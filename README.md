@@ -1,5 +1,7 @@
 # agent-eve
 
+[![CI](https://github.com/ricardoblackskye/agent-eve/actions/workflows/ci.yml/badge.svg)](https://github.com/ricardoblackskye/agent-eve/actions/workflows/ci.yml)
+
 An intelligent AI agent built with [Eve](https://eve.dev) — Vercel's framework for durable, production-grade AI agents in TypeScript.
 
 ## Prerequisites
@@ -79,6 +81,7 @@ model: openrouter.chat("anthropic/claude-sonnet-5"), // OpenRouter model ID
 | Variable               | Required | Description |
 |------------------------|----------|-------------|
 | `OPENROUTER_API_KEY`   | Yes      | OpenRouter API key for model access |
+| `EVE_API_KEY`          | Yes      | Bearer token for production auth (sent as `Authorization: Bearer <EVE_API_KEY>` header) |
 
 ## Scripts
 
@@ -95,17 +98,38 @@ model: openrouter.chat("anthropic/claude-sonnet-5"), // OpenRouter model ID
 Eve provides a built-in eval framework. Evals live in `evals/` and run against a live dev server:
 
 ```bash
-# Start the dev server
-npm run dev
+# Run all evals locally (auto-boots dev server)
+eve eval
 
-# In another terminal, run evals
-eve eval                          # all evals
-eve eval smoke --verbose          # single eval with detail
-eve eval --strict                 # soft assertions gate too
+# Run against a deployed URL
+EVE_EVAL_AUTH_TOKEN=<your-token> eve eval --url https://agent-eve-gold.vercel.app
+
+# Single eval with detail
+eve eval smoke --verbose
 ```
 
-Current eval coverage:
-- **`smoke.eval.ts`** — Verifies the agent boots, responds, and references its capabilities (3/3 gates passing)
+### Current Evals
+| Eval | Gates | Description |
+|------|-------|-------------|
+| `smoke` | 2/2 | Agent boots and responds |
+| `auth-valid` | 2/2 | Authenticated requests succeed |
+| `auth-invalid` | 1/1 | Unauthenticated requests rejected with 401 |
+
+### CI Pipeline
+
+Every PR triggers a GitHub Actions workflow with three checks:
+
+| Check | What it does |
+|-------|-------------|
+| **TypeScript** | `tsc --noEmit` — type safety verification |
+| **Eve Build** | `eve build` — verifies the agent compiles |
+| **Eve Evals** | `eve eval --strict` — runs all evals against a local dev server |
+
+On push to `main`, an additional **Production Evals** job runs all evals against the live deployment.
+
+The workflow requires these GitHub Action secrets:
+- `OPENROUTER_API_KEY` — for CI evals against the local dev server
+- `EVE_EVAL_AUTH_TOKEN` — for production evals (same value as `EVE_API_KEY`)
 
 ## Deployment
 
