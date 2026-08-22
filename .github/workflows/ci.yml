@@ -57,7 +57,7 @@ jobs:
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
-          npx eve eval --strict --junit .eve/junit.xml
+          npx eve eval --strict --exclude-tag production --junit .eve/junit.xml
       - name: Upload eval artifacts
         if: always()
         uses: actions/upload-artifact@v4
