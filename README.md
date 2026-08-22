@@ -79,6 +79,7 @@ model: openrouter.chat("anthropic/claude-sonnet-5"), // OpenRouter model ID
 | Variable               | Required | Description |
 |------------------------|----------|-------------|
 | `OPENROUTER_API_KEY`   | Yes      | OpenRouter API key for model access |
+| `EVE_API_KEY`          | Yes      | Bearer token for production auth (sent as `Authorization: Bearer <EVE_API_KEY>` header) |
 
 ## Scripts
 
