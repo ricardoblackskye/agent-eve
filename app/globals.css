@@ -22,6 +22,7 @@ body {
 header {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 0.75rem;
   padding: 1rem;
   border-bottom: 1px solid #222;
@@ -40,6 +41,15 @@ header {
 
 .status.error {
   background: #c33;
+}
+
+.eve-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid #333;
+  flex-shrink: 0;
 }
 
 .error-message {

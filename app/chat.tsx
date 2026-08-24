@@ -25,6 +25,13 @@ export function Chat() {
       <header>
         <h1>Eve Agent</h1>
         <span className={`status ${agent.status}`}>{agent.status}</span>
+        <img
+          className="eve-avatar"
+          src="/images/eve-avatar.jpg"
+          alt="Eve"
+          width={40}
+          height={40}
+        />
       </header>
 
       {agent.error && (
@@ -39,7 +46,7 @@ export function Chat() {
         )}
         {agent.data.messages.map((msg) => (
           <article key={msg.id} className={`message ${msg.role}`}>
-            <strong>{msg.role}</strong>
+            <strong>{msg.role === "assistant" ? "Eve" : msg.role}</strong>
             {msg.parts.map((part, i) =>
               part.type === "text" ? <p key={i}>{part.text}</p> : null,
             )}

@@ -57,4 +57,42 @@ test.describe("Eve chat", () => {
     expect(proxyResponses).toContain(202);
     expect(proxyResponses).toContain(200);
   });
+
+  test("displays 'Eve' label for assistant messages", async ({ page }) => {
+    await page.goto("/");
+    const input = page.getByPlaceholder("Type your message...");
+    const send = page.getByRole("button", { name: "Send" });
+
+    await input.fill("Reply with a short acknowledgement.");
+    await send.click();
+
+    // Wait for the assistant reply to appear
+    await expect(page.locator(".message.assistant")).toBeVisible({
+      timeout: 45_000,
+    });
+
+    // The label should say "Eve", not "assistant"
+    const label = page.locator(".message.assistant strong");
+    await expect(label).toHaveText("Eve", { timeout: 5_000 });
+  });
+
+  test("shows avatar image in the chat header", async ({ page }) => {
+    await page.goto("/");
+
+    const avatar = page.locator("header img.eve-avatar");
+    await expect(avatar).toBeVisible();
+    await expect(avatar).toHaveAttribute("alt", "Eve");
+    await expect(avatar).toHaveAttribute("src", /images\/eve-avatar\.jpg/);
+
+    // Avatar should be on the right side of the header
+    const header = page.locator("header");
+    const headerAvatar = header.locator(".eve-avatar");
+    const heading = header.locator("h1");
+    // Check it's to the right of the heading
+    const headingBox = await heading.boundingBox();
+    const avatarBox = await headerAvatar.boundingBox();
+    if (headingBox && avatarBox) {
+      expect(avatarBox.x).toBeGreaterThan(headingBox.x + headingBox.width);
+    }
+  });
 });
