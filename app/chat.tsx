@@ -5,8 +5,8 @@ import { useState, type FormEvent } from "react";
 
 export function Chat() {
   const agent = useEveAgent({
-    // Route through the proxy so auth is handled server-side
-    host: "/api/eve",
+    // The proxy is mounted at /api/eve/v1; useEveAgent appends /eve/v1.
+    host: "/api",
   });
   const [input, setInput] = useState("");
   const isBusy = agent.status === "submitted" || agent.status === "streaming";
