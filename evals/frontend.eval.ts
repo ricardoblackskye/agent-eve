@@ -3,6 +3,7 @@ import { satisfies } from "eve/evals/expect";
 
 export default defineEval({
   description: "Verifies the frontend chat page loads and returns HTML.",
+  tags: ["production"],
   async test(t) {
     const response = await t.target.fetch("/");
     const text = await response.text();
