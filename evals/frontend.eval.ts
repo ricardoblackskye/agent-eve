@@ -2,7 +2,7 @@ import { defineEval } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
 export default defineEval({
-  description: "Verifies the frontend chat page loads and returns HTML.",
+  description: "Verifies the frontend page and browser agent proxy load.",
   tags: ["production"],
   async test(t) {
     const response = await t.target.fetch("/");
@@ -17,6 +17,11 @@ export default defineEval({
         (html: string) => html.includes("Eve Agent"),
         "page contains 'Eve Agent'",
       ),
+    );
+    const proxyHealth = await t.target.fetch("/api/eve/v1/health");
+    t.check(
+      proxyHealth.status,
+      satisfies((s: number) => s === 200, "browser proxy health returns 200"),
     );
   },
 });
