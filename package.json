@@ -7,20 +7,26 @@
     "#evals/*": "./evals/*"
   },
   "scripts": {
-    "build": "eve build",
-    "dev": "eve dev",
-    "start": "eve start",
-    "typecheck": "tsc"
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "eve:build": "eve build",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.45",
     "@vercel/connect": "0.4.3",
     "ai": "^7.0.58",
     "eve": "^0.44.0",
+    "next": "^16.3.2",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
     "zod": "4.4.3"
   },
   "devDependencies": {
-    "@types/node": "24.x",
+    "@types/node": "^24.13.3",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.5",
     "typescript": "7.0.2"
   },
   "engines": {
