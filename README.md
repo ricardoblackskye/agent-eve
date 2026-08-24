@@ -191,4 +191,4 @@ Eve auto-discovers tools by their file path — no registration needed.
 
 ## License
 
-MIT
+MIT# Last rebuilt: 2026-08-24T17:35:32Z
