@@ -8,6 +8,6 @@ const openrouter = createOpenAI({
 });
 
 export default defineAgent({
-  model: openrouter.chat("deepseek/deepseek-v4-pro"),
+  model: openrouter.chat("nvidia/nemotron-3-ultra-550b-a55b:free"),
   modelContextWindowTokens: 1_048_576,
 });
