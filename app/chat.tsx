@@ -5,8 +5,8 @@ import { useState, type FormEvent } from "react";
 
 export function Chat() {
   const agent = useEveAgent({
-    // Route through the proxy so auth is handled server-side
-    host: "/api/eve",
+    // The proxy is mounted at /api/eve/v1; useEveAgent appends /eve/v1.
+    host: "/api",
   });
   const [input, setInput] = useState("");
   const isBusy = agent.status === "submitted" || agent.status === "streaming";
@@ -26,6 +26,12 @@ export function Chat() {
         <h1>Eve Agent</h1>
         <span className={`status ${agent.status}`}>{agent.status}</span>
       </header>
+
+      {agent.error && (
+        <p className="error-message" role="alert">
+          {agent.error.message}
+        </p>
+      )}
 
       <main className="messages">
         {agent.data.messages.length === 0 && (

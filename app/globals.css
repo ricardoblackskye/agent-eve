@@ -42,6 +42,15 @@ header {
   background: #c33;
 }
 
+.error-message {
+  margin: 1rem 1rem 0;
+  padding: 0.75rem;
+  border: 1px solid #c33;
+  border-radius: 0.375rem;
+  background: #321414;
+  color: #f99;
+}
+
 .messages {
   flex: 1;
   overflow-y: auto;
