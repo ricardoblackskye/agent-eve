@@ -8,6 +8,6 @@ const openrouter = createOpenAI({
 });
 
 export default defineAgent({
-  model: openrouter.chat("gpt-4o"),
-  modelContextWindowTokens: 128_000,
+  model: openrouter.chat("deepseek/deepseek-v4-pro"),
+  modelContextWindowTokens: 1_048_576,
 });
