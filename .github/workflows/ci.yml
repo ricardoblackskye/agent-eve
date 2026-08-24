@@ -53,11 +53,32 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
       - run: npm ci
-      - name: Run evals (local dev server)
+      - name: Run evals (Next.js + Eve dev server)
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
-          npx eve eval --strict --exclude-tag production --junit .eve/junit.xml
+          mkdir -p .eve
+          npm run dev -- --hostname 127.0.0.1 --port 3000 > .eve/next-dev.log 2>&1 &
+          server_pid=$!
+          cleanup() {
+            kill "$server_pid" 2>/dev/null || true
+            wait "$server_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          for _ in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:3000/eve/v1/health > /dev/null; then
+              break
+            fi
+            if ! kill -0 "$server_pid" 2>/dev/null; then
+              cat .eve/next-dev.log
+              exit 1
+            fi
+            sleep 1
+          done
+
+          curl --fail --silent http://127.0.0.1:3000/eve/v1/health > /dev/null
+          npx eve eval --strict --exclude-tag production --junit .eve/junit.xml --url http://127.0.0.1:3000
       - name: Upload eval artifacts
         if: always()
         uses: actions/upload-artifact@v4
