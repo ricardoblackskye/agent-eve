@@ -27,6 +27,12 @@ export function Chat() {
         <span className={`status ${agent.status}`}>{agent.status}</span>
       </header>
 
+      {agent.error && (
+        <p className="error-message" role="alert">
+          {agent.error.message}
+        </p>
+      )}
+
       <main className="messages">
         {agent.data.messages.length === 0 && (
           <p className="placeholder">Send a message to start chatting.</p>
