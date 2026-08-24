@@ -18,7 +18,14 @@
 - Add a simple frontend eval to verify the page loads
 - Deploy to Vercel — single project, both Next.js and Eve deploy together
 
-**Auth Approach (MVP):** The agent uses a custom bearer token. For the browser, `useEveAgent` accepts an `auth` option with a bearer token resolver. We'll expose the token via `NEXT_PUBLIC_EVE_API_KEY` env var so the client component can pass it. This works for a private MVP where the deployment URL is not public.
+**Auth Approach (MVP):** Server-side proxy via a Next.js API route. The browser never sees the bearer token — it calls `/api/eve/v1/*` which proxies to the Eve agent with the server-side `EVE_API_KEY` env var. `useEveAgent` is configured with `host: "/api/eve"` to route through the proxy. This keeps the token server-only while still using the standard `useEveAgent` hook.
+
+**Auth proxy architecture:**
+```
+Browser → /api/eve/v1/session (Next.js) → Proxy adds bearer token → Eve agent at /eve/v1/session
+Browser → /api/eve/v1/session/:id/stream (Next.js) → Proxy adds bearer token → Eve agent stream
+```
+The real Eve routes at `/eve/v1/*` (handled by `withEve()`) remain available for the Eve CLI, evals, and direct API access with tokens.
 
 **Testing Blueprint:**
 - Add a playwright-style smoke eval that loads the chat page and checks it renders
@@ -147,9 +154,91 @@ Also update `tsconfig.json` to include the `app/` directory:
 
 ---
 
-### Task 4: Create chat page with useEveAgent
+### Task 4: Create API route proxy for auth
 
-**Objective:** Build the chat UI component.
+**Objective:** Create a Next.js API route that proxies requests to the Eve agent, adding the bearer token server-side.
+
+**Files:**
+- Create: `app/api/eve/v1/[...slug]/route.ts`
+
+The catch-all route intercepts all `/api/eve/v1/*` requests, forwards them to the Eve agent (same-origin `/eve/v1/*`), adds the `Authorization` header, and proxies back the response (including streaming for the events endpoint).
+
+```ts
+// app/api/eve/v1/[...slug]/route.ts
+import { type NextRequest, NextResponse } from "next/server";
+
+const API_KEY = process.env.EVE_API_KEY;
+
+// Endpoints that return SSE/NDJSON streams
+const STREAM_PATHS = new Set([
+  "/eve/v1/session/stream",
+  "/eve/v1/internal/stream",
+]);
+
+function isStreamPath(pathname: string): boolean {
+  // Match /eve/v1/session/:id/stream or similar stream endpoints
+  return /^\/eve\/v1\/session\/[^/]+\/stream/.test(pathname);
+}
+
+async function handler(request: NextRequest) {
+  const slug = request.nextUrl.pathname.replace("/api/eve", "");
+  const targetUrl = new URL(slug, request.nextUrl.origin);
+  targetUrl.search = request.nextUrl.search;
+
+  const headers: Record<string, string> = {
+    authorization: `Bearer ${API_KEY}`,
+  };
+
+  // Copy relevant headers from the original request
+  const contentType = request.headers.get("content-type");
+  if (contentType) headers["content-type"] = contentType;
+
+  const accept = request.headers.get("accept");
+  if (accept) headers["accept"] = accept;
+
+  const body = request.method === "GET" || request.method === "HEAD"
+    ? undefined
+    : await request.blob();
+
+  const response = await fetch(targetUrl, {
+    method: request.method,
+    headers,
+    body,
+  });
+
+  // For stream endpoints, return the response as-is (supports NDJSON streaming)
+  if (isStreamPath(request.nextUrl.pathname)) {
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: {
+        "content-type": response.headers.get("content-type") ?? "text/event-stream",
+        "transfer-encoding": "chunked",
+      },
+    });
+  }
+
+  // For regular endpoints, return the JSON response
+  const data = await response.json();
+  return NextResponse.json(data, { status: response.status });
+}
+
+export const GET = handler;
+export const POST = handler;
+export const PUT = handler;
+export const DELETE = handler;
+export const PATCH = handler;
+```
+
+**Verify:** `npx tsc --noEmit` — should compile clean.
+
+**Commit:** `git add app/api/eve/v1/[...slug]/route.ts && git commit -m "feat: add Eve API proxy route for server-side auth"`
+
+---
+
+### Task 5: Create chat page with useEveAgent
+
+**Objective:** Build the chat UI component, pointing at the proxy host.
 
 **Files:**
 - Create: `app/page.tsx`
@@ -160,15 +249,12 @@ Also update `tsconfig.json` to include the `app/` directory:
 "use client";
 
 import { useEveAgent } from "eve/react";
-import { useState, useRef, type FormEvent } from "react";
-
-const API_KEY = process.env.NEXT_PUBLIC_EVE_API_KEY;
+import { useState, type FormEvent } from "react";
 
 export function Chat() {
   const agent = useEveAgent({
-    auth: API_KEY
-      ? { bearer: () => API_KEY }
-      : undefined,
+    // Route through the proxy so auth is handled server-side
+    host: "/api/eve",
   });
   const [input, setInput] = useState("");
   const isBusy = agent.status === "submitted" || agent.status === "streaming";
@@ -229,7 +315,7 @@ export default function Home() {
 }
 ```
 
-Add basic styles to `globals.css`:
+Add chat styles to `globals.css`:
 ```css
 .chat-container { display: flex; flex-direction: column; height: 100vh; max-width: 48rem; margin: 0 auto; }
 header { display: flex; align-items: center; gap: 0.75rem; padding: 1rem; border-bottom: 1px solid #222; }
@@ -242,7 +328,7 @@ header { display: flex; align-items: center; gap: 0.75rem; padding: 1rem; border
 .message.user { background: #1a3a5c; align-self: flex-end; }
 .message.assistant { background: #1a1a2e; align-self: flex-start; }
 .message strong { display: block; font-size: 0.75rem; text-transform: uppercase; opacity: 0.6; margin-bottom: 0.25rem; }
-.composer { display: flex; gap: 0.5rem; padding: 1rem; border-top: 1px solid #222; }
+.composer { display: flex; gap: 0.5rem; padding: 1rem; border-top: 1px solid #333; }
 .composer input { flex: 1; padding: 0.75rem; border: 1px solid #333; border-radius: 0.375rem; background: #111; color: #e5e5e5; font-size: 1rem; }
 .composer input:disabled { opacity: 0.5; }
 .composer button { padding: 0.75rem 1.5rem; border: none; border-radius: 0.375rem; background: #1a5; color: #fff; font-size: 1rem; cursor: pointer; }
@@ -255,29 +341,29 @@ header { display: flex; align-items: center; gap: 0.75rem; padding: 1rem; border
 
 ---
 
-### Task 5: Add .env.local with NEXT_PUBLIC_EVE_API_KEY
+### Task 6: Add .env.local with EVE_API_KEY (server-side only)
 
-**Objective:** Make the bearer token available to the browser.
+**Objective:** Make the bearer token available server-side for the proxy route.
 
 **Files:**
-- Create: `.env.local` (already exists from Vercel link — update it)
+- Update: `.env.local` (already exists from Vercel link)
 - Create: `.env.example` (for documentation)
 
-Update `.env.local`:
+Update `.env.local` (set via Vercel env vars — no browser exposure):
 ```
 # Already set by vercel link:
 # VERCEL_OIDC_TOKEN=...
 
-# Eve API key for browser auth:
-NEXT_PUBLIC_EVE_API_KEY=eve_sk_afd1abb4442ba0bd84d07ab3727cd2822a6a7313b5845e05fe94bc7fdb423b4b
+# Eve API key for server-side proxy auth:
+EVE_API_KEY=eve_sk_afd1abb4442ba0bd84d07ab3727cd2822a6a7313b5845e05fe94bc7fdb423b4b
 ```
 
 Add `.env.example`:
 ```
-# Eve API key for browser auth (NEXT_PUBLIC_ prefix exposes it to client code)
-NEXT_PUBLIC_EVE_API_KEY=eve_sk_...
+# Eve API key for server-side proxy auth (NOT exposed to browser)
+EVE_API_KEY=eve_sk_...
 
-# OpenRouter API key for model access (server-side only)
+# OpenRouter API key for model access
 OPENROUTER_API_KEY=sk-or-...
 ```
 
@@ -285,7 +371,7 @@ OPENROUTER_API_KEY=sk-or-...
 
 ---
 
-### Task 6: Add frontend smoke eval
+### Task 7: Add frontend smoke eval
 
 **Objective:** Verify the chat page renders and the agent responds via the web UI path.
 
@@ -323,7 +409,7 @@ Expected: passes (home page returns 200 with "Eve Agent" title).
 
 ---
 
-### Task 7: Update tsconfig for Next.js
+### Task 8: Update tsconfig for Next.js
 
 **Objective:** Ensure TypeScript is fully configured for Next.js App Router.
 
@@ -357,7 +443,7 @@ Expected: passes (home page returns 200 with "Eve Agent" title).
 
 ---
 
-### Task 8: Local verification — run everything together
+### Task 9: Local verification — run everything together
 
 **Objective:** Confirm the whole stack works locally.
 
@@ -375,7 +461,7 @@ In another terminal:
 curl -s http://localhost:3000 | head -20
 # Expected: HTML with "Eve Agent" in title
 
-# Run Eve evals against the Next.js origin (same-origin Eve routes)
+# Run Eve evals against the Next.js origin (same-origin Eve routes via withEve)
 npx eve eval --url http://localhost:3000 --exclude-tag production
 # Expected: all non-production evals pass
 ```
@@ -388,7 +474,7 @@ git commit -m "feat: add Next.js web UI with Eve agent integration"
 
 ---
 
-### Task 9: Deploy to Vercel and verify production
+### Task 10: Deploy to Vercel and verify production
 
 **Objective:** Deploy the merged Next.js + Eve project to Vercel.
 
@@ -416,7 +502,7 @@ EVE_EVAL_AUTH_TOKEN="eve_sk_..." npx eve eval \
 
 ---
 
-### Task 10: Create PR
+### Task 11: Create PR
 
 ```bash
 GH_TOKEN=$(gh auth token)
@@ -448,18 +534,9 @@ git remote set-url origin https://github.com/ricardoblackskye/agent-eve.git
 
 ## Open Questions / Clarifications
 
-1. **Auth for the browser** — The plan uses `NEXT_PUBLIC_EVE_API_KEY` (exposed client-side). This works for an MVP but means the bearer token is visible in browser dev tools. Alternative approaches:
-   - Create a Next.js API route that proxies the Eve session with the server-side token (token never reaches the browser)
-   - Set a signed cookie from the server side
-   - Add `none()` to the auth chain for public access
-   
-   **Recommendation:** For the MVP, `NEXT_PUBLIC_EVE_API_KEY` is fine since this is a private project. We can harden auth later.
-
-2. **Existing evals** — `auth-invalid.eval.ts` uses `t.target.fetch("/eve/v1/info")` with a bad token. The `withEve()` proxy should pass this through to the Eve agent unchanged — no change needed.
-
-3. **Next.js version** — `eve@0.44.0` works with Next.js 15+. Confirm version compatibility.
-
-4. **Existing `.env.local`** — Already exists from Vercel link. Need to check it doesn't conflict.
+1. **Next.js version** — `eve@0.44.0` works with Next.js 15+. Confirm version compatibility during implementation.
+2. **Existing `.env.local`** — Already exists from Vercel link. Need to check it doesn't conflict with our additions.
+3. **Stream handling in proxy** — The proxy route needs to handle NDJSON streaming properly (no buffering). The plan uses raw `Response(response.body)` for stream endpoints, but need to verify this works with Next.js App Router's edge runtime.
 
 ---
 
@@ -470,7 +547,7 @@ git remote set-url origin https://github.com/ricardoblackskye/agent-eve.git
 | 1 | User sends empty message | Composer button disabled, no request sent |
 | 2 | Network error during streaming | `status` becomes `"error"`, error shown |
 | 3 | User sends message while streaming | Composer disabled, button greyed out |
-| 4 | No NEXT_PUBLIC_EVE_API_KEY set | `auth` is `undefined`, agent falls back to same-origin cookies (may fail if no cookie auth) |
+| 4 | EVE_API_KEY env var not set on server | Proxy route missing auth header — Eve agent returns 401, chat shows error |
 | 5 | Page refresh during active chat | Session is lost (no persistence in MVP), user starts fresh |
 
 ## Verification Checklist
@@ -478,10 +555,11 @@ git remote set-url origin https://github.com/ricardoblackskye/agent-eve.git
 - [ ] Task 1: Next.js + React installed
 - [ ] Task 2: `next.config.ts` created with `withEve()`
 - [ ] Task 3: App Router layout + globals.css
-- [ ] Task 4: Chat page + client component with `useEveAgent`
-- [ ] Task 5: `.env.example` updated
-- [ ] Task 6: Frontend eval written and passes
-- [ ] Task 7: `tsconfig.json` updated
-- [ ] Task 8: Local verification — all evals pass, chat page loads
-- [ ] Task 9: Deployed to Vercel — production evals pass
-- [ ] Task 10: PR created linking to issue #6
+- [ ] Task 4: Eve API proxy route created
+- [ ] Task 5: Chat page + client component with `useEveAgent` and `host: "/api/eve"`
+- [ ] Task 6: `.env.example` updated with `EVE_API_KEY`
+- [ ] Task 7: Frontend eval written and passes
+- [ ] Task 8: `tsconfig.json` updated for Next.js
+- [ ] Task 9: Local verification — all evals pass, chat page loads
+- [ ] Task 10: Deployed to Vercel — production evals pass, page loads
+- [ ] Task 11: PR created linking to issue #6
