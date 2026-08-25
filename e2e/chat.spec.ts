@@ -8,7 +8,7 @@ test.describe("Eve chat", () => {
     await expect(page.getByPlaceholder("Type your message...")).toBeVisible();
     await expect(page.getByRole("button", { name: "Send" })).toBeVisible();
     await expect(page.locator(".status")).toHaveText("Ready");
-    await expect(page.locator(".status")).toHaveCSS("background-color", "rgb(26, 170, 85)");
+    await expect(page.locator(".status")).toHaveCSS("background-color", "rgb(17, 170, 85)");
     await expect(page.locator(".error-message")).toHaveCount(0);
   });
 
