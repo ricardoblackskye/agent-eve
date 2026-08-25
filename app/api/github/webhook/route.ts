@@ -1,0 +1,102 @@
+import { type NextRequest, NextResponse } from "next/server";
+import crypto from "crypto";
+
+/**
+ * Verify the x-hub-signature-256 against the webhook secret.
+ * Returns true if the signature is valid or no secret is configured.
+ */
+function verifySignature(
+  payload: string,
+  signatureHeader: string | null,
+  secret: string | undefined,
+): boolean {
+  if (!secret) return true; // Skip verification if no secret configured (dev only)
+  if (!signatureHeader) return false;
+
+  const sig = crypto
+    .createHmac("sha256", secret)
+    .update(payload)
+    .digest("hex");
+  return `sha256=${sig}` === signatureHeader;
+}
+
+async function handler(request: NextRequest) {
+  // Only accept POST requests
+  if (request.method !== "POST") {
+    return NextResponse.json({ error: "Method not allowed" }, { status: 405 });
+  }
+
+  const payload = await request.text();
+  const signature = request.headers.get("x-hub-signature-256");
+  const event = request.headers.get("x-github-event");
+  const webhookSecret = process.env.GH_WEBHOOK_SECRET;
+
+  // Verify webhook signature
+  if (!verifySignature(payload, signature, webhookSecret)) {
+    return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
+  }
+
+  if (!event) {
+    return NextResponse.json(
+      { error: "Missing x-github-event header" },
+      { status: 400 },
+    );
+  }
+
+  // Parse the payload
+  let data: any;
+  try {
+    data = JSON.parse(payload);
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+
+  // We process pull_request events
+  if (event === "pull_request") {
+    const action = data.action; // opened, synchronize, closed, etc.
+    const pr = data.pull_request;
+    const repo = data.repository;
+
+    if (!pr) {
+      return NextResponse.json({ error: "No PR data" }, { status: 400 });
+    }
+
+    const prData = {
+      number: pr.number,
+      title: pr.title,
+      body: pr.body || "",
+      state: pr.state,
+      merged: pr.merged,
+      mergedBy: pr.merged_by?.login || null,
+      url: pr.html_url,
+      action,
+      repo: repo?.full_name || data.repository?.full_name,
+      labels: (pr.labels || []).map((l: any) => l.name),
+      baseBranch: pr.base?.ref,
+      headBranch: pr.head?.ref,
+    };
+
+    // For now, we log the event — in production this would call the Eve API
+    // to trigger the Release Manager subagent for generating release notes.
+    console.log(`[webhook] PR #${prData.number} ${action}: ${prData.title}`);
+
+    return NextResponse.json({
+      ok: true,
+      message: `PR #${prData.number} ${action} acknowledged`,
+      pr: prData,
+    });
+  }
+
+  // Heartbeat / ping from GitHub
+  if (event === "ping") {
+    return NextResponse.json({ ok: true, message: "pong" });
+  }
+
+  // Unhandled event type
+  return NextResponse.json(
+    { ok: true, message: `Event '${event}' received but not processed` },
+    { status: 200 },
+  );
+}
+
+export const POST = handler;
