@@ -114,6 +114,18 @@ jobs:
             test-results/
           if-no-files-found: ignore
 
+  megalinter:
+    name: MegaLinter
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: MegaLinter
+        uses: oxsecurity/megalinter@v8
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   production-evals:
     name: Production Evals
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
