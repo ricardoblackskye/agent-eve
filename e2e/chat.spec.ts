@@ -7,7 +7,8 @@ test.describe("Eve chat", () => {
     await expect(page.getByRole("heading", { name: "Eve Agent" })).toBeVisible();
     await expect(page.getByPlaceholder("Type your message...")).toBeVisible();
     await expect(page.getByRole("button", { name: "Send" })).toBeVisible();
-    await expect(page.locator(".status")).toHaveText("ready");
+    await expect(page.locator(".status")).toHaveText("Ready");
+    await expect(page.locator(".status")).toHaveCSS("background-color", "rgb(17, 170, 85)");
     await expect(page.locator(".error-message")).toHaveCount(0);
   });
 
@@ -16,7 +17,7 @@ test.describe("Eve chat", () => {
     const response = await request.get("/api/eve/v1/health");
 
     expect(response.status()).toBe(200);
-    await expect(page.locator(".status")).toHaveText("ready");
+    await expect(page.locator(".status")).toHaveText("Ready");
   });
 
   test("sends a message through the proxy and receives an answer", async ({
@@ -49,7 +50,7 @@ test.describe("Eve chat", () => {
     await expect(page.locator(".message.assistant p")).toBeVisible({
       timeout: 45_000,
     });
-    await expect(page.locator(".status")).toHaveText("ready");
+    await expect(page.locator(".status")).toHaveText("Ready");
     await expect(page.locator(".error-message")).toHaveCount(0);
     expect(proxyPaths.every((path) => !path.includes("/api/eve/eve/"))).toBe(
       true,
@@ -76,23 +77,15 @@ test.describe("Eve chat", () => {
     await expect(label).toHaveText("Eve", { timeout: 5_000 });
   });
 
-  test("shows avatar image in the chat header", async ({ page }) => {
+  test("shows the enlarged avatar image in the chat header", async ({ page }) => {
     await page.goto("/");
 
     const avatar = page.locator("header img.eve-avatar");
     await expect(avatar).toBeVisible();
     await expect(avatar).toHaveAttribute("alt", "Eve");
-    await expect(avatar).toHaveAttribute("src", /images\/eve-avatar\.jpg/);
-
-    // Avatar should be on the right side of the header
-    const header = page.locator("header");
-    const headerAvatar = header.locator(".eve-avatar");
-    const heading = header.locator("h1");
-    // Check it's to the right of the heading
-    const headingBox = await heading.boundingBox();
-    const avatarBox = await headerAvatar.boundingBox();
-    if (headingBox && avatarBox) {
-      expect(avatarBox.x).toBeGreaterThan(headingBox.x + headingBox.width);
-    }
+    await expect(avatar).toHaveAttribute("width", "150");
+    await expect(avatar).toHaveAttribute("height", "150");
+    await expect(avatar).toHaveCSS("width", "150px");
+    await expect(avatar).toHaveCSS("height", "150px");
   });
 });
