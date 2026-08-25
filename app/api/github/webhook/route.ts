@@ -76,14 +76,68 @@ async function handler(request: NextRequest) {
       headBranch: pr.head?.ref,
     };
 
-    // For now, we log the event — in production this would call the Eve API
-    // to trigger the Release Manager subagent for generating release notes.
-    console.log(`[webhook] PR #${prData.number} ${action}: ${prData.title}`);
+    // Build a release-notes task message for the Eve agent
+    const message = [
+      `Generate release notes for a PR change:`,
+      ``,
+      `Repository: ${prData.repo}`,
+      `PR #${prData.number} (${prData.action}): ${prData.title}`,
+      prData.body ? `Description: ${prData.body.slice(0, 500)}` : "",
+      `Labels: ${prData.labels.join(", ") || "none"}`,
+      `Base branch: ${prData.baseBranch}`,
+      `Head branch: ${prData.headBranch}`,
+      ``,
+      `Update releasenotes.md with a new entry for this change.`,
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    // Call the Eve API to trigger the Release Manager subagent
+    let eveApiResult = "skipped";
+    let eveApiError: string | null = null;
+    const apiKey = process.env.EVE_API_KEY;
+
+    if (apiKey) {
+      try {
+        const targetUrl = `${request.nextUrl.origin}/eve/v1/session`;
+        const apiHeaders: Record<string, string> = {
+          authorization: `Bearer ${apiKey}`,
+          "content-type": "application/json",
+        };
+        const bypass = process.env.VERCEL_PROTECTION_BYPASS;
+        if (bypass) {
+          apiHeaders["x-vercel-protection-bypass"] = bypass;
+        }
+
+        const apiResponse = await fetch(targetUrl, {
+          method: "POST",
+          headers: apiHeaders,
+          body: JSON.stringify({ message }),
+        });
+
+        if (apiResponse.ok) {
+          const apiData = await apiResponse.json();
+          eveApiResult = apiData?.status || "accepted";
+        } else {
+          eveApiResult = `error: ${apiResponse.status}`;
+        }
+      } catch (err) {
+        eveApiError = err instanceof Error ? err.message : String(err);
+        eveApiResult = "error";
+        console.error(`[webhook] Eve API call failed: ${eveApiError}`);
+      }
+    }
+
+    console.log(
+      `[webhook] PR #${prData.number} ${action}: ${prData.title} — Eve API: ${eveApiResult}`,
+    );
 
     return NextResponse.json({
       ok: true,
       message: `PR #${prData.number} ${action} acknowledged`,
       pr: prData,
+      eveApiResult,
+      ...(eveApiError ? { eveApiError } : {}),
     });
   }
 
