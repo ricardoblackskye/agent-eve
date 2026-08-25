@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import type { NextRequest } from "next/server";
 
 // Mock NextResponse from next/server
 vi.mock("next/server", () => ({
@@ -10,14 +11,37 @@ vi.mock("next/server", () => ({
   },
 }));
 
-function createRequest(path: string) {
+function createRequest(path: string): NextRequest {
   const url = new URL(path, "http://localhost:3000");
   return {
     nextUrl: url,
-    method: "GET",
+    method: "GET" as const,
     headers: new Headers({ "content-type": "application/json" }),
-    blob: vi.fn(),
-  };
+    blob: vi.fn().mockResolvedValue(new Blob()),
+    // NextRequest properties we don't use but TypeScript requires
+    cookies: {} as any,
+    page: {} as any,
+    ua: {} as any,
+    url: url.toString(),
+    body: null,
+    bodyUsed: false,
+    cache: "default",
+    credentials: "same-origin",
+    destination: "",
+    integrity: "",
+    keepalive: false,
+    mode: "same-origin",
+    redirect: "follow",
+    referrer: "",
+    referrerPolicy: "",
+    signal: new AbortController().signal,
+    clone: vi.fn(),
+    arrayBuffer: vi.fn(),
+    formData: vi.fn(),
+    json: vi.fn(),
+    text: vi.fn(),
+    bytes: vi.fn(),
+  } as unknown as NextRequest;
 }
 
 describe("proxy route - bypass header", () => {
@@ -25,6 +49,7 @@ describe("proxy route - bypass header", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.resetModules();
     process.env = { ...ORIGINAL_ENV };
     delete process.env.VERCEL_PROTECTION_BYPASS;
   });

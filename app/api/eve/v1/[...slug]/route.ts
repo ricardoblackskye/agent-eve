@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 
 const API_KEY = process.env.EVE_API_KEY;
+const BYPASS_SECRET = process.env.VERCEL_PROTECTION_BYPASS;
 
 async function handler(request: NextRequest) {
   // Rewrite /api/eve/v1/* → /eve/v1/* (same-origin via withEve)
@@ -18,6 +19,10 @@ async function handler(request: NextRequest) {
 
   const accept = request.headers.get("accept");
   if (accept) headers["accept"] = accept;
+
+  if (BYPASS_SECRET) {
+    headers["x-vercel-protection-bypass"] = BYPASS_SECRET;
+  }
 
   const body =
     request.method === "GET" || request.method === "HEAD"
