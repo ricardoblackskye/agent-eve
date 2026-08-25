@@ -11,9 +11,13 @@ export default defineTool({
     "Read the current content of releasenotes.md from the GitHub repository. " +
     "Returns the file content (decoded from base64) and the file SHA (needed for updates). " +
     "Returns an empty content and null SHA if the file does not exist. " +
+    "Accepts optional owner and repo; falls back to VERCEL_GIT_REPO_OWNER/SLUG env vars. " +
     "Requires GH_RELEASE_TOKEN environment variable.",
-  inputSchema: z.object({}),
-  async execute() {
+  inputSchema: z.object({
+    owner: z.string().optional(),
+    repo: z.string().optional(),
+  }),
+  async execute({ owner, repo }) {
     const token = process.env.GH_RELEASE_TOKEN;
     if (!token) {
       return {
@@ -25,12 +29,12 @@ export default defineTool({
       };
     }
 
-    const owner = process.env.VERCEL_GIT_REPO_OWNER || "ricardoblackskye";
-    const repo = process.env.VERCEL_GIT_REPO_SLUG || "agent-eve";
+    const targetOwner = owner || process.env.VERCEL_GIT_REPO_OWNER || "ricardoblackskye";
+    const targetRepo = repo || process.env.VERCEL_GIT_REPO_SLUG || "agent-eve";
 
     try {
       const response = await fetch(
-        `https://api.github.com/repos/${owner}/${repo}/contents/releasenotes.md`,
+        `https://api.github.com/repos/${targetOwner}/${targetRepo}/contents/releasenotes.md`,
         {
           headers: {
             authorization: `Bearer ${token}`,

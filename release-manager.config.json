@@ -1,0 +1,14 @@
+{
+  "repos": {
+    "ricardoblackskye/agent-eve": {
+      "webhook_secret_env": "GH_WEBHOOK_SECRET",
+      "token_env": "GH_RELEASE_TOKEN",
+      "release_notes_path": "releasenotes.md"
+    }
+  },
+  "defaults": {
+    "webhook_secret_env": "GH_WEBHOOK_SECRET",
+    "token_env": "GH_RELEASE_TOKEN",
+    "release_notes_path": "releasenotes.md"
+  }
+}
