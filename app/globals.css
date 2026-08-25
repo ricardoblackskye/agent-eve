@@ -35,6 +35,10 @@ header {
   background: #222;
 }
 
+.status.ready {
+  background: #1a5;
+}
+
 .status.streaming {
   background: #1a5;
 }
@@ -44,8 +48,8 @@ header {
 }
 
 .eve-avatar {
-  width: 40px;
-  height: 40px;
+  width: 150px;
+  height: 150px;
   border-radius: 50%;
   object-fit: cover;
   border: 2px solid #333;

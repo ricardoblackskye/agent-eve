@@ -24,13 +24,13 @@ export function Chat() {
     <div className="chat-container">
       <header>
         <h1>Eve Agent</h1>
-        <span className={`status ${agent.status}`}>{agent.status}</span>
+        <span className={`status ${agent.status}`}>{agent.status === "ready" ? "Ready" : agent.status}</span>
         <img
           className="eve-avatar"
           src="/images/eve-avatar.jpg"
           alt="Eve"
-          width={40}
-          height={40}
+          width={150}
+          height={150}
         />
       </header>
 
