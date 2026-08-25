@@ -1,0 +1,35 @@
+{
+  "version": "0.2",
+  "language": "en",
+  "words": [
+    "eve",
+    "subagents",
+    "subagent",
+    "releasenotes",
+    "typecheck",
+    "prettier",
+    "megalinter",
+    "zizmor",
+    "lychee",
+    "lycheeignore",
+    "jscpd",
+    "cspell",
+    "devskim",
+    "grype",
+    "trivy",
+    "remarkgfm",
+    "reactmarkdown",
+    "openrouter",
+    "nextjs",
+    "playwright",
+    "vitest"
+  ],
+  "ignorePaths": [
+    "node_modules/**",
+    ".git/**",
+    ".next/**",
+    ".eve/**",
+    ".vercel/**",
+    "package-lock.json"
+  ]
+}

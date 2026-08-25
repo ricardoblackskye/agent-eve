@@ -1,0 +1,27 @@
+APPLY_FIXES: none
+DEFAULT_BRANCH: main
+DISABLE_ERRORS_LINTERS: []
+DISABLE_LINTERS:
+  - CSS_STYLELINT
+  - REPOSITORY_DEVSKIM
+  - REPOSITORY_GRYPE
+  - REPOSITORY_TRIVY
+  - BASH_EXEC
+  - BASH_SHELLCHECK
+  - BASH_SHFMT
+  - TYPESCRIPT_STANDARD
+FILTER_REGEX_EXCLUDE: (node_modules/|\.git/|\.next/|\.eve/|\.vercel/)
+JAVASCRIPT_DEFAULT_STYLE: prettier
+JSON_PRETTIER_FILTER_REGEX_EXCLUDE: (\.next/|\.eve/|\.vercel/|node_modules/)
+PRINT_ALPACA: false
+SHOW_ELAPSED_TIME: true
+SPELL_CSPELL_FILE_EXTENSIONS:
+  - .ts
+  - .tsx
+  - .md
+  - .json
+  - .yml
+  - .yaml
+  - .css
+VALIDATE_ALL_CODEBASE: false
+YAML_YAMLLINT_FILTER_REGEX_EXCLUDE: (\.vercel/|\.next/|\.eve/)

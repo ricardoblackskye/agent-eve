@@ -1,0 +1,11 @@
+{
+  "threshold": 0,
+  "ignore": [
+    "**/node_modules/**",
+    "**/.git/**",
+    "**/.next/**",
+    "**/.eve/**",
+    "**/.vercel/**",
+    "**/package-lock.json"
+  ]
+}
