@@ -11,6 +11,7 @@ export default defineTool({
     "Write release notes content to releasenotes.md in the GitHub repository. " +
     "Creates the file if it doesn't exist, updates it if it does. " +
     "Pass existing file SHA when updating to prevent conflicts. " +
+    "Accepts optional owner and repo; falls back to VERCEL_GIT_REPO_OWNER/SLUG env vars. " +
     "Requires GH_RELEASE_TOKEN environment variable.",
   inputSchema: z.object({
     content: z.string().min(1, "Content is required"),
@@ -20,8 +21,10 @@ export default defineTool({
       .default("docs: update release notes"),
     prNumber: z.number().optional(),
     existingSha: z.string().nullable().optional(),
+    owner: z.string().optional(),
+    repo: z.string().optional(),
   }),
-  async execute({ content, commitMessage, prNumber, existingSha }) {
+  async execute({ content, commitMessage, prNumber, existingSha, owner, repo }) {
     const token = process.env.GH_RELEASE_TOKEN;
     if (!token) {
       return {
@@ -31,8 +34,8 @@ export default defineTool({
       };
     }
 
-    const owner = process.env.VERCEL_GIT_REPO_OWNER || "ricardoblackskye";
-    const repo = process.env.VERCEL_GIT_REPO_SLUG || "agent-eve";
+    const targetOwner = owner || process.env.VERCEL_GIT_REPO_OWNER || "ricardoblackskye";
+    const targetRepo = repo || process.env.VERCEL_GIT_REPO_SLUG || "agent-eve";
 
     // Build commit message
     const msg = prNumber
@@ -55,7 +58,7 @@ export default defineTool({
 
     try {
       const response = await fetch(
-        `https://api.github.com/repos/${owner}/${repo}/contents/releasenotes.md`,
+        `https://api.github.com/repos/${targetOwner}/${targetRepo}/contents/releasenotes.md`,
         {
           method: "PUT",
           headers: {

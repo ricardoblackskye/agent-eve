@@ -1,5 +1,37 @@
 import { type NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
+import fs from "fs";
+import path from "path";
+
+interface RepoConfig {
+  webhook_secret_env: string;
+  token_env: string;
+  release_notes_path: string;
+}
+
+interface ManagerConfig {
+  repos: Record<string, RepoConfig>;
+  defaults: RepoConfig;
+}
+
+let cachedConfig: ManagerConfig | null = null;
+
+function loadConfig(): ManagerConfig {
+  if (cachedConfig) return cachedConfig;
+  const configPath = path.join(process.cwd(), "release-manager.config.json");
+  const raw = fs.readFileSync(configPath, "utf-8");
+  cachedConfig = JSON.parse(raw) as ManagerConfig;
+  return cachedConfig;
+}
+
+function getRepoConfig(repoFullName: string): RepoConfig | null {
+  try {
+    const config = loadConfig();
+    return config.repos[repoFullName] || null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Verify the x-hub-signature-256 against the webhook secret.
@@ -29,12 +61,6 @@ async function handler(request: NextRequest) {
   const payload = await request.text();
   const signature = request.headers.get("x-hub-signature-256");
   const event = request.headers.get("x-github-event");
-  const webhookSecret = process.env.GH_WEBHOOK_SECRET;
-
-  // Verify webhook signature
-  if (!verifySignature(payload, signature, webhookSecret)) {
-    return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
-  }
 
   if (!event) {
     return NextResponse.json(
@@ -49,6 +75,33 @@ async function handler(request: NextRequest) {
     data = JSON.parse(payload);
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+
+  // Look up repo config
+  const repoFullName: string =
+    data.repository?.full_name || data.repository?.fullName || "";
+
+  if (!repoFullName) {
+    return NextResponse.json(
+      { error: "Missing repository full_name in payload" },
+      { status: 400 },
+    );
+  }
+
+  const repoConfig = getRepoConfig(repoFullName);
+  if (!repoConfig) {
+    return NextResponse.json(
+      {
+        error: `Unknown repo '${repoFullName}'. Add it to release-manager.config.json to enable webhook processing.`,
+      },
+      { status: 200 },
+    );
+  }
+
+  // Validate signature with the per-repo secret
+  const webhookSecret = process.env[repoConfig.webhook_secret_env];
+  if (!verifySignature(payload, signature, webhookSecret)) {
+    return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
   }
 
   // We process pull_request events
