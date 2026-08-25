@@ -6,7 +6,7 @@
 ## Changes
 
 ### 1. Replace Avatar Image
-Replace `public/images/eve-avatar.jpg` with the new character graphic from the issue.
+Replace `public/images/eve-avatar.jpg` with the new character graphic from the issue. Test
 
 **Image source:** https://github.com/user-attachments/assets/7862c9d2-34c6-453c-953c-05fe9bcdf4a8
 
