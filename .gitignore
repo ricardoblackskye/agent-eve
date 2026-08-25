@@ -10,4 +10,3 @@ dist
 *.tsbuildinfo
 test-results
 playwright-report
-releasenotes.md
