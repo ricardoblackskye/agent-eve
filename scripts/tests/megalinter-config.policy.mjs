@@ -20,6 +20,10 @@ describe("MegaLinter configuration", () => {
     assert.ok(fs.existsSync(path.join(root, ".jscpd.json")));
   });
 
+  it("has .lycheeignore file", () => {
+    assert.ok(fs.existsSync(path.join(root, ".lycheeignore")));
+  });
+
   it("has megalinter job in CI workflow", () => {
     const ciYml = fs.readFileSync(
       path.join(root, ".github/workflows/ci.yml"),
@@ -43,5 +47,31 @@ describe("MegaLinter configuration", () => {
     assert.ok(cspell.words.includes("subagent"), "cspell must include 'subagent'");
     assert.ok(cspell.words.includes("megalinter"), "cspell must include 'megalinter'");
     assert.ok(cspell.words.includes("releasenotes"), "cspell must include 'releasenotes'");
+    assert.ok(cspell.words.includes("evals"), "cspell must include 'evals'");
+    assert.ok(cspell.words.includes("vercel"), "cspell must include 'vercel'");
+    assert.ok(cspell.words.includes("kics"), "cspell must include 'kics'");
+  });
+
+  it(".jscpd.json threshold is at least 2", () => {
+    const jscpd = JSON.parse(
+      fs.readFileSync(path.join(root, ".jscpd.json"), "utf-8"),
+    );
+    assert.ok(jscpd.threshold >= 2, "jscpd threshold must be >= 2 to tolerate boilerplate");
+  });
+
+  it("CI workflow has top-level permissions", () => {
+    const ciYml = fs.readFileSync(
+      path.join(root, ".github/workflows/ci.yml"),
+      "utf-8",
+    );
+    assert.ok(ciYml.includes("permissions:"), "CI workflow must set top-level permissions");
+  });
+
+  it(".lycheeignore contains localhost pattern", () => {
+    const lychee = fs.readFileSync(
+      path.join(root, ".lycheeignore"),
+      "utf-8",
+    );
+    assert.ok(lychee.includes("127.0.0.1"), ".lycheeignore must exclude localhost");
   });
 });
