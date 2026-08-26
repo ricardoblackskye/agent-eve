@@ -15,7 +15,7 @@ JAVASCRIPT_DEFAULT_STYLE: prettier
 JSON_PRETTIER_FILTER_REGEX_EXCLUDE: (\.next/|\.eve/|\.vercel/|node_modules/)
 PRINT_ALPACA: false
 SHOW_ELAPSED_TIME: true
-SPELL_LYCHEE_ARGUMENTS: --format detailed --no-progress
+SPELL_LYCHEE_ARGUMENTS: --format detailed --no-progress --root-dir /github/workspace
 SPELL_CSPELL_FILE_EXTENSIONS:
   - .ts
   - .tsx
