@@ -4,6 +4,11 @@
       "webhook_secret_env": "GH_WEBHOOK_SECRET",
       "token_env": "GH_RELEASE_TOKEN",
       "release_notes_path": "releasenotes.md"
+    },
+    "test/repo": {
+      "webhook_secret_env": "TEST_WEBHOOK_SECRET",
+      "token_env": "TEST_RELEASE_TOKEN",
+      "release_notes_path": "releasenotes.md"
     }
   },
   "defaults": {
