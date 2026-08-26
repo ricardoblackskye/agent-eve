@@ -105,6 +105,7 @@ jobs:
       - name: Run browser tests
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          VERCEL_PROTECTION_BYPASS: ${{ secrets.VERCEL_PROTECTION_BYPASS }}
         run: npm run test:e2e
       - name: Upload Playwright artifacts
         if: always()
