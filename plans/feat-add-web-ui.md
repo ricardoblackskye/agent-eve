@@ -355,7 +355,7 @@ Update `.env.local` (set via Vercel env vars — no browser exposure):
 # VERCEL_OIDC_TOKEN=...
 
 # Eve API key for server-side proxy auth:
-EVE_API_KEY=eve_sk_afd1abb4442ba0bd84d07ab3727cd2822a6a7313b5845e05fe94bc7fdb423b4b
+EVE_API_KEY=eve_sk_...
 ```
 
 Add `.env.example`:
