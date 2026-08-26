@@ -1,0 +1,5 @@
+[allowlist]
+description = "Historical placeholder in an authored implementation plan"
+commits = ["0f09f0f388bb9bc57d89c1a3e142dadfa7f8021b"]
+paths = ["plans/feat-add-web-ui.md"]
+rules = ["generic-api-key"]

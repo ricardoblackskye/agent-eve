@@ -22,7 +22,20 @@
     "openrouter",
     "nextjs",
     "playwright",
-    "vitest"
+    "vitest",
+    "evals",
+    "shellcheck",
+    "shfmt",
+    "vercel",
+    "checkov",
+    "gitleaks",
+    "kics",
+    "yamllint",
+    "markdownlint",
+    "secretlint",
+    "syft",
+    "trufflehog",
+    "kas"
   ],
   "ignorePaths": [
     "node_modules/**",
@@ -30,6 +43,7 @@
     ".next/**",
     ".eve/**",
     ".vercel/**",
-    "package-lock.json"
+    "package-lock.json",
+    "*megalinter_file_names_cspell.txt"
   ]
 }

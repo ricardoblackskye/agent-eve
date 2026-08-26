@@ -1,0 +1,8 @@
+# Local development endpoints referenced by CI and plan documentation
+http://127\.0\.0\.1:3000/.*
+http://localhost:3000/.*
+/eve/v1/health
+
+# Generated MegaLinter filename reports
+.*megalinter_file_names.*
+
