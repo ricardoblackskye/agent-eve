@@ -6,7 +6,11 @@ on:
   push:
     branches: [main]
 
-permissions: read-all
+permissions:
+  contents: read
+  checks: write
+  actions: write
+  pull-requests: write
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -105,6 +109,7 @@ jobs:
       - name: Run browser tests
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          VERCEL_PROTECTION_BYPASS: ${{ secrets.VERCEL_PROTECTION_BYPASS }}
         run: npm run test:e2e
       - name: Upload Playwright artifacts
         if: always()
