@@ -36,6 +36,7 @@
     "syft",
     "trufflehog",
     "kas"
+    "agent-eve",
   ],
   "ignorePaths": [
     "node_modules/**",
