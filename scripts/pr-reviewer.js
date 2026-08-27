@@ -1,5 +1,5 @@
-const fs = require('fs');
-const { createOpenAI } = require("@ai-sdk/openai");
+import fs from 'fs';
+import { createOpenAI } from "@ai-sdk/openai";
 
 // Read the GitHub event payload
 const eventPath = process.env.GITHUB_EVENT_PATH;
@@ -47,7 +47,7 @@ let prDiff;
 try {
   const diffResponse = await fetch(prDiffUrl, {
     headers: {
-      Authorization: `token ${process.env.GITHUB_TOKEN}`,
+      Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
       Accept: 'application/vnd.github.v3.diff',
     },
   });
@@ -104,7 +104,7 @@ try {
     {
       method: 'POST',
       headers: {
-        Authorization: `token ${process.env.GITHUB_TOKEN}`,
+        Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ body: review }),
