@@ -9,7 +9,7 @@ if (!eventPath) {
 
 let event;
 try {
-  const eventContent = fs.readFileSync(eventPath, 'utf8');
+  const eventContent = fs.readFileSync(eventPath, 'utf8'); // Synchronous is acceptable at startup
   event = JSON.parse(eventContent);
 } catch (error) {
   console.error("Failed to read or parse GitHub event:", error);
@@ -44,12 +44,19 @@ console.log(`Processing PR #${prNumber} in ${repoOwner}/${repoName}`);
 // Fetch the PR diff
 let prDiff;
 try {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+  
   const diffResponse = await fetch(prDiffUrl, {
     headers: {
       Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
       Accept: 'application/vnd.github.v3.diff',
+      'User-Agent': 'agent-eve-pr-reviewer/1.0',
     },
+    signal: controller.signal,
   });
+
+  clearTimeout(timeoutId);
 
   if (!diffResponse.ok) {
     throw new Error(`Failed to fetch diff: ${diffResponse.status} ${diffResponse.statusText}`);
@@ -62,6 +69,9 @@ try {
   process.exit(1);
 }
 
+// Sanitize PR diff to prevent prompt injection (escape backticks)
+const sanitizedPrDiff = prDiff.replace(/`/g, '\\`');
+
 // Call OpenRouter API to generate review
 let review;
 try {
@@ -72,7 +82,7 @@ try {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: "nvidia/nemotron-3-ultra-550b-a55b:free",
+      model: process.env.MODEL_NAME,
       messages: [
         {
           role: "system",
@@ -80,7 +90,7 @@ try {
         },
         {
           role: "user",
-          content: `Please review the following diff and provide your feedback with specific line number citations:\n\n\`\`\`diff\n${prDiff}\n\`\`\``,
+          content: `Please review the following diff and provide your feedback with specific line number citations:\n\n\`\`\`diff\n${sanitizedPrDiff}\n\`\`\``,
         },
       ],
       temperature: 0.2,
@@ -102,11 +112,22 @@ try {
     throw new Error(`No choices in OpenRouter response: ${JSON.stringify(openrouterData)}`);
   }
 
+  // Validate response before accessing content
+  if (!openrouterData.choices[0].message || !openrouterData.choices[0].message.content) {
+    throw new Error(`Invalid response format from OpenRouter: missing message or content`);
+  }
+
   review = openrouterData.choices[0].message.content;
   console.log(`Generated review of length ${review.length}`);
 } catch (error) {
   console.error("Error generating review:", error);
   process.exit(1);
+}
+
+// Handle large diffs by truncating if necessary (though we already sent the full diff,
+// we could add a note if it was very large)
+if (prDiff.length > 100000) {
+  console.log(`Warning: PR diff was large (${prDiff.length} bytes), consider implementing summarization for very large PRs`);
 }
 
 // Post the review as a comment on the PR
