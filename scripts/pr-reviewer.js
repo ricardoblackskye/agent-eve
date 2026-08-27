@@ -80,7 +80,7 @@ Please review the following diff and provide your feedback with specific line nu
 ${prDiff}
 \`\`\``;
 
-  const completion = await openrouter.chatCompletion({
+  const completion = await openrouter.chat.completions.create({
     model: "nvidia/nemotron-3-ultra-550b-a55b:free",
     messages: [
       { role: "system", content: "You are a senior software engineer reviewing this code diff. Look for architectural anti-patterns, security risks, and off-by-one errors. You MUST reference the exact line numbers from the diff headers (@@ -x,y +a,b @@) in your feedback." },
