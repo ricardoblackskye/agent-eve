@@ -24,5 +24,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          MODEL_NAME: "nvidia/nemotron-3-ultra-550b-a55b:free"
         run: |
           node scripts/pr-reviewer.js
