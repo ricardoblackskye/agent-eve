@@ -13,7 +13,7 @@ vi.mock("@ai-sdk/openai", () => ({
 }));
 
 // Import the agent after mocking
-const prReviewerAgent = await import("../agent/subagents/pr-reviewer/agent.ts");
+const prReviewerAgent = await import("../agent/subagents/pr-reviewer/agent");
 
 describe("PR Reviewer Agent", () => {
   it("should exist and have a description", () => {

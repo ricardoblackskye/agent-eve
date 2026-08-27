@@ -4,11 +4,11 @@
 Add a new autonomous Agent capability to Agent Eve to perform PR code reviews for repos in GitHub.
 
 ## Tasks
-- [ ] Setup test infrastructure for Vitest (if needed)
-- [ ] Write failing tests for the PR reviewer subagent
-- [ ] Push tests for review (create a pull request with the tests)
-- [ ] Implement the PR reviewer subagent to make tests pass
-- [ ] Set up GitHub Action to trigger the agent on pull requests (in .github/workflows)
+- [x] Setup test infrastructure for Vitest (if needed)
+- [x] Write failing tests for the PR reviewer subagent
+- [x] Push tests for review (create a pull request with the tests)
+- [x] Implement the PR reviewer subagent to make tests pass
+- [x] Set up GitHub Action to trigger the agent on pull requests (in .github/workflows)
 
 ## TDD Workflow (4-phase)
 1. Setup test infra.
