@@ -12,7 +12,7 @@ graph TB
     Proxy --> EveAgent["Eve Agent<br/>agent/"]
     EveAgent --> OpenRouter["OpenRouter API"]
     OpenRouter --> LLM["NVIDIA Nemotron<br/>3 Ultra 550B"]
-    
+
     style User fill:#1a3a5c,stroke:#4a8ad4,color:#e5e5e5
     style NextJS fill:#2d2d2d,stroke:#555,color:#e5e5e5
     style Proxy fill:#1a1a2e,stroke:#4a4a8a,color:#e5e5e5
@@ -31,7 +31,7 @@ sequenceDiagram
     participant E as Eve Agent
     participant O as OpenRouter
     participant M as Model
-    
+
     B->>N: GET / (loads chat UI)
     N-->>B: HTML + JS
     B->>P: POST /api/eve/v1/session
@@ -57,18 +57,18 @@ flowchart LR
         VP["Vercel Platform Call"] -->|OIDC| V["vercelOidc()"]
         V -->|Authenticated| C["Channel<br/>eve.ts"]
     end
-    
+
     subgraph Development
         LD["Local Dev Request"] -->|localhost| L["localDev()"]
         L -->|Authenticated| C
     end
-    
+
     subgraph External
         API["API Client<br/>(Bearer Token)"] -->|Authorization header| BA["bearerAuth()"]
         BA -->|Valid token| C
         BA -->|Invalid token| R["401 Unauthorized"]
     end
-    
+
     style VP fill:#1a3a5c,stroke:#4a8ad4
     style LD fill:#2d2d2d,stroke:#555
     style API fill:#2e1a1a,stroke:#8a4a4a
@@ -85,21 +85,21 @@ graph TB
         PA -->|No auth wall| PP["API Proxy"]
         PA -->|No auth wall| PU["Web UI"]
     end
-    
+
     subgraph Preview["Preview (Vercel)"]
         PR["agent-*.vercel.app"]
         PR -->|Vercel Auth| PRP["API Proxy"]
         PRP -->|Bypass header| PRE["Eve Agent"]
         PR -->|Vercel Auth| PRU["Web UI"]
     end
-    
+
     subgraph Local["Local Development"]
         L["http://localhost:3000"]
         L --> LP["API Proxy"]
         L --> LU["Web UI"]
         LP -->|Direct| LE["Eve Agent"]
     end
-    
+
     style Production fill:#1a2e1a,stroke:#4a8a4a
     style Preview fill:#2e2e1a,stroke:#8a8a4a
     style Local fill:#1a1a2e,stroke:#4a4a8a
@@ -117,13 +117,13 @@ graph LR
         PLANS["plans/"]
         PUB["public/"]
     end
-    
+
     subgraph Agent["agent/"]
         AT["agent.ts<br/>(Model config)"]
         AI["instructions.md"]
         CH["channels/eve.ts<br/>(Auth)"]
     end
-    
+
     subgraph App["app/"]
         CHAT["chat.tsx<br/>(UI)"]
         CSS["globals.css"]
@@ -131,7 +131,7 @@ graph LR
         PROXY["api/eve/v1/[...slug]/route.ts<br/>(Proxy)"]
         ARCH["architecture/page.tsx<br/>(This page)"]
     end
-    
+
     Root --> Agent
     Root --> App
     Root --> E2E
@@ -149,7 +149,7 @@ sequenceDiagram
     participant EA as useEveAgent
     participant P as API Proxy
     participant E as Eve Agent
-    
+
     U->>C: Types message
     U->>C: Clicks Send
     C->>EA: send("message")
@@ -168,8 +168,8 @@ sequenceDiagram
 
 ## Environment Variables
 
-| Variable | Purpose | Required |
-|----------|---------|----------|
-| `OPENROUTER_API_KEY` | API key for OpenRouter model access | Yes |
-| `EVE_API_KEY` | Bearer token for Eve API authentication | Yes |
-| `VERCEL_PROTECTION_BYPASS` | Bypass token for Vercel preview auth | For preview only |
+| Variable                   | Purpose                                 | Required         |
+| -------------------------- | --------------------------------------- | ---------------- |
+| `OPENROUTER_API_KEY`       | API key for OpenRouter model access     | Yes              |
+| `EVE_API_KEY`              | Bearer token for Eve API authentication | Yes              |
+| `VERCEL_PROTECTION_BYPASS` | Bypass token for Vercel preview auth    | For preview only |

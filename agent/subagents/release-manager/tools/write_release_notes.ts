@@ -15,16 +15,20 @@ export default defineTool({
     "Requires GH_RELEASE_TOKEN environment variable.",
   inputSchema: z.object({
     content: z.string().min(1, "Content is required"),
-    commitMessage: z
-      .string()
-      .optional()
-      .default("docs: update release notes"),
+    commitMessage: z.string().optional().default("docs: update release notes"),
     prNumber: z.number().optional(),
     existingSha: z.string().nullable().optional(),
     owner: z.string().optional(),
     repo: z.string().optional(),
   }),
-  async execute({ content, commitMessage, prNumber, existingSha, owner, repo }) {
+  async execute({
+    content,
+    commitMessage,
+    prNumber,
+    existingSha,
+    owner,
+    repo,
+  }) {
     const token = process.env.GH_RELEASE_TOKEN;
     if (!token) {
       return {
@@ -34,13 +38,12 @@ export default defineTool({
       };
     }
 
-    const targetOwner = owner || process.env.VERCEL_GIT_REPO_OWNER || "ricardoblackskye";
+    const targetOwner =
+      owner || process.env.VERCEL_GIT_REPO_OWNER || "ricardoblackskye";
     const targetRepo = repo || process.env.VERCEL_GIT_REPO_SLUG || "agent-eve";
 
     // Build commit message
-    const msg = prNumber
-      ? `${commitMessage} (#${prNumber})`
-      : commitMessage;
+    const msg = prNumber ? `${commitMessage} (#${prNumber})` : commitMessage;
 
     // Encode content to base64
     const encoded = Buffer.from(content, "utf-8").toString("base64");

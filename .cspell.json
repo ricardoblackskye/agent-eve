@@ -36,7 +36,20 @@
     "syft",
     "trufflehog",
     "kas",
-    "agent-eve"
+    "agent-eve",
+    "nemotron",
+    "Nemotron",
+    "sandboxed",
+    "ricardoblackskye",
+    "Braintrust",
+    "unstub",
+    "oneline",
+    "deepseek",
+    "HMAC",
+    "browsable",
+    "Capitalise",
+    "behaviour",
+    "capitalised"
   ],
   "ignorePaths": [
     "node_modules/**",
@@ -45,6 +58,7 @@
     ".eve/**",
     ".vercel/**",
     "package-lock.json",
-    "*megalinter_file_names_cspell.txt"
+    "*megalinter_file_names_cspell.txt",
+    "tsconfig.tsbuildinfo"
   ]
 }

@@ -4,7 +4,9 @@ test.describe("Architecture page", () => {
   test("loads the architecture page with title", async ({ page }) => {
     await page.goto("/architecture");
 
-    await expect(page.getByRole("heading", { name: "Architecture", exact: true })).toBeVisible({ timeout: 10_000 });
+    await expect(
+      page.getByRole("heading", { name: "Architecture", exact: true }),
+    ).toBeVisible({ timeout: 10_000 });
     // Page should return 200
     expect(page.url()).toContain("/architecture");
   });

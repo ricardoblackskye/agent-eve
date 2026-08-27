@@ -45,10 +45,7 @@ function verifySignature(
   if (!secret) return true; // Skip verification if no secret configured (dev only)
   if (!signatureHeader) return false;
 
-  const sig = crypto
-    .createHmac("sha256", secret)
-    .update(payload)
-    .digest("hex");
+  const sig = crypto.createHmac("sha256", secret).update(payload).digest("hex");
   return `sha256=${sig}` === signatureHeader;
 }
 
@@ -62,20 +59,20 @@ async function handler(request: NextRequest) {
   const signature = request.headers.get("x-hub-signature-256");
   const event = request.headers.get("x-github-event");
 
-       if (!event) {
-         return NextResponse.json(
-           { error: "Missing x-github-event header" },
-           { status: 400 }
-         );
-       }
+  if (!event) {
+    return NextResponse.json(
+      { error: "Missing x-github-event header" },
+      { status: 400 },
+    );
+  }
 
-       // Handle ping event early (does not require repository or signature)
-       if (event === "ping") {
-         return NextResponse.json({ ok: true, message: "pong" });
-       }
+  // Handle ping event early (does not require repository or signature)
+  if (event === "ping") {
+    return NextResponse.json({ ok: true, message: "pong" });
+  }
 
-       // Parse the payload
-       let data: any;
+  // Parse the payload
+  let data: any;
   try {
     data = JSON.parse(payload);
   } catch {
@@ -156,35 +153,35 @@ async function handler(request: NextRequest) {
     const apiKey = process.env.EVE_API_KEY;
 
     if (apiKey) {
-          try {
-            const targetUrl = `${request.nextUrl.origin}/eve/v1/session`;
-            const apiHeaders: Record<string, string> = {
-                          authorization: `Bearer ${apiKey}`,
-                          "content-type": "application/json",
-                        };
-            const bypass = process.env.VERCEL_PROTECTION_BYPASS;
-            if (bypass) {
-              apiHeaders[`x-vercel-protection-bypass`] = bypass;
-            }
-
-            const apiResponse = await fetch(targetUrl, {
-              method: "POST",
-              headers: apiHeaders,
-              body: JSON.stringify({ message }),
-            });
-
-            if (apiResponse.ok) {
-              const apiData = await apiResponse.json();
-              eveApiResult = apiData?.status || "accepted";
-            } else {
-              eveApiResult = `error: ${apiResponse.status}`;
-            }
-          } catch (err) {
-            eveApiError = err instanceof Error ? err.message : String(err);
-            eveApiResult = "error";
-            console.error(`[webhook] Eve API call failed: ${eveApiError}`);
-          }
+      try {
+        const targetUrl = `${request.nextUrl.origin}/eve/v1/session`;
+        const apiHeaders: Record<string, string> = {
+          authorization: `Bearer ${apiKey}`,
+          "content-type": "application/json",
+        };
+        const bypass = process.env.VERCEL_PROTECTION_BYPASS;
+        if (bypass) {
+          apiHeaders[`x-vercel-protection-bypass`] = bypass;
         }
+
+        const apiResponse = await fetch(targetUrl, {
+          method: "POST",
+          headers: apiHeaders,
+          body: JSON.stringify({ message }),
+        });
+
+        if (apiResponse.ok) {
+          const apiData = await apiResponse.json();
+          eveApiResult = apiData?.status || "accepted";
+        } else {
+          eveApiResult = `error: ${apiResponse.status}`;
+        }
+      } catch (err) {
+        eveApiError = err instanceof Error ? err.message : String(err);
+        eveApiResult = "error";
+        console.error(`[webhook] Eve API call failed: ${eveApiError}`);
+      }
+    }
 
     console.log(
       `[webhook] PR #${prData.number} ${action}: ${prData.title} — Eve API: ${eveApiResult}`,

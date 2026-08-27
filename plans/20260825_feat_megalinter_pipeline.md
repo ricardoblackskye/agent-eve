@@ -25,43 +25,46 @@ Add MegaLinter to the agent-eve CI pipeline so it matches the linting patterns u
 
 ## Files
 
-| File | Action | Purpose |
-|------|--------|---------|
-| `.mega-linter.yml` | **Create** | MegaLinter configuration — enabled linters, exclusions, environment variables |
-| `.cspell.json` | **Create** | CSpell dictionary with project-specific terms (eve, subagents, releasenotes, etc.) |
-| `.jscpd.json` | **Create** | Copy-paste detector config — exclude generated dirs, set threshold |
-| `.github/workflows/ci.yml` | **Modify** | Add `megalinter` job after existing jobs |
-| `scripts/tests/megalinter-config.policy.mjs` | **Create** | Policy tests asserting config existence and structure (TDD) |
+| File                                         | Action     | Purpose                                                                            |
+| -------------------------------------------- | ---------- | ---------------------------------------------------------------------------------- |
+| `.mega-linter.yml`                           | **Create** | MegaLinter configuration — enabled linters, exclusions, environment variables      |
+| `.cspell.json`                               | **Create** | CSpell dictionary with project-specific terms (eve, subagents, releasenotes, etc.) |
+| `.jscpd.json`                                | **Create** | Copy-paste detector config — exclude generated dirs, set threshold                 |
+| `.github/workflows/ci.yml`                   | **Modify** | Add `megalinter` job after existing jobs                                           |
+| `scripts/tests/megalinter-config.policy.mjs` | **Create** | Policy tests asserting config existence and structure (TDD)                        |
 
 ## Linters to Enable
 
 ### High-value (non-disruptive)
-| Linter | Category | Rationale |
-|--------|----------|-----------|
-| `TYPESCRIPT_STANDARD` | Format | TypeScript Standard style — consistent TS/TSX formatting |
-| `MARKDOWN_MARKDOWNLINT` | Format | Clean markdown docs |
-| `MARKDOWN_MARKDOWN_TABLE_FORMATTER` | Format | Consistent tables in plans/, AGENTS.md, etc. |
-| `YAML_YAMLLINT` | Format | Clean CI workflow and config YAML |
-| `JSON_PRETTIER` | Format | Consistent JSON formatting |
-| `SPELL_CSPELL` | Spelling | Catch typos in code and docs |
-| `SPELL_LYCHEE` | Links | Catch broken URLs in markdown |
-| `COPYPASTE_JSCPD` | Quality | Flag duplicate code |
-| `ACTION_ZIZMOR` | Security | Audit GitHub Actions workflows for security issues |
+
+| Linter                              | Category | Rationale                                                |
+| ----------------------------------- | -------- | -------------------------------------------------------- |
+| `TYPESCRIPT_STANDARD`               | Format   | TypeScript Standard style — consistent TS/TSX formatting |
+| `MARKDOWN_MARKDOWNLINT`             | Format   | Clean markdown docs                                      |
+| `MARKDOWN_MARKDOWN_TABLE_FORMATTER` | Format   | Consistent tables in plans/, AGENTS.md, etc.             |
+| `YAML_YAMLLINT`                     | Format   | Clean CI workflow and config YAML                        |
+| `JSON_PRETTIER`                     | Format   | Consistent JSON formatting                               |
+| `SPELL_CSPELL`                      | Spelling | Catch typos in code and docs                             |
+| `SPELL_LYCHEE`                      | Links    | Catch broken URLs in markdown                            |
+| `COPYPASTE_JSCPD`                   | Quality  | Flag duplicate code                                      |
+| `ACTION_ZIZMOR`                     | Security | Audit GitHub Actions workflows for security issues       |
 
 ### Lower priority (start disabled, enable later)
-| Linter | Reason |
-|--------|--------|
-| `CSS_STYLELINT` | Only one CSS file (`app/globals.css`); low value initially |
-| `REPOSITORY_DEVSKIM` | Secret scanning — enable after baseline |
-| `REPOSITORY_GRYPE` | Container scanning — requires Docker |
-| `REPOSITORY_TRIVY` | Filesystem scanning — enables after baseline |
-| `BASH_SHELLCHECK` | No shell scripts yet (all via CI actions) |
+
+| Linter               | Reason                                                     |
+| -------------------- | ---------------------------------------------------------- |
+| `CSS_STYLELINT`      | Only one CSS file (`app/globals.css`); low value initially |
+| `REPOSITORY_DEVSKIM` | Secret scanning — enable after baseline                    |
+| `REPOSITORY_GRYPE`   | Container scanning — requires Docker                       |
+| `REPOSITORY_TRIVY`   | Filesystem scanning — enables after baseline               |
+| `BASH_SHELLCHECK`    | No shell scripts yet (all via CI actions)                  |
 
 ## MegaLinter Configuration
 
 `.mega-linter.yml`:
+
 ```yaml
-APPLY_FIXES: none  # No auto-fix in CI; reviewer decides
+APPLY_FIXES: none # No auto-fix in CI; reviewer decides
 DEFAULT_BRANCH: main
 DISABLE_ERRORS_LINTERS: []
 DISABLE_LINTERS:
@@ -72,7 +75,7 @@ DISABLE_LINTERS:
   - BASH_EXEC
   - BASH_SHELLCHECK
   - BASH_SHFMT
-  - TYPESCRIPT_STANDARD  # ts-standard crashes on TS 7.x — rely on tsc at build time
+  - TYPESCRIPT_STANDARD # ts-standard crashes on TS 7.x — rely on tsc at build time
 FILTER_REGEX_EXCLUDE: (node_modules/|\.git/|\.next/|\.eve/|\.vercel/)
 JAVASCRIPT_DEFAULT_STYLE: prettier
 JSON_PRETTIER_FILTER_REGEX_EXCLUDE: (\.next/|\.eve/|\.vercel/|node_modules/)
@@ -88,13 +91,14 @@ SPELL_CSPELL_FILE_EXTENSIONS:
   - .yml
   - .yaml
   - .css
-VALIDATE_ALL_CODEBASE: false  # Only PR changed files initially
+VALIDATE_ALL_CODEBASE: false # Only PR changed files initially
 YAML_YAMLLINT_FILTER_REGEX_EXCLUDE: (\.vercel/|\.next/|\.eve/)
 ```
 
 ## CSpell Configuration
 
 `.cspell.json`:
+
 ```json
 {
   "version": "0.2",
@@ -223,6 +227,7 @@ Create `.mega-linter.yml`, `.cspell.json`, `.jscpd.json`, modify `ci.yml` with m
 ## Baseline Check (Phase 1.5)
 
 Before implementing:
+
 1. Run MegaLinter against `main` in a CI run to establish the baseline finding count
 2. If many findings (yellow/red), record the baseline but don't fix in this PR — this PR is about **adding the pipeline**, not remediating findings
 3. File follow-up issues per linter category for remediation

@@ -1,4 +1,4 @@
-import fs from 'fs';
+import fs from "fs";
 
 // Read the GitHub event payload
 const eventPath = process.env.GITHUB_EVENT_PATH;
@@ -9,7 +9,7 @@ if (!eventPath) {
 
 let event;
 try {
-  const eventContent = fs.readFileSync(eventPath, 'utf8'); // Synchronous is acceptable at startup
+  const eventContent = fs.readFileSync(eventPath, "utf8"); // Synchronous is acceptable at startup
   event = JSON.parse(eventContent);
 } catch (error) {
   console.error("Failed to read or parse GitHub event:", error);
@@ -46,12 +46,12 @@ let prDiff;
 try {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
-  
+
   const diffResponse = await fetch(prDiffUrl, {
     headers: {
       Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
-      Accept: 'application/vnd.github.v3.diff',
-      'User-Agent': 'agent-eve-pr-reviewer/1.0',
+      Accept: "application/vnd.github.v3.diff",
+      "User-Agent": "agent-eve-pr-reviewer/1.0",
     },
     signal: controller.signal,
   });
@@ -59,7 +59,9 @@ try {
   clearTimeout(timeoutId);
 
   if (!diffResponse.ok) {
-    throw new Error(`Failed to fetch diff: ${diffResponse.status} ${diffResponse.statusText}`);
+    throw new Error(
+      `Failed to fetch diff: ${diffResponse.status} ${diffResponse.statusText}`,
+    );
   }
 
   prDiff = await diffResponse.text();
@@ -70,51 +72,64 @@ try {
 }
 
 // Sanitize PR diff to prevent prompt injection (escape backticks)
-const sanitizedPrDiff = prDiff.replace(/`/g, '\\`');
+const sanitizedPrDiff = prDiff.replace(/`/g, "\\`");
 
 // Call OpenRouter API to generate review
 let review;
 try {
-  const openrouterResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
-      "Content-Type": "application/json",
+  const openrouterResponse = await fetch(
+    "https://openrouter.ai/api/v1/chat/completions",
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: process.env.MODEL_NAME,
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are a senior software engineer reviewing this code diff. Look for architectural anti-patterns, security risks, and off-by-one errors. You MUST reference the exact line numbers from the diff headers (@@ -x,y +a,b @@) in your feedback.",
+          },
+          {
+            role: "user",
+            content: `Please review the following diff and provide your feedback with specific line number citations:\n\n\`\`\`diff\n${sanitizedPrDiff}\n\`\`\``,
+          },
+        ],
+        temperature: 0.2,
+        max_tokens: 1500,
+      }),
     },
-    body: JSON.stringify({
-      model: process.env.MODEL_NAME,
-      messages: [
-        {
-          role: "system",
-          content: "You are a senior software engineer reviewing this code diff. Look for architectural anti-patterns, security risks, and off-by-one errors. You MUST reference the exact line numbers from the diff headers (@@ -x,y +a,b @@) in your feedback.",
-        },
-        {
-          role: "user",
-          content: `Please review the following diff and provide your feedback with specific line number citations:\n\n\`\`\`diff\n${sanitizedPrDiff}\n\`\`\``,
-        },
-      ],
-      temperature: 0.2,
-      max_tokens: 1500,
-    }),
-  });
+  );
 
   console.log(`OpenRouter response status: ${openrouterResponse.status}`);
 
   if (!openrouterResponse.ok) {
     const errorText = await openrouterResponse.text();
-    throw new Error(`Failed to call OpenRouter: ${openrouterResponse.status} ${openrouterResponse.statusText}\nResponse: ${errorText}`);
+    throw new Error(
+      `Failed to call OpenRouter: ${openrouterResponse.status} ${openrouterResponse.statusText}\nResponse: ${errorText}`,
+    );
   }
 
   const openrouterData = await openrouterResponse.json();
   console.log(`OpenRouter response data:`, openrouterData);
-  
+
   if (!openrouterData.choices || openrouterData.choices.length === 0) {
-    throw new Error(`No choices in OpenRouter response: ${JSON.stringify(openrouterData)}`);
+    throw new Error(
+      `No choices in OpenRouter response: ${JSON.stringify(openrouterData)}`,
+    );
   }
 
   // Validate response before accessing content
-  if (!openrouterData.choices[0].message || !openrouterData.choices[0].message.content) {
-    throw new Error(`Invalid response format from OpenRouter: missing message or content`);
+  if (
+    !openrouterData.choices[0].message ||
+    !openrouterData.choices[0].message.content
+  ) {
+    throw new Error(
+      `Invalid response format from OpenRouter: missing message or content`,
+    );
   }
 
   review = openrouterData.choices[0].message.content;
@@ -127,7 +142,9 @@ try {
 // Handle large diffs by truncating if necessary (though we already sent the full diff,
 // we could add a note if it was very large)
 if (prDiff.length > 100000) {
-  console.log(`Warning: PR diff was large (${prDiff.length} bytes), consider implementing summarization for very large PRs`);
+  console.log(
+    `Warning: PR diff was large (${prDiff.length} bytes), consider implementing summarization for very large PRs`,
+  );
 }
 
 // Post the review as a comment on the PR
@@ -135,18 +152,20 @@ try {
   const commentResponse = await fetch(
     `https://api.github.com/repos/${repoOwner}/${repoName}/issues/${prNumber}/comments`,
     {
-      method: 'POST',
+      method: "POST",
       headers: {
         Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
       },
       body: JSON.stringify({ body: review }),
-    }
+    },
   );
 
   if (!commentResponse.ok) {
     const errorText = await commentResponse.text();
-    throw new Error(`Failed to post comment: ${commentResponse.status} ${commentResponse.statusText}\nResponse: ${errorText}`);
+    throw new Error(
+      `Failed to post comment: ${commentResponse.status} ${commentResponse.statusText}\nResponse: ${errorText}`,
+    );
   }
 
   const result = await commentResponse.json();

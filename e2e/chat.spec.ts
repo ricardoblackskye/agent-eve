@@ -4,11 +4,16 @@ test.describe("Eve chat", () => {
   test("renders ready chat controls without an error", async ({ page }) => {
     await page.goto("/");
 
-    await expect(page.getByRole("heading", { name: "Eve Agent" })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Eve Agent" }),
+    ).toBeVisible();
     await expect(page.getByPlaceholder("Type your message...")).toBeVisible();
     await expect(page.getByRole("button", { name: "Send" })).toBeVisible();
     await expect(page.locator(".status")).toHaveText("Ready");
-    await expect(page.locator(".status")).toHaveCSS("background-color", "rgb(17, 170, 85)");
+    await expect(page.locator(".status")).toHaveCSS(
+      "background-color",
+      "rgb(17, 170, 85)",
+    );
     await expect(page.locator(".error-message")).toHaveCount(0);
   });
 
@@ -77,7 +82,9 @@ test.describe("Eve chat", () => {
     await expect(label).toHaveText("Eve", { timeout: 5_000 });
   });
 
-  test("shows the enlarged avatar image in the chat header", async ({ page }) => {
+  test("shows the enlarged avatar image in the chat header", async ({
+    page,
+  }) => {
     await page.goto("/");
 
     const avatar = page.locator("header img.eve-avatar");

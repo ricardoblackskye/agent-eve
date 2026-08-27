@@ -28,10 +28,7 @@ export default defineEval({
     );
     t.check(
       pingData?.message,
-      satisfies(
-        (m: string) => m === "pong",
-        "ping response contains pong",
-      ),
+      satisfies((m: string) => m === "pong", "ping response contains pong"),
     );
 
     // Test invalid body returns error

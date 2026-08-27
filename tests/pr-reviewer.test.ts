@@ -26,7 +26,7 @@ describe("PR Reviewer Agent - TDD Tests", () => {
         process.cwd(),
         ".github",
         "workflows",
-        "pr-reviewer.yml"
+        "pr-reviewer.yml",
       );
       const content = fs.readFileSync(workflowPath, "utf8");
       expect(content).toMatch(/node-version: '22'/);
@@ -38,13 +38,13 @@ describe("PR Reviewer Agent - TDD Tests", () => {
         process.cwd(),
         ".github",
         "workflows",
-        "pr-reviewer.yml"
+        "pr-reviewer.yml",
       );
       const content = fs.readFileSync(workflowPath, "utf8");
       // This is a recommendation, so we'll warn if not present but not fail
       if (!content.includes("cache:") || !content.includes("npm")) {
         console.warn(
-          "Consider adding explicit cache key for npm ci in workflow file"
+          "Consider adding explicit cache key for npm ci in workflow file",
         );
       }
     });
@@ -54,7 +54,7 @@ describe("PR Reviewer Agent - TDD Tests", () => {
         process.cwd(),
         ".github",
         "workflows",
-        "pr-reviewer.yml"
+        "pr-reviewer.yml",
       );
       const content = fs.readFileSync(workflowPath, "utf8");
       expect(content.endsWith("\n")).toBe(true);
@@ -68,18 +68,16 @@ describe("PR Reviewer Agent - TDD Tests", () => {
         "agent",
         "subagents",
         "pr-reviewer",
-        "agent.ts"
+        "agent.ts",
       );
       const content = fs.readFileSync(agentPath, "utf8");
-      
+
       // Should not contain the hardcoded model string directly
-      expect(content).not.toContain(
-        "nvidia/nemotron-3-ultra-550b-a55b:free"
-      );
-      
+      expect(content).not.toContain("nvidia/nemotron-3-ultra-550b-a55b:free");
+
       // Should reference a config or environment variable
       expect(content).toMatch(
-        /process\.env\.MODEL_NAME|config\.model|MODEL_NAME/
+        /process\.env\.MODEL_NAME|config\.model|MODEL_NAME/,
       );
     });
 
@@ -89,14 +87,12 @@ describe("PR Reviewer Agent - TDD Tests", () => {
         "agent",
         "subagents",
         "pr-reviewer",
-        "agent.ts"
+        "agent.ts",
       );
       const content = fs.readFileSync(agentPath, "utf8");
-      
+
       // Extract the modelContextWindowTokens value
-      const match = content.match(
-        /modelContextWindowTokens:\s*(\d+)/
-      );
+      const match = content.match(/modelContextWindowTokens:\s*(\d+)/);
       if (match) {
         const windowSize = parseInt(match[1], 10);
         expect(windowSize).toBeLessThan(500000);
@@ -114,10 +110,10 @@ describe("PR Reviewer Agent - TDD Tests", () => {
         "agent",
         "subagents",
         "pr-reviewer",
-        "agent.ts"
+        "agent.ts",
       );
       const content = fs.readFileSync(agentPath, "utf8");
-      
+
       if (content.includes("createOpenAI")) {
         expect(content).toMatch(/createOpenAI\(/);
       }
@@ -128,39 +124,44 @@ describe("PR Reviewer Agent - TDD Tests", () => {
     it("should use asynchronous file I/O or justify synchronous usage", () => {
       const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
       const content = fs.readFileSync(scriptPath, "utf8");
-      
+
       // Should use async version or have a comment justifying sync usage
-      const hasAsyncRead = content.includes("fs.promises.readFile") || 
-                          content.includes("fs.readFile(") && 
-                          !content.includes("fs.readFileSync");
-      const hasJustifyingComment = content.includes("// Synchronous is acceptable at startup");
-      
+      const hasAsyncRead =
+        content.includes("fs.promises.readFile") ||
+        (content.includes("fs.readFile(") &&
+          !content.includes("fs.readFileSync"));
+      const hasJustifyingComment = content.includes(
+        "// Synchronous is acceptable at startup",
+      );
+
       expect(hasAsyncRead || hasJustifyingComment).toBe(true);
     });
 
     it("should wrap top-level await in async function or use ES module", () => {
       const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
       const content = fs.readFileSync(scriptPath, "utf8");
-      
+
       // Check if it's an ES module
-      const isESModule = content.includes("import ") && 
-                         content.includes("from ") &&
-                         !content.includes("require(");
-      
+      const isESModule =
+        content.includes("import ") &&
+        content.includes("from ") &&
+        !content.includes("require(");
+
       // Or check if main logic is wrapped in async function
-      const hasAsyncWrapper = content.includes("(async () =>") ||
-                             content.includes("async function") ||
-                             content.includes("() => {") &&
-                             content.includes("await ") &&
-                             content.includes("})()");
-      
+      const hasAsyncWrapper =
+        content.includes("(async () =>") ||
+        content.includes("async function") ||
+        (content.includes("() => {") &&
+          content.includes("await ") &&
+          content.includes("})()"));
+
       expect(isESModule || hasAsyncWrapper).toBe(true);
     });
 
     it("should add timeout to fetch calls for PR diff", () => {
       const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
       const content = fs.readFileSync(scriptPath, "utf8");
-      
+
       // Should use AbortSignal.timeout or similar timeout mechanism
       expect(content).toMatch(/AbortSignal\.timeout|timeout|signal:/);
     });
@@ -168,43 +169,37 @@ describe("PR Reviewer Agent - TDD Tests", () => {
     it("should centralize model name (not hardcoded)", () => {
       const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
       const content = fs.readFileSync(scriptPath, "utf8");
-      
+
       // Should not contain the hardcoded model string
-      expect(content).not.toContain(
-        "nvidia/nemotron-3-ultra-550b-a55b:free"
-      );
-      
+      expect(content).not.toContain("nvidia/nemotron-3-ultra-550b-a55b:free");
+
       // Should get model from config/environment
       expect(content).toMatch(
-        /process\.env\.OPENROUTER_MODEL|MODEL_NAME|config\.model/
+        /process\.env\.OPENROUTER_MODEL|MODEL_NAME|config\.model/,
       );
     });
 
     it("should sanitize PR diff to prevent prompt injection", () => {
       const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
       const content = fs.readFileSync(scriptPath, "utf8");
-      
+
       // Should escape backticks in the diff before using in template literal
       // Simple check for replace or escape function
-      expect(content).toMatch(
-        /replace|escape|sanitize/
-      );
+      expect(content).toMatch(/replace|escape|sanitize/);
     });
 
     it("should validate OpenRouter response before accessing content", () => {
       const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
       const content = fs.readFileSync(scriptPath, "utf8");
-      
+
       // Should check for choices array and message content
-      expect(content).toMatch(
-        /choices\.length|if\s*!\(choices/
-      );
+      expect(content).toMatch(/choices\.length|if\s*!\(choices/);
     });
 
     it("should add User-Agent header to GitHub API calls", () => {
       const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
       const content = fs.readFileSync(scriptPath, "utf8");
-      
+
       // Should include User-Agent in headers
       expect(content).toMatch(/User-Agent.*agent-eve|'User-Agent'/);
     });
@@ -212,10 +207,10 @@ describe("PR Reviewer Agent - TDD Tests", () => {
     it("should handle large diffs (truncation or summarization)", () => {
       const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
       const content = fs.readFileSync(scriptPath, "utf8");
-      
+
       // Should have logic to handle large diffs
       expect(content).toMatch(
-        /maxDiffLength|truncate|substring|\.length\s*>\s*\d+/
+        /maxDiffLength|truncate|substring|\.length\s*>\s*\d+/,
       );
     });
   });
@@ -224,10 +219,10 @@ describe("PR Reviewer Agent - TDD Tests", () => {
     it("should avoid dynamic import after mocks", () => {
       const testPath = path.join(process.cwd(), "tests", "pr-reviewer.test.ts");
       const content = fs.readFileSync(testPath, "utf8");
-      
+
       // Should not use await import after mocks are set up
       expect(content).not.toMatch(/await\s+import\(/);
-      
+
       // Should use regular import or vi.hoisted
       expect(content).toMatch(/import.*from|vi\.hoisted/);
     });
@@ -237,12 +232,12 @@ describe("PR Reviewer Agent - TDD Tests", () => {
       // For now, we'll check if the test file has meaningful assertions
       const testPath = path.join(process.cwd(), "tests", "pr-reviewer.test.ts");
       const content = fs.readFileSync(testPath, "utf8");
-      
+
       // Should have more than just existence checks
-      const meaningfulAssertions = content.match(
-        /expect\([^)]+\)\.to(?:Be|Have|Contain|Match|Throw)/g
-      ) || [];
-      
+      const meaningfulAssertions =
+        content.match(/expect\([^)]+\)\.to(?:Be|Have|Contain|Match|Throw)/g) ||
+        [];
+
       expect(meaningfulAssertions.length).toBeGreaterThan(1);
     });
   });

@@ -64,7 +64,7 @@ describe("proxy route - bypass header", () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response("{}", {
         headers: { "content-type": "application/json" },
-      })
+      }),
     );
     vi.stubGlobal("fetch", fetchMock);
 
@@ -77,7 +77,7 @@ describe("proxy route - bypass header", () => {
     const [, options] = fetchCall;
     expect(options.headers).toHaveProperty(
       "x-vercel-protection-bypass",
-      "my-bypass-secret"
+      "my-bypass-secret",
     );
   });
 
@@ -87,7 +87,7 @@ describe("proxy route - bypass header", () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response("{}", {
         headers: { "content-type": "application/json" },
-      })
+      }),
     );
     vi.stubGlobal("fetch", fetchMock);
 
@@ -107,7 +107,7 @@ describe("proxy route - bypass header", () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response("{}", {
         headers: { "content-type": "application/json" },
-      })
+      }),
     );
     vi.stubGlobal("fetch", fetchMock);
 
