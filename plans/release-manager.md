@@ -16,6 +16,7 @@ The system adds three capabilities to agent-eve:
 3. **Architecture route** (`app/architecture/page.tsx`) — renders `ARCHITECTURE.md` with Mermaid.js diagrams on the web
 
 ### Data Flow (PR → Release Notes)
+
 ```
 GitHub PR event → /api/github/webhook → Root agent delegates to Release Manager
 → Release Manager fetches PR/issues from GitHub API
@@ -24,6 +25,7 @@ GitHub PR event → /api/github/webhook → Root agent delegates to Release Mana
 ```
 
 ### Architecture Page Flow
+
 ```
 Browser → GET /architecture → Next.js SSR renders ARCHITECTURE.md with Mermaid
 → Client-side Mermaid renders diagrams
@@ -36,14 +38,17 @@ Browser → GET /architecture → Next.js SSR renders ARCHITECTURE.md with Merma
 ### Phase 1: Infrastructure & Tests
 
 #### Task 1.1: Install dependencies
+
 - `npm install mermaid react-markdown remark-gfm`
 - `npm install --save-dev @types/react-markdown`
 
 #### Task 1.2: Create test fixture helpers
+
 - Create `e2e/architecture.spec.ts` — test the `/architecture` page
 - Create an Eve eval for the Release Manager tool existence
 
 #### Task 1.3: Update `.gitignore`
+
 - Add `releasenotes.md` to `.gitignore` (auto-generated, shouldn't be committed directly)
 
 ---
@@ -51,6 +56,7 @@ Browser → GET /architecture → Next.js SSR renders ARCHITECTURE.md with Merma
 ### Phase 2: ARCHITECTURE.md + /architecture Route
 
 #### Task 2.1: Create ARCHITECTURE.md
+
 - `ARCHITECTURE.md` at repo root with Mermaid.js diagrams covering:
   - System overview (Vercel → Next.js → Eve Agent → OpenRouter)
   - Request flow (browser → proxy → Eve agent → model)
@@ -58,15 +64,18 @@ Browser → GET /architecture → Next.js SSR renders ARCHITECTURE.md with Merma
   - Deployment diagram (Preview vs Production, protection bypass)
 
 #### Task 2.2: Create `/architecture` page
+
 - `app/architecture/page.tsx` — reads and renders `ARCHITECTURE.md`
 - Uses `react-markdown` with `remark-gfm` for GitHub-flavored markdown
 - Uses `next/dynamic` with SSR disabled for the Mermaid component
 - Matches the dark theme of the existing chat
 
 #### Task 2.3: Add `releasenotes.md` route (future)
+
 - Stub `app/releasenotes/page.tsx` that renders the generated release notes
 
 #### Task 2.4: Write E2E test for architecture page
+
 - Visit `/architecture`, check it loads and renders content
 - Check for Mermaid diagram rendering in DOM
 
@@ -75,6 +84,7 @@ Browser → GET /architecture → Next.js SSR renders ARCHITECTURE.md with Merma
 ### Phase 3: Release Manager Subagent
 
 #### Task 3.1: Create subagent structure
+
 ```
 agent/subagents/release-manager/
 ├── agent.ts          — defineAgent with description + model
@@ -83,6 +93,7 @@ agent/subagents/release-manager/
 ```
 
 #### Task 3.2: Create GitHub webhook route
+
 - `app/api/github/webhook/route.ts` — POST handler for GitHub webhook events
 - Validates `x-hub-signature-256` (HMAC-SHA256 with a secret)
 - On `pull_request` events (opened, synchronize, closed):
@@ -92,6 +103,7 @@ agent/subagents/release-manager/
   - Generates cumulated release notes
 
 #### Task 3.3: Create release notes generation tool
+
 - `agent/tools/generate-release-notes.ts` — tool that:
   - Accepts PR data (number, title, body, labels, commits, changed files)
   - Categorizes changes: features, bug fixes, CI, docs, chores
@@ -100,6 +112,7 @@ agent/subagents/release-manager/
   - Writes the file
 
 #### Task 3.4: Create release notes commit tool
+
 - A tool or instruction to commit and push `releasenotes.md` back to the repo
 - Uses GitHub API (not git on the server) for simplicity
 
@@ -108,6 +121,7 @@ agent/subagents/release-manager/
 ### Phase 4: Extensibility for Other Repos
 
 #### Task 4.1: Repo configuration
+
 - `release-manager.config.json` — config file mapping repos to their config:
   ```json
   {
@@ -122,6 +136,7 @@ agent/subagents/release-manager/
   ```
 
 #### Task 4.2: Multi-repo support in webhook
+
 - The webhook handler reads `x-github-event` and `x-hub-signature-256` headers
 - Looks up repo in config, validates with correct secret
 - Calls the appropriate Eve agent with repo-specific context
@@ -130,20 +145,20 @@ agent/subagents/release-manager/
 
 ## Files to Change
 
-| File | Action | Phase |
-|------|--------|-------|
-| `ARCHITECTURE.md` | **Create** | 2 |
-| `app/architecture/page.tsx` | **Create** | 2 |
-| `app/architecture/arch.css` | **Create** | 2 |
-| `agent/subagents/release-manager/agent.ts` | **Create** | 3 |
-| `agent/subagents/release-manager/instructions.md` | **Create** | 3 |
-| `agent/tools/generate-release-notes.ts` | **Create** | 3 |
-| `app/api/github/webhook/route.ts` | **Create** | 3 |
-| `release-manager.config.json` | **Create** | 4 |
-| `package.json` | **Modify** (add deps) | 1 |
-| `.gitignore` | **Modify** (add `releasenotes.md`) | 1 |
-| `e2e/architecture.spec.ts` | **Create** | 2 |
-| `evals/release-manager.eval.ts` | **Create** | 3 |
+| File                                              | Action                             | Phase |
+| ------------------------------------------------- | ---------------------------------- | ----- |
+| `ARCHITECTURE.md`                                 | **Create**                         | 2     |
+| `app/architecture/page.tsx`                       | **Create**                         | 2     |
+| `app/architecture/arch.css`                       | **Create**                         | 2     |
+| `agent/subagents/release-manager/agent.ts`        | **Create**                         | 3     |
+| `agent/subagents/release-manager/instructions.md` | **Create**                         | 3     |
+| `agent/tools/generate-release-notes.ts`           | **Create**                         | 3     |
+| `app/api/github/webhook/route.ts`                 | **Create**                         | 3     |
+| `release-manager.config.json`                     | **Create**                         | 4     |
+| `package.json`                                    | **Modify** (add deps)              | 1     |
+| `.gitignore`                                      | **Modify** (add `releasenotes.md`) | 1     |
+| `e2e/architecture.spec.ts`                        | **Create**                         | 2     |
+| `evals/release-manager.eval.ts`                   | **Create**                         | 3     |
 
 ---
 
@@ -151,15 +166,15 @@ agent/subagents/release-manager/
 
 ### E2E Tests (Playwright)
 
-| Test | File | What it validates |
-|------|------|-------------------|
-| `architecture page loads` | `e2e/architecture.spec.ts` | `/architecture` returns 200 and renders headings |
-| `architecture contains Mermaid diagram` | `e2e/architecture.spec.ts` | Page contains `.mermaid` or SVG elements |
+| Test                                    | File                       | What it validates                                |
+| --------------------------------------- | -------------------------- | ------------------------------------------------ |
+| `architecture page loads`               | `e2e/architecture.spec.ts` | `/architecture` returns 200 and renders headings |
+| `architecture contains Mermaid diagram` | `e2e/architecture.spec.ts` | Page contains `.mermaid` or SVG elements         |
 
 ### Evals (Eve framework)
 
-| Eval | File | What it validates |
-|------|------|-------------------|
+| Eval                              | File                            | What it validates                                |
+| --------------------------------- | ------------------------------- | ------------------------------------------------ |
 | `Release Manager subagent exists` | `evals/release-manager.eval.ts` | `/eve/v1/info` includes release-manager subagent |
 
 ### RED Verification

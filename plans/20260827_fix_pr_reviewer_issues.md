@@ -7,16 +7,19 @@ This plan outlines the steps to fix the issues identified by the PR reviewer age
 ## Issues from PR Reviewer Agent Feedback
 
 ### 1. `.github/workflows/pr-reviewer.yml`
+
 - **Node.js version**: Change from `'24'` to `'22'` or `'lts/*'` (Node.js 24 does not exist yet).
 - **Cache key**: Make the `npm ci` cache explicit (optional but recommended for reproducibility).
 - **Newline at end of file**: Ensure the file ends with a newline.
 
 ### 2. `agent/subagents/pr-reviewer/agent.ts`
+
 - **Hardcoded model name**: Remove duplication by centralizing the model name (e.g., in an environment variable or config file).
 - **Excessive context window**: Reduce `modelContextWindowTokens` from 1,048,576 to a more reasonable value (e.g., 256,000).
 - **Unused import**: Verify and remove unused imports if any.
 
 ### 3. `scripts/pr-reviewer.js`
+
 - **Synchronous file I/O**: Replace `fs.readFileSync` with asynchronous version (`fs.promises.readFile`) or keep if acceptable at startup (but prefer async).
 - **Top-level await**: Wrap the main logic in an async function or add `"type": "module"` to `package.json`.
 - **Missing timeout on fetch**: Add a timeout (e.g., 30 seconds) to the `fetch` call to get the PR diff.
@@ -28,6 +31,7 @@ This plan outlines the steps to fix the issues identified by the PR reviewer age
 - **Missing User-Agent header**: Add a `User-Agent` header required by GitHub API.
 
 ### 4. `tests/pr-reviewer.test.ts`
+
 - **Dynamic import after mocks**: Refactor to avoid fragile timing dependencies (e.g., use `vi.hoisted`).
 - **Test depth**: Enhance tests to verify behavior, not just existence.
 
@@ -64,6 +68,7 @@ From the latest MegaLinter run, the following descriptors reported errors:
 ## Implementation Plan
 
 ### Phase 1: Fix PR Reviewer Agent Code
+
 1. Update `.github/workflows/pr-reviewer.yml`:
    - Change `node-version: '24'` to `node-version: '22'`.
    - Add `cache: npm` with explicit key if needed (optional).
@@ -90,6 +95,7 @@ From the latest MegaLinter run, the following descriptors reported errors:
    - Add behavioral tests (e.g., mock the OpenRouter API and verify comment posting).
 
 ### Phase 2: Fix MegaLinter Errors
+
 1. **JavaScript/Prettier**:
    - Run `npx prettier --list-different "**/*.js"` to identify offending files.
    - Run `npx prettier --write` on those files.
@@ -111,17 +117,20 @@ From the latest MegaLinter run, the following descriptors reported errors:
    - Fix each error (indentation, syntax, etc.).
 
 ### Phase 3: Verification
+
 1. Run the PR reviewer agent locally or in a test to ensure it works without syntax errors.
 2. Run MegaLinter locally to confirm all errors are resolved.
 3. Commit and push changes to the branch.
 4. Verify that all CI checks pass (including MegaLinter).
 
 ## Notes
+
 - The plan follows the user's preference for plan-first TDD: create plan, commit plan only, push branch, then implement.
 - Each fix should be committed separately with clear messages.
 - Avoid mixing style fixes with functional changes unless necessary.
 - After implementing, run the relevant linters/tests to verify each fix.
 
 ## References
+
 - PR reviewer agent feedback: [GitHub PR #36 review](https://github.com/ricardoblackskye/agent-eve/pull/36#issuecomment-...)
 - MegaLinter documentation: https://megalinter.io/

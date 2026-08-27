@@ -3,7 +3,7 @@ import { defineAgent } from "eve";
 
 const openrouter = createOpenAI({
   baseURL: "https://openrouter.ai/api/v1",
-  apiKey: process.env.OPENROUTER_API_KEY,
+  apiKey: process.env.AI_GATEWAY_API_KEY,
   name: "openrouter",
 });
 

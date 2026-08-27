@@ -10,6 +10,7 @@ The webhook handler at `app/api/github/webhook/route.ts` currently logs PR event
 ## Approach
 
 The webhook handler will use the same auth pattern as the browser proxy:
+
 - `Authorization: Bearer ${EVE_API_KEY}` header
 - `x-vercel-protection-bypass` header for preview environments
 - Call to the same origin (production) or localhost (dev)
@@ -18,16 +19,17 @@ The handler constructs a structured task message for the Eve agent, which the ro
 
 ## Files
 
-| File | Action | What it does |
-|------|--------|-------------|
-| `app/api/github/webhook/route.ts` | **Modify** | Replace the `console.log` placeholder with an Eve API call |
-| `evals/webhook.eval.ts` | **Create** | Test that the webhook handler validates HMAC and calls the API |
+| File                              | Action     | What it does                                                   |
+| --------------------------------- | ---------- | -------------------------------------------------------------- |
+| `app/api/github/webhook/route.ts` | **Modify** | Replace the `console.log` placeholder with an Eve API call     |
+| `evals/webhook.eval.ts`           | **Create** | Test that the webhook handler validates HMAC and calls the API |
 
 ## Implementation Details
 
 ### Webhook PR Event Flow
 
 On `pull_request` events (opened, synchronize, closed/merged):
+
 1. Validate HMAC signature (already done)
 2. Parse PR data (already done)
 3. Build a release-notes task message
@@ -40,8 +42,8 @@ const message = `Generate release notes for a PR change:
 
 Repository: ${prData.repo}
 PR #${prData.number} (${prData.action}): ${prData.title}
-${prData.body ? `Description: ${prData.body.slice(0, 500)}` : ''}
-Labels: ${prData.labels.join(', ') || 'none'}
+${prData.body ? `Description: ${prData.body.slice(0, 500)}` : ""}
+Labels: ${prData.labels.join(", ") || "none"}
 Base branch: ${prData.baseBranch}
 Head branch: ${prData.headBranch}
 
@@ -54,15 +56,15 @@ Update releasenotes.md with a new entry for this change.`;
 const targetUrl = `${request.nextUrl.origin}/eve/v1/session`;
 const headers: Record<string, string> = {
   authorization: `Bearer ${process.env.EVE_API_KEY}`,
-  'content-type': 'application/json',
+  "content-type": "application/json",
 };
 const bypass = process.env.VERCEL_PROTECTION_BYPASS;
 if (bypass) {
-  headers['x-vercel-protection-bypass'] = bypass;
+  headers["x-vercel-protection-bypass"] = bypass;
 }
 
 const apiResponse = await fetch(targetUrl, {
-  method: 'POST',
+  method: "POST",
   headers,
   body: JSON.stringify({ message }),
 });
@@ -73,6 +75,7 @@ const apiResponse = await fetch(targetUrl, {
 ### Eve Eval — `evals/webhook.eval.ts`
 
 A production eval that:
+
 1. Calls `GET /api/github/webhook` and asserts `405 Method Not Allowed` (POST-only)
 2. Sends a simulated ping event and asserts `""pong""`
 3. Tests that an unauthenticated POST (no signature) returns a validation error

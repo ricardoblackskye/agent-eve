@@ -33,6 +33,7 @@
 **Objective:** Write an eval that reads the agent info and asserts the model is `deepseek/deepseek-v4-pro`. It will fail RED against the current agent.
 
 **Files:**
+
 - Create: `evals/model-check.eval.ts`
 
 **Step 1: Write failing test**
@@ -53,7 +54,10 @@ export default defineEval({
     const modelId = info?.agent?.model?.id;
     t.check(
       modelId,
-      satisfies((id: string) => id.includes("deepseek-v4-pro"), "model is deepseek-v4-pro"),
+      satisfies(
+        (id: string) => id.includes("deepseek-v4-pro"),
+        "model is deepseek-v4-pro",
+      ),
     );
   },
 });
@@ -64,6 +68,7 @@ export default defineEval({
 ```bash
 npx eve eval model-check --url http://localhost:8399
 ```
+
 Expected: FAIL — model is `openrouter/gpt-4o`, not `deepseek-v4-pro`.
 
 **Step 3: Commit**
@@ -80,6 +85,7 @@ git commit -m "test: add model-check eval asserting deepseek-v4-pro"
 **Objective:** Change `gpt-4o` to `deepseek/deepseek-v4-pro` and update context window.
 
 **Files:**
+
 - Modify: `agent/agent.ts`
 
 **Step 1: Change the model**
@@ -99,6 +105,7 @@ export default defineAgent({
 npm run build
 npx tsc --noEmit
 ```
+
 Expected: both pass.
 
 ---
@@ -120,6 +127,7 @@ npx vercel deploy --prebuilt --prod --token $VERCEL_TOKEN
 ```bash
 npx eve eval --exclude-tag production
 ```
+
 Expected: smoke eval passes 2/2.
 
 **Step 3: Run production evals against live deployment**
@@ -128,6 +136,7 @@ Expected: smoke eval passes 2/2.
 EVE_EVAL_AUTH_TOKEN="eve_sk_..." npx eve eval \
   --url https://agent-eve-gold.vercel.app
 ```
+
 Expected: ALL evals GREEN — including the new model-check eval.
 
 ---
@@ -135,6 +144,7 @@ Expected: ALL evals GREEN — including the new model-check eval.
 ### Task 4: Commit, push, create PR
 
 **Files:**
+
 - Modified: `agent/agent.ts` (model swap + context window)
 - Created: `evals/model-check.eval.ts`
 

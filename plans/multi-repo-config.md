@@ -9,13 +9,13 @@ The webhook handler currently only handles agent-eve. Add a config file that map
 
 ## Files
 
-| File | Action | What it does |
-|------|--------|-------------|
-| `release-manager.config.json` | **Create** | Repo mapping config with env var references |
-| `app/api/github/webhook/route.ts` | **Modify** | Read config, validate per-repo signature, pass owner/repo |
-| `agent/subagents/release-manager/tools/read_current_notes.ts` | **Modify** | Accept optional `owner`/`repo` input params |
-| `agent/subagents/release-manager/tools/write_release_notes.ts` | **Modify** | Accept optional `owner`/`repo` input params |
-| `evals/multi-repo-config.eval.ts` | **Create** | Production eval for config file and webhook routing |
+| File                                                           | Action     | What it does                                              |
+| -------------------------------------------------------------- | ---------- | --------------------------------------------------------- |
+| `release-manager.config.json`                                  | **Create** | Repo mapping config with env var references               |
+| `app/api/github/webhook/route.ts`                              | **Modify** | Read config, validate per-repo signature, pass owner/repo |
+| `agent/subagents/release-manager/tools/read_current_notes.ts`  | **Modify** | Accept optional `owner`/`repo` input params               |
+| `agent/subagents/release-manager/tools/write_release_notes.ts` | **Modify** | Accept optional `owner`/`repo` input params               |
+| `evals/multi-repo-config.eval.ts`                              | **Create** | Production eval for config file and webhook routing       |
 
 ## Implementation
 

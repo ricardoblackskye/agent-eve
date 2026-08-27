@@ -10,6 +10,7 @@
 **Architecture:** The `withEve()` helper from `eve/next` wraps the Next.js config so the agent routes mount at `/eve/v1/*` under the same origin. The browser calls `useEveAgent()` which talks to those same-origin routes. No CORS, no separate deployment.
 
 **Technical Strategy:**
+
 - Add Next.js 15+ as a dependency
 - Create `next.config.ts` wrapping with `withEve()` — auto-discovers the `agent/` directory
 - Create App Router layout + chat page (`app/layout.tsx`, `app/page.tsx`)
@@ -21,13 +22,16 @@
 **Auth Approach (MVP):** Server-side proxy via a Next.js API route. The browser never sees the bearer token — it calls `/api/eve/v1/*` which proxies to the Eve agent with the server-side `EVE_API_KEY` env var. `useEveAgent` is configured with `host: "/api/eve"` to route through the proxy. This keeps the token server-only while still using the standard `useEveAgent` hook.
 
 **Auth proxy architecture:**
+
 ```
 Browser → /api/eve/v1/session (Next.js) → Proxy adds bearer token → Eve agent at /eve/v1/session
 Browser → /api/eve/v1/session/:id/stream (Next.js) → Proxy adds bearer token → Eve agent stream
 ```
+
 The real Eve routes at `/eve/v1/*` (handled by `withEve()`) remain available for the Eve CLI, evals, and direct API access with tokens.
 
 **Testing Blueprint:**
+
 - Add a playwright-style smoke eval that loads the chat page and checks it renders
 - All existing Eve evals must still pass (model-check, smoke, auth-valid, auth-invalid)
 
@@ -40,15 +44,18 @@ The real Eve routes at `/eve/v1/*` (handled by `withEve()`) remain available for
 **Objective:** Add Next.js, React, and related deps to the project.
 
 **Files:**
+
 - Modify: `package.json`
 
 **Steps:**
+
 ```bash
 npm install next@latest react@latest react-dom@latest
 npm install -D @types/react @types/react-dom @types/node
 ```
 
 Update `package.json` scripts:
+
 ```json
 {
   "scripts": {
@@ -72,6 +79,7 @@ Update `package.json` scripts:
 **Objective:** Wire up `withEve()` so the agent routes mount under the Next.js app.
 
 **Files:**
+
 - Create: `next.config.ts`
 - Delete/unlink: the old `agent/` can stay as-is — `withEve()` discovers it automatically
 
@@ -86,9 +94,11 @@ export default withEve(nextConfig);
 ```
 
 **Verify:**
+
 ```bash
 npx tsc --noEmit
 ```
+
 Expected: compiles clean.
 
 **Commit:** `git add next.config.ts && git commit -m "feat: add next.config.ts with withEve()"`
@@ -100,6 +110,7 @@ Expected: compiles clean.
 **Objective:** Set up the basic Next.js App Router structure.
 
 **Files:**
+
 - Create: `app/layout.tsx`
 - Create: `app/globals.css`
 
@@ -134,7 +145,10 @@ export default function RootLayout({
   padding: 0;
 }
 body {
-  font-family: system-ui, -apple-system, sans-serif;
+  font-family:
+    system-ui,
+    -apple-system,
+    sans-serif;
   background: #0a0a0a;
   color: #e5e5e5;
   min-height: 100vh;
@@ -142,9 +156,16 @@ body {
 ```
 
 Also update `tsconfig.json` to include the `app/` directory:
+
 ```json
 {
-  "include": ["agent/**/*.ts", "evals/**/*.ts", "app/**/*.ts", "app/**/*.tsx", "next-env.d.ts"]
+  "include": [
+    "agent/**/*.ts",
+    "evals/**/*.ts",
+    "app/**/*.ts",
+    "app/**/*.tsx",
+    "next-env.d.ts"
+  ]
 }
 ```
 
@@ -159,6 +180,7 @@ Also update `tsconfig.json` to include the `app/` directory:
 **Objective:** Create a Next.js API route that proxies requests to the Eve agent, adding the bearer token server-side.
 
 **Files:**
+
 - Create: `app/api/eve/v1/[...slug]/route.ts`
 
 The catch-all route intercepts all `/api/eve/v1/*` requests, forwards them to the Eve agent (same-origin `/eve/v1/*`), adds the `Authorization` header, and proxies back the response (including streaming for the events endpoint).
@@ -196,9 +218,10 @@ async function handler(request: NextRequest) {
   const accept = request.headers.get("accept");
   if (accept) headers["accept"] = accept;
 
-  const body = request.method === "GET" || request.method === "HEAD"
-    ? undefined
-    : await request.blob();
+  const body =
+    request.method === "GET" || request.method === "HEAD"
+      ? undefined
+      : await request.blob();
 
   const response = await fetch(targetUrl, {
     method: request.method,
@@ -212,7 +235,8 @@ async function handler(request: NextRequest) {
       status: response.status,
       statusText: response.statusText,
       headers: {
-        "content-type": response.headers.get("content-type") ?? "text/event-stream",
+        "content-type":
+          response.headers.get("content-type") ?? "text/event-stream",
         "transfer-encoding": "chunked",
       },
     });
@@ -241,6 +265,7 @@ export const PATCH = handler;
 **Objective:** Build the chat UI component, pointing at the proxy host.
 
 **Files:**
+
 - Create: `app/page.tsx`
 - Create: `app/chat.tsx` (client component)
 
@@ -316,23 +341,98 @@ export default function Home() {
 ```
 
 Add chat styles to `globals.css`:
+
 ```css
-.chat-container { display: flex; flex-direction: column; height: 100vh; max-width: 48rem; margin: 0 auto; }
-header { display: flex; align-items: center; gap: 0.75rem; padding: 1rem; border-bottom: 1px solid #222; }
-.status { font-size: 0.75rem; padding: 0.125rem 0.5rem; border-radius: 999px; background: #222; }
-.status.streaming { background: #1a5; }
-.status.error { background: #c33; }
-.messages { flex: 1; overflow-y: auto; padding: 1rem; display: flex; flex-direction: column; gap: 1rem; }
-.placeholder { color: #666; text-align: center; margin-top: 4rem; }
-.message { padding: 0.75rem; border-radius: 0.5rem; max-width: 80%; }
-.message.user { background: #1a3a5c; align-self: flex-end; }
-.message.assistant { background: #1a1a2e; align-self: flex-start; }
-.message strong { display: block; font-size: 0.75rem; text-transform: uppercase; opacity: 0.6; margin-bottom: 0.25rem; }
-.composer { display: flex; gap: 0.5rem; padding: 1rem; border-top: 1px solid #333; }
-.composer input { flex: 1; padding: 0.75rem; border: 1px solid #333; border-radius: 0.375rem; background: #111; color: #e5e5e5; font-size: 1rem; }
-.composer input:disabled { opacity: 0.5; }
-.composer button { padding: 0.75rem 1.5rem; border: none; border-radius: 0.375rem; background: #1a5; color: #fff; font-size: 1rem; cursor: pointer; }
-.composer button:disabled { opacity: 0.5; cursor: default; }
+.chat-container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  max-width: 48rem;
+  margin: 0 auto;
+}
+header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem;
+  border-bottom: 1px solid #222;
+}
+.status {
+  font-size: 0.75rem;
+  padding: 0.125rem 0.5rem;
+  border-radius: 999px;
+  background: #222;
+}
+.status.streaming {
+  background: #1a5;
+}
+.status.error {
+  background: #c33;
+}
+.messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.placeholder {
+  color: #666;
+  text-align: center;
+  margin-top: 4rem;
+}
+.message {
+  padding: 0.75rem;
+  border-radius: 0.5rem;
+  max-width: 80%;
+}
+.message.user {
+  background: #1a3a5c;
+  align-self: flex-end;
+}
+.message.assistant {
+  background: #1a1a2e;
+  align-self: flex-start;
+}
+.message strong {
+  display: block;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  opacity: 0.6;
+  margin-bottom: 0.25rem;
+}
+.composer {
+  display: flex;
+  gap: 0.5rem;
+  padding: 1rem;
+  border-top: 1px solid #333;
+}
+.composer input {
+  flex: 1;
+  padding: 0.75rem;
+  border: 1px solid #333;
+  border-radius: 0.375rem;
+  background: #111;
+  color: #e5e5e5;
+  font-size: 1rem;
+}
+.composer input:disabled {
+  opacity: 0.5;
+}
+.composer button {
+  padding: 0.75rem 1.5rem;
+  border: none;
+  border-radius: 0.375rem;
+  background: #1a5;
+  color: #fff;
+  font-size: 1rem;
+  cursor: pointer;
+}
+.composer button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
 ```
 
 **Verify:** `npx tsc --noEmit`
@@ -346,10 +446,12 @@ header { display: flex; align-items: center; gap: 0.75rem; padding: 1rem; border
 **Objective:** Make the bearer token available server-side for the proxy route.
 
 **Files:**
+
 - Update: `.env.local` (already exists from Vercel link)
 - Create: `.env.example` (for documentation)
 
 Update `.env.local` (set via Vercel env vars — no browser exposure):
+
 ```
 # Already set by vercel link:
 # VERCEL_OIDC_TOKEN=...
@@ -359,6 +461,7 @@ EVE_API_KEY=eve_sk_...
 ```
 
 Add `.env.example`:
+
 ```
 # Eve API key for server-side proxy auth (NOT exposed to browser)
 EVE_API_KEY=eve_sk_...
@@ -376,6 +479,7 @@ OPENROUTER_API_KEY=sk-or-...
 **Objective:** Verify the chat page renders and the agent responds via the web UI path.
 
 **Files:**
+
 - Modify: `evals/smoke.eval.ts` (add a check that the HTML page loads)
 
 Since the Eve eval framework targets the agent HTTP routes, we can use `t.target.fetch` to check the Next.js page:
@@ -396,7 +500,10 @@ export default defineEval({
     );
     t.check(
       text,
-      satisfies((html: string) => html.includes("Eve Agent"), "page contains 'Eve Agent'"),
+      satisfies(
+        (html: string) => html.includes("Eve Agent"),
+        "page contains 'Eve Agent'",
+      ),
     );
   },
 });
@@ -414,6 +521,7 @@ Expected: passes (home page returns 200 with "Eve Agent" title).
 **Objective:** Ensure TypeScript is fully configured for Next.js App Router.
 
 **Files:**
+
 - Modify: `tsconfig.json`
 
 ```json
@@ -432,7 +540,13 @@ Expected: passes (home page returns 200 with "Eve Agent" title).
     "allowJs": true,
     "incremental": true
   },
-  "include": ["agent/**/*.ts", "evals/**/*.ts", "app/**/*.ts", "app/**/*.tsx", "next-env.d.ts"],
+  "include": [
+    "agent/**/*.ts",
+    "evals/**/*.ts",
+    "app/**/*.ts",
+    "app/**/*.tsx",
+    "next-env.d.ts"
+  ],
   "exclude": ["node_modules"]
 }
 ```
@@ -456,6 +570,7 @@ npm run dev
 ```
 
 In another terminal:
+
 ```bash
 # Check the chat page loads
 curl -s http://localhost:3000 | head -20
@@ -467,6 +582,7 @@ npx eve eval --url http://localhost:3000 --exclude-tag production
 ```
 
 **Branch commit (all tasks together):**
+
 ```bash
 git add -A
 git commit -m "feat: add Next.js web UI with Eve agent integration"
@@ -485,6 +601,7 @@ npx vercel deploy --prebuilt --prod --token $VERCEL_TOKEN
 ```
 
 **Verify production:**
+
 ```bash
 # Health check
 curl -s https://agent-eve-gold.vercel.app/eve/v1/health
@@ -542,13 +659,13 @@ git remote set-url origin https://github.com/ricardoblackskye/agent-eve.git
 
 ## Edge Cases Identified
 
-| # | Scenario | Expected Behavior |
-|---|----------|-------------------|
-| 1 | User sends empty message | Composer button disabled, no request sent |
-| 2 | Network error during streaming | `status` becomes `"error"`, error shown |
-| 3 | User sends message while streaming | Composer disabled, button greyed out |
-| 4 | EVE_API_KEY env var not set on server | Proxy route missing auth header — Eve agent returns 401, chat shows error |
-| 5 | Page refresh during active chat | Session is lost (no persistence in MVP), user starts fresh |
+| #   | Scenario                              | Expected Behavior                                                         |
+| --- | ------------------------------------- | ------------------------------------------------------------------------- |
+| 1   | User sends empty message              | Composer button disabled, no request sent                                 |
+| 2   | Network error during streaming        | `status` becomes `"error"`, error shown                                   |
+| 3   | User sends message while streaming    | Composer disabled, button greyed out                                      |
+| 4   | EVE_API_KEY env var not set on server | Proxy route missing auth header — Eve agent returns 401, chat shows error |
+| 5   | Page refresh during active chat       | Session is lost (no persistence in MVP), user starts fresh                |
 
 ## Verification Checklist
 
