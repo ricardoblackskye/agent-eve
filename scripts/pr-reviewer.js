@@ -1,5 +1,4 @@
 import fs from 'fs';
-import { createOpenAI } from "@ai-sdk/openai";
 
 // Read the GitHub event payload
 const eventPath = process.env.GITHUB_EVENT_PATH;
@@ -63,34 +62,47 @@ try {
   process.exit(1);
 }
 
-// Set up OpenRouter client
-const openrouter = createOpenAI({
-  baseURL: "https://openrouter.ai/api/v1",
-  apiKey: process.env.OPENROUTER_API_KEY,
-});
-
-// Generate the review using the model with emphasis on line numbers
+// Call OpenRouter API to generate review
 let review;
 try {
-  const prompt = `You are a senior software engineer reviewing this code diff. Look for architectural anti-patterns, security risks, and off-by-one errors.
-CRITICAL: You MUST reference the exact line numbers from the diff headers (@@ -x,y +a,b @@) in your feedback.
-Please review the following diff and provide your feedback with specific line number citations:
-
-\`\`\`diff
-${prDiff}
-\`\`\``;
-
-  const completion = await openrouter.chat.completions.create({
-    model: "nvidia/nemotron-3-ultra-550b-a55b:free",
-    messages: [
-      { role: "system", content: "You are a senior software engineer reviewing this code diff. Look for architectural anti-patterns, security risks, and off-by-one errors. You MUST reference the exact line numbers from the diff headers (@@ -x,y +a,b @@) in your feedback." },
-      { role: "user", content: prompt },
-    ],
-    temperature: 0.2, // Lower temperature for more focused review
-    max_tokens: 1500,
+  const openrouterResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "nvidia/nemotron-3-ultra-550b-a55b:free",
+      messages: [
+        {
+          role: "system",
+          content: "You are a senior software engineer reviewing this code diff. Look for architectural anti-patterns, security risks, and off-by-one errors. You MUST reference the exact line numbers from the diff headers (@@ -x,y +a,b @@) in your feedback.",
+        },
+        {
+          role: "user",
+          content: `Please review the following diff and provide your feedback with specific line number citations:\n\n\`\`\`diff\n${prDiff}\n\`\`\``,
+        },
+      ],
+      temperature: 0.2,
+      max_tokens: 1500,
+    }),
   });
 
-  review = completion.choices[0].message.content;
+  console.log(`OpenRouter response status: ${openrouterResponse.status}`);
+
+  if (!openrouterResponse.ok) {
+    const errorText = await openrouterResponse.text();
+    throw new Error(`Failed to call OpenRouter: ${openrouterResponse.status} ${openrouterResponse.statusText}\nResponse: ${errorText}`);
+  }
+
+  const openrouterData = await openrouterResponse.json();
+  console.log(`OpenRouter response data:`, openrouterData);
+  
+  if (!openrouterData.choices || openrouterData.choices.length === 0) {
+    throw new Error(`No choices in OpenRouter response: ${JSON.stringify(openrouterData)}`);
+  }
+
+  review = openrouterData.choices[0].message.content;
   console.log(`Generated review of length ${review.length}`);
 } catch (error) {
   console.error("Error generating review:", error);
@@ -112,7 +124,8 @@ try {
   );
 
   if (!commentResponse.ok) {
-    throw new Error(`Failed to post comment: ${commentResponse.status} ${commentResponse.statusText}`);
+    const errorText = await commentResponse.text();
+    throw new Error(`Failed to post comment: ${commentResponse.status} ${commentResponse.statusText}\nResponse: ${errorText}`);
   }
 
   const result = await commentResponse.json();
