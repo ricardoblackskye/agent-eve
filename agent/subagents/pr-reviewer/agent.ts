@@ -10,6 +10,6 @@ const openrouter = createOpenAI({
 export default defineAgent({
   description:
     "You are a senior software engineer reviewing this code diff. Look for architectural anti-patterns, security risks, and off-by-one errors.",
-  model: openrouter.chat("nvidia/nemotron-3-ultra-550b-a55b:free"),
+  model: openrouter.chat("openrouter/nvidia/nemotron-3-ultra-550b-a55b:free"),
   modelContextWindowTokens: 1048576,
 });
