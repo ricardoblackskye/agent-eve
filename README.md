@@ -78,20 +78,20 @@ model: openrouter.chat("anthropic/claude-sonnet-5"), // OpenRouter model ID
 
 ### Environment Variables
 
-| Variable               | Required | Description |
-|------------------------|----------|-------------|
-| `OPENROUTER_API_KEY`   | Yes      | OpenRouter API key for model access |
-| `EVE_API_KEY`          | Yes      | Bearer token for production auth (sent as `Authorization: Bearer <EVE_API_KEY>` header) |
+| Variable             | Required | Description                                                                             |
+| -------------------- | -------- | --------------------------------------------------------------------------------------- |
+| `OPENROUTER_API_KEY` | Yes      | OpenRouter API key for model access                                                     |
+| `EVE_API_KEY`        | Yes      | Bearer token for production auth (sent as `Authorization: Bearer <EVE_API_KEY>` header) |
 
 ## Scripts
 
-| Command              | Description                           |
-|----------------------|---------------------------------------|
-| `npm run build`      | Build the agent (`eve build`)         |
-| `npm run dev`        | Start the development server          |
-| `npm run start`      | Start the production server           |
-| `npm run typecheck`  | TypeScript type-check (`tsc --noEmit`)|
-| `eve eval`           | Run all evals against running server  |
+| Command             | Description                            |
+| ------------------- | -------------------------------------- |
+| `npm run build`     | Build the agent (`eve build`)          |
+| `npm run dev`       | Start the development server           |
+| `npm run start`     | Start the production server            |
+| `npm run typecheck` | TypeScript type-check (`tsc --noEmit`) |
+| `eve eval`          | Run all evals against running server   |
 
 ## Testing (Evals)
 
@@ -109,25 +109,27 @@ eve eval smoke --verbose
 ```
 
 ### Current Evals
-| Eval | Gates | Description |
-|------|-------|-------------|
-| `smoke` | 2/2 | Agent boots and responds |
-| `auth-valid` | 2/2 | Authenticated requests succeed |
-| `auth-invalid` | 1/1 | Unauthenticated requests rejected with 401 |
+
+| Eval           | Gates | Description                                |
+| -------------- | ----- | ------------------------------------------ |
+| `smoke`        | 2/2   | Agent boots and responds                   |
+| `auth-valid`   | 2/2   | Authenticated requests succeed             |
+| `auth-invalid` | 1/1   | Unauthenticated requests rejected with 401 |
 
 ### CI Pipeline
 
 Every PR triggers a GitHub Actions workflow with three checks:
 
-| Check | What it does |
-|-------|-------------|
-| **TypeScript** | `tsc --noEmit` — type safety verification |
-| **Eve Build** | `eve build` — verifies the agent compiles |
-| **Eve Evals** | `eve eval --strict` — runs all evals against a local dev server |
+| Check          | What it does                                                    |
+| -------------- | --------------------------------------------------------------- |
+| **TypeScript** | `tsc --noEmit` — type safety verification                       |
+| **Eve Build**  | `eve build` — verifies the agent compiles                       |
+| **Eve Evals**  | `eve eval --strict` — runs all evals against a local dev server |
 
 On push to `main`, an additional **Production Evals** job runs all evals against the live deployment.
 
 The workflow requires these GitHub Action secrets:
+
 - `OPENROUTER_API_KEY` — for CI evals against the local dev server
 - `EVE_EVAL_AUTH_TOKEN` — for production evals (same value as `EVE_API_KEY`)
 
@@ -136,6 +138,7 @@ The workflow requires these GitHub Action secrets:
 ### Vercel
 
 1. Link the project:
+
    ```bash
    vercel link    # or: eve link --project agent-eve --non-interactive
    ```
@@ -172,7 +175,7 @@ export default defineTool({
   },
   async execute({ city }) {
     const res = await fetch(
-      `https://api.weather.com/current?city=${encodeURIComponent(city)}`
+      `https://api.weather.com/current?city=${encodeURIComponent(city)}`,
     );
     return res.json();
   },

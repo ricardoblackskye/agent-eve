@@ -45,10 +45,7 @@ function verifySignature(
   if (!secret) return true; // Skip verification if no secret configured (dev only)
   if (!signatureHeader) return false;
 
-  const sig = crypto
-    .createHmac("sha256", secret)
-    .update(payload)
-    .digest("hex");
+  const sig = crypto.createHmac("sha256", secret).update(payload).digest("hex");
   return `sha256=${sig}` === signatureHeader;
 }
 
@@ -62,24 +59,30 @@ async function handler(request: NextRequest) {
   const signature = request.headers.get("x-hub-signature-256");
   const event = request.headers.get("x-github-event");
 
-       if (!event) {
-         return NextResponse.json(
-           { error: "Missing x-github-event header" },
-           { status: 400 }
-         );
-       }
+  if (!event) {
+    return NextResponse.json(
+      { error: "Missing x-github-event header" },
+      { status: 400 },
+    );
+  }
 
-       // Handle ping event early (does not require repository or signature)
-       if (event === "ping") {
-         return NextResponse.json({ ok: true, message: "pong" });
-       }
+  // Handle ping event early (does not require repository or signature)
+  if (event === "ping") {
+    return NextResponse.json({ ok: true, message: "pong" });
+  }
 
-       // Parse the payload
-       let data: any;
+  // Parse the payload
+  let data: any;
   try {
     data = JSON.parse(payload);
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+
+  // For pull_request events, check PR data early so empty bodies get a
+  // clear "No PR data" error rather than a misleading "Missing repository".
+  if (event === "pull_request" && !data.pull_request) {
+    return NextResponse.json({ error: "No PR data" }, { status: 400 });
   }
 
   // Look up repo config
@@ -96,11 +99,11 @@ async function handler(request: NextRequest) {
   const repoConfig = getRepoConfig(repoFullName);
   if (!repoConfig) {
     return NextResponse.json(
-      {
-        error: `Unknown repo '${repoFullName}'. Add it to release-manager.config.json to enable webhook processing.`,
-      },
-      { status: 200 },
-    );
+    {
+      error: `Unknown repo '${repoFullName}'. Add it to release-manager.config.json to enable webhook processing.`,
+    },
+    { status: 404 },
+  );
   }
 
   // Validate signature with the per-repo secret
@@ -155,36 +158,36 @@ async function handler(request: NextRequest) {
     let eveApiError: string | null = null;
     const apiKey = process.env.EVE_API_KEY;
 
-    if (apiKey) {
-          try {
-            const targetUrl = `${request.nextUrl.origin}/eve/v1/session`;
-            const apiHeaders: Record<string, string> = {
-                          authorization: `Bearer ${apiKey}`,
-                          "content-type": "application/json",
-                        };
-            const bypass = process.env.VERCEL_PROTECTION_BYPASS;
-            if (bypass) {
-              apiHeaders[`x-vercel-protection-bypass`] = bypass;
-            }
+    try {
+      const targetUrl = `${request.nextUrl.origin}/eve/v1/session`;
+      const apiHeaders: Record<string, string> = {
+        "content-type": "application/json",
+      };
+      if (apiKey) {
+        apiHeaders.authorization = `Bearer ${apiKey}`;
+      }
+      const bypass = process.env.VERCEL_PROTECTION_BYPASS;
+      if (bypass) {
+        apiHeaders[`x-vercel-protection-bypass`] = bypass;
+      }
 
-            const apiResponse = await fetch(targetUrl, {
-              method: "POST",
-              headers: apiHeaders,
-              body: JSON.stringify({ message }),
-            });
+      const apiResponse = await fetch(targetUrl, {
+        method: "POST",
+        headers: apiHeaders,
+        body: JSON.stringify({ message }),
+      });
 
-            if (apiResponse.ok) {
-              const apiData = await apiResponse.json();
-              eveApiResult = apiData?.status || "accepted";
-            } else {
-              eveApiResult = `error: ${apiResponse.status}`;
-            }
-          } catch (err) {
-            eveApiError = err instanceof Error ? err.message : String(err);
-            eveApiResult = "error";
-            console.error(`[webhook] Eve API call failed: ${eveApiError}`);
-          }
-        }
+      if (apiResponse.ok) {
+        const apiData = await apiResponse.json();
+        eveApiResult = apiData?.status || "accepted";
+      } else {
+        eveApiResult = `error: ${apiResponse.status}`;
+      }
+    } catch (err) {
+      eveApiError = err instanceof Error ? err.message : String(err);
+      eveApiResult = "error";
+      console.error(`[webhook] Eve API call failed: ${eveApiError}`);
+    }
 
     console.log(
       `[webhook] PR #${prData.number} ${action}: ${prData.title} — Eve API: ${eveApiResult}`,
@@ -212,3 +215,4 @@ async function handler(request: NextRequest) {
 }
 
 export const POST = handler;
+export const GET = handler;

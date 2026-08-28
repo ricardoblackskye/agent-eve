@@ -15,9 +15,7 @@ export default function ReleaseNotesPage() {
 
   return (
     <div className="architecture-container">
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>
-        {content}
-      </ReactMarkdown>
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
     </div>
   );
 }

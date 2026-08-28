@@ -9,19 +9,20 @@ Add a browsable `/releasenotes` page that renders `releasenotes.md` as styled HT
 
 ## Files
 
-| File | Action | What it does |
-|------|--------|-------------|
-| `app/api/releasenotes/route.ts` | **Create** | Serves `releasenotes.md` content (or placeholder) via `GET` |
-| `app/releasenotes/page.tsx` | **Create** | Client component, fetches markdown, renders via ReactMarkdown |
-| `releasenotes.md` | **Create** | Empty placeholder file with initial heading |
-| `e2e/releasenotes.spec.ts` | **Create** | Playwright tests for the page |
-| `app/globals.css` | **Modify** | Reuse `.architecture-container` styles (no new CSS needed) |
+| File                            | Action     | What it does                                                  |
+| ------------------------------- | ---------- | ------------------------------------------------------------- |
+| `app/api/releasenotes/route.ts` | **Create** | Serves `releasenotes.md` content (or placeholder) via `GET`   |
+| `app/releasenotes/page.tsx`     | **Create** | Client component, fetches markdown, renders via ReactMarkdown |
+| `releasenotes.md`               | **Create** | Empty placeholder file with initial heading                   |
+| `e2e/releasenotes.spec.ts`      | **Create** | Playwright tests for the page                                 |
+| `app/globals.css`               | **Modify** | Reuse `.architecture-container` styles (no new CSS needed)    |
 
 ## Implementation
 
 ### 1. API Route — `app/api/releasenotes/route.ts`
 
 Same pattern as `/api/architecture`:
+
 - Reads `releasenotes.md` from project root
 - Returns markdown as `text/markdown`
 - If file doesn't exist, returns a placeholder: `"# Release Notes\n\nNo release notes yet."`
@@ -29,6 +30,7 @@ Same pattern as `/api/architecture`:
 ### 2. Page — `app/releasenotes/page.tsx`
 
 Simplified version of the architecture page:
+
 - Fetch markdown from `/api/releasenotes`
 - Render with `ReactMarkdown` + `remarkGfm`
 - No Mermaid extraction/loading (release notes are plain markdown)
@@ -38,6 +40,7 @@ Simplified version of the architecture page:
 ### 3. Placeholder file — `releasenotes.md`
 
 Create an empty initial file:
+
 ```markdown
 # Release Notes
 ```

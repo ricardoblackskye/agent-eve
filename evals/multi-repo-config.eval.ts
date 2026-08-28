@@ -62,10 +62,7 @@ export default defineEval({
     const knownData = await knownRepoResponse.json();
     t.check(
       knownData?.ok === true,
-      satisfies(
-        (ok: boolean) => ok === true,
-        "known repo returns ok: true",
-      ),
+      satisfies((ok: boolean) => ok === true, "known repo returns ok: true"),
     );
   },
 });

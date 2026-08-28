@@ -61,7 +61,7 @@ jobs:
       - run: npm ci
       - name: Run evals (Next.js + Eve dev server)
         env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          EVE_API_KEY: ${{ secrets.EVE_API_KEY }}
         run: |
           mkdir -p .eve
           npm run dev -- --hostname 127.0.0.1 --port 3000 > .eve/next-dev.log 2>&1 &

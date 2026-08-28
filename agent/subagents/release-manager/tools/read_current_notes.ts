@@ -29,7 +29,8 @@ export default defineTool({
       };
     }
 
-    const targetOwner = owner || process.env.VERCEL_GIT_REPO_OWNER || "ricardoblackskye";
+    const targetOwner =
+      owner || process.env.VERCEL_GIT_REPO_OWNER || "ricardoblackskye";
     const targetRepo = repo || process.env.VERCEL_GIT_REPO_SLUG || "agent-eve";
 
     try {
@@ -48,7 +49,8 @@ export default defineTool({
           success: true,
           content: null,
           sha: null,
-          message: "releasenotes.md does not exist yet. A new file will be created.",
+          message:
+            "releasenotes.md does not exist yet. A new file will be created.",
         };
       }
 

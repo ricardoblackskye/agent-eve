@@ -36,7 +36,8 @@ export default function ArchitecturePage() {
         if (!mermaidLoaded.current && blocks.length > 0) {
           mermaidLoaded.current = true;
           const script = document.createElement("script");
-          script.src = "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js";
+          script.src =
+            "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js";
           script.onload = () => {
             (window as any).mermaid.initialize({
               theme: "dark",

@@ -6,8 +6,7 @@ const GITHUB_API =
   "https://api.github.com/repos/ricardoblackskye/agent-eve/contents/releasenotes.md";
 
 async function fetchFromGitHub(): Promise<string | null> {
-  const token =
-    process.env.GH_RELEASE_TOKEN || process.env.GITHUB_TOKEN || "";
+  const token = process.env.GH_RELEASE_TOKEN || process.env.GITHUB_TOKEN || "";
 
   try {
     const headers: Record<string, string> = {
@@ -17,7 +16,10 @@ async function fetchFromGitHub(): Promise<string | null> {
       headers.authorization = `Bearer ${token}`;
     }
 
-    const response = await fetch(GITHUB_API, { headers, next: { revalidate: 0 } });
+    const response = await fetch(GITHUB_API, {
+      headers,
+      next: { revalidate: 0 },
+    });
     if (!response.ok) return null;
 
     const data = await response.json();

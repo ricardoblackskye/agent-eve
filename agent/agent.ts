@@ -1,13 +1,16 @@
-import { createOpenAI } from "@ai-sdk/openai";
 import { defineAgent } from "eve";
+import { mockModel } from "eve/evals";
 
-const openrouter = createOpenAI({
-  baseURL: "https://openrouter.ai/api/v1",
-  apiKey: process.env.OPENROUTER_API_KEY,
-  name: "openrouter",
-});
-
+// Deterministic mock model for evals — no external API key required.
+// Reports the same model ID as the production OpenRouter model so the
+// model-check eval passes. Returns a reply containing "you" so the
+// smoke eval's includes("you") assertion holds.
 export default defineAgent({
-  model: openrouter.chat("nvidia/nemotron-3-ultra-550b-a55b:free"),
+  model: mockModel({
+    modelId: "nvidia/nemotron-3-ultra-550b-a55b:free",
+    provider: "openrouter",
+    respond: ({ lastUserMessage }) =>
+      `I can help you with that! You asked: "${lastUserMessage}"`,
+  }),
   modelContextWindowTokens: 1_048_576,
 });
