@@ -153,9 +153,18 @@ async function handler(request: NextRequest) {
       .filter(Boolean)
       .join("\n");
 
-    // Call the Eve API to trigger the Release Manager subagent
+    // Call the Eve API to trigger the Release Manager subagent.
+    //
+    // IMPORTANT (bug #39): If the Eve API session call fails, we must NOT
+    // return HTTP 200 `{"ok: true}`. A 200 tells GitHub the webhook was
+    // delivered successfully, so GitHub won't retry or surface the failure —
+    // and releasenotes.md is silently never written. We map the upstream
+    // failure to a 502 (Bad Gateway) with `ok: false` so the failure is
+    // observable in GitHub's webhook delivery logs and the Release Manager is
+    // not invoked until its dependency is healthy.
     let eveApiResult = "skipped";
     let eveApiError: string | null = null;
+    let eveApiStatus: number | null = null;
     const apiKey = process.env.EVE_API_KEY;
 
     try {
@@ -181,7 +190,16 @@ async function handler(request: NextRequest) {
         const apiData = await apiResponse.json();
         eveApiResult = apiData?.status || "accepted";
       } else {
+        eveApiStatus = apiResponse.status;
+        let detail = "";
+        try {
+          const errData = await apiResponse.json();
+          detail = errData?.error || errData?.message || apiResponse.statusText;
+        } catch {
+          detail = apiResponse.statusText;
+        }
         eveApiResult = `error: ${apiResponse.status}`;
+        eveApiError = `Eve API rejected session: ${detail}`;
       }
     } catch (err) {
       eveApiError = err instanceof Error ? err.message : String(err);
@@ -192,6 +210,20 @@ async function handler(request: NextRequest) {
     console.log(
       `[webhook] PR #${prData.number} ${action}: ${prData.title} — Eve API: ${eveApiResult}`,
     );
+
+    // Surface upstream failures instead of masking them as a success.
+    if (eveApiResult.startsWith("error")) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Eve API session creation failed; release notes were not updated.",
+          eveApiResult,
+          ...(eveApiError ? { eveApiError } : {}),
+          ...(eveApiStatus ? { eveApiStatus } : {}),
+        },
+        { status: 502 },
+      );
+    }
 
     return NextResponse.json({
       ok: true,
