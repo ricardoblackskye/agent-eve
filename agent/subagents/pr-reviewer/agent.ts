@@ -7,14 +7,9 @@ const openrouter = createOpenAI({
   name: "openrouter",
 });
 
-const modelName = process.env.MODEL_NAME;
-if (!modelName) {
-  throw new Error("MODEL_NAME environment variable is required");
-}
-
 export default defineAgent({
   description:
     "You are a senior software engineer reviewing this code diff. Look for architectural anti-patterns, security risks, and off-by-one errors.",
-  model: openrouter.chat(modelName),
+  model: openrouter.chat("nvidia/nemotron-3-ultra-550b-a55b:free"),
   modelContextWindowTokens: 256000,
 });
