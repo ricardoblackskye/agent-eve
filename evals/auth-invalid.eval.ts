@@ -5,7 +5,7 @@ export default defineEval({
   description: "Unauthenticated requests are rejected with an error status.",
   tags: ["production"],
   async test(t) {
-    const response = await t.target.fetch("/eve/v1/info", {
+    const response = await t.target.fetch("/api/eve/v1/info", {
       headers: { authorization: "Bearer bad-token" },
     });
     t.check(

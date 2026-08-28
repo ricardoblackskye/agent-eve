@@ -79,6 +79,12 @@ async function handler(request: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
+  // For pull_request events, check PR data early so empty bodies get a
+  // clear "No PR data" error rather than a misleading "Missing repository".
+  if (event === "pull_request" && !data.pull_request) {
+    return NextResponse.json({ error: "No PR data" }, { status: 400 });
+  }
+
   // Look up repo config
   const repoFullName: string =
     data.repository?.full_name || data.repository?.fullName || "";
@@ -93,11 +99,11 @@ async function handler(request: NextRequest) {
   const repoConfig = getRepoConfig(repoFullName);
   if (!repoConfig) {
     return NextResponse.json(
-      {
-        error: `Unknown repo '${repoFullName}'. Add it to release-manager.config.json to enable webhook processing.`,
-      },
-      { status: 200 },
-    );
+    {
+      error: `Unknown repo '${repoFullName}'. Add it to release-manager.config.json to enable webhook processing.`,
+    },
+    { status: 404 },
+  );
   }
 
   // Validate signature with the per-repo secret
@@ -152,35 +158,35 @@ async function handler(request: NextRequest) {
     let eveApiError: string | null = null;
     const apiKey = process.env.EVE_API_KEY;
 
-    if (apiKey) {
-      try {
-        const targetUrl = `${request.nextUrl.origin}/eve/v1/session`;
-        const apiHeaders: Record<string, string> = {
-          authorization: `Bearer ${apiKey}`,
-          "content-type": "application/json",
-        };
-        const bypass = process.env.VERCEL_PROTECTION_BYPASS;
-        if (bypass) {
-          apiHeaders[`x-vercel-protection-bypass`] = bypass;
-        }
-
-        const apiResponse = await fetch(targetUrl, {
-          method: "POST",
-          headers: apiHeaders,
-          body: JSON.stringify({ message }),
-        });
-
-        if (apiResponse.ok) {
-          const apiData = await apiResponse.json();
-          eveApiResult = apiData?.status || "accepted";
-        } else {
-          eveApiResult = `error: ${apiResponse.status}`;
-        }
-      } catch (err) {
-        eveApiError = err instanceof Error ? err.message : String(err);
-        eveApiResult = "error";
-        console.error(`[webhook] Eve API call failed: ${eveApiError}`);
+    try {
+      const targetUrl = `${request.nextUrl.origin}/eve/v1/session`;
+      const apiHeaders: Record<string, string> = {
+        "content-type": "application/json",
+      };
+      if (apiKey) {
+        apiHeaders.authorization = `Bearer ${apiKey}`;
       }
+      const bypass = process.env.VERCEL_PROTECTION_BYPASS;
+      if (bypass) {
+        apiHeaders[`x-vercel-protection-bypass`] = bypass;
+      }
+
+      const apiResponse = await fetch(targetUrl, {
+        method: "POST",
+        headers: apiHeaders,
+        body: JSON.stringify({ message }),
+      });
+
+      if (apiResponse.ok) {
+        const apiData = await apiResponse.json();
+        eveApiResult = apiData?.status || "accepted";
+      } else {
+        eveApiResult = `error: ${apiResponse.status}`;
+      }
+    } catch (err) {
+      eveApiError = err instanceof Error ? err.message : String(err);
+      eveApiResult = "error";
+      console.error(`[webhook] Eve API call failed: ${eveApiError}`);
     }
 
     console.log(
@@ -209,3 +215,4 @@ async function handler(request: NextRequest) {
 }
 
 export const POST = handler;
+export const GET = handler;
