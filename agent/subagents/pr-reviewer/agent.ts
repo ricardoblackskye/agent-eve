@@ -8,5 +8,6 @@ const openrouter = createOpenAI({
 
 export default defineAgent({
   description: "You are a helpful assistant.",
-  model: openrouter.chat("nvidia/nemotron-3-ultra-550b-a55b:free"),
+  model: openrouter.chat("openrouter/nvidia/nemotron-3-ultra-550b-a55b:free"),
+  modelContextWindowTokens: 1_048_576,
 });
