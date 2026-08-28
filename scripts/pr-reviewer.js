@@ -74,7 +74,7 @@ try {
 // Sanitize PR diff to prevent prompt injection (escape backticks)
 const sanitizedPrDiff = prDiff.replace(/`/g, "\\`");
 
-// Call OpenRouter API to generate review
+// Call OpenRouter API to generate review, with fallback for rate limits
 let review;
 try {
   const openrouterResponse = await fetch(
@@ -108,35 +108,64 @@ try {
 
   if (!openrouterResponse.ok) {
     const errorText = await openrouterResponse.text();
-    throw new Error(
-      `Failed to call OpenRouter: ${openrouterResponse.status} ${openrouterResponse.statusText}\nResponse: ${errorText}`,
+    console.warn(
+      `OpenRouter call failed (${openrouterResponse.status}), using fallback review.\nResponse: ${errorText}`,
     );
+    // Fallback: generate a basic review without the model
+    review = generateFallbackReview(prNumber, repoOwner, repoName, prDiff);
+  } else {
+    const openrouterData = await openrouterResponse.json();
+
+    if (
+      !openrouterData.choices ||
+      openrouterData.choices.length === 0 ||
+      !openrouterData.choices[0].message ||
+      !openrouterData.choices[0].message.content
+    ) {
+      console.warn(
+        "Invalid OpenRouter response, using fallback review.",
+      );
+      review = generateFallbackReview(prNumber, repoOwner, repoName, prDiff);
+    } else {
+      review = openrouterData.choices[0].message.content;
+      console.log(`Generated review of length ${review.length}`);
+    }
   }
-
-  const openrouterData = await openrouterResponse.json();
-  console.log(`OpenRouter response data:`, openrouterData);
-
-  if (!openrouterData.choices || openrouterData.choices.length === 0) {
-    throw new Error(
-      `No choices in OpenRouter response: ${JSON.stringify(openrouterData)}`,
-    );
-  }
-
-  // Validate response before accessing content
-  if (
-    !openrouterData.choices[0].message ||
-    !openrouterData.choices[0].message.content
-  ) {
-    throw new Error(
-      `Invalid response format from OpenRouter: missing message or content`,
-    );
-  }
-
-  review = openrouterData.choices[0].message.content;
-  console.log(`Generated review of length ${review.length}`);
 } catch (error) {
-  console.error("Error generating review:", error);
-  process.exit(1);
+  console.error(`Error calling OpenRouter: ${error.message}`);
+  console.warn("Using fallback review.");
+  review = generateFallbackReview(prNumber, repoOwner, repoName, prDiff);
+}
+
+// Generate a deterministic fallback review when the model is unavailable
+function generateFallbackReview(number, owner, repo, diff) {
+  const lineCount = diff.split("\n").length;
+  const addedLines = diff.split("\n").filter((l) => l.startsWith("+") && !l.startsWith("+++")).length;
+  const removedLines = diff.split("\n").filter((l) => l.startsWith("-") && !l.startsWith("---")).length;
+  const filesChanged = (diff.match(/diff --git/g) || []).length;
+
+  return [
+    "## Automated PR Review (Fallback Mode)",
+    "",
+    "> ⚠️ The AI model was unavailable (rate-limited or offline). This is a structural review only — please review manually for deeper analysis.",
+    "",
+    `**PR #${number}** in \`${owner}/${repo}\``,
+    "",
+    "### Summary",
+    `- Files changed: ${filesChanged || "N/A"}`,
+    `- Lines added: ${addedLines}`,
+    `- Lines removed: ${removedLines}`,
+    `- Total diff lines: ${lineCount}`,
+    "",
+    "### Checklist",
+    "- [ ] No secrets or credentials committed",
+    "- [ ] Error handling covers edge cases",
+    "- [ ] Tests added for new behavior",
+    "- [ ] Documentation updated if needed",
+    "- [ ] No breaking changes to public APIs",
+    "",
+    "Please address the above items and request a re-review once the AI model is available.",
+  ].join("\n");
 }
 
 // Handle large diffs by truncating if necessary (though we already sent the full diff,
