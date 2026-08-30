@@ -3,7 +3,7 @@ import { satisfies } from "eve/evals/expect";
 
 export default defineEval({
   description:
-    "Verifies the agent uses nvidia/nemotron-3-ultra-550b-a55b:free model.",
+    "Verifies the agent uses the configured OpenRouter model (deepseek by default).",
   tags: ["production"],
   async test(t) {
     const infoResponse = await t.target.fetch("/eve/v1/info");
@@ -12,8 +12,8 @@ export default defineEval({
     t.check(
       modelId,
       satisfies(
-        (id: string) => id.includes("nemotron-3-ultra"),
-        "model is nvidia/nemotron-3-ultra-550b-a55b:free",
+        (id: string) => id.includes("deepseek"),
+        "model is the configured OpenRouter model (deepseek by default)",
       ),
     );
   },
