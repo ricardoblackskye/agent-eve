@@ -153,6 +153,52 @@ The workflow requires these GitHub Action secrets:
 
 The `eve deploy` command handles building, bundling, and deploying with Vercel Workflow, Sandbox, and Cron integrations.
 
+### GitHub Webhook (PR Code Review & Release Notes)
+
+The agent reacts to GitHub Pull Request events through a webhook that Vercel
+hosts at:
+
+```
+https://<your-deployment>.vercel.app/api/github/webhook
+```
+
+Configure it once in the repo (**Settings → Webhooks → Add webhook**):
+
+| Field | Value |
+| ----- | ----- |
+| **Payload URL** | `https://<your-deployment>.vercel.app/api/github/webhook` |
+| **Content type** | `application/json` |
+| **Secret** | the value of `GH_WEBHOOK_SECRET` |
+| **Events** | **Pull request** (subscribe to Pull request events) |
+
+The webhook verifies the `GH_WEBHOOK_SECRET` on every request
+(`app/api/github/webhook/route.ts` reads it from
+`process.env[repoConfig.webhook_secret_env]`), so the secret must match the
+`GH_WEBHOOK_SECRET` set in your Vercel environment variables.
+
+Required environment variables (Vercel + GitHub Actions secrets):
+
+| Variable | Required | Description |
+| -------- | -------- | ----------- |
+| `GH_WEBHOOK_SECRET` | Yes | Shared secret that authenticates incoming webhook payloads. |
+| `GH_RELEASE_TOKEN` | Yes | GitHub token the Release Manager uses to write `releasenotes.md` on merge. |
+| `OPENROUTER_API_KEY` | Yes | Powers the AI review + release-notes generation. |
+
+Repo → webhook-secret + release-notes-path mapping lives in
+[`release-manager.config.json`](release-manager.config.json). Add a new repo
+there to enable webhook processing for it.
+
+**What happens:**
+
+- Opening or editing a PR triggers the **PR-reviewer** GitHub Action, which posts
+  an AI code review (model set by the `MODEL_NAME` repo variable — defaults to
+  `deepseek/deepseek-v4-pro`).
+- Merging a PR fires the webhook → the **Release Manager** subagent updates
+  [`releasenotes.md`](releasenotes.md) with a summary of the change.
+
+> The webhook must be created in GitHub repo Settings for the flow to run — this
+> documents how; it does not create the webhook for you.
+
 ### Self-Hosted / Docker
 
 ```bash
