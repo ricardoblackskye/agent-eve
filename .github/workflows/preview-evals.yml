@@ -1,0 +1,40 @@
+name: Preview Evals
+
+on:
+  deployment_status:
+
+permissions:
+  contents: read
+  checks: write
+  actions: write
+  pull-requests: write
+
+env:
+  NODE_VERSION: "24"
+
+jobs:
+  preview-evals:
+    name: Vercel Preview Evals
+    if: github.event.deployment_status.state == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - name: Run evals against Vercel Preview URL
+        env:
+          EVE_EVAL_AUTH_TOKEN: ${{ secrets.EVE_EVAL_AUTH_TOKEN }}
+          VERCEL_PROTECTION_BYPASS: ${{ secrets.VERCEL_PROTECTION_BYPASS }}
+        run: |
+          npx eve eval --strict --junit .eve/junit-preview.xml \
+            --url ${{ github.event.deployment_status.target_url }}
+      - name: Upload preview eval artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-results-preview
+          path: .eve/evals/
