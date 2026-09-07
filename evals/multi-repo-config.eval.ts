@@ -28,10 +28,13 @@ export default defineEval({
       }),
     });
     const unknownData = await unknownRepoResponse.json();
+    const unknownErrorMsg =
+      typeof unknownData?.error === "string"
+        ? unknownData.error
+        : JSON.stringify(unknownData || "");
     t.check(
-      unknownData?.error?.includes("unknown repo") ||
-        unknownData?.error?.includes("not configured") ||
-        unknownData?.error?.includes("Unknown"),
+      unknownErrorMsg.toLowerCase().includes("unknown") ||
+        unknownErrorMsg.toLowerCase().includes("not configured"),
       satisfies(
         (found: boolean) => found === true,
         "unknown repo returns an error",
@@ -61,8 +64,14 @@ export default defineEval({
     });
     const knownData = await knownRepoResponse.json();
     t.check(
-      knownData?.ok === true,
-      satisfies((ok: boolean) => ok === true, "known repo returns ok: true"),
+      knownRepoResponse.status === 200 &&
+        knownData?.ok === true &&
+        (knownData?.eveApiResult === "accepted" ||
+          knownData?.eveApiResult === "skipped"),
+      satisfies(
+        (accepted: boolean) => accepted === true,
+        "known repo returns status 200 and ok: true",
+      ),
     );
   },
 });
