@@ -30,8 +30,16 @@ jobs:
           EVE_EVAL_AUTH_TOKEN: ${{ secrets.EVE_EVAL_AUTH_TOKEN }}
           VERCEL_PROTECTION_BYPASS: ${{ secrets.VERCEL_PROTECTION_BYPASS }}
         run: |
+          TARGET_URL="${{ github.event.deployment_status.target_url }}"
+          if [ -n "$VERCEL_PROTECTION_BYPASS" ]; then
+            if [[ "$TARGET_URL" == *\?* ]]; then
+              TARGET_URL="${TARGET_URL}&x-vercel-protection-bypass=${VERCEL_PROTECTION_BYPASS}"
+            else
+              TARGET_URL="${TARGET_URL}?x-vercel-protection-bypass=${VERCEL_PROTECTION_BYPASS}"
+            fi
+          fi
           npx eve eval --strict --junit .eve/junit-preview.xml \
-            --url ${{ github.event.deployment_status.target_url }}
+            --url "$TARGET_URL"
       - name: Upload preview eval artifacts
         if: always()
         uses: actions/upload-artifact@v4
