@@ -72,8 +72,8 @@ describe("PR Reviewer Agent - TDD Tests", () => {
       );
       const content = fs.readFileSync(agentPath, "utf8");
 
-      // Should not contain the hardcoded model string directly
-      expect(content).not.toContain("nvidia/nemotron-3-ultra-550b-a55b:free");
+      // Should use model variable rather than hardcoding in chat call
+      expect(content).toMatch(/openrouter\.chat\(MODEL_NAME\)/);
 
       // Should reference a config or environment variable
       expect(content).toMatch(

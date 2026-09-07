@@ -54,12 +54,12 @@ export default defineEval({
           number: 1,
           title: "Test",
           body: "",
-          html_url: "https://github.com/ricardoblackskye/agent-eve/pull/1",
+          html_url: "https://github.com/test/repo/pull/1",
           labels: [],
           base: { ref: "main" },
           head: { ref: "feat/test" },
         },
-        repository: { full_name: "ricardoblackskye/agent-eve" },
+        repository: { full_name: "test/repo" },
       }),
     });
     const knownData = await knownRepoResponse.json();
