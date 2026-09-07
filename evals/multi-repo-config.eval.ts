@@ -64,12 +64,13 @@ export default defineEval({
     });
     const knownData = await knownRepoResponse.json();
     t.check(
-      knownData?.ok === true ||
-        (knownRepoResponse.status !== 404 &&
-          typeof knownData?.eveApiResult === "string"),
+      knownRepoResponse.status === 200 &&
+        knownData?.ok === true &&
+        (knownData?.eveApiResult === "accepted" ||
+          knownData?.eveApiResult === "skipped"),
       satisfies(
         (accepted: boolean) => accepted === true,
-        "known repo is recognized and routed by config",
+        "known repo returns status 200 and ok: true",
       ),
     );
   },
