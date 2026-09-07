@@ -8,7 +8,7 @@ const openrouter = createOpenAI({
 });
 
 const MODEL_NAME =
-  process.env.MODEL_NAME || "nvidia/nemotron-3-ultra-550b-a55b:free";
+  process.env.MODEL_NAME || "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free";
 
 export default defineAgent({
   description:
