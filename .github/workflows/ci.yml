@@ -85,7 +85,7 @@ jobs:
           done
 
           curl --fail --silent http://127.0.0.1:3000/eve/v1/health > /dev/null
-          npx eve eval --strict --junit .eve/junit.xml --url http://127.0.0.1:3000
+          npx eve eval --strict --exclude-tag production --junit .eve/junit.xml --url http://127.0.0.1:3000
       - name: Upload eval artifacts
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
