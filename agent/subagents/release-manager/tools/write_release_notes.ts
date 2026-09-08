@@ -12,7 +12,8 @@ export default defineTool({
     "Creates the file if it doesn't exist, updates it if it does. " +
     "Pass existing file SHA when updating to prevent conflicts. " +
     "Accepts optional owner and repo; falls back to VERCEL_GIT_REPO_OWNER/SLUG env vars. " +
-    "Requires GH_RELEASE_TOKEN environment variable.",
+    "Requires GH_RELEASE_TOKEN environment variable (falls back to GITHUB_TOKEN). " +
+    "The token needs 'Contents: Read and write'; a 403 means that scope is missing.",
   inputSchema: z.object({
     content: z.string().min(1, "Content is required"),
     commitMessage: z.string().optional().default("docs: update release notes"),
@@ -29,7 +30,7 @@ export default defineTool({
     owner,
     repo,
   }) {
-    const token = process.env.GH_RELEASE_TOKEN;
+    const token = process.env.GH_RELEASE_TOKEN || process.env.GITHUB_TOKEN;
     if (!token) {
       return {
         success: false,
@@ -76,6 +77,19 @@ export default defineTool({
       const data = await response.json();
 
       if (!response.ok) {
+        // A 403 here almost always means the token lacks Contents: write.
+        // Say so explicitly: the Release Manager previously failed silently,
+        // so no one could tell a missing token from a missing scope (#80).
+        if (response.status === 403) {
+          return {
+            success: false,
+            error:
+              `GitHub API error (403): the token lacks the required scope. ` +
+              `Writing ${targetOwner}/${targetRepo} contents needs ` +
+              `'Contents: Read and write'. ` +
+              `Details: ${data?.message || response.statusText}`,
+          };
+        }
         return {
           success: false,
           error: `GitHub API error (${response.status}): ${data?.message || response.statusText}`,
