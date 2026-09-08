@@ -2,6 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import fs from "fs";
 import path from "path";
+import { isStoryTrigger } from "../../../../agent/lib/story-trigger";
 
 interface RepoConfig {
   webhook_secret_env: string;
@@ -282,6 +283,124 @@ async function handler(request: NextRequest) {
       ok: true,
       message: `PR #${prData.number} ${action} acknowledged`,
       pr: prData,
+      eveApiResult,
+      ...(eveApiError ? { eveApiError } : {}),
+    });
+  }
+
+  // Handle issue events that ask the Product Owner subagent to draft a story.
+  if (event === "issues") {
+    const action = data.action; // opened, edited, reopened, labeled, closed, ...
+    const issue = data.issue;
+
+    // Detect the trigger (mention in body, or the trigger label) using the
+    // shared, platform-neutral detector. Non-triggering issues fall through.
+    if (
+      !isStoryTrigger({
+        action,
+        issue: {
+          number: issue?.number,
+          title: issue?.title,
+          body: issue?.body || "",
+          labels: (issue?.labels || []).map((l: any) => ({ name: l.name })),
+        },
+        label: data.label ? { name: data.label.name } : undefined,
+      })
+    ) {
+      return NextResponse.json({
+        ok: true,
+        message: `Issue ${issue?.number} ${action} received but is not a story trigger`,
+      });
+    }
+
+    // Build a Product Owner task message for the Eve agent.
+    const owner = repoFullName.split("/")[0];
+    const repo = repoFullName.split("/")[1];
+    const message = [
+      `Draft a user story from this GitHub issue:`,
+      ``,
+      `Repository: ${repoFullName}`,
+      `Issue #${issue?.number} (${action}): ${issue?.title}`,
+      issue?.body ? `Description: ${issue.body.slice(0, 2000)}` : "",
+      ``,
+      `Reply to this issue by drafting a structured user story and, once complete, ` +
+        `creating a linked story issue on GitHub. The originating issue number is ${issue?.number}.`,
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    let eveApiResult = "skipped";
+    let eveApiError: string | null = null;
+    let eveApiStatus: number | null = null;
+    const apiKey = process.env.EVE_API_KEY;
+
+    try {
+      const targetUrl = `${request.nextUrl.origin}/eve/v1/session`;
+      const apiHeaders: Record<string, string> = {
+        "content-type": "application/json",
+      };
+      if (apiKey) {
+        apiHeaders.authorization = `Bearer ${apiKey}`;
+      }
+      const bypass =
+        process.env.VERCEL_PROTECTION_BYPASS ||
+        request.headers.get("x-vercel-protection-bypass") ||
+        request.nextUrl.searchParams.get("x-vercel-protection-bypass");
+      if (bypass) {
+        apiHeaders["x-vercel-protection-bypass"] = bypass;
+      }
+      const cookie = request.headers.get("cookie");
+      if (cookie) {
+        apiHeaders["cookie"] = cookie;
+      }
+
+      const apiResponse = await fetch(targetUrl, {
+        method: "POST",
+        headers: apiHeaders,
+        body: JSON.stringify({ message }),
+      });
+
+      if (apiResponse.ok) {
+        const apiData = await apiResponse.json();
+        eveApiResult = apiData?.status || "accepted";
+      } else {
+        eveApiStatus = apiResponse.status;
+        let detail = "";
+        try {
+          const errData = await apiResponse.json();
+          detail = errData?.error || errData?.message || apiResponse.statusText;
+        } catch {
+          detail = apiResponse.statusText;
+        }
+        eveApiResult = `error: ${apiResponse.status}`;
+        eveApiError = `Eve API rejected session: ${detail}`;
+      }
+    } catch (err) {
+      eveApiError = err instanceof Error ? err.message : String(err);
+      eveApiResult = "error";
+      console.error(`[webhook] Eve API call failed: ${eveApiError}`);
+    }
+
+    console.log(
+      `[webhook] Issue #${issue?.number} ${action}: ${issue?.title} — Eve API: ${eveApiResult}`,
+    );
+
+    if (eveApiResult.startsWith("error")) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Eve API session creation failed; the story was not drafted.",
+          eveApiResult,
+          ...(eveApiError ? { eveApiError } : {}),
+          ...(eveApiStatus ? { eveApiStatus } : {}),
+        },
+        { status: 502 },
+      );
+    }
+
+    return NextResponse.json({
+      ok: true,
+      message: `Issue #${issue?.number} ${action} acknowledged by Product Owner`,
       eveApiResult,
       ...(eveApiError ? { eveApiError } : {}),
     });
