@@ -118,6 +118,30 @@ describe("webhook secret enforcement in production", () => {
     expect(res.status).not.toBe(500);
   });
 
+  // Regression: an earlier version also failed closed on VERCEL_ENV=preview.
+  // Preview has no webhook secret configured and the preview eval suite posts
+  // unsigned webhooks at it, so that broke CI without adding security.
+  it("still allows unsigned webhooks on preview deployments", async () => {
+    vi.stubEnv("VERCEL_ENV", "preview");
+    vi.stubEnv("GH_WEBHOOK_SECRET", "");
+
+    const { POST } = await import("../app/api/github/webhook/route");
+    const res: any = await POST(createRequest(PR_BODY));
+
+    expect(res.status).not.toBe(500);
+  });
+
+  it("still verifies the signature on preview when a secret IS configured", async () => {
+    vi.stubEnv("VERCEL_ENV", "preview");
+    vi.stubEnv("GH_WEBHOOK_SECRET", "preview-secret");
+
+    const { POST } = await import("../app/api/github/webhook/route");
+    const res: any = await POST(createRequest(PR_BODY));
+
+    // Wrong/missing signature must still be rejected when a secret exists.
+    expect(res.status).toBe(401);
+  });
+
   it("still allows unsigned webhooks when VERCEL_ENV is absent (CI / tests)", async () => {
     vi.stubEnv("VERCEL_ENV", undefined as unknown as string);
     vi.stubEnv("GH_WEBHOOK_SECRET", "");

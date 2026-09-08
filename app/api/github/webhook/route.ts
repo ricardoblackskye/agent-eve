@@ -34,16 +34,19 @@ function getRepoConfig(repoFullName: string): RepoConfig | null {
 }
 
 /**
- * True when the app is running as a deployed (non-local) environment.
+ * True when the app is running as a PRODUCTION deployment.
  *
  * Used to decide whether a missing webhook secret is a fatal
  * misconfiguration rather than a local convenience.
+ *
+ * Deliberately production-only: Preview deployments have no webhook secret
+ * configured, and the preview eval suite posts unsigned webhooks at them.
+ * Failing closed on Preview broke that suite without adding security — a
+ * preview URL sits behind Vercel's protection bypass and holds no production
+ * data. If a secret IS configured on preview, it is still enforced.
  */
-function isDeployedEnvironment(): boolean {
-  return (
-    process.env.VERCEL_ENV === "production" ||
-    process.env.VERCEL_ENV === "preview"
-  );
+function isProductionEnvironment(): boolean {
+  return process.env.VERCEL_ENV === "production";
 }
 
 /**
@@ -60,10 +63,10 @@ function verifySignature(
   // forged payloads on any deployment that forgot GH_WEBHOOK_SECRET.
   // In a deployed environment that is a fatal misconfiguration: fail closed.
   if (!secret) {
-    if (isDeployedEnvironment()) {
+    if (isProductionEnvironment()) {
       return false;
     }
-    return true; // Local development only.
+    return true; // Local development and preview only.
   }
   if (!signatureHeader) return false;
 
@@ -133,7 +136,7 @@ async function handler(request: NextRequest) {
   // signature failure: surface it as a 500 with an explicit message so it is
   // distinguishable from a genuine bad signature (401) in the delivery logs.
   const webhookSecret = process.env[repoConfig.webhook_secret_env];
-  if (!webhookSecret && isDeployedEnvironment()) {
+  if (!webhookSecret && isProductionEnvironment()) {
     console.error(
       `[webhook] ${repoConfig.webhook_secret_env} is not set in a deployed environment ` +
         `(VERCEL_ENV=${process.env.VERCEL_ENV}). Refusing to process the webhook without ` +

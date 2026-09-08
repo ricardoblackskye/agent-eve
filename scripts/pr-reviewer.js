@@ -134,10 +134,14 @@ try {
         ],
         temperature: 0.2,
         // Reasoning models (e.g. deepseek-v4-pro) report their thinking in a
-        // separate `reasoning` field and spend `max_tokens` on it. At 1500 the
-        // budget was exhausted before any answer was emitted, so `content`
-        // came back null HTTP 200 and the script fell back to a structural
-        // review. Raise the budget so the visible answer survives.
+        // separate `reasoning` field and spend `max_tokens` on it. Their
+        // reasoning length is NON-DETERMINISTIC — the same diff has produced
+        // 0, ~5.5k and ~17k reasoning tokens — so sizing `max_tokens` alone
+        // cannot guarantee an answer: when the budget runs out mid-thought,
+        // `content` is null on an HTTP 200 and the review silently degrades to
+        // the structural fallback. Cap the reasoning explicitly so the answer
+        // always has room, and keep max_tokens above reasoning + answer.
+        reasoning: { effort: "low" },
         max_tokens: 4000,
       }),
     },

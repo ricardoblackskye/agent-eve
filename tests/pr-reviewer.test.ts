@@ -180,6 +180,20 @@ describe("PR Reviewer Agent - TDD Tests", () => {
       expect(maxTokens).toBeGreaterThanOrEqual(4000);
     });
 
+    // Regression: the reasoning budget is NON-DETERMINISTIC (0, ~5.5k and
+    // ~17k reasoning tokens observed for the SAME 20k diff), so sizing
+    // max_tokens alone cannot guarantee an answer. Pin an explicit cap.
+    it("caps reasoning effort so the answer always has token budget", () => {
+      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
+      const content = fs.readFileSync(scriptPath, "utf8");
+
+      expect(content).toMatch(/reasoning:\s*\{\s*effort:\s*"low"\s*\}/);
+      // max_tokens must comfortably exceed the low-effort reasoning budget.
+      const maxTokens = content.match(/max_tokens:\s*(\d+)/);
+      expect(maxTokens).not.toBeNull();
+      expect(parseInt(maxTokens![1], 10)).toBeGreaterThanOrEqual(4000);
+    });
+
     it("should distinguish a null-content response from a malformed one", () => {
       const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
       const content = fs.readFileSync(scriptPath, "utf8");
