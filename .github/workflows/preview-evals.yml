@@ -15,7 +15,14 @@ env:
 jobs:
   preview-evals:
     name: Vercel Preview Evals
-    if: github.event.deployment_status.state == 'success'
+    # Production deployments are excluded: their target_url is the production
+    # host, which sits behind Vercel Authentication, so the evals would hit the
+    # auth wall and fail with 401 before ever reaching the app. Production is
+    # already covered by the production-evals job in ci.yml, which targets
+    # agent-eve-gold.vercel.app directly. See issue #79.
+    if: >-
+      github.event.deployment_status.state == 'success' &&
+      github.event.deployment_status.environment != 'Production'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
