@@ -68,6 +68,31 @@ describe(".env.example", () => {
     expect(block).toMatch(/Issues:\s*Read and write/i);
     expect(block).toMatch(/Personal access token/i);
   });
+
+  it("documents a command to verify the token's scopes before deploying", () => {
+    // Reviewer finding: the required scope was asserted but never verified.
+    // The file must show HOW to check, not just what is needed.
+    expect(raw).toMatch(/x-oauth-scopes/);
+    expect(raw).toMatch(/rate_limit/);
+  });
+
+  it("warns that a fine-grained PAT needs both scopes selected separately", () => {
+    expect(raw).toMatch(/[Ff]ine-grained PAT/);
+    expect(raw).toMatch(/Contents/);
+  });
+
+  it("states that GH_WEBHOOK_SECRET is required in deployed environments", () => {
+    // Reviewer finding: an unset secret silently bypassed signature
+    // verification, so the example must not imply it is optional.
+    const block = raw.slice(
+      0,
+      raw.indexOf("GH_WEBHOOK_SECRET=") === -1
+        ? raw.length
+        : raw.indexOf("GH_WEBHOOK_SECRET="),
+    );
+    expect(block).toMatch(/REQUIRED in deployed environments/i);
+    expect(block).toMatch(/HTTP 500|refuses to process/i);
+  });
 });
 
 describe(".gitignore", () => {

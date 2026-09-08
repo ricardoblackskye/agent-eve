@@ -178,11 +178,11 @@ The webhook verifies the `GH_WEBHOOK_SECRET` on every request
 
 Required environment variables (Vercel + GitHub Actions secrets):
 
-| Variable             | Required | Description                                                                |
-| -------------------- | -------- | -------------------------------------------------------------------------- |
-| `GH_WEBHOOK_SECRET`  | Yes      | Shared secret that authenticates incoming webhook payloads.                |
-| `GH_RELEASE_TOKEN`   | Yes      | GitHub token the Release Manager uses to write `releasenotes.md` on merge. |
-| `OPENROUTER_API_KEY` | Yes      | Powers the AI review + release-notes generation.                           |
+| Variable             | Required | Description                                                                                                                                                                                        |
+| -------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GH_WEBHOOK_SECRET`  | Yes      | Shared secret that authenticates incoming webhook payloads. **Required on Vercel** — if unset in a deployed environment the handler returns HTTP 500 rather than processing an unverified payload. |
+| `GH_RELEASE_TOKEN`   | Yes      | GitHub token the Release Manager uses to write `releasenotes.md` on merge.                                                                                                                         |
+| `OPENROUTER_API_KEY` | Yes      | Powers the AI review + release-notes generation.                                                                                                                                                   |
 
 > **Provisioning:** start from [`.env.example`](.env.example) — copy it to `.env.local`
 > and fill in the values. In production these are set as **Vercel environment variables**

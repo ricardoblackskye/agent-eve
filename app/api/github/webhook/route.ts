@@ -34,15 +34,37 @@ function getRepoConfig(repoFullName: string): RepoConfig | null {
 }
 
 /**
+ * True when the app is running as a deployed (non-local) environment.
+ *
+ * Used to decide whether a missing webhook secret is a fatal
+ * misconfiguration rather than a local convenience.
+ */
+function isDeployedEnvironment(): boolean {
+  return (
+    process.env.VERCEL_ENV === "production" ||
+    process.env.VERCEL_ENV === "preview"
+  );
+}
+
+/**
  * Verify the x-hub-signature-256 against the webhook secret.
- * Returns true if the signature is valid or no secret is configured.
+ * Returns true if the signature is valid, or if no secret is configured and
+ * we are NOT in a deployed environment (local development only).
  */
 function verifySignature(
   payload: string,
   signatureHeader: string | null,
   secret: string | undefined,
 ): boolean {
-  if (!secret) return true; // Skip verification if no secret configured (dev only)
+  // An unset secret historically returned true, which silently accepted
+  // forged payloads on any deployment that forgot GH_WEBHOOK_SECRET.
+  // In a deployed environment that is a fatal misconfiguration: fail closed.
+  if (!secret) {
+    if (isDeployedEnvironment()) {
+      return false;
+    }
+    return true; // Local development only.
+  }
   if (!signatureHeader) return false;
 
   const sig = crypto.createHmac("sha256", secret).update(payload).digest("hex");
@@ -99,15 +121,35 @@ async function handler(request: NextRequest) {
   const repoConfig = getRepoConfig(repoFullName);
   if (!repoConfig) {
     return NextResponse.json(
-    {
-      error: `Unknown repo '${repoFullName}'. Add it to release-manager.config.json to enable webhook processing.`,
-    },
-    { status: 404 },
-  );
+      {
+        error: `Unknown repo '${repoFullName}'. Add it to release-manager.config.json to enable webhook processing.`,
+      },
+      { status: 404 },
+    );
   }
 
-  // Validate signature with the per-repo secret
+  // Validate signature with the per-repo secret.
+  // A missing secret in a deployed environment is a misconfiguration, not a
+  // signature failure: surface it as a 500 with an explicit message so it is
+  // distinguishable from a genuine bad signature (401) in the delivery logs.
   const webhookSecret = process.env[repoConfig.webhook_secret_env];
+  if (!webhookSecret && isDeployedEnvironment()) {
+    console.error(
+      `[webhook] ${repoConfig.webhook_secret_env} is not set in a deployed environment ` +
+        `(VERCEL_ENV=${process.env.VERCEL_ENV}). Refusing to process the webhook without ` +
+        `signature verification. Set the secret in your Vercel environment variables.`,
+    );
+    return NextResponse.json(
+      {
+        ok: false,
+        error:
+          `Webhook secret '${repoConfig.webhook_secret_env}' is not configured in this ` +
+          `deployment. Refusing to process an unverified webhook.`,
+      },
+      { status: 500 },
+    );
+  }
+
   if (!verifySignature(payload, signature, webhookSecret)) {
     return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
   }
@@ -223,7 +265,8 @@ async function handler(request: NextRequest) {
       return NextResponse.json(
         {
           ok: false,
-          error: "Eve API session creation failed; release notes were not updated.",
+          error:
+            "Eve API session creation failed; release notes were not updated.",
           eveApiResult,
           ...(eveApiError ? { eveApiError } : {}),
           ...(eveApiStatus ? { eveApiStatus } : {}),
