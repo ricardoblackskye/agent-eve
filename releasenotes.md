@@ -19,3 +19,5 @@
 - [PR #81]: Fix preview evals triggering on production deployments — previously preview-evals.yml ran on every deployment_status including production, causing 401 failures against Vercel Authentication and leaving red checks on main after merges (Issue #79)
 
 - [PR #81]: Fix release notes workflow failing silently — now surfaces failures properly for easier diagnosis (Issue #80)
+
+- [PR #83]: Fix production evals webhook signature regression — production evals posted unsigned payloads and asserted success; after webhook signature enforcement (PR #77), `verifySignature` correctly rejects unsigned requests with 401, so evals now sign payloads properly (Issue #82)
