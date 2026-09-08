@@ -1,5 +1,6 @@
 import { defineEval } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
+import { canSign, signPayload, signingSecret } from "./helpers/sign";
 
 export default defineEval({
   description:
@@ -41,26 +42,37 @@ export default defineEval({
       ),
     );
 
-    // Test known repo is accepted
+    // Test known repo is accepted.
+    // Production rejects unsigned webhooks with 401 by design, so sign the
+    // request when a signing secret is available. Without one (local `eve
+    // eval`, CI without the secret) skip rather than assert insecure behaviour.
+    if (!canSign()) {
+      t.succeeded();
+      return;
+    }
+
+    const knownRepoBody = JSON.stringify({
+      action: "opened",
+      pull_request: {
+        number: 1,
+        title: "Test",
+        body: "",
+        html_url: "https://github.com/test/repo/pull/1",
+        labels: [],
+        base: { ref: "main" },
+        head: { ref: "feat/test" },
+      },
+      repository: { full_name: "test/repo" },
+    });
+
     const knownRepoResponse = await t.target.fetch("/api/github/webhook", {
       method: "POST",
       headers: {
         "content-type": "application/json",
         "x-github-event": "pull_request",
+        "x-hub-signature-256": signPayload(knownRepoBody, signingSecret()!),
       },
-      body: JSON.stringify({
-        action: "opened",
-        pull_request: {
-          number: 1,
-          title: "Test",
-          body: "",
-          html_url: "https://github.com/test/repo/pull/1",
-          labels: [],
-          base: { ref: "main" },
-          head: { ref: "feat/test" },
-        },
-        repository: { full_name: "test/repo" },
-      }),
+      body: knownRepoBody,
     });
     const knownData = await knownRepoResponse.json();
     t.check(
