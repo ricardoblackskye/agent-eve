@@ -72,7 +72,7 @@ describe("PR Reviewer Agent - TDD Tests", () => {
       );
       const content = fs.readFileSync(agentPath, "utf8");
 
-      // Should not contain the hardcoded model string directly
+      // Should not contain the old hardcoded model string directly
       expect(content).not.toContain("nvidia/nemotron-3-ultra-550b-a55b:free");
 
       // Should reference a config or environment variable

@@ -7,9 +7,12 @@ const openrouter = createOpenAI({
   name: "openrouter",
 });
 
+const MODEL_NAME =
+  process.env.MODEL_NAME || "deepseek/deepseek-v4-pro";
+
 export default defineAgent({
   description:
     "You are a senior software engineer reviewing this code diff. Look for architectural anti-patterns, security risks, and off-by-one errors.",
-  model: openrouter.chat("openrouter/nvidia/nemotron-3-ultra-550b-a55b:free"),
-  modelContextWindowTokens: 1048576,
+  model: openrouter.chat(MODEL_NAME),
+  modelContextWindowTokens: 128000,
 });

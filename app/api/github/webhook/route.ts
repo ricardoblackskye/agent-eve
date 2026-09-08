@@ -175,9 +175,16 @@ async function handler(request: NextRequest) {
       if (apiKey) {
         apiHeaders.authorization = `Bearer ${apiKey}`;
       }
-      const bypass = process.env.VERCEL_PROTECTION_BYPASS;
+      const bypass =
+        process.env.VERCEL_PROTECTION_BYPASS ||
+        request.headers.get("x-vercel-protection-bypass") ||
+        request.nextUrl.searchParams.get("x-vercel-protection-bypass");
       if (bypass) {
-        apiHeaders[`x-vercel-protection-bypass`] = bypass;
+        apiHeaders["x-vercel-protection-bypass"] = bypass;
+      }
+      const cookie = request.headers.get("cookie");
+      if (cookie) {
+        apiHeaders["cookie"] = cookie;
       }
 
       const apiResponse = await fetch(targetUrl, {

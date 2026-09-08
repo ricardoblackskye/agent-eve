@@ -40,8 +40,12 @@ async function handler(request: NextRequest) {
   const accept = request.headers.get("accept");
   if (accept) headers["accept"] = accept;
 
-  if (BYPASS_SECRET) {
-    headers["x-vercel-protection-bypass"] = BYPASS_SECRET;
+  const bypass =
+    BYPASS_SECRET ||
+    request.headers.get("x-vercel-protection-bypass") ||
+    request.nextUrl.searchParams.get("x-vercel-protection-bypass");
+  if (bypass) {
+    headers["x-vercel-protection-bypass"] = bypass;
   }
 
   const body =
