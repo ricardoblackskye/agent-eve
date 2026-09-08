@@ -35,7 +35,7 @@ curl http://localhost:3000/eve/v1/health
 
 ## Project Layout
 
-```
+```text
 agent-eve/
 ├── agent/
 │   ├── agent.ts            # Agent config (model, limits, context window)
@@ -158,18 +158,18 @@ The `eve deploy` command handles building, bundling, and deploying with Vercel W
 The agent reacts to GitHub Pull Request events through a webhook that Vercel
 hosts at:
 
-```
+```text
 https://<your-deployment>.vercel.app/api/github/webhook
 ```
 
 Configure it once in the repo (**Settings → Webhooks → Add webhook**):
 
-| Field | Value |
-| ----- | ----- |
-| **Payload URL** | `https://<your-deployment>.vercel.app/api/github/webhook` |
-| **Content type** | `application/json` |
-| **Secret** | the value of `GH_WEBHOOK_SECRET` |
-| **Events** | **Pull request** (subscribe to Pull request events) |
+| Field            | Value                                                     |
+| ---------------- | --------------------------------------------------------- |
+| **Payload URL**  | `https://<your-deployment>.vercel.app/api/github/webhook` |
+| **Content type** | `application/json`                                        |
+| **Secret**       | the value of `GH_WEBHOOK_SECRET`                          |
+| **Events**       | **Pull request** (subscribe to Pull request events)       |
 
 The webhook verifies the `GH_WEBHOOK_SECRET` on every request
 (`app/api/github/webhook/route.ts` reads it from
@@ -178,11 +178,22 @@ The webhook verifies the `GH_WEBHOOK_SECRET` on every request
 
 Required environment variables (Vercel + GitHub Actions secrets):
 
-| Variable | Required | Description |
-| -------- | -------- | ----------- |
-| `GH_WEBHOOK_SECRET` | Yes | Shared secret that authenticates incoming webhook payloads. |
-| `GH_RELEASE_TOKEN` | Yes | GitHub token the Release Manager uses to write `releasenotes.md` on merge. |
-| `OPENROUTER_API_KEY` | Yes | Powers the AI review + release-notes generation. |
+| Variable             | Required | Description                                                                                                                                                                                        |
+| -------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GH_WEBHOOK_SECRET`  | Yes      | Shared secret that authenticates incoming webhook payloads. **Required on Vercel** — if unset in a deployed environment the handler returns HTTP 500 rather than processing an unverified payload. |
+| `GH_RELEASE_TOKEN`   | Yes      | GitHub token the Release Manager uses to write `releasenotes.md` on merge.                                                                                                                         |
+| `OPENROUTER_API_KEY` | Yes      | Powers the AI review + release-notes generation.                                                                                                                                                   |
+
+> **Provisioning:** start from [`.env.example`](.env.example) — copy it to `.env.local`
+> and fill in the values. In production these are set as **Vercel environment variables**
+> (Project Settings → Environment Variables), not in a file; mark the tokens **Sensitive**.
+> Sensitive Vercel values are masked and cannot be read back with `vercel env pull`.
+>
+> `GH_RELEASE_TOKEN` needs **Issues: Read and write** in addition to Contents — the Product
+> Owner creates story issues and posts clarifying comments, and a Contents-only token returns
+> `403` on those calls. On a classic PAT, tick `public_repo` (or `repo` for private repos).
+> After adding or changing an environment variable, **redeploy** — changes do not apply to
+> existing deployments.
 
 Repo → webhook-secret + release-notes-path mapping lives in
 [`release-manager.config.json`](release-manager.config.json). Add a new repo

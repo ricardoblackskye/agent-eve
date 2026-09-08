@@ -71,8 +71,84 @@ try {
   process.exit(1);
 }
 
+// Documentation has no review value for a code reviewer, and it dominates
+// large diffs: a single 70KB markdown plan pushed one PR past 100KB, which
+// made the reasoning model exhaust its token budget and return null content.
+// Drop documentation-only files before spending any of that budget.
+const NON_CODE_PATTERNS = [
+  /\.mdx?$/i,
+  /(^|\/)docs?\//i,
+  /(^|\/)LICENSE(\.md)?$/i,
+  /(^|\/)\.hermes\/plans\//i,
+];
+
+function stripDocsFromDiff(diff) {
+  const parts = diff.split(/(?=^diff --git )/m);
+  const kept = [];
+  const removedFiles = [];
+  for (const part of parts) {
+    if (!part.trim()) continue;
+    const match = part.match(/^diff --git a\/(.+?) b\//m);
+    const filePath = match ? match[1] : "";
+    if (filePath && NON_CODE_PATTERNS.some((p) => p.test(filePath))) {
+      removedFiles.push(filePath);
+      continue;
+    }
+    kept.push(part);
+  }
+  const stripped = kept.join("");
+  return {
+    diff: stripped,
+    removedBytes: diff.length - stripped.length,
+    removedFiles,
+  };
+}
+
+const {
+  diff: codeDiff,
+  removedBytes,
+  removedFiles,
+} = stripDocsFromDiff(prDiff);
+
+if (removedFiles.length > 0) {
+  console.log(
+    `Excluded ${removedFiles.length} documentation file(s) from review ` +
+      `(${removedBytes} bytes): ${removedFiles.join(", ")}`,
+  );
+}
+
+// Reasoning models (deepseek-v4-pro) spend `max_tokens` on a separate
+// `reasoning` field before emitting any answer. A large diff makes them
+// exhaust that budget, so `content` comes back null on an HTTP 200 and the
+// review silently degrades to the structural fallback. Cap the prompt instead
+// of raising max_tokens forever: measure the budget in characters here, and
+// keep the plan/doc noise out of a code review.
+const MAX_DIFF_CHARS = Number(process.env.PR_REVIEW_MAX_DIFF_CHARS) || 20000;
+
+function truncateDiff(diff, maxChars) {
+  if (diff.length <= maxChars) return { diff, truncated: false, omitted: 0 };
+
+  const kept = diff.slice(0, maxChars);
+  // Cut on a line boundary so the model never sees a half-written hunk.
+  const lastBreak = kept.lastIndexOf("\n");
+  const cut = lastBreak > 0 ? kept.slice(0, lastBreak) : kept;
+  return { diff: cut, truncated: true, omitted: diff.length - cut.length };
+}
+
+const {
+  diff: reviewDiff,
+  truncated,
+  omitted,
+} = truncateDiff(codeDiff, MAX_DIFF_CHARS);
+
+if (truncated) {
+  console.log(
+    `Diff truncated for review: ${codeDiff.length} -> ${reviewDiff.length} chars (${omitted} omitted)`,
+  );
+}
+
 // Sanitize PR diff to prevent prompt injection (escape backticks)
-const sanitizedPrDiff = prDiff.replace(/`/g, "\\`");
+const sanitizedPrDiff = reviewDiff.replace(/`/g, "\\`");
 
 // Call OpenRouter API to generate review, with fallback for rate limits
 let review;
@@ -95,11 +171,28 @@ try {
           },
           {
             role: "user",
-            content: `Please review the following diff and provide your feedback with specific line number citations:\n\n\`\`\`diff\n${sanitizedPrDiff}\n\`\`\``,
+            content: `Please review the following diff and provide your feedback with specific line number citations:${
+              removedFiles.length > 0
+                ? `\n\nNote: ${removedFiles.length} documentation file(s) were excluded (${removedFiles.join(", ")}).`
+                : ""
+            }${
+              truncated
+                ? `\n\nNote: this diff was truncated to ${reviewDiff.length} of ${codeDiff.length} characters (${omitted} omitted). Review what is shown; do not speculate about the omitted part.`
+                : ""
+            }\n\n\`\`\`diff\n${sanitizedPrDiff}\n\`\`\``,
           },
         ],
         temperature: 0.2,
-        max_tokens: 1500,
+        // Reasoning models (e.g. deepseek-v4-pro) report their thinking in a
+        // separate `reasoning` field and spend `max_tokens` on it. Their
+        // reasoning length is NON-DETERMINISTIC — the same diff has produced
+        // 0, ~5.5k and ~17k reasoning tokens — so sizing `max_tokens` alone
+        // cannot guarantee an answer: when the budget runs out mid-thought,
+        // `content` is null on an HTTP 200 and the review silently degrades to
+        // the structural fallback. Cap the reasoning explicitly so the answer
+        // always has room, and keep max_tokens above reasoning + answer.
+        reasoning: { effort: "low" },
+        max_tokens: 4000,
       }),
     },
   );
@@ -115,19 +208,27 @@ try {
     review = generateFallbackReview(prNumber, repoOwner, repoName, prDiff);
   } else {
     const openrouterData = await openrouterResponse.json();
+    const message = openrouterData.choices?.[0]?.message;
 
-    if (
-      !openrouterData.choices ||
-      openrouterData.choices.length === 0 ||
-      !openrouterData.choices[0].message ||
-      !openrouterData.choices[0].message.content
-    ) {
+    if (!message) {
+      console.warn("Invalid OpenRouter response, using fallback review.");
+      review = generateFallbackReview(prNumber, repoOwner, repoName, prDiff);
+    } else if (!message.content) {
+      // Reasoning models can emit all their output into `reasoning` and leave
+      // `content` null when the token budget runs out. Report that precisely
+      // instead of the generic "Invalid OpenRouter response", and fall back to
+      // the reasoning text when there is nothing else to post.
+      const reasoning = message.reasoning;
       console.warn(
-        "Invalid OpenRouter response, using fallback review.",
+        `OpenRouter returned no message content (finish_reason: ${
+          openrouterData.choices?.[0]?.finish_reason ?? "unknown"
+        }, reasoning length: ${
+          typeof reasoning === "string" ? reasoning.length : 0
+        }), using fallback review.`,
       );
       review = generateFallbackReview(prNumber, repoOwner, repoName, prDiff);
     } else {
-      review = openrouterData.choices[0].message.content;
+      review = message.content;
       console.log(`Generated review of length ${review.length}`);
     }
   }
@@ -140,8 +241,12 @@ try {
 // Generate a deterministic fallback review when the model is unavailable
 function generateFallbackReview(number, owner, repo, diff) {
   const lineCount = diff.split("\n").length;
-  const addedLines = diff.split("\n").filter((l) => l.startsWith("+") && !l.startsWith("+++")).length;
-  const removedLines = diff.split("\n").filter((l) => l.startsWith("-") && !l.startsWith("---")).length;
+  const addedLines = diff
+    .split("\n")
+    .filter((l) => l.startsWith("+") && !l.startsWith("+++")).length;
+  const removedLines = diff
+    .split("\n")
+    .filter((l) => l.startsWith("-") && !l.startsWith("---")).length;
   const filesChanged = (diff.match(/diff --git/g) || []).length;
 
   return [
@@ -166,14 +271,6 @@ function generateFallbackReview(number, owner, repo, diff) {
     "",
     "Please address the above items and request a re-review once the AI model is available.",
   ].join("\n");
-}
-
-// Handle large diffs by truncating if necessary (though we already sent the full diff,
-// we could add a note if it was very large)
-if (prDiff.length > 100000) {
-  console.log(
-    `Warning: PR diff was large (${prDiff.length} bytes), consider implementing summarization for very large PRs`,
-  );
 }
 
 // Post the review as a comment on the PR

@@ -49,7 +49,14 @@
     "browsable",
     "Capitalise",
     "behaviour",
-    "capitalised"
+    "capitalised",
+    "nfr",
+    "nfrs",
+    "Nfrs",
+    "NFR",
+    "SDLC",
+    "clarif",
+    "testably"
   ],
   "ignorePaths": [
     "node_modules/**",

@@ -166,6 +166,62 @@ describe("PR Reviewer Agent - TDD Tests", () => {
       expect(content).toMatch(/AbortSignal\.timeout|timeout|signal:/);
     });
 
+    // Regression: reasoning models (deepseek-v4-pro) spend max_tokens on a
+    // separate `reasoning` field. At 1500 the budget was exhausted before any
+    // answer was emitted, so `content` was null on an HTTP 200 and every review
+    // silently degraded to the fallback. See PR #77.
+    it("should request enough tokens for a reasoning model to emit content", () => {
+      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
+      const content = fs.readFileSync(scriptPath, "utf8");
+
+      const match = content.match(/max_tokens:\s*(\d+)/);
+      expect(match).not.toBeNull();
+      const maxTokens = parseInt(match![1], 10);
+      expect(maxTokens).toBeGreaterThanOrEqual(4000);
+    });
+
+    // Regression: the reasoning budget is NON-DETERMINISTIC (0, ~5.5k and
+    // ~17k reasoning tokens observed for the SAME 20k diff), so sizing
+    // max_tokens alone cannot guarantee an answer. Pin an explicit cap.
+    it("caps reasoning effort so the answer always has token budget", () => {
+      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
+      const content = fs.readFileSync(scriptPath, "utf8");
+
+      expect(content).toMatch(/reasoning:\s*\{\s*effort:\s*"low"\s*\}/);
+      // max_tokens must comfortably exceed the low-effort reasoning budget.
+      const maxTokens = content.match(/max_tokens:\s*(\d+)/);
+      expect(maxTokens).not.toBeNull();
+      expect(parseInt(maxTokens![1], 10)).toBeGreaterThanOrEqual(4000);
+    });
+
+    // Regression: documentation dominated the diff (a single 70KB plan file
+    // pushed one PR past 100KB), the reasoning model exhausted its budget and
+    // returned null content. Docs have no code-review value — strip them.
+    it("strips documentation files before sending the diff for review", () => {
+      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
+      const content = fs.readFileSync(scriptPath, "utf8");
+
+      expect(content).toMatch(/stripDocsFromDiff\(/);
+      // The real source line is "/(^|\/)\.hermes\/plans\//i" — assert the
+      // plan-directory rule exists without over-specifying escaping.
+      expect(content).toMatch(/hermes\\?\/.*plans/);
+      expect(content).toMatch(/\.mdx\?/);
+      // Must feed the stripped diff into the truncation step, not the raw one.
+      expect(content).toMatch(/truncateDiff\(\s*codeDiff/);
+    });
+
+    it("should distinguish a null-content response from a malformed one", () => {
+      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
+      const content = fs.readFileSync(scriptPath, "utf8");
+
+      // The old check collapsed "no choices" and "null content" into one
+      // generic warning, which hid the real cause. Both must be handled, and
+      // the null-content branch must report the finish_reason / reasoning size.
+      expect(content).toMatch(/message\.content/);
+      expect(content).toMatch(/finish_reason/);
+      expect(content).toMatch(/reasoning/);
+    });
+
     it("should centralize model name (not hardcoded)", () => {
       const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
       const content = fs.readFileSync(scriptPath, "utf8");
@@ -192,8 +248,12 @@ describe("PR Reviewer Agent - TDD Tests", () => {
       const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
       const content = fs.readFileSync(scriptPath, "utf8");
 
-      // Should check for choices array and message content
-      expect(content).toMatch(/choices\.length|if\s*!\(choices/);
+      // Should check the choices array / message before reading content.
+      // Optional chaining (`choices?.[0]?.message`) is the current form and is
+      // equivalent in safety to an explicit length check.
+      expect(content).toMatch(
+        /choices\.length|if\s*!\(choices|choices\?\.\[0\]\?\.message/,
+      );
     });
 
     it("should add User-Agent header to GitHub API calls", () => {
@@ -212,6 +272,26 @@ describe("PR Reviewer Agent - TDD Tests", () => {
       expect(content).toMatch(
         /maxDiffLength|truncate|substring|\.length\s*>\s*\d+/,
       );
+    });
+
+    // Regression: the previous "large diff" guard was a console.log placed
+    // AFTER the API call — it never truncated anything, so a regex-only test
+    // passed while real reviews failed. Assert the cap is actually applied to
+    // what gets sent, not merely mentioned.
+    it("truncates the diff BEFORE sending it to the model", async () => {
+      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
+      const source = fs.readFileSync(scriptPath, "utf8");
+
+      // The sanitized diff that reaches the prompt must derive from a
+      // truncated value, not the raw diff.
+      expect(source).toMatch(/sanitizedPrDiff\s*=\s*reviewDiff\.replace/);
+      expect(source).toMatch(/truncateDiff\(/);
+      // And the cap must be small enough to leave room for reasoning tokens.
+      const cap = source.match(
+        /MAX_DIFF_CHARS\s*=\s*Number\([^)]*\)\s*\|\|\s*(\d+)/,
+      );
+      expect(cap).not.toBeNull();
+      expect(parseInt(cap![1], 10)).toBeLessThanOrEqual(20000);
     });
   });
 
