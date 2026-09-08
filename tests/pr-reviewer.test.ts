@@ -166,6 +166,32 @@ describe("PR Reviewer Agent - TDD Tests", () => {
       expect(content).toMatch(/AbortSignal\.timeout|timeout|signal:/);
     });
 
+    // Regression: reasoning models (deepseek-v4-pro) spend max_tokens on a
+    // separate `reasoning` field. At 1500 the budget was exhausted before any
+    // answer was emitted, so `content` was null on an HTTP 200 and every review
+    // silently degraded to the fallback. See PR #77.
+    it("should request enough tokens for a reasoning model to emit content", () => {
+      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
+      const content = fs.readFileSync(scriptPath, "utf8");
+
+      const match = content.match(/max_tokens:\s*(\d+)/);
+      expect(match).not.toBeNull();
+      const maxTokens = parseInt(match![1], 10);
+      expect(maxTokens).toBeGreaterThanOrEqual(4000);
+    });
+
+    it("should distinguish a null-content response from a malformed one", () => {
+      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
+      const content = fs.readFileSync(scriptPath, "utf8");
+
+      // The old check collapsed "no choices" and "null content" into one
+      // generic warning, which hid the real cause. Both must be handled, and
+      // the null-content branch must report the finish_reason / reasoning size.
+      expect(content).toMatch(/message\.content/);
+      expect(content).toMatch(/finish_reason/);
+      expect(content).toMatch(/reasoning/);
+    });
+
     it("should centralize model name (not hardcoded)", () => {
       const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
       const content = fs.readFileSync(scriptPath, "utf8");
@@ -192,8 +218,12 @@ describe("PR Reviewer Agent - TDD Tests", () => {
       const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
       const content = fs.readFileSync(scriptPath, "utf8");
 
-      // Should check for choices array and message content
-      expect(content).toMatch(/choices\.length|if\s*!\(choices/);
+      // Should check the choices array / message before reading content.
+      // Optional chaining (`choices?.[0]?.message`) is the current form and is
+      // equivalent in safety to an explicit length check.
+      expect(content).toMatch(
+        /choices\.length|if\s*!\(choices|choices\?\.\[0\]\?\.message/,
+      );
     });
 
     it("should add User-Agent header to GitHub API calls", () => {

@@ -1034,7 +1034,7 @@ export default defineEval({
 
 **Step: Run locally**
 
-```
+```bash
 npm run dev -- --hostname 127.0.0.1 --port 3000 &
 npx eve eval --url http://127.0.0.1:3000
 ```

@@ -35,7 +35,7 @@ curl http://localhost:3000/eve/v1/health
 
 ## Project Layout
 
-```
+```text
 agent-eve/
 ├── agent/
 │   ├── agent.ts            # Agent config (model, limits, context window)
@@ -158,7 +158,7 @@ The `eve deploy` command handles building, bundling, and deploying with Vercel W
 The agent reacts to GitHub Pull Request events through a webhook that Vercel
 hosts at:
 
-```
+```text
 https://<your-deployment>.vercel.app/api/github/webhook
 ```
 

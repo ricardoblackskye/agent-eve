@@ -99,7 +99,12 @@ try {
           },
         ],
         temperature: 0.2,
-        max_tokens: 1500,
+        // Reasoning models (e.g. deepseek-v4-pro) report their thinking in a
+        // separate `reasoning` field and spend `max_tokens` on it. At 1500 the
+        // budget was exhausted before any answer was emitted, so `content`
+        // came back null HTTP 200 and the script fell back to a structural
+        // review. Raise the budget so the visible answer survives.
+        max_tokens: 4000,
       }),
     },
   );
@@ -115,19 +120,27 @@ try {
     review = generateFallbackReview(prNumber, repoOwner, repoName, prDiff);
   } else {
     const openrouterData = await openrouterResponse.json();
+    const message = openrouterData.choices?.[0]?.message;
 
-    if (
-      !openrouterData.choices ||
-      openrouterData.choices.length === 0 ||
-      !openrouterData.choices[0].message ||
-      !openrouterData.choices[0].message.content
-    ) {
+    if (!message) {
+      console.warn("Invalid OpenRouter response, using fallback review.");
+      review = generateFallbackReview(prNumber, repoOwner, repoName, prDiff);
+    } else if (!message.content) {
+      // Reasoning models can emit all their output into `reasoning` and leave
+      // `content` null when the token budget runs out. Report that precisely
+      // instead of the generic "Invalid OpenRouter response", and fall back to
+      // the reasoning text when there is nothing else to post.
+      const reasoning = message.reasoning;
       console.warn(
-        "Invalid OpenRouter response, using fallback review.",
+        `OpenRouter returned no message content (finish_reason: ${
+          openrouterData.choices?.[0]?.finish_reason ?? "unknown"
+        }, reasoning length: ${
+          typeof reasoning === "string" ? reasoning.length : 0
+        }), using fallback review.`,
       );
       review = generateFallbackReview(prNumber, repoOwner, repoName, prDiff);
     } else {
-      review = openrouterData.choices[0].message.content;
+      review = message.content;
       console.log(`Generated review of length ${review.length}`);
     }
   }
@@ -140,8 +153,12 @@ try {
 // Generate a deterministic fallback review when the model is unavailable
 function generateFallbackReview(number, owner, repo, diff) {
   const lineCount = diff.split("\n").length;
-  const addedLines = diff.split("\n").filter((l) => l.startsWith("+") && !l.startsWith("+++")).length;
-  const removedLines = diff.split("\n").filter((l) => l.startsWith("-") && !l.startsWith("---")).length;
+  const addedLines = diff
+    .split("\n")
+    .filter((l) => l.startsWith("+") && !l.startsWith("+++")).length;
+  const removedLines = diff
+    .split("\n")
+    .filter((l) => l.startsWith("-") && !l.startsWith("---")).length;
   const filesChanged = (diff.match(/diff --git/g) || []).length;
 
   return [
