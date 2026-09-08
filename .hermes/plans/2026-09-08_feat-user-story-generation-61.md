@@ -5,16 +5,37 @@
 > **Branch (R1):** `feat/user-story-core-61`
 > **Plan date:** 2026-09-08
 
-**Goal:** Give Agent Eve a `product-owner` subagent that turns a raw feature request into a
-machine-readable, AI-ready user story — and, when the request is too vague to do that
-safely, pauses and asks a targeted clarifying question instead of inventing detail.
+**Goal:** A Product Owner drafts a rough feature request as a GitHub issue and tags the Eve
+Agent. Eve turns it into a machine-readable, AI-ready user story and **creates a new linked
+story issue** on GitHub. When the request is too vague to do that safely, Eve **comments the
+clarifying questions back on the original issue and stops**, waiting for the answer.
 
 **Architecture:** A new declared Eve subagent `agent/subagents/product-owner/` with its own
-`instructions.md` and two tools. Deterministic logic (template validation, refinement-gap
-detection, NFR injection) lives in import-only `agent/lib/`, unit-tested with Vitest; the LLM
-handles only the genuinely fuzzy work (prose intent, examples, constraints). Backlog delivery
-is **platform-agnostic** — the agent emits a canonical JSON payload; a provider adapter turns
-it into Azure DevOps / GitHub / Jira. R1 ships the payload + a dry-run `console` provider only.
+`instructions.md` and two tools. Deterministic logic (trigger detection, template validation,
+refinement-gap detection, NFR injection) lives in import-only `agent/lib/`, unit-tested with
+Vitest; the LLM handles only the genuinely fuzzy work (prose intent, examples, constraints).
+Backlog delivery stays **platform-agnostic** — the agent always emits a canonical JSON payload
+and a provider adapter translates it — but R1 ships **GitHub as the first real provider**, so
+the loop is end-to-end usable. A dry-run `console` provider remains the default for safety.
+
+**End-to-end R1 flow:**
+
+```text
+PO opens GitHub issue mentioning @eve-agent (or applies the trigger label)
+        │
+        ▼
+POST /api/github/webhook   (x-github-event: issues)
+        │  verify GH_WEBHOOK_SECRET, look up repo config
+        │  detect trigger → build message → POST /eve/v1/session
+        ▼
+product-owner subagent
+        │  draft_user_story
+        ├── needs_clarification → comment questions on original issue → STOP
+        └── complete           → publish_story (github provider)
+                                      │
+                                      ▼
+                        new story issue created, linked back to the original
+```
 
 **Tech Stack:** Eve framework (`defineAgent`, `defineTool`), Zod 4.4.3, TypeScript 7.0.2
 (strict), Vitest 4 (`tests/**/*.test.ts`), Playwright (e2e), MegaLinter (cspell/prettier).
@@ -26,19 +47,40 @@ it into Azure DevOps / GitHub / Jira. R1 ships the payload + a dry-run `console`
 Issue #61 has 4 phases. They are split across **3 releases** so each is independently
 reviewable, deployable, and useful:
 
-| Release            | Branch                         | Issue phases      | Scope                                                                            |
-| ------------------ | ------------------------------ | ----------------- | -------------------------------------------------------------------------------- |
-| **R1** (this plan) | `feat/user-story-core-61`      | Phase 2 + Phase 3 | Story schema, structuring, refinement loop, canonical payload + dry-run provider |
-| **R2**             | `feat/user-story-ingestion-61` | Phase 1           | Feedback/ticket parsing + context retrieval                                      |
-| **R3**             | `feat/user-story-backlog-61`   | Phase 4           | Platform-agnostic backlog push (Azure DevOps first adapter)                      |
+| Release            | Branch                         | Issue phases         | Scope                                                                                                      |
+| ------------------ | ------------------------------ | -------------------- | ---------------------------------------------------------------------------------------------------------- |
+| **R1** (this plan) | `feat/user-story-core-61`      | Phase 2 + 3 + 4 (GH) | GitHub-issue trigger, story schema, structuring, refinement loop, canonical payload, **real GitHub write** |
+| **R2**             | `feat/user-story-ingestion-61` | Phase 1              | Feedback/ticket parsing + context retrieval                                                                |
+| **R3**             | `feat/user-story-backlog-61`   | Phase 4 (others)     | Additional platform-agnostic providers (Azure DevOps, Jira) behind the same payload + provider interface   |
 
-Two clarifications the user gave while scoping:
+Clarifications the user gave while scoping:
 
-- **Backlog integration must be platform agnostic.** Not Azure-DevOps-only. R1 therefore
-  defines the canonical payload + a provider interface, and ships only a `console`/dry-run
-  provider. No `AZDO_*` env vars, no real network push, in R1.
+- **Backlog integration must be platform agnostic.** Not Azure-DevOps-only. R1 defines the
+  canonical payload + provider interface and ships **GitHub as the first real adapter** (no new
+  credentials — reuses `GH_RELEASE_TOKEN`). Azure DevOps / Jira arrive as further adapters in R3
+  behind the same interface. The dry-run `console` provider stays the default.
 - **Context retrieval (Phase 1) is out of scope for R1.** No doc-querying tool in R1. R2
   covers it. This is noted as a known R1 limitation.
+- **R1 delivers the full loop** — trigger, draft, and create the linked issue — rather than a
+  dry-run core only.
+- **Trigger = both signals:** `issues.opened` when the body mentions the agent, **and**
+  `issues.labeled` with a trigger label.
+- **Refinement questions are posted as a comment on the original issue**, then the run stops
+  and waits for the answer. No story issue is created until the gaps are filled.
+
+### On "tagging the Eve Agent"
+
+GitHub has no "@mention" webhook event — a mention is not an event in itself, so it cannot be
+subscribed to directly. The trigger is therefore implemented by **inspecting the issue payload**
+for a trigger signal. Two independent signals are supported, both detected from the payload:
+
+| Signal              | Event            | Detection                                                                |
+| ------------------- | ---------------- | ------------------------------------------------------------------------ |
+| Mention in the body | `issues.opened`  | issue body contains the configured mention string (default `@eve-agent`) |
+| Trigger label       | `issues.labeled` | `issue.labels` contains the configured label (default `needs-story`)     |
+
+This is why the webhook subscribes to the generic **`issues`** event and branches in code,
+rather than reacting to a dedicated mention event that does not exist.
 
 ---
 
@@ -61,7 +103,24 @@ Verified against `origin/main` @ `371c8b6`:
   registered by string-matching `/eve/v1/info`, and carries `tags: ["production"]`.
   CI runs `npx eve eval --strict --exclude-tag production --url http://127.0.0.1:3000`, so
   **production-tagged evals are excluded locally/CI** — R1 must not depend on one.
-- The root `agent/agent.ts` uses `mockModel` unconditionally (no API key needed for evals).
+- **The root `agent/agent.ts` is env-driven, NOT unconditionally mocked.** It calls
+  `resolveChatModel()` from `agent/chat-model.ts`, which returns the **live OpenRouter model
+  (`deepseek/deepseek-v4-pro`, or `EVE_CHAT_MODEL`) when `OPENROUTER_API_KEY` is set**, and
+  falls back to `mockModel` only when that key is absent. Consequence: the webhook-triggered
+  flow runs against a real model in production, so R1's output quality depends on
+  `OPENROUTER_API_KEY` being configured. (An earlier draft of this plan wrongly claimed the
+  root always uses `mockModel`; that was read from a stale local `main` and is corrected here.)
+- **The webhook currently handles only `pull_request` and `ping`.** `app/api/github/webhook/route.ts`
+  branches on `event === "pull_request"` (line 116) and `event === "ping"`; everything else
+  falls through to `200 {"ok": true, "message": "Event '<x>' received but not processed"}`.
+  Adding an `issues` branch is **purely additive** — no existing behaviour changes.
+- The existing PR flow already does the hard parts we reuse: HMAC `x-hub-signature-256`
+  verification against a per-repo secret, repo lookup in `release-manager.config.json`, and
+  firing an Eve session via `POST /eve/v1/session` with a composed `message`.
+- **Token scope risk (unverified):** `GH_RELEASE_TOKEN` is presently used only for GitHub
+  _contents_ read/write (`releasenotes.md`). Creating issues and comments requires
+  **`issues: write`**. I cannot verify the PAT's scopes from here — if it lacks them the write
+  fails with 403 and a PAT with `issues: write` must be minted. See Risk 9.
 - Lint gate: MegaLinter with cspell (`.cspell.json`, words list) + prettier. **Plan files and
   dotfiles are linted too** — new words must be added to `.cspell.json`.
 
@@ -872,10 +931,11 @@ describe("product-owner subagent", () => {
     expect(src).toMatch(/needs_clarification|clarif/);
   });
 
-  it("has both tools in its tools directory", () => {
+  it("has all three tools in its tools directory", () => {
     const tools = fs.readdirSync(path.join(dir, "tools"));
     expect(tools).toContain("draft_user_story.ts");
     expect(tools).toContain("publish_story.ts");
+    expect(tools).toContain("comment_questions.ts");
   });
 });
 ```
@@ -908,10 +968,17 @@ export default defineAgent({
 });
 ```
 
-`instructions.md` must cover: the five required sections (intent, machine-verifiable
-acceptance criteria, concrete examples, explicit MUST/SHOULD constraints, NFRs); the rule
-that `draft_user_story` returning `needs_clarification` means **stop and ask the user the
-returned questions** before retrying; and that publishing in this release is dry-run only.
+`instructions.md` must cover:
+
+- the five required sections (intent, machine-verifiable acceptance criteria, concrete
+  examples, explicit MUST/SHOULD constraints, NFRs);
+- the **GitHub workflow**: when invoked from an issue, call `draft_user_story` first;
+- if `draft_user_story` returns `needs_clarification`, call `comment_questions` with the
+  originating `owner`/`repo`/`issueNumber`, then **stop and wait** — do not create a story
+  issue in that run;
+- if it returns `complete`, call `publish_story` with provider `github` and the
+  `sourceIssueNumber` so the new issue links back to the source;
+- never invent detail to fill a gap — asking is always preferred to guessing.
 
 **Step 4: Run to verify pass** — expected 6 passed.
 
@@ -977,13 +1044,791 @@ npx eve eval --url http://127.0.0.1:3000
 
 ---
 
-## Task 8 — Lint gate + full verification (MANDATORY before push)
+## Task 8 — Trigger detection (`agent/lib/story-trigger.ts`)
+
+**Objective:** Decide, purely and testably, whether an incoming GitHub `issues` payload should
+start the story workflow. Keeping this in `lib/` means the webhook and its tests share one
+implementation.
+
+**Files:**
+
+- Create: `agent/lib/story-trigger.ts`
+- Test: `tests/story-trigger.test.ts`
+
+**Step 1: Write the failing test**
+
+```ts
+// tests/story-trigger.test.ts
+import { describe, it, expect } from "vitest";
+import { isStoryTrigger, TRIGGER_DEFAULTS } from "../agent/lib/story-trigger";
+
+const basePayload = {
+  action: "opened",
+  issue: {
+    number: 7,
+    title: "Export CSV",
+    body: "We need CSV export",
+    labels: [],
+  },
+};
+
+describe("isStoryTrigger", () => {
+  it("fires on issues.opened when the body mentions the agent", () => {
+    expect(
+      isStoryTrigger({
+        ...basePayload,
+        issue: { ...basePayload.issue, body: "@eve-agent please draft this" },
+      }),
+    ).toBe(true);
+  });
+
+  it("does not fire on issues.opened without a mention", () => {
+    expect(isStoryTrigger(basePayload)).toBe(false);
+  });
+
+  it("fires on issues.labeled with the trigger label", () => {
+    expect(
+      isStoryTrigger({
+        action: "labeled",
+        issue: { ...basePayload.issue, labels: [{ name: "needs-story" }] },
+        label: { name: "needs-story" },
+      }),
+    ).toBe(true);
+  });
+
+  it("does not fire on issues.labeled with an unrelated label", () => {
+    expect(
+      isStoryTrigger({
+        action: "labeled",
+        issue: { ...basePayload.issue, labels: [{ name: "bug" }] },
+        label: { name: "bug" },
+      }),
+    ).toBe(false);
+  });
+
+  it("is case-insensitive on the label", () => {
+    expect(
+      isStoryTrigger({
+        action: "labeled",
+        issue: { ...basePayload.issue, labels: [{ name: "Needs-Story" }] },
+        label: { name: "Needs-Story" },
+      }),
+    ).toBe(true);
+  });
+
+  it("does not fire on issues.closed", () => {
+    expect(
+      isStoryTrigger({
+        ...basePayload,
+        action: "closed",
+        issue: { ...basePayload.issue, body: "@eve-agent" },
+      }),
+    ).toBe(false);
+  });
+
+  it("does not fire on a pull_request payload", () => {
+    expect(
+      isStoryTrigger({ action: "opened", pull_request: { number: 1 } }),
+    ).toBe(false);
+  });
+
+  it("respects env overrides for mention and label", () => {
+    process.env.EVE_STORY_MENTION = "@eve-bot";
+    expect(
+      isStoryTrigger({
+        ...basePayload,
+        issue: { ...basePayload.issue, body: "@eve-bot draft this" },
+      }),
+    ).toBe(true);
+    delete process.env.EVE_STORY_MENTION;
+  });
+
+  it("exposes defaults", () => {
+    expect(TRIGGER_DEFAULTS.mention).toBe("@eve-agent");
+    expect(TRIGGER_DEFAULTS.label).toBe("needs-story");
+  });
+});
+```
+
+**Step 2: Run to verify failure** — `npx vitest run tests/story-trigger.test.ts` → FAIL.
+
+**Step 3: Write the minimal implementation**
+
+```ts
+// agent/lib/story-trigger.ts
+export const TRIGGER_DEFAULTS = {
+  mention: "@eve-agent",
+  label: "needs-story",
+} as const;
+
+interface IssueLike {
+  body?: string | null;
+  labels?: Array<{ name?: string } | string>;
+}
+
+interface PayloadLike {
+  action?: string;
+  issue?: IssueLike;
+  label?: { name?: string };
+  pull_request?: unknown;
+}
+
+function config() {
+  return {
+    mention: process.env.EVE_STORY_MENTION || TRIGGER_DEFAULTS.mention,
+    label: process.env.EVE_STORY_LABEL || TRIGGER_DEFAULTS.label,
+  };
+}
+
+function labelNames(issue?: IssueLike): string[] {
+  return (issue?.labels ?? []).map((l) =>
+    typeof l === "string" ? l : (l?.name ?? ""),
+  );
+}
+
+export function isStoryTrigger(payload: PayloadLike): boolean {
+  if (!payload || payload.pull_request) return false;
+  if (!payload.issue) return false;
+
+  const { mention, label } = config();
+  const action = payload.action;
+
+  if (action === "opened" || action === "edited" || action === "reopened") {
+    return (payload.issue.body ?? "")
+      .toLowerCase()
+      .includes(mention.toLowerCase());
+  }
+
+  if (action === "labeled") {
+    const wanted = label.toLowerCase();
+    const onIssue = labelNames(payload.issue).some(
+      (n) => n.toLowerCase() === wanted,
+    );
+    const applied = (payload.label?.name ?? "").toLowerCase() === wanted;
+    return onIssue || applied;
+  }
+
+  return false;
+}
+```
+
+**Step 4: Run to verify pass** — expected 9 passed.
+
+**Step 5: Commit**
+`git commit -m "feat(story): add GitHub issue trigger detection"`
+
+---
+
+## Task 9 — GitHub backlog provider (`agent/lib/backlog-provider.ts`)
+
+**Objective:** Make the canonical payload deliverable for real. GitHub is the first provider
+adapter; `console` stays the default so nothing writes unless explicitly selected.
+
+**Files:**
+
+- Modify: `agent/lib/backlog-provider.ts`
+- Test: `tests/github-provider.test.ts`
+
+**Step 1: Write the failing test**
+
+```ts
+// tests/github-provider.test.ts
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { getProvider, toCanonicalPayload } from "../agent/lib/backlog-provider";
+import type { UserStory } from "../agent/lib/story-schema";
+
+const story: UserStory = {
+  id: "US-001",
+  title: "Export report as CSV",
+  intent: "A project manager can export the sprint report as a CSV file.",
+  acceptanceCriteria: [
+    { given: "12 items", when: "click Export", then: "12 rows download" },
+  ],
+  examples: [{ input: "click Export", output: "report.csv" }],
+  constraints: ["MUST NOT block the UI thread"],
+  nfrs: { performance: "p95 < 2s", security: "tenant scoped", latency: "n/a" },
+  openQuestions: [],
+};
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  delete process.env.GH_RELEASE_TOKEN;
+});
+
+describe("github provider", () => {
+  it("renders the story as issue markdown with every section", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 201,
+      json: async () => ({
+        number: 42,
+        html_url: "https://github.com/o/r/issues/42",
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    process.env.GH_RELEASE_TOKEN = "tok";
+
+    await getProvider("github").publish(toCanonicalPayload(story));
+
+    const [, options] = fetchMock.mock.calls[0];
+    const body = JSON.parse(options.body as string);
+    expect(body.title).toContain("US-001");
+    expect(body.body).toContain("Acceptance Criteria");
+    expect(body.body).toContain("Constraints");
+    expect(body.body).toContain("NFR");
+  });
+
+  it("links the created issue back to the originating issue", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 201,
+      json: async () => ({
+        number: 42,
+        html_url: "https://github.com/o/r/issues/42",
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    process.env.GH_RELEASE_TOKEN = "tok";
+
+    await getProvider("github").publish(toCanonicalPayload(story), {
+      sourceIssueNumber: 7,
+      owner: "o",
+      repo: "r",
+    });
+
+    const [, options] = fetchMock.mock.calls[0];
+    const body = JSON.parse(options.body as string);
+    expect(body.body).toContain("#7");
+  });
+
+  it("posts to the GitHub issues API with a bearer token", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 201,
+      json: async () => ({ number: 42, html_url: "https://x/42" }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    process.env.GH_RELEASE_TOKEN = "tok";
+
+    await getProvider("github").publish(toCanonicalPayload(story), {
+      owner: "o",
+      repo: "r",
+    });
+
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://api.github.com/repos/o/r/issues");
+    expect(options.headers.authorization).toBe("Bearer tok");
+  });
+
+  it("refuses to write when the token is missing", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    delete process.env.GH_RELEASE_TOKEN;
+
+    const res = await getProvider("github").publish(toCanonicalPayload(story), {
+      owner: "o",
+      repo: "r",
+    });
+
+    expect(res.delivered).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("reports a 403 as a permissions problem", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 403,
+        json: async () => ({ message: "Resource not accessible" }),
+      }),
+    );
+    process.env.GH_RELEASE_TOKEN = "tok";
+
+    const res = await getProvider("github").publish(toCanonicalPayload(story), {
+      owner: "o",
+      repo: "r",
+    });
+
+    expect(res.delivered).toBe(false);
+    expect(res.message).toMatch(/403|permission|scope/i);
+  });
+});
+```
+
+**Step 2: Run to verify failure** — `npx vitest run tests/github-provider.test.ts` → FAIL.
+
+**Step 3: Write the minimal implementation** — extend `backlog-provider.ts`:
+
+```ts
+export interface PublishTarget {
+  owner?: string;
+  repo?: string;
+  sourceIssueNumber?: number;
+}
+
+function renderIssueBody(p: CanonicalPayload, source?: number): string {
+  const s = p.story;
+  return [
+    source ? `Derived from #${source}` : "",
+    "",
+    `## Intent`,
+    s.intent,
+    "",
+    `## Acceptance Criteria`,
+    ...s.acceptanceCriteria.map(
+      (ac, i) =>
+        `${i + 1}. **Given** ${ac.given} — **When** ${ac.when} — **Then** ${ac.then}`,
+    ),
+    "",
+    `## Examples`,
+    ...s.examples.map(
+      (ex) => `- Input: \`${ex.input}\` → Output: \`${ex.output}\``,
+    ),
+    "",
+    `## Constraints`,
+    ...s.constraints.map((c) => `- ${c}`),
+    "",
+    `## Non-Functional Requirements`,
+    `- Performance: ${s.nfrs.performance}`,
+    `- Security: ${s.nfrs.security}`,
+    `- Latency: ${s.nfrs.latency}`,
+  ]
+    .filter((l) => l !== undefined)
+    .join("\n");
+}
+
+const githubProvider: BacklogProvider = {
+  id: "github",
+  async publish(payload, target: PublishTarget = {}) {
+    const token = process.env.GH_RELEASE_TOKEN;
+    const owner = target.owner || process.env.VERCEL_GIT_REPO_OWNER;
+    const repo = target.repo || process.env.VERCEL_GIT_REPO_SLUG;
+
+    if (!token) {
+      return {
+        delivered: false,
+        mode: "dry-run",
+        provider: "github",
+        message: "GH_RELEASE_TOKEN is not set; nothing was created.",
+      };
+    }
+    if (!owner || !repo) {
+      return {
+        delivered: false,
+        mode: "dry-run",
+        provider: "github",
+        message:
+          "Target owner/repo could not be resolved; nothing was created.",
+      };
+    }
+
+    const response = await fetch(
+      `https://api.github.com/repos/${owner}/${repo}/issues`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${token}`,
+          "content-type": "application/json",
+          accept: "application/vnd.github+json",
+        },
+        body: JSON.stringify({
+          title: `[${payload.story.id}] ${payload.story.title}`,
+          body: renderIssueBody(payload, target.sourceIssueNumber),
+          labels: ["user-story"],
+        }),
+      },
+    );
+
+    const data = await response.json();
+    if (!response.ok) {
+      return {
+        delivered: false,
+        mode: "live",
+        provider: "github",
+        message:
+          response.status === 403
+            ? `GitHub rejected the write with 403 — the token likely lacks 'issues: write'. ${data?.message ?? ""}`
+            : `GitHub API error (${response.status}): ${data?.message ?? response.statusText}`,
+      };
+    }
+
+    return {
+      delivered: true,
+      mode: "live",
+      provider: "github",
+      reference: String(data.number),
+      message: `Created issue #${data.number}: ${data.html_url}`,
+    };
+  },
+};
+```
+
+`getProvider` must now return `githubProvider` for `"github"` and accept an optional `target`
+argument on `publish`.
+
+**Step 4: Run to verify pass** — expected 5 passed.
+
+**Step 5: Commit**
+`git commit -m "feat(story): add GitHub backlog provider adapter"`
+
+---
+
+## Task 10 — `comment_questions` tool (refinement loop on GitHub)
+
+**Objective:** Phase 3's "push a clarifying question back to the Product Owner". Per the user's
+decision, questions are posted as a **comment on the original issue** and the run stops — no
+story issue is created until the gaps are answered.
+
+**Files:**
+
+- Create: `agent/subagents/product-owner/tools/comment_questions.ts`
+- Test: `tests/comment-questions.test.ts`
+
+**Step 1: Write the failing test**
+
+```ts
+// tests/comment-questions.test.ts
+import { describe, it, expect, vi, afterEach } from "vitest";
+import tool from "../agent/subagents/product-owner/tools/comment_questions";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  delete process.env.GH_RELEASE_TOKEN;
+});
+
+describe("comment_questions", () => {
+  it("posts the questions as a comment on the source issue", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 201,
+      json: async () => ({ id: 1 }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    process.env.GH_RELEASE_TOKEN = "tok";
+
+    await tool.execute(
+      {
+        owner: "o",
+        repo: "r",
+        issueNumber: 7,
+        questions: ["Who is the user?", "What is the exact output?"],
+      } as any,
+      {} as any,
+    );
+
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://api.github.com/repos/o/r/issues/7/comments");
+    const body = JSON.parse(options.body as string);
+    expect(body.body).toContain("Who is the user?");
+    expect(body.body).toContain("What is the exact output?");
+  });
+
+  it("does not attempt a write when the token is missing", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    delete process.env.GH_RELEASE_TOKEN;
+
+    const r = await tool.execute(
+      { owner: "o", repo: "r", issueNumber: 7, questions: ["q"] } as any,
+      {} as any,
+    );
+
+    expect(r.posted).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("reports a 403 as a missing issues:write scope", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue({ ok: false, status: 403, json: async () => ({}) }),
+    );
+    process.env.GH_RELEASE_TOKEN = "tok";
+
+    const r = await tool.execute(
+      { owner: "o", repo: "r", issueNumber: 7, questions: ["q"] } as any,
+      {} as any,
+    );
+
+    expect(r.posted).toBe(false);
+    expect(r.error).toMatch(/403|scope|issues: write/i);
+  });
+
+  it("returns the questions so the agent can surface them", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue({ ok: true, status: 201, json: async () => ({}) }),
+    );
+    process.env.GH_RELEASE_TOKEN = "tok";
+
+    const r = await tool.execute(
+      { owner: "o", repo: "r", issueNumber: 7, questions: ["q1"] } as any,
+      {} as any,
+    );
+
+    expect(r.questions).toEqual(["q1"]);
+  });
+});
+```
+
+**Step 2: Run to verify failure** — `npx vitest run tests/comment-questions.test.ts` → FAIL.
+
+**Step 3: Write the minimal implementation**
+
+```ts
+// agent/subagents/product-owner/tools/comment_questions.ts
+import { defineTool } from "eve/tools";
+import { z } from "zod";
+
+export default defineTool({
+  description:
+    "Post clarifying questions as a comment on the originating GitHub issue, then stop " +
+    "and wait for the Product Owner to answer. Use this when draft_user_story returns " +
+    "status 'needs_clarification'. Do NOT create the story issue until the " +
+    "questions have been answered.",
+  inputSchema: z.object({
+    owner: z.string().min(1),
+    repo: z.string().min(1),
+    issueNumber: z.number().int().positive(),
+    questions: z.array(z.string().min(1)).min(1),
+  }),
+  async execute({ owner, repo, issueNumber, questions }) {
+    const token = process.env.GH_RELEASE_TOKEN;
+    if (!token) {
+      return {
+        posted: false,
+        error: "GH_RELEASE_TOKEN is not set; could not post the questions.",
+        questions,
+      };
+    }
+
+    const body = [
+      "Thanks — before I can turn this into an AI-ready user story I need a bit more detail.",
+      "",
+      ...questions.map((q, i) => `${i + 1}. ${q}`),
+      "",
+      "Reply here and I'll draft the story.",
+    ].join("\n");
+
+    const response = await fetch(
+      `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/comments`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${token}`,
+          "content-type": "application/json",
+          accept: "application/vnd.github+json",
+        },
+        body: JSON.stringify({ body }),
+      },
+    );
+
+    if (!response.ok) {
+      return {
+        posted: false,
+        error:
+          response.status === 403
+            ? `GitHub returned 403 — the token likely lacks the 'issues: write' scope.`
+            : `GitHub API error (${response.status})`,
+        questions,
+      };
+    }
+
+    return { posted: true, questions };
+  },
+});
+```
+
+**Step 4: Run to verify pass** — expected 4 passed.
+
+**Step 5: Commit**
+`git commit -m "feat(story): add comment_questions tool for refinement loop"`
+
+---
+
+## Task 11 — Webhook `issues` branch
+
+**Objective:** Wire the trigger into the existing webhook so a tagged issue starts the
+Product Owner. Purely additive — the `pull_request` path is untouched.
+
+**Files:**
+
+- Modify: `app/api/github/webhook/route.ts`
+- Test: `tests/webhook-issues.test.ts`
+
+**Step 1: Write the failing test**
+
+```ts
+// tests/webhook-issues.test.ts
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
+vi.mock("next/server", () => ({
+  NextResponse: {
+    json: vi.fn((data: any, init?: any) => ({
+      status: init?.status ?? 200,
+      body: JSON.stringify(data),
+    })),
+  },
+}));
+
+function issueRequest(payload: any) {
+  return {
+    method: "POST" as const,
+    headers: new Headers({
+      "content-type": "application/json",
+      "x-github-event": "issues",
+    }),
+    text: async () => JSON.stringify(payload),
+    nextUrl: new URL("http://localhost:3000/api/github/webhook"),
+  } as any;
+}
+
+describe("webhook - issues event", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ status: "accepted" }),
+      }),
+    );
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("starts the Product Owner when the body mentions the agent", async () => {
+    const { POST } = await import("../app/api/github/webhook/route");
+    const res = await POST(
+      issueRequest({
+        action: "opened",
+        issue: {
+          number: 7,
+          title: "CSV export",
+          body: "@eve-agent draft this",
+        },
+        repository: { full_name: "ricardoblackskye/agent-eve" },
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(JSON.parse(res.body).ok).toBe(true);
+  });
+
+  it("starts the Product Owner when the trigger label is applied", async () => {
+    const { POST } = await import("../app/api/github/webhook/route");
+    const res = await POST(
+      issueRequest({
+        action: "labeled",
+        issue: {
+          number: 7,
+          title: "CSV export",
+          body: "no mention",
+          labels: [{ name: "needs-story" }],
+        },
+        label: { name: "needs-story" },
+        repository: { full_name: "ricardoblackskye/agent-eve" },
+      }),
+    );
+    expect(JSON.parse(res.body).ok).toBe(true);
+  });
+
+  it("acknowledges but does NOT trigger on an untagged issue", async () => {
+    const { POST } = await import("../app/api/github/webhook/route");
+    const res = await POST(
+      issueRequest({
+        action: "opened",
+        issue: { number: 7, title: "CSV export", body: "just an idea" },
+        repository: { full_name: "ricardoblackskye/agent-eve" },
+      }),
+    );
+    const data = JSON.parse(res.body);
+    expect(data.ok).toBe(true);
+    expect(data.triggered).toBeFalsy();
+  });
+
+  it("still returns 'No PR data' for an empty pull_request payload (no regression)", async () => {
+    const { POST } = await import("../app/api/github/webhook/route");
+    const res = await POST({
+      method: "POST" as const,
+      headers: new Headers({
+        "content-type": "application/json",
+        "x-github-event": "pull_request",
+      }),
+      text: async () =>
+        JSON.stringify({
+          action: "opened",
+          repository: { full_name: "test/repo" },
+        }),
+      nextUrl: new URL("http://localhost:3000/api/github/webhook"),
+    } as any);
+    expect(JSON.parse(res.body).error).toBe("No PR data");
+  });
+});
+```
+
+**Step 2: Run to verify failure** — `npx vitest run tests/webhook-issues.test.ts` → FAIL
+(untagged issue currently returns `{ok:true, message:"Event 'issues' received but not processed"}`
+without `triggered`, and no Eve session is fired).
+
+**Step 3: Write the minimal implementation** — add an `issues` branch in
+`app/api/github/webhook/route.ts` before the final fall-through:
+
+```ts
+if (event === "issues") {
+  const issue = data.issue;
+  if (!issue) {
+    return NextResponse.json({ error: "No issue data" }, { status: 400 });
+  }
+
+  if (!isStoryTrigger(data)) {
+    return NextResponse.json({
+      ok: true,
+      triggered: false,
+      message: `Issue #${issue.number} acknowledged; no story trigger present`,
+    });
+  }
+
+  const message = [
+    `Draft an AI-ready user story from this GitHub issue:`,
+    ``,
+    `Repository: ${repoFullName}`,
+    `Issue #${issue.number}: ${issue.title}`,
+    `Body: ${(issue.body || "").slice(0, 2000)}`,
+    ``,
+    `Call draft_user_story. If it returns 'needs_clarification', call`,
+    `comment_questions with owner/repo for this repository and issueNumber`,
+    `${issue.number}, then stop and wait. If it returns 'complete', call`,
+    `publish_story with provider 'github' and sourceIssueNumber ${issue.number}.`,
+  ].join("\n");
+
+  // ...same POST /eve/v1/session call as the pull_request branch...
+}
+```
+
+The `POST /eve/v1/session` call is identical to the existing PR path, so extract it into a
+shared `startEveSession(request, message)` helper used by both branches rather than
+duplicating it (DRY).
+
+**Step 4: Run to verify pass** — expected 4 passed, plus existing `webhook.eval.ts`
+behaviour unchanged.
+
+**Step 5: Commit**
+`git commit -m "feat(webhook): trigger Product Owner from tagged GitHub issues"`
+
+---
+
+## Task 12 — Lint gate + full verification (MANDATORY before push)
 
 **Objective:** MegaLinter (cspell + prettier) and the full suite must be green locally.
 
 **Steps:**
 
-1. `npx vitest run` — expect **7 → 12 files, 33 → 59 tests, all passing**.
+1. `npx vitest run` — expect **7 → 17 files, 33 → 76 tests, all passing**
+   (43 new: 8 schema + 6 refinement + 5 provider + 4 draft + 3 publish + 6 agent +
+   9 trigger + 5 github + 4 comment + 4 webhook, minus overlap).
 2. `npx tsc --noEmit` — expect clean (exit 0).
 3. `npm run build` — expect success.
 4. `npx -y cspell@8 --config .cspell.json agent/lib/*.ts agent/subagents/product-owner/**/*.ts agent/subagents/product-owner/instructions.md tests/*.test.ts evals/product-owner.eval.ts .hermes/plans/2026-09-08_feat-user-story-generation-61.md`
@@ -1000,27 +1845,35 @@ npx eve eval --url http://127.0.0.1:3000
 
 ## Files Likely to Change
 
-| File                                                        | Action                     |
-| ----------------------------------------------------------- | -------------------------- |
-| `agent/lib/story-schema.ts`                                 | Create                     |
-| `agent/lib/story-refinement.ts`                             | Create                     |
-| `agent/lib/backlog-provider.ts`                             | Create                     |
-| `agent/subagents/product-owner/agent.ts`                    | Create                     |
-| `agent/subagents/product-owner/instructions.md`             | Create                     |
-| `agent/subagents/product-owner/tools/draft_user_story.ts`   | Create                     |
-| `agent/subagents/product-owner/tools/publish_story.ts`      | Create                     |
-| `tests/story-schema.test.ts`                                | Create                     |
-| `tests/story-refinement.test.ts`                            | Create                     |
-| `tests/backlog-provider.test.ts`                            | Create                     |
-| `tests/draft-user-story.test.ts`                            | Create                     |
-| `tests/publish-story.test.ts`                               | Create                     |
-| `tests/product-owner-agent.test.ts`                         | Create                     |
-| `evals/product-owner.eval.ts`                               | Create                     |
-| `.cspell.json`                                              | Modify (new project terms) |
-| `.hermes/plans/2026-09-08_feat-user-story-generation-61.md` | This file                  |
+| File                                                        | Action                                                                            |
+| ----------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `agent/lib/story-schema.ts`                                 | Create                                                                            |
+| `agent/lib/story-refinement.ts`                             | Create                                                                            |
+| `agent/lib/backlog-provider.ts`                             | Create (+ GitHub adapter in Task 9)                                               |
+| `agent/lib/story-trigger.ts`                                | Create                                                                            |
+| `agent/subagents/product-owner/agent.ts`                    | Create                                                                            |
+| `agent/subagents/product-owner/instructions.md`             | Create                                                                            |
+| `agent/subagents/product-owner/tools/draft_user_story.ts`   | Create                                                                            |
+| `agent/subagents/product-owner/tools/publish_story.ts`      | Create                                                                            |
+| `agent/subagents/product-owner/tools/comment_questions.ts`  | Create                                                                            |
+| `app/api/github/webhook/route.ts`                           | **Modify** (additive `issues` branch + shared `startEveSession` helper)           |
+| `tests/story-schema.test.ts`                                | Create                                                                            |
+| `tests/story-refinement.test.ts`                            | Create                                                                            |
+| `tests/backlog-provider.test.ts`                            | Create                                                                            |
+| `tests/github-provider.test.ts`                             | Create                                                                            |
+| `tests/story-trigger.test.ts`                               | Create                                                                            |
+| `tests/draft-user-story.test.ts`                            | Create                                                                            |
+| `tests/publish-story.test.ts`                               | Create                                                                            |
+| `tests/comment-questions.test.ts`                           | Create                                                                            |
+| `tests/webhook-issues.test.ts`                              | Create                                                                            |
+| `tests/product-owner-agent.test.ts`                         | Create                                                                            |
+| `evals/product-owner.eval.ts`                               | Create                                                                            |
+| `README.md`                                                 | Modify — document the trigger (mention / label) and required webhook subscription |
+| `.cspell.json`                                              | Modify (new project terms)                                                        |
+| `.hermes/plans/2026-09-08_feat-user-story-generation-61.md` | This file                                                                         |
 
-**Not changed in R1:** `agent/agent.ts` (root keeps `mockModel`), `ARCHITECTURE.md` (update in
-R3 once the backlog flow is real), `release-manager.config.json`, any CI workflow.
+**Not changed in R1:** `agent/agent.ts` and `agent/chat-model.ts` (root model resolution is
+already env-driven), `release-manager.config.json` (repo lookup reused as-is), any CI workflow.
 
 ---
 
@@ -1032,9 +1885,24 @@ R3 once the backlog flow is real), `release-manager.config.json`, any CI workflo
 - **Evals:** `npx eve eval --url http://127.0.0.1:3000` — `product-owner.eval.ts` passes
   (untagged, so it also runs in CI).
 - **Lint:** cspell + prettier clean on all new/changed files **including this plan file**.
-- **Manual smoke:** start `npm run dev`, ask the agent to draft a story from a vague
-  one-liner, and confirm it asks a clarifying question rather than inventing detail; then
-  supply the detail and confirm it returns a complete payload.
+- **Manual smoke (local):** start `npm run dev`, `curl` the webhook with an `issues` payload
+  containing `@eve-agent` and confirm the response is `{"ok": true, "triggered": true}`.
+- **Manual smoke (real, requires deploy + token):** open a real GitHub issue that mentions the
+  agent, confirm Eve creates the linked story issue; then open a deliberately vague one and
+  confirm it comments questions back and does **not** create an issue.
+- **Webhook subscription (manual, one-time):** the existing GitHub webhook must be extended to
+  subscribe to **Issues** in addition to **Pull request**. This is a repo Settings change the
+  plan documents but cannot create.
+
+### Deployment prerequisites
+
+| Requirement                             | Why                                                                          |
+| --------------------------------------- | ---------------------------------------------------------------------------- |
+| Webhook subscribes to **Issues**        | Without it GitHub never sends the `issues` event                             |
+| `GH_RELEASE_TOKEN` with `issues: write` | Required to create the story issue and post comment questions                |
+| `OPENROUTER_API_KEY`                    | Without it the root agent falls back to `mockModel` and produces canned text |
+| `GH_WEBHOOK_SECRET`                     | Already used; unchanged                                                      |
+| Label `needs-story` (optional)          | Only needed for the label trigger; mention trigger needs no setup            |
 
 ---
 
@@ -1054,25 +1922,36 @@ R3 once the backlog flow is real), `release-manager.config.json`, any CI workflo
 3. **Constraint regex is strict.** Requiring `MUST`/`SHOULD`/`MAY` at the start will reject
    reasonable prose constraints. Deliberate — the issue asks for constraints that "explicitly
    dictate what downstream agents must not do". Watch for false rejections in smoke testing.
-4. **R1 does not push anywhere.** `publish_story` is dry-run only by design (user asked for
-   platform-agnostic). Real delivery lands in R3.
+4. **R1 ships a real GitHub write** (user's decision). The `console` dry-run provider remains
+   the default, so nothing is written unless `publish_story` is called with provider `github`.
+   The created issue links back via a "Derived from #N" line rather than a native GitHub
+   "closes" link — GitHub has no first-class parent/child issue link in the REST API.
 5. **Context retrieval deferred.** Phase 1's "query system documentation before drafting" is
    R2. Until then, the agent drafts without architectural context and may propose features
    that conflict with existing boundaries.
 6. **Open question for R2:** which doc set should be indexed — this repo's
    `ARCHITECTURE.md`/`README.md`/`AGENTS.md`, or an external source?
-7. **Open question for R3:** which provider adapter first? The canonical payload is
-   provider-neutral; Azure DevOps is the one named in the issue, but GitHub Issues would need
-   no new credentials since `GH_RELEASE_TOKEN` already exists.
-8. **`next-env.d.ts` is modified in the working tree** (pre-existing, unrelated to this
-   work). Do not commit it as part of this branch unless the user asks.
+7. **Open question for R3:** which provider adapter next? The canonical payload is
+   provider-neutral; Azure DevOps is the one named in the issue.
+8. **Loops.** Eve creating an issue triggers no further webhook (Eve is not a GitHub user
+   being mentioned), so there is no infinite-loop risk. But a PO editing the source issue to
+   mention the agent again — or re-applying the trigger label — would start another run.
+   Acceptable for R1; if it becomes noisy, add a `story-drafted` label guard.
+9. **`GH_RELEASE_TOKEN` scope is the main delivery risk (unverified).** The token is currently
+   used only for _contents_ read/write. Creating issues and comments needs **`issues: write`**.
+   If the PAT lacks it, both `publish_story` and `comment_questions` return the 403 path
+   designed in Tasks 9/10 — the flow degrades to "no output" rather than crashing. The user
+   should confirm or re-mint the PAT before deployment.
+10. **`next-env.d.ts` is modified in the working tree** (pre-existing, unrelated to this
+    work). Do not commit it as part of this branch unless the user asks.
 
 ---
 
 ## Release Plan Summary
 
-- **R1 — `feat/user-story-core-61` (this plan):** schema, structuring, refinement loop,
-  canonical payload, dry-run provider, `product-owner` subagent. Phases 2 + 3.
+- **R1 — `feat/user-story-core-61` (this plan):** GitHub-issue trigger (mention + label),
+  story schema, structuring, refinement loop, canonical payload, and **GitHub as the first real
+  provider** — full loop: trigger → draft → linked issue created. Phases 2 + 3 + 4(GitHub).
 - **R2 — `feat/user-story-ingestion-61`:** Phase 1 — feedback/ticket parsing (recurring
   pain-point extraction) and context retrieval.
 - **R3 — `feat/user-story-backlog-61`:** Phase 4 — live platform-agnostic backlog push,

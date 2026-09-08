@@ -55,7 +55,8 @@
     "Nfrs",
     "NFR",
     "SDLC",
-    "clarif"
+    "clarif",
+    "testably"
   ],
   "ignorePaths": [
     "node_modules/**",
