@@ -194,6 +194,22 @@ describe("PR Reviewer Agent - TDD Tests", () => {
       expect(parseInt(maxTokens![1], 10)).toBeGreaterThanOrEqual(4000);
     });
 
+    // Regression: documentation dominated the diff (a single 70KB plan file
+    // pushed one PR past 100KB), the reasoning model exhausted its budget and
+    // returned null content. Docs have no code-review value — strip them.
+    it("strips documentation files before sending the diff for review", () => {
+      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
+      const content = fs.readFileSync(scriptPath, "utf8");
+
+      expect(content).toMatch(/stripDocsFromDiff\(/);
+      // The real source line is "/(^|\/)\.hermes\/plans\//i" — assert the
+      // plan-directory rule exists without over-specifying escaping.
+      expect(content).toMatch(/hermes\\?\/.*plans/);
+      expect(content).toMatch(/\.mdx\?/);
+      // Must feed the stripped diff into the truncation step, not the raw one.
+      expect(content).toMatch(/truncateDiff\(\s*codeDiff/);
+    });
+
     it("should distinguish a null-content response from a malformed one", () => {
       const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
       const content = fs.readFileSync(scriptPath, "utf8");

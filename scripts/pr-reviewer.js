@@ -71,6 +71,52 @@ try {
   process.exit(1);
 }
 
+// Documentation has no review value for a code reviewer, and it dominates
+// large diffs: a single 70KB markdown plan pushed one PR past 100KB, which
+// made the reasoning model exhaust its token budget and return null content.
+// Drop documentation-only files before spending any of that budget.
+const NON_CODE_PATTERNS = [
+  /\.mdx?$/i,
+  /(^|\/)docs?\//i,
+  /(^|\/)LICENSE(\.md)?$/i,
+  /(^|\/)\.hermes\/plans\//i,
+];
+
+function stripDocsFromDiff(diff) {
+  const parts = diff.split(/(?=^diff --git )/m);
+  const kept = [];
+  const removedFiles = [];
+  for (const part of parts) {
+    if (!part.trim()) continue;
+    const match = part.match(/^diff --git a\/(.+?) b\//m);
+    const filePath = match ? match[1] : "";
+    if (filePath && NON_CODE_PATTERNS.some((p) => p.test(filePath))) {
+      removedFiles.push(filePath);
+      continue;
+    }
+    kept.push(part);
+  }
+  const stripped = kept.join("");
+  return {
+    diff: stripped,
+    removedBytes: diff.length - stripped.length,
+    removedFiles,
+  };
+}
+
+const {
+  diff: codeDiff,
+  removedBytes,
+  removedFiles,
+} = stripDocsFromDiff(prDiff);
+
+if (removedFiles.length > 0) {
+  console.log(
+    `Excluded ${removedFiles.length} documentation file(s) from review ` +
+      `(${removedBytes} bytes): ${removedFiles.join(", ")}`,
+  );
+}
+
 // Reasoning models (deepseek-v4-pro) spend `max_tokens` on a separate
 // `reasoning` field before emitting any answer. A large diff makes them
 // exhaust that budget, so `content` comes back null on an HTTP 200 and the
@@ -93,11 +139,11 @@ const {
   diff: reviewDiff,
   truncated,
   omitted,
-} = truncateDiff(prDiff, MAX_DIFF_CHARS);
+} = truncateDiff(codeDiff, MAX_DIFF_CHARS);
 
 if (truncated) {
   console.log(
-    `Diff truncated for review: ${prDiff.length} -> ${reviewDiff.length} chars (${omitted} omitted)`,
+    `Diff truncated for review: ${codeDiff.length} -> ${reviewDiff.length} chars (${omitted} omitted)`,
   );
 }
 
@@ -126,8 +172,12 @@ try {
           {
             role: "user",
             content: `Please review the following diff and provide your feedback with specific line number citations:${
+              removedFiles.length > 0
+                ? `\n\nNote: ${removedFiles.length} documentation file(s) were excluded (${removedFiles.join(", ")}).`
+                : ""
+            }${
               truncated
-                ? `\n\nNote: this diff was truncated to ${reviewDiff.length} of ${prDiff.length} characters (${omitted} omitted). Review what is shown; do not speculate about the omitted part.`
+                ? `\n\nNote: this diff was truncated to ${reviewDiff.length} of ${codeDiff.length} characters (${omitted} omitted). Review what is shown; do not speculate about the omitted part.`
                 : ""
             }\n\n\`\`\`diff\n${sanitizedPrDiff}\n\`\`\``,
           },
