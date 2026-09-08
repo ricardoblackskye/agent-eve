@@ -71,8 +71,38 @@ try {
   process.exit(1);
 }
 
+// Reasoning models (deepseek-v4-pro) spend `max_tokens` on a separate
+// `reasoning` field before emitting any answer. A large diff makes them
+// exhaust that budget, so `content` comes back null on an HTTP 200 and the
+// review silently degrades to the structural fallback. Cap the prompt instead
+// of raising max_tokens forever: measure the budget in characters here, and
+// keep the plan/doc noise out of a code review.
+const MAX_DIFF_CHARS = Number(process.env.PR_REVIEW_MAX_DIFF_CHARS) || 20000;
+
+function truncateDiff(diff, maxChars) {
+  if (diff.length <= maxChars) return { diff, truncated: false, omitted: 0 };
+
+  const kept = diff.slice(0, maxChars);
+  // Cut on a line boundary so the model never sees a half-written hunk.
+  const lastBreak = kept.lastIndexOf("\n");
+  const cut = lastBreak > 0 ? kept.slice(0, lastBreak) : kept;
+  return { diff: cut, truncated: true, omitted: diff.length - cut.length };
+}
+
+const {
+  diff: reviewDiff,
+  truncated,
+  omitted,
+} = truncateDiff(prDiff, MAX_DIFF_CHARS);
+
+if (truncated) {
+  console.log(
+    `Diff truncated for review: ${prDiff.length} -> ${reviewDiff.length} chars (${omitted} omitted)`,
+  );
+}
+
 // Sanitize PR diff to prevent prompt injection (escape backticks)
-const sanitizedPrDiff = prDiff.replace(/`/g, "\\`");
+const sanitizedPrDiff = reviewDiff.replace(/`/g, "\\`");
 
 // Call OpenRouter API to generate review, with fallback for rate limits
 let review;
@@ -95,7 +125,11 @@ try {
           },
           {
             role: "user",
-            content: `Please review the following diff and provide your feedback with specific line number citations:\n\n\`\`\`diff\n${sanitizedPrDiff}\n\`\`\``,
+            content: `Please review the following diff and provide your feedback with specific line number citations:${
+              truncated
+                ? `\n\nNote: this diff was truncated to ${reviewDiff.length} of ${prDiff.length} characters (${omitted} omitted). Review what is shown; do not speculate about the omitted part.`
+                : ""
+            }\n\n\`\`\`diff\n${sanitizedPrDiff}\n\`\`\``,
           },
         ],
         temperature: 0.2,
@@ -183,14 +217,6 @@ function generateFallbackReview(number, owner, repo, diff) {
     "",
     "Please address the above items and request a re-review once the AI model is available.",
   ].join("\n");
-}
-
-// Handle large diffs by truncating if necessary (though we already sent the full diff,
-// we could add a note if it was very large)
-if (prDiff.length > 100000) {
-  console.log(
-    `Warning: PR diff was large (${prDiff.length} bytes), consider implementing summarization for very large PRs`,
-  );
 }
 
 // Post the review as a comment on the PR

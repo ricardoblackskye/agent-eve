@@ -243,6 +243,26 @@ describe("PR Reviewer Agent - TDD Tests", () => {
         /maxDiffLength|truncate|substring|\.length\s*>\s*\d+/,
       );
     });
+
+    // Regression: the previous "large diff" guard was a console.log placed
+    // AFTER the API call — it never truncated anything, so a regex-only test
+    // passed while real reviews failed. Assert the cap is actually applied to
+    // what gets sent, not merely mentioned.
+    it("truncates the diff BEFORE sending it to the model", async () => {
+      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
+      const source = fs.readFileSync(scriptPath, "utf8");
+
+      // The sanitized diff that reaches the prompt must derive from a
+      // truncated value, not the raw diff.
+      expect(source).toMatch(/sanitizedPrDiff\s*=\s*reviewDiff\.replace/);
+      expect(source).toMatch(/truncateDiff\(/);
+      // And the cap must be small enough to leave room for reasoning tokens.
+      const cap = source.match(
+        /MAX_DIFF_CHARS\s*=\s*Number\([^)]*\)\s*\|\|\s*(\d+)/,
+      );
+      expect(cap).not.toBeNull();
+      expect(parseInt(cap![1], 10)).toBeLessThanOrEqual(20000);
+    });
   });
 
   describe("Test File (tests/pr-reviewer.test.ts)", () => {
