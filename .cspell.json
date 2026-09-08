@@ -56,7 +56,9 @@
     "NFR",
     "SDLC",
     "clarif",
-    "testably"
+    "testably",
+    "serialised",
+    "serialises"
   ],
   "ignorePaths": [
     "node_modules/**",

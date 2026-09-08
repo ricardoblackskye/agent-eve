@@ -1,5 +1,6 @@
 import { defineEval } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
+import { canSign, signPayload, signingSecret } from "./helpers/sign";
 
 export default defineEval({
   description: "Verifies the GitHub webhook handler is operational.",
@@ -38,7 +39,10 @@ export default defineEval({
         "content-type": "application/json",
         "x-github-event": "pull_request",
       },
-      body: JSON.stringify({ action: "opened", repository: { full_name: "test/repo" } }),
+      body: JSON.stringify({
+        action: "opened",
+        repository: { full_name: "test/repo" },
+      }),
     });
     const badData = await badResponse.json();
     t.check(
@@ -49,26 +53,37 @@ export default defineEval({
       ),
     );
 
-    // Test valid PR event triggers Eve API call (via response envelope)
+    // Test valid PR event triggers Eve API call (via response envelope).
+    // Production rejects unsigned webhooks with 401 by design, so sign the
+    // request when a signing secret is available. Without one (local `eve
+    // eval`, CI without the secret) skip rather than assert insecure behaviour.
+    if (!canSign()) {
+      t.succeeded();
+      return;
+    }
+
+    const validPrBody = JSON.stringify({
+      action: "opened",
+      pull_request: {
+        number: 1,
+        title: "Test PR",
+        body: "Test body",
+        html_url: "https://github.com/test/repo/pull/1",
+        labels: [],
+        base: { ref: "main" },
+        head: { ref: "feat/test" },
+      },
+      repository: { full_name: "test/repo" },
+    });
+
     const prResponse = await t.target.fetch("/api/github/webhook", {
       method: "POST",
       headers: {
         "content-type": "application/json",
         "x-github-event": "pull_request",
+        "x-hub-signature-256": signPayload(validPrBody, signingSecret()!),
       },
-      body: JSON.stringify({
-        action: "opened",
-        pull_request: {
-          number: 1,
-          title: "Test PR",
-          body: "Test body",
-          html_url: "https://github.com/test/repo/pull/1",
-          labels: [],
-          base: { ref: "main" },
-          head: { ref: "feat/test" },
-        },
-        repository: { full_name: "test/repo" },
-      }),
+      body: validPrBody,
     });
     const prData = await prResponse.json();
     t.check(
