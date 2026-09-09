@@ -6,6 +6,10 @@
 
 - [PR #84]: R1 user-story generation loop (Product Owner subagent) — implements a Product Owner subagent that drafts structured, AI-ready user stories from GitHub issues and creates linked story issues when the request is clear; includes deterministic, unit-tested core libraries (story-schema.ts with Zod schema and NFR defaults, story-refinement.ts with gap detection) mirroring the existing pr-reviewer/release-manager subagent pattern (Issue #61)
 
+### Bug Fixes
+
+- [PR #88]: Fix token-scope probe to accept public_repo scope for issue creation on public repos — the probe only accepted repo/issues:write, incorrectly rejecting GH_RELEASE_TOKEN with public_repo scope; public_repo is sufficient for issue/PR comment writes on public repositories per GitHub community guidance; includes regression tests covering public_repo, repo, issues:write, and write:discussion-only scopes
+
 ## v0.1.2 (2026-08-27)
 
 ### Bug Fixes
