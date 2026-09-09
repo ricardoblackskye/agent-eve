@@ -7,7 +7,7 @@ const openrouter = createOpenAI({
   name: "openrouter",
 });
 
-const DEFAULT_MODEL = "nvidia/nemotron-3-ultra-550b-a55b:free";
+const DEFAULT_MODEL = "deepseek/deepseek-v4-pro";
 
 export default defineAgent({
   description:

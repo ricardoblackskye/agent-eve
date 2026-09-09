@@ -20,6 +20,12 @@ describe("product-owner subagent", () => {
     expect(src).toMatch(/MODEL_NAME/);
   });
 
+  it("defaults to deepseek-v4-pro (not the retired nemotron free model)", () => {
+    const src = fs.readFileSync(path.join(dir, "agent.ts"), "utf8");
+    expect(src).toContain("deepseek/deepseek-v4-pro");
+    expect(src).not.toContain("nemotron");
+  });
+
   it("has instructions covering all five story sections", () => {
     const src = fs
       .readFileSync(path.join(dir, "instructions.md"), "utf8")
