@@ -38,6 +38,8 @@ export interface PublishResult {
   mode: "dry-run" | "live";
   providerId: string;
   url?: string;
+  /** The id/number of the newly created item (e.g. GitHub issue number). */
+  issueNumber?: number;
   error?: string;
 }
 
@@ -150,6 +152,7 @@ class GitHubProvider implements BacklogProvider {
         mode: "live",
         providerId: this.id,
         url: data.html_url,
+        issueNumber: data.number,
       };
     } catch (err) {
       return {
@@ -223,9 +226,6 @@ export async function checkGitHubTokenScope(): Promise<{
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean);
-    // `repo` (classic, private+public), `public_repo` (classic, public only),
-    // and `issues: write` (fine-grained) all confer issue write access.
-    // agent-eve is a public repo, so `public_repo` is sufficient here.
     const hasIssuesWrite = scopes.some((s) =>
       /^(issues: write|repo|public_repo|write:org)$/i.test(s),
     );

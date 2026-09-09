@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   toCanonicalPayload,
   getProvider,
@@ -50,5 +50,39 @@ describe("getProvider", () => {
       toCanonicalPayload(story),
     );
     expect(res.delivered).toBe(false);
+  });
+});
+
+describe("GitHubProvider.publish", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+    delete process.env.GH_STORY_TOKEN;
+    delete process.env.GH_RELEASE_TOKEN;
+    delete process.env.GITHUB_TOKEN;
+  });
+
+  it("returns the created issue number on success", async () => {
+    process.env.GH_STORY_TOKEN = "tok";
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 201,
+      json: async () => ({
+        number: 991,
+        html_url: "https://github.com/ricardoblackskye/agent-eve/issues/991",
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const provider = getProvider("github");
+    const result = await provider.publish({
+      ...toCanonicalPayload(story),
+      sourceIssueNumber: 85,
+    });
+
+    expect(result.delivered).toBe(true);
+    expect((result as unknown as { issueNumber?: number }).issueNumber).toBe(
+      991,
+    );
   });
 });
