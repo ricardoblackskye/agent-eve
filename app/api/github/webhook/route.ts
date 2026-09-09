@@ -323,8 +323,13 @@ async function handler(request: NextRequest) {
       `Issue #${issue?.number} (${action}): ${issue?.title}`,
       issue?.body ? `Description: ${issue.body.slice(0, 2000)}` : "",
       ``,
-      `Reply to this issue by drafting a structured user story and, once complete, ` +
-        `creating a linked story issue on GitHub. The originating issue number is ${issue?.number}.`,
+      `Steps:`,
+      `1. Call draft_user_story with the request above.`,
+      `2. If it returns status "needs_clarification", call comment_questions with ` +
+        `owner "${owner}", repo "${repo}", issueNumber ${issue?.number}, and the questions — then STOP.`,
+      `3. If it returns status "complete", call publish_story with ` +
+        `provider: "github", sourceIssueNumber: ${issue?.number}, and the returned payload ` +
+        `so a linked [Story] issue is created on GitHub. Do NOT use the console dry-run default.`,
     ]
       .filter(Boolean)
       .join("\n");
