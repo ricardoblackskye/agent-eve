@@ -61,7 +61,11 @@
     "serialises",
     "summarise",
     "summarises",
-    "defences"
+    "defences",
+    "defence",
+    "recognised",
+    "sanitised",
+    "DOSOMETHINGBAD"
   ],
   "ignorePaths": [
     "node_modules/**",
