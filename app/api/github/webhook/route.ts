@@ -332,8 +332,7 @@ async function handler(request: NextRequest) {
     const body = (issue?.body || "").slice(0, 2000);
 
     const message = [
-      `You are the Product Owner subagent. Draft a structured user story from the ` +
-        `GitHub issue described below.`,
+      `A GitHub issue has been labeled "needs-story". Please delegate to the Product Owner subagent to draft a structured user story from it.`,
       ``,
       `Repository (verified identifier): ${owner}/${repo}`,
       `Issue number (verified identifier): ${issueNumber}`,
@@ -348,7 +347,7 @@ ${body}`
         : `(no description provided)`,
       `<<< END USER-SUPPLIED ISSUE DATA >>>`,
       ``,
-      `Steps:`,
+      `The Product Owner subagent will:`,
       `1. Call draft_user_story with the request above.`,
       `2. If it returns status "needs_clarification", call comment_questions with ` +
         `owner "${owner}", repo "${repo}", issueNumber ${issueNumber}, and the questions - then STOP.`,
