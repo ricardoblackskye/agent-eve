@@ -7,6 +7,11 @@ import { z } from "zod";
  * The product-owner workflow is: draft → if needs_clarification, comment the
  * questions on the *source* issue and wait. This tool performs the comment and
  * returns a marker so the agent knows not to create a story issue in this run.
+ *
+ * Phase 3 hardening: before posting, the tool lists the issue's existing
+ * comments and, if an earlier comment already contains every question (so a
+ * requester re-applied `needs-story` while unanswered questions are still up),
+ * it skips the duplicate post and returns `duplicate: true`.
  */
 export default defineTool({
   description:
@@ -44,6 +49,8 @@ export default defineTool({
       };
     }
 
+    const base = `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}`;
+
     const body = [
       "👋 Thanks for the request! Before I can turn this into a structured user story, I need a few clarifications:",
       "",
@@ -53,19 +60,39 @@ export default defineTool({
     ].join("\n");
 
     try {
-      const res = await fetch(
-        `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/comments`,
-        {
-          method: "POST",
-          headers: {
-            authorization: `Bearer ${token}`,
-            accept: "application/vnd.github+json",
-            "content-type": "application/json",
-            "x-github-api-version": "2022-11-28",
-          },
-          body: JSON.stringify({ body }),
+      // Phase 3: skip if these exact questions are already posted.
+      const listRes = await fetch(`${base}/comments`, {
+        method: "GET",
+        headers: {
+          authorization: `Bearer ${token}`,
+          accept: "application/vnd.github+json",
+          "x-github-api-version": "2022-11-28",
         },
-      );
+      });
+      if (listRes.ok) {
+        const existing = (await listRes.json()) as Array<{ body?: string }>;
+        const normalizedQuestions = questions.map((q) =>
+          q.trim().toLowerCase(),
+        );
+        const isDuplicate = existing.some((c) => {
+          const commentBody = (c.body || "").toLowerCase();
+          return normalizedQuestions.every((q) => commentBody.includes(q));
+        });
+        if (isDuplicate) {
+          return { commented: false, duplicate: true, issueNumber };
+        }
+      }
+
+      const res = await fetch(`${base}/comments`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${token}`,
+          accept: "application/vnd.github+json",
+          "content-type": "application/json",
+          "x-github-api-version": "2022-11-28",
+        },
+        body: JSON.stringify({ body }),
+      });
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
