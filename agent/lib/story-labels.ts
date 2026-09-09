@@ -2,7 +2,7 @@ export const TRIGGER_LABEL = "needs-story";
 export const DONE_LABEL = "user-story-added";
 
 /**
- * Compute the label choreography for finalising a user-story pipeline run.
+ * Compute the label choreography for finalizing a user-story pipeline run.
  *
  * On a successful publish we remove the trigger label (`needs-story`) and add
  * the completion label (`user-story-added`). On a non-success state (e.g. the

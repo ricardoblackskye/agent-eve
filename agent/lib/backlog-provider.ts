@@ -70,7 +70,7 @@ function githubConfiguredToken(): string | undefined {
  * opts in. Requires `issues: write` scope on the token; a 403 is reported with
  * an explicit scope message rather than swallowed.
  *
- * Phase 4: after a successful create, the provider also finalises the *source*
+ * Phase 4: after a successful create, the provider also finalizes the *source*
  * issue — posts a cross-reference comment (the observable parent→child link),
  * adds `user-story-added`, and removes `needs-story` — using the deterministic
  * `finalizeLabels` helper. These mutations are best-effort; any failure is
