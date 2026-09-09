@@ -1,5 +1,5 @@
 import type { UserStory } from "./story-schema";
-import { finalizeLabels, TRIGGER_LABEL } from "./story-labels";
+import { finalizeLabels } from "./story-labels";
 
 /**
  * Platform-agnostic backlog provider seam.
@@ -72,9 +72,11 @@ function githubConfiguredToken(): string | undefined {
  *
  * Phase 4: after a successful create, the provider also finalizes the *source*
  * issue — posts a cross-reference comment (the observable parent→child link),
- * adds `user-story-added`, and removes `needs-story` — using the deterministic
- * `finalizeLabels` helper. These mutations are best-effort; any failure is
- * surfaced in `warnings` rather than silently swallowed.
+ * adds `user-story-added`, and removes `needs-story`. Finalization is
+ * idempotent: the child-link comment is skipped if one already references the
+ * story, and deleting an already-absent label (404) is treated as success
+ * rather than a warning, so a retry never piles up duplicate comments or
+ * spurious errors.
  */
 class GitHubProvider implements BacklogProvider {
   id = GITHUB_PROVIDER_ID;
@@ -163,7 +165,7 @@ class GitHubProvider implements BacklogProvider {
       let labelTransitions: { add: string[]; remove: string[] } | undefined;
 
       if (payload.sourceIssueNumber) {
-        labelTransitions = finalizeLabels([TRIGGER_LABEL], { success: true });
+        labelTransitions = finalizeLabels({ success: true });
         await this.finalizeSourceIssue(
           token,
           owner,
@@ -211,25 +213,27 @@ class GitHubProvider implements BacklogProvider {
       "x-github-api-version": "2022-11-28",
     };
 
-    // 1. Cross-reference comment (the observable parent→child link).
-    try {
-      const commentRes = await fetch(`${base}/comments`, {
-        method: "POST",
-        headers: authHeaders,
-        body: JSON.stringify({
-          body: `📄 User story generated for this issue: ${storyUrl}`,
-        }),
-      });
-      if (!commentRes.ok) {
-        warnings.push(`child-link comment failed (${commentRes.status})`);
+    // 1. Cross-reference comment (the observable parent→child link), idempotent:
+    //    skip the POST when a comment already references the story URL.
+    const childLinkBody = `📄 User story generated for this issue: ${storyUrl}`;
+    if (!(await this.hasComment(token, base, storyUrl))) {
+      try {
+        const commentRes = await fetch(`${base}/comments`, {
+          method: "POST",
+          headers: authHeaders,
+          body: JSON.stringify({ body: childLinkBody }),
+        });
+        if (!commentRes.ok) {
+          warnings.push(`child-link comment failed (${commentRes.status})`);
+        }
+      } catch (err) {
+        warnings.push(
+          `child-link comment failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
       }
-    } catch (err) {
-      warnings.push(
-        `child-link comment failed: ${err instanceof Error ? err.message : String(err)}`,
-      );
     }
 
-    // 2. Add the completion label(s).
+    // 2. Add the completion label(s) — POST is a no-op if already present.
     for (const label of transitions.add) {
       try {
         const addRes = await fetch(`${base}/labels`, {
@@ -247,14 +251,18 @@ class GitHubProvider implements BacklogProvider {
       }
     }
 
-    // 3. Remove the trigger label(s).
+    // 3. Remove the trigger label(s). A 404 means the label is already gone,
+    //    which is the desired end state — treat it as success, not a warning.
     for (const label of transitions.remove) {
       try {
-        const delRes = await fetch(`${base}/labels/${encodeURIComponent(label)}`, {
-          method: "DELETE",
-          headers: authHeaders,
-        });
-        if (!delRes.ok) {
+        const delRes = await fetch(
+          `${base}/labels/${encodeURIComponent(label)}`,
+          {
+            method: "DELETE",
+            headers: authHeaders,
+          },
+        );
+        if (!delRes.ok && delRes.status !== 404) {
           warnings.push(`remove label '${label}' failed (${delRes.status})`);
         }
       } catch (err) {
@@ -262,6 +270,33 @@ class GitHubProvider implements BacklogProvider {
           `remove label '${label}' failed: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
+    }
+  }
+
+  private async hasComment(
+    token: string,
+    base: string,
+    marker: string,
+  ): Promise<boolean> {
+    try {
+      const res = await fetch(`${base}/comments`, {
+        method: "GET",
+        headers: {
+          authorization: `Bearer ${token}`,
+          accept: "application/vnd.github+json",
+          "x-github-api-version": "2022-11-28",
+        },
+      });
+      if (!res.ok) return false;
+      const comments = (await res.json()) as Array<{ body?: string }>;
+      const needle = marker.trim().toLowerCase();
+      return comments.some((c) =>
+        (c.body || "").trim().toLowerCase().includes(needle),
+      );
+    } catch {
+      // Can't confirm; return false so the caller still attempts the comment
+      // (best-effort — the duplicate guard is an optimization, not a hard gate).
+      return false;
     }
   }
 }
