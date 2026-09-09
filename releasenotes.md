@@ -4,6 +4,7 @@
 
 ### Features
 
+- [PR #90]: Further refinement of the backlog creation process — enhances the story refinement pipeline with improved backlog generation workflows and better integration with the Product Owner subagent (Issue #61)
 - [PR #84]: R1 user-story generation loop (Product Owner subagent) — implements a Product Owner subagent that drafts structured, AI-ready user stories from GitHub issues and creates linked story issues when the request is clear; includes deterministic, unit-tested core libraries (story-schema.ts with Zod schema and NFR defaults, story-refinement.ts with gap detection) mirroring the existing pr-reviewer/release-manager subagent pattern (Issue #61)
 
 ### Bug Fixes
