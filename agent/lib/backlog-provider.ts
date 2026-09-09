@@ -223,8 +223,11 @@ export async function checkGitHubTokenScope(): Promise<{
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean);
+    // `repo` (classic, private+public), `public_repo` (classic, public only),
+    // and `issues: write` (fine-grained) all confer issue write access.
+    // agent-eve is a public repo, so `public_repo` is sufficient here.
     const hasIssuesWrite = scopes.some((s) =>
-      /^(issues: write|repo|write:org)$/i.test(s),
+      /^(issues: write|repo|public_repo|write:org)$/i.test(s),
     );
     if (!res.ok) {
       return { ok: false, scopes, error: `token rejected (${res.status})` };
