@@ -85,4 +85,55 @@ describe("GitHubProvider.publish", () => {
       991,
     );
   });
+
+  it("links the child story and transitions labels on the source issue", async () => {
+    process.env.GH_STORY_TOKEN = "tok";
+    const calls: Array<{ url: string; method: string }> = [];
+    const fetchMock = vi.fn(async (url: string, init?: { method?: string }) => {
+      const method = init?.method || "GET";
+      calls.push({ url: String(url), method });
+      if (String(url).endsWith("/issues") && method === "POST") {
+        return {
+          ok: true,
+          status: 201,
+          json: async () => ({
+            number: 991,
+            html_url:
+              "https://github.com/ricardoblackskye/agent-eve/issues/991",
+          }),
+        };
+      }
+      return { ok: true, status: 200, json: async () => ({}) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const provider = getProvider("github");
+    const result = await provider.publish({
+      ...toCanonicalPayload(story),
+      sourceIssueNumber: 85,
+    });
+
+    expect(result.delivered).toBe(true);
+    const r = result as unknown as {
+      issueNumber?: number;
+      labelTransitions?: { add: string[]; remove: string[] };
+    };
+    expect(r.issueNumber).toBe(991);
+    expect(r.labelTransitions).toEqual({
+      add: ["user-story-added"],
+      remove: ["needs-story"],
+    });
+
+    const urls = calls.map((c) => c.url);
+    // create
+    expect(urls.some((u) => u.endsWith("/issues"))).toBe(true);
+    // child-link comment on source
+    expect(urls.some((u) => u.endsWith("/issues/85/comments"))).toBe(true);
+    // add user-story-added label
+    expect(urls.some((u) => u.endsWith("/issues/85/labels"))).toBe(true);
+    // remove needs-story label
+    expect(urls.some((u) => u.endsWith("/issues/85/labels/needs-story"))).toBe(
+      true,
+    );
+  });
 });

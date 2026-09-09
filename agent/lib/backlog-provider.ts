@@ -1,4 +1,5 @@
 import type { UserStory } from "./story-schema";
+import { finalizeLabels, TRIGGER_LABEL } from "./story-labels";
 
 /**
  * Platform-agnostic backlog provider seam.
@@ -40,6 +41,10 @@ export interface PublishResult {
   url?: string;
   /** The id/number of the newly created item (e.g. GitHub issue number). */
   issueNumber?: number;
+  /** Labels applied/removed on the source issue after a successful publish. */
+  labelTransitions?: { add: string[]; remove: string[] };
+  /** Non-fatal transition failures surfaced so they are observable, not silent. */
+  warnings?: string[];
   error?: string;
 }
 
@@ -64,6 +69,12 @@ function githubConfiguredToken(): string | undefined {
  * default remains `console` (dry run) so nothing is created until the operator
  * opts in. Requires `issues: write` scope on the token; a 403 is reported with
  * an explicit scope message rather than swallowed.
+ *
+ * Phase 4: after a successful create, the provider also finalises the *source*
+ * issue — posts a cross-reference comment (the observable parent→child link),
+ * adds `user-story-added`, and removes `needs-story` — using the deterministic
+ * `finalizeLabels` helper. These mutations are best-effort; any failure is
+ * surfaced in `warnings` rather than silently swallowed.
  */
 class GitHubProvider implements BacklogProvider {
   id = GITHUB_PROVIDER_ID;
@@ -147,12 +158,31 @@ class GitHubProvider implements BacklogProvider {
       }
 
       const data = (await res.json()) as { html_url: string; number: number };
+
+      const warnings: string[] = [];
+      let labelTransitions: { add: string[]; remove: string[] } | undefined;
+
+      if (payload.sourceIssueNumber) {
+        labelTransitions = finalizeLabels([TRIGGER_LABEL], { success: true });
+        await this.finalizeSourceIssue(
+          token,
+          owner,
+          repo,
+          payload.sourceIssueNumber,
+          data.html_url,
+          labelTransitions,
+          warnings,
+        );
+      }
+
       return {
         delivered: true,
         mode: "live",
         providerId: this.id,
         url: data.html_url,
         issueNumber: data.number,
+        labelTransitions,
+        warnings: warnings.length ? warnings : undefined,
       };
     } catch (err) {
       return {
@@ -161,6 +191,77 @@ class GitHubProvider implements BacklogProvider {
         providerId: this.id,
         error: `Failed to create story issue: ${err instanceof Error ? err.message : String(err)}`,
       };
+    }
+  }
+
+  private async finalizeSourceIssue(
+    token: string,
+    owner: string,
+    repo: string,
+    sourceIssueNumber: number,
+    storyUrl: string,
+    transitions: { add: string[]; remove: string[] },
+    warnings: string[],
+  ): Promise<void> {
+    const base = `https://api.github.com/repos/${owner}/${repo}/issues/${sourceIssueNumber}`;
+    const authHeaders = {
+      authorization: `Bearer ${token}`,
+      accept: "application/vnd.github+json",
+      "content-type": "application/json",
+      "x-github-api-version": "2022-11-28",
+    };
+
+    // 1. Cross-reference comment (the observable parent→child link).
+    try {
+      const commentRes = await fetch(`${base}/comments`, {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          body: `📄 User story generated for this issue: ${storyUrl}`,
+        }),
+      });
+      if (!commentRes.ok) {
+        warnings.push(`child-link comment failed (${commentRes.status})`);
+      }
+    } catch (err) {
+      warnings.push(
+        `child-link comment failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
+    // 2. Add the completion label(s).
+    for (const label of transitions.add) {
+      try {
+        const addRes = await fetch(`${base}/labels`, {
+          method: "POST",
+          headers: authHeaders,
+          body: JSON.stringify({ labels: [label] }),
+        });
+        if (!addRes.ok) {
+          warnings.push(`add label '${label}' failed (${addRes.status})`);
+        }
+      } catch (err) {
+        warnings.push(
+          `add label '${label}' failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
+    // 3. Remove the trigger label(s).
+    for (const label of transitions.remove) {
+      try {
+        const delRes = await fetch(`${base}/labels/${encodeURIComponent(label)}`, {
+          method: "DELETE",
+          headers: authHeaders,
+        });
+        if (!delRes.ok) {
+          warnings.push(`remove label '${label}' failed (${delRes.status})`);
+        }
+      } catch (err) {
+        warnings.push(
+          `remove label '${label}' failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
     }
   }
 }
