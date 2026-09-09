@@ -58,7 +58,14 @@
     "clarif",
     "testably",
     "serialised",
-    "serialises"
+    "serialises",
+    "summarise",
+    "summarises",
+    "defences",
+    "defence",
+    "recognised",
+    "sanitised",
+    "DOSOMETHINGBAD"
   ],
   "ignorePaths": [
     "node_modules/**",
