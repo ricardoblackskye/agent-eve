@@ -5,10 +5,18 @@
 ### Features
 
 - [PR #90]: Further refinement of the backlog creation process — enhances the story refinement pipeline with improved backlog generation workflows and better integration with the Product Owner subagent (Issue #61)
+  - Phase 3 & 4 backlog integration: child-link comment posting on source issues when stories are generated
+  - Label transitions via `finalizeLabels` helper for Phase 4 workflow
+  - GitHub provider now returns created issue numbers and links child stories with label transitions
+  - Skip duplicate clarifying comments on re-apply (Phase 3 idempotency)
+  - Regression guards for no-re-trigger + `publish_story` surfacing
 - [PR #84]: R1 user-story generation loop (Product Owner subagent) — implements a Product Owner subagent that drafts structured, AI-ready user stories from GitHub issues and creates linked story issues when the request is clear; includes deterministic, unit-tested core libraries (story-schema.ts with Zod schema and NFR defaults, story-refinement.ts with gap detection) mirroring the existing pr-reviewer/release-manager subagent pattern (Issue #61)
 
 ### Bug Fixes
 
+- [PR #90]: Fixed product-owner subagent default model from retired nemotron to deepseek-v4-pro
+- [PR #90]: Fixed label transition logic — `finalizeLabels` now describes transitions rather than using hard-coded current labels
+- [PR #90]: Made finalization idempotent (avoids duplicate child-link comments)
 - [PR #88]: Fix token-scope probe to accept public_repo scope for issue creation on public repos — the probe only accepted repo/issues:write, incorrectly rejecting GH_RELEASE_TOKEN with public_repo scope; public_repo is sufficient for issue/PR comment writes on public repositories per GitHub community guidance; includes regression tests covering public_repo, repo, issues:write, and write:discussion-only scopes
 
 ## v0.1.2 (2026-08-27)
