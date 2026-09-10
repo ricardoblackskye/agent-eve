@@ -1,4 +1,5 @@
 import type { UserStory } from "./story-schema";
+import { finalizeLabels } from "./story-labels";
 
 /**
  * Platform-agnostic backlog provider seam.
@@ -38,6 +39,12 @@ export interface PublishResult {
   mode: "dry-run" | "live";
   providerId: string;
   url?: string;
+  /** The id/number of the newly created item (e.g. GitHub issue number). */
+  issueNumber?: number;
+  /** Labels applied/removed on the source issue after a successful publish. */
+  labelTransitions?: { add: string[]; remove: string[] };
+  /** Non-fatal transition failures surfaced so they are observable, not silent. */
+  warnings?: string[];
   error?: string;
 }
 
@@ -62,6 +69,14 @@ function githubConfiguredToken(): string | undefined {
  * default remains `console` (dry run) so nothing is created until the operator
  * opts in. Requires `issues: write` scope on the token; a 403 is reported with
  * an explicit scope message rather than swallowed.
+ *
+ * Phase 4: after a successful create, the provider also finalizes the *source*
+ * issue — posts a cross-reference comment (the observable parent→child link),
+ * adds `user-story-added`, and removes `needs-story`. Finalization is
+ * idempotent: the child-link comment is skipped if one already references the
+ * story, and deleting an already-absent label (404) is treated as success
+ * rather than a warning, so a retry never piles up duplicate comments or
+ * spurious errors.
  */
 class GitHubProvider implements BacklogProvider {
   id = GITHUB_PROVIDER_ID;
@@ -145,11 +160,31 @@ class GitHubProvider implements BacklogProvider {
       }
 
       const data = (await res.json()) as { html_url: string; number: number };
+
+      const warnings: string[] = [];
+      let labelTransitions: { add: string[]; remove: string[] } | undefined;
+
+      if (payload.sourceIssueNumber) {
+        labelTransitions = finalizeLabels({ success: true });
+        await this.finalizeSourceIssue(
+          token,
+          owner,
+          repo,
+          payload.sourceIssueNumber,
+          data.html_url,
+          labelTransitions,
+          warnings,
+        );
+      }
+
       return {
         delivered: true,
         mode: "live",
         providerId: this.id,
         url: data.html_url,
+        issueNumber: data.number,
+        labelTransitions,
+        warnings: warnings.length ? warnings : undefined,
       };
     } catch (err) {
       return {
@@ -158,6 +193,110 @@ class GitHubProvider implements BacklogProvider {
         providerId: this.id,
         error: `Failed to create story issue: ${err instanceof Error ? err.message : String(err)}`,
       };
+    }
+  }
+
+  private async finalizeSourceIssue(
+    token: string,
+    owner: string,
+    repo: string,
+    sourceIssueNumber: number,
+    storyUrl: string,
+    transitions: { add: string[]; remove: string[] },
+    warnings: string[],
+  ): Promise<void> {
+    const base = `https://api.github.com/repos/${owner}/${repo}/issues/${sourceIssueNumber}`;
+    const authHeaders = {
+      authorization: `Bearer ${token}`,
+      accept: "application/vnd.github+json",
+      "content-type": "application/json",
+      "x-github-api-version": "2022-11-28",
+    };
+
+    // 1. Cross-reference comment (the observable parent→child link), idempotent:
+    //    skip the POST when a comment already references the story URL.
+    const childLinkBody = `📄 User story generated for this issue: ${storyUrl}`;
+    if (!(await this.hasComment(token, base, storyUrl))) {
+      try {
+        const commentRes = await fetch(`${base}/comments`, {
+          method: "POST",
+          headers: authHeaders,
+          body: JSON.stringify({ body: childLinkBody }),
+        });
+        if (!commentRes.ok) {
+          warnings.push(`child-link comment failed (${commentRes.status})`);
+        }
+      } catch (err) {
+        warnings.push(
+          `child-link comment failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
+    // 2. Add the completion label(s) — POST is a no-op if already present.
+    for (const label of transitions.add) {
+      try {
+        const addRes = await fetch(`${base}/labels`, {
+          method: "POST",
+          headers: authHeaders,
+          body: JSON.stringify({ labels: [label] }),
+        });
+        if (!addRes.ok) {
+          warnings.push(`add label '${label}' failed (${addRes.status})`);
+        }
+      } catch (err) {
+        warnings.push(
+          `add label '${label}' failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
+    // 3. Remove the trigger label(s). A 404 means the label is already gone,
+    //    which is the desired end state — treat it as success, not a warning.
+    for (const label of transitions.remove) {
+      try {
+        const delRes = await fetch(
+          `${base}/labels/${encodeURIComponent(label)}`,
+          {
+            method: "DELETE",
+            headers: authHeaders,
+          },
+        );
+        if (!delRes.ok && delRes.status !== 404) {
+          warnings.push(`remove label '${label}' failed (${delRes.status})`);
+        }
+      } catch (err) {
+        warnings.push(
+          `remove label '${label}' failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+  }
+
+  private async hasComment(
+    token: string,
+    base: string,
+    marker: string,
+  ): Promise<boolean> {
+    try {
+      const res = await fetch(`${base}/comments`, {
+        method: "GET",
+        headers: {
+          authorization: `Bearer ${token}`,
+          accept: "application/vnd.github+json",
+          "x-github-api-version": "2022-11-28",
+        },
+      });
+      if (!res.ok) return false;
+      const comments = (await res.json()) as Array<{ body?: string }>;
+      const needle = marker.trim().toLowerCase();
+      return comments.some((c) =>
+        (c.body || "").trim().toLowerCase().includes(needle),
+      );
+    } catch {
+      // Can't confirm; return false so the caller still attempts the comment
+      // (best-effort — the duplicate guard is an optimization, not a hard gate).
+      return false;
     }
   }
 }
@@ -223,9 +362,6 @@ export async function checkGitHubTokenScope(): Promise<{
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean);
-    // `repo` (classic, private+public), `public_repo` (classic, public only),
-    // and `issues: write` (fine-grained) all confer issue write access.
-    // agent-eve is a public repo, so `public_repo` is sufficient here.
     const hasIssuesWrite = scopes.some((s) =>
       /^(issues: write|repo|public_repo|write:org)$/i.test(s),
     );

@@ -83,6 +83,20 @@ model: openrouter.chat("anthropic/claude-sonnet-5"), // OpenRouter model ID
 | `OPENROUTER_API_KEY` | Yes      | OpenRouter API key for model access                                                     |
 | `EVE_API_KEY`        | Yes      | Bearer token for production auth (sent as `Authorization: Bearer <EVE_API_KEY>` header) |
 
+### User Story Generation
+
+Label an issue `needs-story` (or mention `@eve-agent` in the body) and the
+Product Owner subagent drafts a structured `[Story]` issue. On a successful
+publish, the agent:
+
+- creates a new `[Story]` issue whose body links back to the source issue, and
+  posts a cross-reference comment on the source issue (the parent → child link);
+- removes the `needs-story` label from the source issue; and
+- applies the `user-story-added` label to the source issue.
+
+`user-story-added` does **not** re-trigger generation, so a publish completes
+without looping.
+
 ## Scripts
 
 | Command             | Description                            |

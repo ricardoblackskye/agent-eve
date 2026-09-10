@@ -78,4 +78,37 @@ describe("publish_story", () => {
     expect(r.delivered).toBe(false);
     expect(r.error).toMatch(/token/i);
   });
+
+  it("surfaces the provider's issue number and label transitions", async () => {
+    process.env.GH_STORY_TOKEN = "tok";
+    const fetchMock = vi.fn(async (url: string, init?: { method?: string }) => {
+      const method = init?.method || "GET";
+      const u = String(url);
+      if (u.endsWith("/issues") && method === "POST") {
+        return {
+          ok: true,
+          status: 201,
+          json: async () => ({
+            number: 991,
+            html_url:
+              "https://github.com/ricardoblackskye/agent-eve/issues/991",
+          }),
+        };
+      }
+      return { ok: true, status: 200, json: async () => ({}) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const r = await (tool.execute as any)(
+      { payload, provider: "github", sourceIssueNumber: 85 },
+      {} as any,
+    );
+
+    expect(r.delivered).toBe(true);
+    expect(r.issueNumber).toBe(991);
+    expect(r.labelTransitions).toEqual({
+      add: ["user-story-added"],
+      remove: ["needs-story"],
+    });
+  });
 });

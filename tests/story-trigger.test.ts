@@ -58,6 +58,16 @@ describe("isStoryTrigger", () => {
     ).toBe(true);
   });
 
+  it("does not re-trigger on the completion label user-story-added", () => {
+    expect(
+      isStoryTrigger({
+        action: "labeled",
+        issue: { ...basePayload.issue, labels: [{ name: "user-story-added" }] },
+        label: { name: "user-story-added" },
+      }),
+    ).toBe(false);
+  });
+
   it("does not fire on issues.closed", () => {
     expect(
       isStoryTrigger({
