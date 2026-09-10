@@ -23,39 +23,89 @@ const STORY_URL = "https://github.com/ricardoblackskye/agent-eve/issues/991";
 
 function stubFetch(opts: {
   existingComments?: Array<{ body?: string }>;
+  commentPages?: Array<Array<{ body?: string }>>;
   deleteLabelStatus?: number;
-}): { calls: Array<{ url: string; method: string }>; fetchMock: unknown } {
-  const calls: Array<{ url: string; method: string }> = [];
-  const fetchMock = vi.fn(async (url: string, init?: { method?: string }) => {
-    const method = init?.method || "GET";
-    const u = String(url);
-    calls.push({ url: u, method });
-    if (u.endsWith("/issues") && method === "POST") {
-      return {
-        ok: true,
-        status: 201,
-        json: async () => ({ number: 991, html_url: STORY_URL }),
-      };
-    }
-    if (u.endsWith("/issues/85/comments")) {
-      if (method === "GET") {
+  graphqlStatus?: number;
+  subIssuesTotalCount?: number;
+}): {
+  calls: Array<{ url: string; method: string; body?: unknown }>;
+  fetchMock: unknown;
+} {
+  const calls: Array<{ url: string; method: string; body?: unknown }> = [];
+  const fetchMock = vi.fn(
+    async (url: string, init?: { method?: string; body?: string }) => {
+      const method = init?.method || "GET";
+      const u = String(url);
+      let body: unknown;
+      try {
+        body = init?.body ? JSON.parse(init.body) : undefined;
+      } catch {
+        body = init?.body;
+      }
+      calls.push({ url: u, method, body });
+      if (u.endsWith("/issues") && method === "POST") {
+        return {
+          ok: true,
+          status: 201,
+          json: async () => ({
+            number: 991,
+            html_url: STORY_URL,
+            node_id: "child-node",
+          }),
+        };
+      }
+      if (u.endsWith("/issues/85") && method === "GET") {
         return {
           ok: true,
           status: 200,
-          json: async () => opts.existingComments ?? [],
+          json: async () => ({ node_id: "src-node" }),
         };
       }
-      return { ok: true, status: 201, json: async () => ({}) };
-    }
-    if (u.endsWith("/issues/85/labels") && method === "POST") {
+      if (u.endsWith("/graphql")) {
+        const status = opts.graphqlStatus ?? 200;
+        const query = (body as { query?: string } | undefined)?.query ?? "";
+        const resp = query.includes("totalCount")
+          ? {
+              data: {
+                node: {
+                  subIssues: { totalCount: opts.subIssuesTotalCount ?? 0 },
+                },
+              },
+            }
+          : { data: {} };
+        return { ok: status < 400, status, json: async () => resp };
+      }
+      if (u.includes("/issues/85/comments")) {
+        if (method === "GET") {
+          if (opts.commentPages) {
+            const page = Number.parseInt(
+              new URL(u).searchParams.get("page") || "1",
+              10,
+            );
+            return {
+              ok: true,
+              status: 200,
+              json: async () => opts.commentPages![page - 1] ?? [],
+            };
+          }
+          return {
+            ok: true,
+            status: 200,
+            json: async () => opts.existingComments ?? [],
+          };
+        }
+        return { ok: true, status: 201, json: async () => ({}) };
+      }
+      if (u.endsWith("/issues/85/labels") && method === "POST") {
+        return { ok: true, status: 200, json: async () => ({}) };
+      }
+      if (u.endsWith("/issues/85/labels/needs-story") && method === "DELETE") {
+        const status = opts.deleteLabelStatus ?? 200;
+        return { ok: status < 400, status, json: async () => ({}) };
+      }
       return { ok: true, status: 200, json: async () => ({}) };
-    }
-    if (u.endsWith("/issues/85/labels/needs-story") && method === "DELETE") {
-      const status = opts.deleteLabelStatus ?? 200;
-      return { ok: status < 400, status, json: async () => ({}) };
-    }
-    return { ok: true, status: 200, json: async () => ({}) };
-  });
+    },
+  );
   return { calls, fetchMock };
 }
 
@@ -146,19 +196,86 @@ describe("GitHubProvider.publish", () => {
     );
   });
 
-  it("does not post a duplicate child-link comment when one already exists", async () => {
+  it("links the source issue in the child body (cross-reference)", async () => {
+    const { result, calls } = await publish({});
+    expect(result.delivered).toBe(true);
+
+    const createCall = calls.find(
+      (c) => c.url.endsWith("/issues") && c.method === "POST",
+    );
+    const body = (createCall?.body as { body?: string } | undefined) ?? {};
+    expect(body.body).toContain(
+      "[#85](https://github.com/ricardoblackskye/agent-eve/issues/85)",
+    );
+  });
+
+  it("sets the source issue as the child's parent via GraphQL", async () => {
+    const { result, calls } = await publish({});
+    expect(result.delivered).toBe(true);
+
+    const gqlCall = calls.find(
+      (c) =>
+        c.url.endsWith("/graphql") &&
+        c.method === "POST" &&
+        ((c.body as { query?: string })?.query ?? "").includes("addSubIssue"),
+    );
+    expect(gqlCall).toBeDefined();
+    const gqlBody = gqlCall?.body as
+      | {
+          query?: string;
+          variables?: { issueId?: string; subIssueId?: string };
+        }
+      | undefined;
+    expect(gqlBody?.query).toContain("addSubIssue");
+    expect(gqlBody?.variables?.issueId).toBe("src-node");
+    expect(gqlBody?.variables?.subIssueId).toBe("child-node");
+  });
+
+  it("surfaces a warning (not a throw) when the parent-link GraphQL call fails", async () => {
+    const { result } = await publish({ graphqlStatus: 500 });
+    expect(result.delivered).toBe(true);
+    expect((result.warnings ?? []).some((w) => w.includes("parent-link"))).toBe(
+      true,
+    );
+  });
+
+  it("skips creation when the source already has sub-issues", async () => {
+    const { result, calls } = await publish({ subIssuesTotalCount: 1 });
+    expect(result.delivered).toBe(false);
+    expect((result as unknown as { duplicate?: boolean }).duplicate).toBe(true);
+    expect(
+      calls.filter((c) => c.url.endsWith("/issues") && c.method === "POST"),
+    ).toHaveLength(0);
+  });
+
+  it("catches a child-link comment beyond the first page of comments", async () => {
+    const page1 = Array.from({ length: 100 }, (_, i) => ({
+      body: `comment ${i}`,
+    }));
+    const page2 = [
+      { body: `📄 User story generated for this issue: ${STORY_URL}` },
+    ];
+    const { result, calls } = await publish({ commentPages: [page1, page2] });
+    expect(result.delivered).toBe(false);
+    expect((result as unknown as { duplicate?: boolean }).duplicate).toBe(true);
+    expect(
+      calls.filter((c) => c.url.endsWith("/issues") && c.method === "POST"),
+    ).toHaveLength(0);
+  });
+
+  it("skips creation when a child already exists (dedup)", async () => {
     const { result, calls } = await publish({
       existingComments: [
         { body: `📄 User story generated for this issue: ${STORY_URL}` },
       ],
     });
 
-    expect(result.delivered).toBe(true);
-    const commentPosts = calls.filter(
-      (c) => c.url.endsWith("/issues/85/comments") && c.method === "POST",
+    const createCalls = calls.filter(
+      (c) => c.url.endsWith("/issues") && c.method === "POST",
     );
-    expect(commentPosts).toHaveLength(0);
-    expect(result.warnings).toBeUndefined();
+    expect(createCalls).toHaveLength(0);
+    expect(result.delivered).toBe(false);
+    expect((result as unknown as { duplicate?: boolean }).duplicate).toBe(true);
   });
 
   it("treats an already-removed trigger label (404) as success, not a warning", async () => {
@@ -166,8 +283,8 @@ describe("GitHubProvider.publish", () => {
 
     expect(result.delivered).toBe(true);
     // No warning raised for the benign 404 on the trigger-label delete.
-    expect((result.warnings ?? []).filter((w) => w.includes("remove label"))).toHaveLength(
-      0,
-    );
+    expect(
+      (result.warnings ?? []).filter((w) => w.includes("remove label")),
+    ).toHaveLength(0);
   });
 });
