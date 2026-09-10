@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { renderMarkdown } from "../agent/lib/sprint-report";
+import { renderMarkdown, renderPdf } from "../agent/lib/sprint-report";
 import type { SprintMetrics } from "../agent/lib/sprint-metrics";
 
 const metrics: SprintMetrics = {
@@ -22,5 +22,14 @@ describe("renderMarkdown", () => {
     expect(md).toContain("| Done (throughput) | 2 |");
     expect(md).toContain("| Avg cycle time (days) | 3.0 |");
     expect(md).toContain("| Median cycle time (days) | 3.0 |");
+  });
+});
+
+describe("renderPdf", () => {
+  it("produces a PDF byte buffer with the expected header", async () => {
+    const bytes = await renderPdf("Sprint 9", metrics, "2026-09-10");
+    expect(bytes).toBeInstanceOf(Uint8Array);
+    expect(bytes.length).toBeGreaterThan(200);
+    expect(String.fromCharCode(...bytes.slice(0, 5))).toBe("%PDF-");
   });
 });

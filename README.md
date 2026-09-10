@@ -97,6 +97,16 @@ publish, the agent:
 `user-story-added` does **not** re-trigger generation, so a publish completes
 without looping.
 
+### Sprint Metrics Report
+
+Label an issue `generate-sprint-report` and the Sprint Metrics Analyst subagent
+reads the GitHub Kanban board (Projects V2) and generates a report with cycle
+time, throughput, and work-in-progress. It writes the report into `reports/` as
+Markdown and PDF, and posts a linking comment on the issue. Requires a token with
+`read:project` scope (`GH_SPRINT_TOKEN`); the board defaults to user project
+`ricardoblackskye` #3, overridable via `SPRINT_PROJECT_OWNER` /
+`SPRINT_PROJECT_NUMBER`.
+
 ## Scripts
 
 | Command             | Description                            |

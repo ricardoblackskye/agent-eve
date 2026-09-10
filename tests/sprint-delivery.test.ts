@@ -4,7 +4,7 @@ import { deliverReport } from "../agent/lib/sprint-delivery";
 describe("deliverReport", () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it("writes the report into reports/ and posts a linking comment", async () => {
+  it("writes markdown and pdf into reports/ and posts a linking comment", async () => {
     const calls: Array<{ url: string; method: string; body: unknown }> = [];
     const fetchMock = vi.fn(
       async (url: string, init?: { method?: string; body?: string }) => {
@@ -16,25 +16,37 @@ describe("deliverReport", () => {
           body = init?.body;
         }
         calls.push({ url: String(url), method, body });
-        if (String(url).includes("/contents/reports/")) {
+        const u = String(url);
+        if (u.includes("/contents/reports/sprint-1.md")) {
           return {
             ok: true,
             status: 201,
             json: async () => ({
               content: {
                 html_url:
-                  "https://github.com/ricardoblackskye/agent-eve/blob/main/reports/sprint-1.md",
+                  "https://github.com/o/r/blob/main/reports/sprint-1.md",
               },
             }),
           };
         }
-        if (String(url).endsWith("/comments")) {
+        if (u.includes("/contents/reports/sprint-1.pdf")) {
           return {
             ok: true,
             status: 201,
             json: async () => ({
-              html_url:
-                "https://github.com/ricardoblackskye/agent-eve/issues/9#comment-1",
+              content: {
+                html_url:
+                  "https://github.com/o/r/blob/main/reports/sprint-1.pdf",
+              },
+            }),
+          };
+        }
+        if (u.endsWith("/comments")) {
+          return {
+            ok: true,
+            status: 201,
+            json: async () => ({
+              html_url: "https://github.com/o/r/issues/9#comment-1",
             }),
           };
         }
@@ -45,32 +57,30 @@ describe("deliverReport", () => {
 
     const result = await deliverReport({
       token: "tok",
-      owner: "ricardoblackskye",
-      repo: "agent-eve",
+      owner: "o",
+      repo: "r",
       issueNumber: 9,
-      filename: "sprint-1.md",
+      baseName: "sprint-1",
       markdown: "# Sprint Metrics Report\n\nhello",
+      pdf: new Uint8Array([1, 2, 3, 4]),
     });
 
-    expect(result.reportUrl).toContain("/reports/sprint-1.md");
-    expect(result.commentUrl).toContain("comment-1");
+    expect(result.reportUrl).toContain("sprint-1.md");
+    expect(result.reportPdfUrl).toContain("sprint-1.pdf");
 
-    const put = calls.find((c) =>
-      c.url.includes("/contents/reports/sprint-1.md"),
-    );
-    expect(put?.method).toBe("PUT");
-    const putBody = put?.body as { content?: string };
-    expect(typeof putBody.content).toBe("string"); // base64
+    const putUrls = calls.filter((c) => c.method === "PUT").map((c) => c.url);
+    expect(putUrls.some((u) => u.includes("sprint-1.md"))).toBe(true);
+    expect(putUrls.some((u) => u.includes("sprint-1.pdf"))).toBe(true);
 
     const comment = calls.find(
       (c) => c.url.includes("/issues/9/comments") && c.method === "POST",
     );
-    expect(comment).toBeDefined();
     const commentBody = (comment?.body as { body?: string })?.body ?? "";
-    expect(commentBody).toContain("reports/sprint-1.md");
+    expect(commentBody).toContain("sprint-1.md");
+    expect(commentBody).toContain("sprint-1.pdf");
   });
 
-  it("falls back to embedding the markdown when the file write fails", async () => {
+  it("embeds markdown inline when the file write fails", async () => {
     const calls: Array<{ url: string; body: unknown }> = [];
     vi.stubGlobal(
       "fetch",
@@ -88,7 +98,9 @@ describe("deliverReport", () => {
         return {
           ok: true,
           status: 201,
-          json: async () => ({ html_url: "https://...com/comment" }),
+          json: async () => ({
+            html_url: "https://github.com/o/r/issues/9#comment-1",
+          }),
         };
       }),
     );
@@ -98,7 +110,7 @@ describe("deliverReport", () => {
       owner: "o",
       repo: "r",
       issueNumber: 9,
-      filename: "sprint-1.md",
+      baseName: "sprint-1",
       markdown: "# Report\n\nbody",
     });
 
@@ -106,6 +118,6 @@ describe("deliverReport", () => {
     expect(result.commentUrl).toBeDefined();
     const comment = calls.find((c) => c.url.includes("/issues/9/comments"));
     const commentBody = (comment?.body as { body?: string })?.body ?? "";
-    expect(commentBody).toContain("body"); // markdown embedded inline
+    expect(commentBody).toContain("body");
   });
 });

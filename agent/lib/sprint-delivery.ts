@@ -5,12 +5,16 @@ export interface DeliverReportOptions {
   owner: string;
   repo: string;
   issueNumber: number;
-  filename: string;
+  /** Base filename without extension, e.g. "sprint-2026-09-10". */
+  baseName: string;
   markdown: string;
+  /** R2: optional PDF bytes, written to `reports/<baseName>.pdf`. */
+  pdf?: Uint8Array;
 }
 
 export interface DeliverReportResult {
   reportUrl?: string;
+  reportPdfUrl?: string;
   commentUrl?: string;
   warnings?: string[];
   error?: string;
@@ -23,46 +27,73 @@ const AUTH = (token: string) => ({
   "x-github-api-version": "2022-11-28",
 });
 
+async function writeReportFile(
+  token: string,
+  owner: string,
+  repo: string,
+  path: string,
+  base64Content: string,
+): Promise<{ url?: string; warning?: string }> {
+  try {
+    const res = await fetch(
+      `https://api.github.com/repos/${owner}/${repo}/contents/reports/${path}`,
+      {
+        method: "PUT",
+        headers: AUTH(token),
+        body: JSON.stringify({
+          message: `Add sprint metrics report ${path}`,
+          content: base64Content,
+        }),
+      },
+    );
+    if (res.ok) {
+      const data = (await res.json()) as { content?: { html_url?: string } };
+      return { url: data.content?.html_url };
+    }
+    return { warning: `report file write failed (${path}: ${res.status})` };
+  } catch (err) {
+    return {
+      warning: `report file write failed (${path}): ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+}
+
 /**
- * Deliver a rendered sprint report: write it into the `reports/` folder via the
- * contents API, then post a comment on the triggering issue linking to it (or
- * embedding the markdown inline as a fallback). Best-effort: a failed file write
- * or comment surfaces as a warning rather than throwing.
+ * Deliver a rendered sprint report: write the markdown (and optional PDF) into
+ * the `reports/` folder via the contents API, then post a linking comment on the
+ * triggering issue. Best-effort: failures surface as warnings, never throw.
  */
 export async function deliverReport(
   opts: DeliverReportOptions,
 ): Promise<DeliverReportResult> {
   const warnings: string[] = [];
-  let reportUrl: string | undefined;
+  const base = opts.baseName;
 
-  // 1. Commit the report into reports/.
-  try {
-    const putRes = await fetch(
-      `https://api.github.com/repos/${opts.owner}/${opts.repo}/contents/reports/${opts.filename}`,
-      {
-        method: "PUT",
-        headers: AUTH(opts.token),
-        body: JSON.stringify({
-          message: `Add sprint metrics report ${opts.filename}`,
-          content: Buffer.from(opts.markdown, "utf8").toString("base64"),
-        }),
-      },
+  const md = await writeReportFile(
+    opts.token,
+    opts.owner,
+    opts.repo,
+    `${base}.md`,
+    Buffer.from(opts.markdown, "utf8").toString("base64"),
+  );
+  if (md.warning) warnings.push(md.warning);
+
+  let reportPdfUrl: string | undefined;
+  if (opts.pdf) {
+    const pdf = await writeReportFile(
+      opts.token,
+      opts.owner,
+      opts.repo,
+      `${base}.pdf`,
+      Buffer.from(opts.pdf).toString("base64"),
     );
-    if (putRes.ok) {
-      const data = (await putRes.json()) as { content?: { html_url?: string } };
-      reportUrl = data.content?.html_url;
-    } else {
-      warnings.push(`report file write failed (${putRes.status})`);
-    }
-  } catch (err) {
-    warnings.push(
-      `report file write failed: ${err instanceof Error ? err.message : String(err)}`,
-    );
+    reportPdfUrl = pdf.url;
+    if (pdf.warning) warnings.push(pdf.warning);
   }
 
-  // 2. Post a comment linking to the report (or embedding the markdown).
-  const commentBody = reportUrl
-    ? `📊 Sprint metrics report generated.\n\n${reportUrl}`
+  const links = [md.url, reportPdfUrl].filter(Boolean) as string[];
+  const commentBody = links.length
+    ? `📊 Sprint metrics report generated.\n\n${links.join("\n\n")}`
     : `📊 Sprint metrics report generated:\n\n${opts.markdown}`;
 
   let commentUrl: string | undefined;
@@ -88,7 +119,8 @@ export async function deliverReport(
   }
 
   return {
-    reportUrl,
+    reportUrl: md.url,
+    reportPdfUrl,
     commentUrl,
     warnings: warnings.length ? warnings : undefined,
   };

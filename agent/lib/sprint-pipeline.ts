@@ -1,6 +1,6 @@
 import { fetchSprintBoard } from "./sprint-projects";
 import { computeSprintMetrics } from "./sprint-metrics";
-import { renderMarkdown } from "./sprint-report";
+import { renderMarkdown, renderPdf } from "./sprint-report";
 import { deliverReport } from "./sprint-delivery";
 
 export interface RunSprintReportOptions {
@@ -16,6 +16,7 @@ export interface RunSprintReportResult {
   delivered: boolean;
   projectTitle?: string;
   reportUrl?: string;
+  reportPdfUrl?: string;
   commentUrl?: string;
   metrics?: ReturnType<typeof computeSprintMetrics>;
   warnings?: string[];
@@ -43,21 +44,24 @@ export async function runSprintReport(
       metrics,
       generatedAt,
     );
-    const filename = `sprint-${generatedAt}.md`;
+    const pdf = await renderPdf(snapshot.projectTitle, metrics, generatedAt);
+    const baseName = `sprint-${generatedAt}`;
 
     const delivery = await deliverReport({
       token: opts.token,
       owner: opts.owner,
       repo: opts.repo,
       issueNumber: opts.issueNumber,
-      filename,
+      baseName,
       markdown,
+      pdf,
     });
 
     return {
       delivered: true,
       projectTitle: snapshot.projectTitle,
       reportUrl: delivery.reportUrl,
+      reportPdfUrl: delivery.reportPdfUrl,
       commentUrl: delivery.commentUrl,
       metrics,
       warnings: delivery.warnings,

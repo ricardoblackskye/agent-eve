@@ -41,12 +41,15 @@ function buildFetchMock(): {
       };
     }
     if (u.includes("/contents/reports/")) {
+      const isPdf = u.includes(".pdf");
       return {
         ok: true,
         status: 201,
         json: async () => ({
           content: {
-            html_url: "https://github.com/o/r/blob/main/reports/sprint-1.md",
+            html_url: `https://github.com/o/r/blob/main/reports/sprint-1.${
+              isPdf ? "pdf" : "md"
+            }`,
           },
         }),
       };
@@ -84,6 +87,7 @@ describe("runSprintReport", () => {
     expect(result.delivered).toBe(true);
     expect(result.projectTitle).toBe("Sprint 9");
     expect(result.reportUrl).toContain("/reports/sprint-");
+    expect(result.reportPdfUrl).toContain("/reports/sprint-");
     expect(result.commentUrl).toBeDefined();
   });
 
