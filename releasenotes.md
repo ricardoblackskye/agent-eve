@@ -1,5 +1,15 @@
 # Release Notes
 
+## v0.2.2 (2026-08-30)
+
+### Features
+
+- [PR #98]: feat(story): Add parent-link to generated story issues — when creating a new `[Story]` issue, the GitHub provider now adds a parent link back to the source issue in the story issue's body, providing bidirectional traceability between the feature request and the generated story (Issue #61)
+
+### Bug Fixes
+
+- [PR #98]: fix(story): Option B dedup guard prevents duplicate story creation — before creating a `[Story]` issue, the GitHub provider now checks the source issue's comments for an existing `📄 User story generated…` marker and skips creation (returns `duplicate: true`) if one is found; closes the gap Option A left where a partial-failure run that created a child but never applied the `user-story-added` label would otherwise mint a duplicate on re-trigger (Issue #61)
+
 ## v0.2.1 (2026-08-29)
 
 ### Bug Fixes
