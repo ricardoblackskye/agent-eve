@@ -1,3 +1,5 @@
+import { DONE_LABEL } from "./story-labels";
+
 export interface TriggerPayload {
   action: string;
   issue?: {
@@ -50,6 +52,12 @@ export function isStoryTrigger(payload: TriggerPayload): boolean {
     return false;
   }
 
+  // A story has already been generated for this issue (finalization applied the
+  // completion label) — never re-trigger, even if the trigger label is
+  // (re-)applied or a mention still matches. This is the dedup guard that
+  // prevents duplicate [Story] issues.
+  if (hasDoneLabel(payload)) return false;
+
   if (action === "labeled") {
     const label = (payload.label?.name || "").toLowerCase();
     if (label && label === getEnvLabel().toLowerCase()) return true;
@@ -67,4 +75,11 @@ function hasMention(payload: TriggerPayload): boolean {
     (l.name || "").toLowerCase(),
   );
   return body.includes(`@${mention}`) || labels.includes(mention);
+}
+
+function hasDoneLabel(payload: TriggerPayload): boolean {
+  const done = DONE_LABEL.toLowerCase();
+  return (payload.issue?.labels || []).some(
+    (l) => (l.name || "").toLowerCase() === done,
+  );
 }
