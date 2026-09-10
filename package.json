@@ -11,6 +11,7 @@
     "build": "next build",
     "start": "next start",
     "test:e2e": "playwright test",
+    "test": "vitest run",
     "eve:build": "eve build",
     "typecheck": "tsc --noEmit"
   },
