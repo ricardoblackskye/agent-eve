@@ -45,6 +45,7 @@
     "unstub",
     "oneline",
     "deepseek",
+    "dedup",
     "HMAC",
     "browsable",
     "Capitalise",

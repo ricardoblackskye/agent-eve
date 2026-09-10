@@ -68,6 +68,32 @@ describe("isStoryTrigger", () => {
     ).toBe(false);
   });
 
+  it("does not re-trigger when needs-story is re-added to an already-finalized issue", () => {
+    expect(
+      isStoryTrigger({
+        action: "labeled",
+        issue: {
+          ...basePayload.issue,
+          labels: [{ name: "user-story-added" }, { name: "needs-story" }],
+        },
+        label: { name: "needs-story" },
+      }),
+    ).toBe(false);
+  });
+
+  it("does not re-trigger on a mention when the completion label is present", () => {
+    expect(
+      isStoryTrigger({
+        ...basePayload,
+        issue: {
+          ...basePayload.issue,
+          body: "@eve-agent please draft this",
+          labels: [{ name: "user-story-added" }],
+        },
+      }),
+    ).toBe(false);
+  });
+
   it("does not fire on issues.closed", () => {
     expect(
       isStoryTrigger({
