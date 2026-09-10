@@ -93,4 +93,25 @@ describe("fetchSprintBoard", () => {
       fetchSprintBoard("tok", "ricardoblackskye", 3),
     ).rejects.toThrow(/read:project|403/i);
   });
+
+  it("surfaces a clear read:project error when GraphQL returns FORBIDDEN", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          errors: [
+            {
+              type: "FORBIDDEN",
+              message: "Resource not accessible by personal access token",
+            },
+          ],
+        }),
+      })),
+    );
+    await expect(
+      fetchSprintBoard("tok", "ricardoblackskye", 3),
+    ).rejects.toThrow(/read:project/i);
+  });
 });

@@ -127,5 +127,23 @@ export async function fetchSprintBoard(
     }
     throw new Error(`Projects API error ${res.status}`);
   }
-  return normalize(await res.json());
+
+  const body = (await res.json()) as {
+    errors?: Array<{ type?: string; message?: string }>;
+    data?: { user?: { projectV2?: unknown } };
+  };
+  if (body.errors?.length) {
+    const first = body.errors[0];
+    const msg = first.message ?? "unknown error";
+    if (
+      first.type === "FORBIDDEN" ||
+      msg.toLowerCase().includes("not accessible")
+    ) {
+      throw new Error(
+        "Projects API: token lacks 'read:project' scope (Resource not accessible by personal access token).",
+      );
+    }
+    throw new Error(`Projects API error: ${msg}`);
+  }
+  return normalize(body);
 }
