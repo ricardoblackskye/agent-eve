@@ -1,5 +1,11 @@
 # Release Notes
 
+## v0.2.1 (2026-08-29)
+
+### Bug Fixes
+
+- [PR #95]: fix(story): prevent duplicate user-story issues via completion-label dedup guard — adds a dedup guard to the user-story trigger so re-adding the `needs-story` label (or a duplicate/racing label event, or a re-edit still matching the `@eve-agent` mention) to an issue that already has a generated story does not create a second `[Story]` issue
+
 ## v0.2.0 (2026-08-28)
 
 ### Features
