@@ -5,123 +5,124 @@ export interface DeliverReportOptions {
   owner: string;
   repo: string;
   issueNumber: number;
-  /** Base filename without extension, e.g. "sprint-2026-09-10". */
+  /** Base filename without extension, e.g. "sprint-2026-09-11". */
   baseName: string;
   markdown: string;
-  /** R2: optional PDF bytes, written to `reports/<baseName>.pdf`. */
-  pdf?: Uint8Array;
+  pdf: Uint8Array;
 }
 
 export interface DeliverReportResult {
-  reportUrl?: string;
-  reportPdfUrl?: string;
+  mdUrl?: string;
+  pdfUrl?: string;
   commentUrl?: string;
-  warnings?: string[];
-  error?: string;
 }
 
-const AUTH = (token: string) => ({
-  authorization: `Bearer ${token}`,
-  accept: "application/vnd.github+json",
-  "content-type": "application/json",
-  "x-github-api-version": "2022-11-28",
-});
+const MAX_COMMENT_CHARS = 60000; // GitHub's comment limit is 65536; stay safely under.
 
 async function writeReportFile(
   token: string,
   owner: string,
   repo: string,
   path: string,
-  base64Content: string,
-): Promise<{ url?: string; warning?: string }> {
-  try {
-    const res = await fetch(
-      `https://api.github.com/repos/${owner}/${repo}/contents/reports/${path}`,
-      {
-        method: "PUT",
-        headers: AUTH(token),
-        body: JSON.stringify({
-          message: `Add sprint metrics report ${path}`,
-          content: base64Content,
-        }),
-      },
-    );
-    if (res.ok) {
-      const data = (await res.json()) as { content?: { html_url?: string } };
-      return { url: data.content?.html_url };
-    }
-    return { warning: `report file write failed (${path}: ${res.status})` };
-  } catch (err) {
-    return {
-      warning: `report file write failed (${path}): ${err instanceof Error ? err.message : String(err)}`,
-    };
+  content: string | Uint8Array,
+  isBinary: boolean,
+): Promise<string> {
+  const body: Record<string, unknown> = {
+    message: `Sprint report: ${path}`,
+    branch: "main",
+  };
+  if (isBinary) {
+    body.content = Buffer.from(content as Uint8Array).toString("base64");
+    body.encoding = "base64";
+  } else {
+    body.content = content as string;
   }
+  const res = await fetch(
+    `https://api.github.com/repos/${owner}/${repo}/contents/${path}`,
+    {
+      method: "PUT",
+      headers: {
+        authorization: `Bearer ${token}`,
+        accept: "application/vnd.github+json",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(body),
+    },
+  );
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Failed to write ${path}: ${res.status} ${detail}`);
+  }
+  const data = (await res.json()) as {
+    content?: { html_url?: string };
+    commit?: { html_url?: string };
+  };
+  return (data.content?.html_url ?? data.commit?.html_url ?? "").replace(
+    "https://github.com/",
+    "https://raw.githubusercontent.com/",
+  );
 }
 
 /**
- * Deliver a rendered sprint report: write the markdown (and optional PDF) into
- * the `reports/` folder via the contents API, then post a linking comment on the
- * triggering issue. Best-effort: failures surface as warnings, never throw.
+ * Write the sprint report (Markdown + PDF) into the repo's reports/ folder and
+ * post an issue comment linking them. Timestamped filenames mean re-running the
+ * report on the same day does NOT overwrite the previous run. If the file write
+ * fails we fall back to a truncated inline summary comment (safe under
+ * GitHub's 64k limit) rather than failing the whole pipeline.
  */
 export async function deliverReport(
   opts: DeliverReportOptions,
 ): Promise<DeliverReportResult> {
-  const warnings: string[] = [];
-  const base = opts.baseName;
+  const mdPath = `reports/${opts.baseName}.md`;
+  const pdfPath = `reports/${opts.baseName}.pdf`;
 
-  const md = await writeReportFile(
-    opts.token,
-    opts.owner,
-    opts.repo,
-    `${base}.md`,
-    Buffer.from(opts.markdown, "utf8").toString("base64"),
-  );
-  if (md.warning) warnings.push(md.warning);
-
-  let reportPdfUrl: string | undefined;
-  if (opts.pdf) {
-    const pdf = await writeReportFile(
+  let mdUrl: string | undefined;
+  let pdfUrl: string | undefined;
+  try {
+    mdUrl = await writeReportFile(
       opts.token,
       opts.owner,
       opts.repo,
-      `${base}.pdf`,
-      Buffer.from(opts.pdf).toString("base64"),
+      mdPath,
+      opts.markdown,
+      false,
     );
-    reportPdfUrl = pdf.url;
-    if (pdf.warning) warnings.push(pdf.warning);
+    pdfUrl = await writeReportFile(
+      opts.token,
+      opts.owner,
+      opts.repo,
+      pdfPath,
+      opts.pdf,
+      true,
+    );
+  } catch (err) {
+    mdUrl = undefined;
+    pdfUrl = undefined;
+    console.error("Sprint report file write failed:", err);
   }
-
-  const links = [md.url, reportPdfUrl].filter(Boolean) as string[];
-  const commentBody = links.length
-    ? `📊 Sprint metrics report generated.\n\n${links.join("\n\n")}`
-    : `📊 Sprint metrics report generated:\n\n${opts.markdown}`;
 
   let commentUrl: string | undefined;
-  try {
-    const cRes = await fetch(
-      `https://api.github.com/repos/${opts.owner}/${opts.repo}/issues/${opts.issueNumber}/comments`,
-      {
-        method: "POST",
-        headers: AUTH(opts.token),
-        body: JSON.stringify({ body: commentBody }),
+  const commentBody =
+    mdUrl && pdfUrl
+      ? `📊 Sprint metrics report generated.\n\n- 📄 Markdown: ${mdUrl}\n- 📕 PDF: ${pdfUrl}`
+      : `⚠️ Sprint report generated but could not be written to the repo. Summary:\n\n${opts.markdown.slice(0, MAX_COMMENT_CHARS)}`;
+
+  const commentRes = await fetch(
+    `https://api.github.com/repos/${opts.owner}/${opts.repo}/issues/${opts.issueNumber}/comments`,
+    {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${opts.token}`,
+        accept: "application/vnd.github+json",
+        "content-type": "application/json",
       },
-    );
-    if (cRes.ok) {
-      const data = (await cRes.json()) as { html_url?: string };
-      commentUrl = data.html_url;
-    } else {
-      warnings.push(`report comment failed (${cRes.status})`);
-    }
-  } catch (err) {
-    warnings.push(
-      `report comment failed: ${err instanceof Error ? err.message : String(err)}`,
-    );
+      body: JSON.stringify({ body: commentBody }),
+    },
+  );
+  if (commentRes.ok) {
+    const data = (await commentRes.json()) as { html_url?: string };
+    commentUrl = data.html_url;
   }
 
-  return {
-    reportUrl: md.url,
-    reportPdfUrl,
-    commentUrl,
-    warnings: warnings.length ? warnings : undefined,
-  };
+  return { mdUrl, pdfUrl, commentUrl };
 }

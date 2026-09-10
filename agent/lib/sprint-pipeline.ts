@@ -1,6 +1,6 @@
-import { fetchSprintBoard } from "./sprint-projects";
-import { computeSprintMetrics } from "./sprint-metrics";
 import { renderMarkdown, renderPdf } from "./sprint-report";
+import { computeSprintMetrics, type SprintMetrics } from "./sprint-metrics";
+import { fetchSprintBoard, type SprintBoardSnapshot } from "./sprint-projects";
 import { deliverReport } from "./sprint-delivery";
 
 export interface RunSprintReportOptions {
@@ -8,37 +8,42 @@ export interface RunSprintReportOptions {
   owner: string;
   repo: string;
   issueNumber: number;
-  login: string;
-  projectNumber: number;
+  projectOwner?: string;
+  projectNumber?: number;
 }
 
 export interface RunSprintReportResult {
-  delivered: boolean;
+  ok: boolean;
   projectTitle?: string;
+  metrics?: SprintMetrics;
   reportUrl?: string;
   reportPdfUrl?: string;
   commentUrl?: string;
-  metrics?: ReturnType<typeof computeSprintMetrics>;
-  warnings?: string[];
   error?: string;
 }
 
 /**
- * Orchestrate the full sprint-report pipeline: fetch the board, compute
- * metrics, render markdown, and deliver it (write to `reports/` + comment on the
- * triggering issue). Returns a structured result rather than throwing.
+ * End-to-end sprint report run: read the Projects board, compute delivery
+ * metrics, render Markdown + PDF, write them to the repo's reports/ folder,
+ * and post a linking comment. Errors are logged (for production debugging)
+ * and surfaced in the result rather than thrown.
  */
 export async function runSprintReport(
   opts: RunSprintReportOptions,
 ): Promise<RunSprintReportResult> {
   try {
-    const snapshot = await fetchSprintBoard(
+    const owner = opts.projectOwner ?? opts.owner;
+    const number = opts.projectNumber ?? 3;
+    const snapshot: SprintBoardSnapshot = await fetchSprintBoard(
       opts.token,
-      opts.login,
-      opts.projectNumber,
+      owner,
+      number,
     );
     const metrics = computeSprintMetrics(snapshot);
-    const generatedAt = new Date().toISOString().slice(0, 10);
+    const generatedAt = new Date()
+      .toISOString()
+      .slice(0, 19)
+      .replace(/[:T]/g, "-"); // 2026-09-11-14-05-09
     const markdown = renderMarkdown(
       snapshot.projectTitle,
       metrics,
@@ -58,18 +63,16 @@ export async function runSprintReport(
     });
 
     return {
-      delivered: true,
+      ok: true,
       projectTitle: snapshot.projectTitle,
-      reportUrl: delivery.reportUrl,
-      reportPdfUrl: delivery.reportPdfUrl,
-      commentUrl: delivery.commentUrl,
       metrics,
-      warnings: delivery.warnings,
+      reportUrl: delivery.mdUrl,
+      reportPdfUrl: delivery.pdfUrl,
+      commentUrl: delivery.commentUrl,
     };
   } catch (err) {
-    return {
-      delivered: false,
-      error: err instanceof Error ? err.message : String(err),
-    };
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[sprint-pipeline] runSprintReport failed:", message);
+    return { ok: false, error: message };
   }
 }

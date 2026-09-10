@@ -19,20 +19,20 @@ export default defineTool({
     repo: z.string(),
     issueNumber: z.number(),
     projectNumber: z.number().optional(),
-    login: z.string().optional(),
+    projectOwner: z.string().optional(),
   }),
   async execute({
     owner,
     repo,
     issueNumber,
     projectNumber,
-    login,
+    projectOwner,
   }: {
     owner: string;
     repo: string;
     issueNumber: number;
     projectNumber?: number;
-    login?: string;
+    projectOwner?: string;
   }) {
     const token =
       process.env.GH_SPRINT_TOKEN ||
@@ -40,7 +40,7 @@ export default defineTool({
       process.env.GITHUB_TOKEN;
     if (!token) {
       return {
-        delivered: false,
+        ok: false,
         error:
           "No GitHub token configured (set GH_SPRINT_TOKEN / GH_RELEASE_TOKEN " +
           "with read:project scope).",
@@ -52,7 +52,8 @@ export default defineTool({
       owner,
       repo,
       issueNumber,
-      login: login || process.env.SPRINT_PROJECT_OWNER || "ricardoblackskye",
+      projectOwner:
+        projectOwner || process.env.SPRINT_PROJECT_OWNER || "ricardoblackskye",
       projectNumber:
         projectNumber || Number(process.env.SPRINT_PROJECT_NUMBER || 3),
     });

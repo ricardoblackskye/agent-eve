@@ -15,6 +15,7 @@ export function renderMarkdown(
     ["To Do", String(metrics.toDo)],
     ["In Progress (WIP)", String(metrics.inProgress)],
     ["Done (throughput)", String(metrics.done)],
+    ["Other / unrecognized status", String(metrics.other)],
     ["Avg cycle time (days)", metrics.cycleTimeDays.average.toFixed(1)],
     ["Median cycle time (days)", metrics.cycleTimeDays.median.toFixed(1)],
   ];
@@ -81,6 +82,7 @@ export async function renderPdf(
     ["To Do", String(metrics.toDo)],
     ["In Progress (WIP)", String(metrics.inProgress)],
     ["Done (throughput)", String(metrics.done)],
+    ["Other / unrecognized status", String(metrics.other)],
     ["Avg cycle time (days)", metrics.cycleTimeDays.average.toFixed(1)],
     ["Median cycle time (days)", metrics.cycleTimeDays.median.toFixed(1)],
   ];

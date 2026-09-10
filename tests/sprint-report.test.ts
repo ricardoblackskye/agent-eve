@@ -7,6 +7,7 @@ const metrics: SprintMetrics = {
   toDo: 1,
   inProgress: 2,
   done: 2,
+  other: 0,
   cycleTimeDays: { average: 3, median: 3 },
 };
 
@@ -20,6 +21,7 @@ describe("renderMarkdown", () => {
     expect(md).toContain("| To Do | 1 |");
     expect(md).toContain("| In Progress (WIP) | 2 |");
     expect(md).toContain("| Done (throughput) | 2 |");
+    expect(md).toContain("| Other / unrecognized status | 0 |");
     expect(md).toContain("| Avg cycle time (days) | 3.0 |");
     expect(md).toContain("| Median cycle time (days) | 3.0 |");
   });

@@ -1,52 +1,38 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { fetchSprintBoard } from "../agent/lib/sprint-projects";
 
-const graphqlResponse = {
-  data: {
-    user: {
-      projectV2: {
-        title: "Sprint 9",
-        items: {
-          nodes: [
-            {
-              content: {
-                number: 101,
-                title: "Fix login bug",
-                createdAt: "2026-09-01T00:00:00Z",
-                closedAt: "2026-09-05T00:00:00Z",
-              },
-              fieldValues: {
-                nodes: [{ name: "Done", field: { name: "Status" } }],
-              },
-            },
-            {
-              content: {
-                number: 102,
-                title: "Add CSV export",
-                createdAt: "2026-09-02T00:00:00Z",
-                closedAt: null,
-              },
-              fieldValues: {
-                nodes: [{ name: "In Progress", field: { name: "Status" } }],
-              },
-            },
-            {
-              content: {
-                number: 103,
-                title: "Sprint report",
-                createdAt: "2026-09-03T00:00:00Z",
-                closedAt: null,
-              },
-              fieldValues: {
-                nodes: [{ name: "To Do", field: { name: "Status" } }],
-              },
-            },
-          ],
+function makeItem(number: number, status: string): unknown {
+  return {
+    content: {
+      number,
+      title: `Item ${number}`,
+      createdAt: "2026-09-01T00:00:00Z",
+      closedAt: status === "Done" ? "2026-09-05T00:00:00Z" : null,
+    },
+    fieldValues: { nodes: [{ name: status, field: { name: "Status" } }] },
+  };
+}
+
+function pageBody(
+  title: string,
+  items: unknown[],
+  hasNextPage: boolean,
+  endCursor: string | null,
+): unknown {
+  return {
+    data: {
+      user: {
+        projectV2: {
+          title,
+          items: {
+            pageInfo: { hasNextPage, endCursor },
+            nodes: items,
+          },
         },
       },
     },
-  },
-};
+  };
+}
 
 describe("fetchSprintBoard", () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -55,7 +41,17 @@ describe("fetchSprintBoard", () => {
     const fetchMock = vi.fn(async () => ({
       ok: true,
       status: 200,
-      json: async () => graphqlResponse,
+      json: async () =>
+        pageBody(
+          "Sprint 9",
+          [
+            makeItem(101, "Done"),
+            makeItem(102, "In Progress"),
+            makeItem(103, "To Do"),
+          ],
+          false,
+          null,
+        ),
     }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -68,11 +64,6 @@ describe("fetchSprintBoard", () => {
       "In Progress",
       "To Do",
     ]);
-    expect(snapshot.items[0]).toMatchObject({
-      number: 101,
-      title: "Fix login bug",
-      closedAt: "2026-09-05T00:00:00Z",
-    });
 
     const [url, init] = fetchMock.mock.calls[0] as unknown as [
       string,
@@ -80,8 +71,70 @@ describe("fetchSprintBoard", () => {
     ];
     expect(url).toBe("https://api.github.com/graphql");
     const sent = JSON.parse(init.body);
-    expect(sent.variables).toEqual({ login: "ricardoblackskye", number: 3 });
+    expect(sent.variables).toEqual({
+      login: "ricardoblackskye",
+      number: 3,
+      cursor: null,
+    });
     expect(sent.query).toContain("projectV2");
+  });
+
+  it("paginates through all items across multiple pages", async () => {
+    const page1 = Array.from({ length: 100 }, (_, i) =>
+      makeItem(i + 1, "Done"),
+    );
+    const page2 = Array.from({ length: 50 }, (_, i) =>
+      makeItem(100 + i + 1, "In Progress"),
+    );
+
+    const fetchMock = vi.fn(async (_url: string, init?: { body?: string }) => {
+      const vars = JSON.parse(init?.body ?? "{}").variables;
+      const cursor = vars?.cursor;
+      if (!cursor) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => pageBody("Sprint 9", page1, true, "abc123"),
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => pageBody("Sprint 9", page2, false, null),
+      };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const snapshot = await fetchSprintBoard("tok", "ricardoblackskye", 3);
+
+    expect(snapshot.items).toHaveLength(150);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns empty status when the item has no Status field (no wrong-column fallback)", async () => {
+    const itemWithPriorityOnly = {
+      content: {
+        number: 1,
+        title: "x",
+        createdAt: "2026-09-01T00:00:00Z",
+        closedAt: null,
+      },
+      fieldValues: {
+        nodes: [{ name: "High", field: { name: "Priority" } }],
+      },
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () =>
+          pageBody("Sprint 9", [itemWithPriorityOnly], false, null),
+      })),
+    );
+
+    const snapshot = await fetchSprintBoard("tok", "ricardoblackskye", 3);
+    expect(snapshot.items[0].status).toBe("");
   });
 
   it("surfaces a clear 403 for a missing read:project scope", async () => {

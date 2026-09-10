@@ -12,6 +12,8 @@ export interface SprintMetrics {
   inProgress: number;
   /** Throughput: items currently "Done" this sprint. */
   done: number;
+  /** Items whose status column did not match a recognized column. */
+  other: number;
   cycleTimeDays: CycleTimeStats;
 }
 
@@ -37,6 +39,8 @@ function median(values: number[]): number {
  * Compute sprint delivery metrics from a board snapshot. Cycle time is the
  * (approximated) elapsed time from an item's `createdAt` to its `closedAt` for
  * items that reached "Done"; items still in flight are excluded from cycle time.
+ * Items whose status is not a recognized column are counted under `other` so
+ * that `totalItems === toDo + inProgress + done + other`.
  */
 export function computeSprintMetrics(
   snapshot: SprintBoardSnapshot,
@@ -45,6 +49,7 @@ export function computeSprintMetrics(
   let toDo = 0;
   let inProgress = 0;
   let done = 0;
+  let other = 0;
   const cycleTimes: number[] = [];
 
   for (const item of items) {
@@ -59,6 +64,8 @@ export function computeSprintMetrics(
       inProgress++;
     } else if (status === "to do" || status === "todo") {
       toDo++;
+    } else {
+      other++;
     }
   }
 
@@ -71,6 +78,7 @@ export function computeSprintMetrics(
     toDo,
     inProgress,
     done,
+    other,
     cycleTimeDays: { average, median: median(cycleTimes) },
   };
 }
