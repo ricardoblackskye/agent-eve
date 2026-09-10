@@ -107,12 +107,25 @@ class GitHubProvider implements BacklogProvider {
     const repo = process.env.GITHUB_REPO_NAME || "agent-eve";
     const story = payload.story;
 
-    // Option B dedup: if a child story already exists for this source issue
-    // (detected via the child-link comment on the source), skip creation. This
-    // catches the partial-failure case that Option A's label check misses.
+    // Option B dedup: if a child story already exists for this source issue,
+    // skip creation. Two signals, most deterministic first:
+    //   1. the formal sub-issue relationship (structural, pagination-free), and
+    //   2. the child-link comment on the source (paginated fallback).
+    // NOTE: this check-then-create is not atomic — GitHub has no conditional
+    // issue create, so a genuinely concurrent double-fire can still race
+    // through. In practice the trigger is a single webhook per label-add and
+    // Option A already blocks the common re-label path, so the residual window
+    // is negligible; fully closing it needs an external idempotency store.
     if (payload.sourceIssueNumber) {
       const sourceBase = `https://api.github.com/repos/${owner}/${repo}/issues/${payload.sourceIssueNumber}`;
-      if (await this.hasComment(token, sourceBase, CHILD_LINK_PREFIX)) {
+      const alreadyLinked =
+        (await this.hasChildSubIssue(
+          token,
+          owner,
+          repo,
+          payload.sourceIssueNumber,
+        )) || (await this.hasComment(token, sourceBase, CHILD_LINK_PREFIX));
+      if (alreadyLinked) {
         return {
           delivered: false,
           mode: "dry-run",
@@ -314,26 +327,96 @@ class GitHubProvider implements BacklogProvider {
     }
   }
 
+  /**
+   * True when the source issue already has at least one sub-issue (i.e. a child
+   * story was linked as its parent). This is the primary, deterministic dedup
+   * signal: it reads a structural relationship via `totalCount`, so it has no
+   * pagination problem and no reliance on a best-effort comment.
+   */
+  private async hasChildSubIssue(
+    token: string,
+    owner: string,
+    repo: string,
+    sourceIssueNumber: number,
+  ): Promise<boolean> {
+    try {
+      const srcRes = await fetch(
+        `https://api.github.com/repos/${owner}/${repo}/issues/${sourceIssueNumber}`,
+        {
+          method: "GET",
+          headers: {
+            authorization: `Bearer ${token}`,
+            accept: "application/vnd.github+json",
+            "x-github-api-version": "2022-11-28",
+          },
+        },
+      );
+      if (!srcRes.ok) return false;
+      const src = (await srcRes.json()) as { node_id?: string };
+      if (!src.node_id) return false;
+
+      const query = `
+        query SubIssueCount($id: ID!) {
+          node(id: $id) {
+            ... on Issue {
+              subIssues { totalCount }
+            }
+          }
+        }
+      `;
+      const gqlRes = await fetch("https://api.github.com/graphql", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${token}`,
+          accept: "application/vnd.github+json",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ query, variables: { id: src.node_id } }),
+      });
+      if (!gqlRes.ok) return false;
+      const body = (await gqlRes.json()) as {
+        data?: { node?: { subIssues?: { totalCount?: number } } };
+      };
+      return (body.data?.node?.subIssues?.totalCount ?? 0) > 0;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * True when any comment on the issue (across ALL pages) contains the marker.
+   * Paginates with `per_page=100` so a child-link comment beyond GitHub's
+   * default first page (30) is still found.
+   */
   private async hasComment(
     token: string,
     base: string,
     marker: string,
   ): Promise<boolean> {
+    const needle = marker.trim().toLowerCase();
     try {
-      const res = await fetch(`${base}/comments`, {
-        method: "GET",
-        headers: {
-          authorization: `Bearer ${token}`,
-          accept: "application/vnd.github+json",
-          "x-github-api-version": "2022-11-28",
-        },
-      });
-      if (!res.ok) return false;
-      const comments = (await res.json()) as Array<{ body?: string }>;
-      const needle = marker.trim().toLowerCase();
-      return comments.some((c) =>
-        (c.body || "").trim().toLowerCase().includes(needle),
-      );
+      let page = 1;
+      for (;;) {
+        const res = await fetch(`${base}/comments?per_page=100&page=${page}`, {
+          method: "GET",
+          headers: {
+            authorization: `Bearer ${token}`,
+            accept: "application/vnd.github+json",
+            "x-github-api-version": "2022-11-28",
+          },
+        });
+        if (!res.ok) return false;
+        const comments = (await res.json()) as Array<{ body?: string }>;
+        if (
+          comments.some((c) =>
+            (c.body || "").trim().toLowerCase().includes(needle),
+          )
+        ) {
+          return true;
+        }
+        if (comments.length < 100) return false;
+        page++;
+      }
     } catch {
       // Can't confirm; return false so the caller still attempts the comment
       // (best-effort — the duplicate guard is an optimization, not a hard gate).

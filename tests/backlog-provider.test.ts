@@ -23,8 +23,10 @@ const STORY_URL = "https://github.com/ricardoblackskye/agent-eve/issues/991";
 
 function stubFetch(opts: {
   existingComments?: Array<{ body?: string }>;
+  commentPages?: Array<Array<{ body?: string }>>;
   deleteLabelStatus?: number;
   graphqlStatus?: number;
+  subIssuesTotalCount?: number;
 }): {
   calls: Array<{ url: string; method: string; body?: unknown }>;
   fetchMock: unknown;
@@ -61,10 +63,31 @@ function stubFetch(opts: {
       }
       if (u.endsWith("/graphql")) {
         const status = opts.graphqlStatus ?? 200;
-        return { ok: status < 400, status, json: async () => ({ data: {} }) };
+        const query = (body as { query?: string } | undefined)?.query ?? "";
+        const resp = query.includes("totalCount")
+          ? {
+              data: {
+                node: {
+                  subIssues: { totalCount: opts.subIssuesTotalCount ?? 0 },
+                },
+              },
+            }
+          : { data: {} };
+        return { ok: status < 400, status, json: async () => resp };
       }
-      if (u.endsWith("/issues/85/comments")) {
+      if (u.includes("/issues/85/comments")) {
         if (method === "GET") {
+          if (opts.commentPages) {
+            const page = Number.parseInt(
+              new URL(u).searchParams.get("page") || "1",
+              10,
+            );
+            return {
+              ok: true,
+              status: 200,
+              json: async () => opts.commentPages![page - 1] ?? [],
+            };
+          }
           return {
             ok: true,
             status: 200,
@@ -191,7 +214,10 @@ describe("GitHubProvider.publish", () => {
     expect(result.delivered).toBe(true);
 
     const gqlCall = calls.find(
-      (c) => c.url.endsWith("/graphql") && c.method === "POST",
+      (c) =>
+        c.url.endsWith("/graphql") &&
+        c.method === "POST" &&
+        ((c.body as { query?: string })?.query ?? "").includes("addSubIssue"),
     );
     expect(gqlCall).toBeDefined();
     const gqlBody = gqlCall?.body as
@@ -211,6 +237,30 @@ describe("GitHubProvider.publish", () => {
     expect((result.warnings ?? []).some((w) => w.includes("parent-link"))).toBe(
       true,
     );
+  });
+
+  it("skips creation when the source already has sub-issues", async () => {
+    const { result, calls } = await publish({ subIssuesTotalCount: 1 });
+    expect(result.delivered).toBe(false);
+    expect((result as unknown as { duplicate?: boolean }).duplicate).toBe(true);
+    expect(
+      calls.filter((c) => c.url.endsWith("/issues") && c.method === "POST"),
+    ).toHaveLength(0);
+  });
+
+  it("catches a child-link comment beyond the first page of comments", async () => {
+    const page1 = Array.from({ length: 100 }, (_, i) => ({
+      body: `comment ${i}`,
+    }));
+    const page2 = [
+      { body: `📄 User story generated for this issue: ${STORY_URL}` },
+    ];
+    const { result, calls } = await publish({ commentPages: [page1, page2] });
+    expect(result.delivered).toBe(false);
+    expect((result as unknown as { duplicate?: boolean }).duplicate).toBe(true);
+    expect(
+      calls.filter((c) => c.url.endsWith("/issues") && c.method === "POST"),
+    ).toHaveLength(0);
   });
 
   it("skips creation when a child already exists (dedup)", async () => {
