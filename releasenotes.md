@@ -1,5 +1,11 @@
 # Release Notes
 
+## Unreleased
+
+### CI/Infrastructure
+
+- [PR #104]: feat(ci): run unit tests (vitest) on every PR and push to main — adds automated unit test execution in CI via a new `unit-tests` job and `npm test` script, ensuring test failures block merges and catch regressions early (Issue #103)
+
 ## v0.2.2 (2026-08-30)
 
 ### Features
