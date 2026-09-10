@@ -236,7 +236,7 @@ containing the same question strings → `execute` returns
 `{ commented: false, duplicate: true }` and does NOT POST.
 **Step 2:** FAIL (currently always POSTs). **Step 3 (impl):** before POST, GET
 `/issues/{n}/comments`, and if any existing comment body contains every question
-string (normalised), skip and return `duplicate: true`. **Step 4:** PASS.
+string (normalized), skip and return `duplicate: true`. **Step 4:** PASS.
 **Step 5:** commit.
 
 ---
