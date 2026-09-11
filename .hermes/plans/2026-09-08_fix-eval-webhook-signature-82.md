@@ -32,7 +32,7 @@ POST https://agent-eve-gold.vercel.app/api/github/webhook   (unsigned)
 Run history for `production-evals` on `main` proves causation:
 
 | Time                              | Result                                               |
-| --------------------------------- | ---------------------------------------------------- |
+|-----------------------------------|------------------------------------------------------|
 | `09:22` (before the change)       | **success** — `multi-repo-config 2/2`, `webhook 6/6` |
 | `16:44`, `17:20`, `17:24` (after) | **failure**                                          |
 
@@ -241,7 +241,7 @@ which is safe but means reduced production coverage — noted on the issue.
 ## Files Likely to Change
 
 | File                                                        | Action                                            |
-| ----------------------------------------------------------- | ------------------------------------------------- |
+|-------------------------------------------------------------|---------------------------------------------------|
 | `evals/helpers/sign.ts`                                     | Create                                            |
 | `evals/webhook.eval.ts`                                     | Modify (sign happy-path POST, skip when unsigned) |
 | `evals/multi-repo-config.eval.ts`                           | Modify (same)                                     |

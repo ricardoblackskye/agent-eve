@@ -48,7 +48,7 @@ Issue #61 has 4 phases. They are split across **3 releases** so each is independ
 reviewable, deployable, and useful:
 
 | Release            | Branch                         | Issue phases         | Scope                                                                                                      |
-| ------------------ | ------------------------------ | -------------------- | ---------------------------------------------------------------------------------------------------------- |
+|--------------------|--------------------------------|----------------------|------------------------------------------------------------------------------------------------------------|
 | **R1** (this plan) | `feat/user-story-core-61`      | Phase 2 + 3 + 4 (GH) | GitHub-issue trigger, story schema, structuring, refinement loop, canonical payload, **real GitHub write** |
 | **R2**             | `feat/user-story-ingestion-61` | Phase 1              | Feedback/ticket parsing + context retrieval                                                                |
 | **R3**             | `feat/user-story-backlog-61`   | Phase 4 (others)     | Additional platform-agnostic providers (Azure DevOps, Jira) behind the same payload + provider interface   |
@@ -75,7 +75,7 @@ subscribed to directly. The trigger is therefore implemented by **inspecting the
 for a trigger signal. Two independent signals are supported, both detected from the payload:
 
 | Signal              | Event            | Detection                                                                |
-| ------------------- | ---------------- | ------------------------------------------------------------------------ |
+|---------------------|------------------|--------------------------------------------------------------------------|
 | Mention in the body | `issues.opened`  | issue body contains the configured mention string (default `@eve-agent`) |
 | Trigger label       | `issues.labeled` | `issue.labels` contains the configured label (default `needs-story`)     |
 
@@ -1846,7 +1846,7 @@ behaviour unchanged.
 ## Files Likely to Change
 
 | File                                                        | Action                                                                            |
-| ----------------------------------------------------------- | --------------------------------------------------------------------------------- |
+|-------------------------------------------------------------|-----------------------------------------------------------------------------------|
 | `agent/lib/story-schema.ts`                                 | Create                                                                            |
 | `agent/lib/story-refinement.ts`                             | Create                                                                            |
 | `agent/lib/backlog-provider.ts`                             | Create (+ GitHub adapter in Task 9)                                               |
@@ -1897,7 +1897,7 @@ already env-driven), `release-manager.config.json` (repo lookup reused as-is), a
 ### Deployment prerequisites
 
 | Requirement                             | Why                                                                          |
-| --------------------------------------- | ---------------------------------------------------------------------------- |
+|-----------------------------------------|------------------------------------------------------------------------------|
 | Webhook subscribes to **Issues**        | Without it GitHub never sends the `issues` event                             |
 | `GH_RELEASE_TOKEN` with `issues: write` | Required to create the story issue and post comment questions                |
 | `OPENROUTER_API_KEY`                    | Without it the root agent falls back to `mockModel` and produces canned text |

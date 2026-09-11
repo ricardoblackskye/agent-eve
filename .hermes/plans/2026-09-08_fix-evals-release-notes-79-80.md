@@ -56,8 +56,8 @@ out the three causes the issue listed as possibilities (401 / 404 / 502).
 
 Ruled out so far:
 
-| Suspect                                         | Status                                                                           |
-| ----------------------------------------------- | -------------------------------------------------------------------------------- |
+| Suspect                                         | Status                                                                          |
+|-------------------------------------------------|---------------------------------------------------------------------------------|
 | `GH_WEBHOOK_SECRET` mismatch                    | ❌ ruled out — delivery returned 200                                             |
 | Repo missing from `release-manager.config.json` | ❌ ruled out — `ricardoblackskye/agent-eve` present                              |
 | Eve API session failure (502)                   | ❌ ruled out — `eveApiResult: "accepted"`                                        |
@@ -248,7 +248,7 @@ describe("write_release_notes (#80)", () => {
 2. Branch on the result:
 
 | Observed                 | Cause                             | Fix                                                                 |
-| ------------------------ | --------------------------------- | ------------------------------------------------------------------- |
+|--------------------------|-----------------------------------|---------------------------------------------------------------------|
 | `403` mentioning scope   | Token lacks `Contents: write`     | Re-mint the PAT with Contents **and** Issues; update `.env.example` |
 | `200` but no file change | Subagent failing after acceptance | Inspect agent logs; add the failure to the webhook response         |
 | `200` and file written   | Already fixed by Task 2           | Close #80 with evidence                                             |
@@ -276,7 +276,7 @@ requires the Vercel dashboard, I will report that as a blocker rather than guess
 ## Files Likely to Change
 
 | File                                                           | Action                                              |
-| -------------------------------------------------------------- | --------------------------------------------------- |
+|----------------------------------------------------------------|-----------------------------------------------------|
 | `.github/workflows/preview-evals.yml`                          | Modify (add production guard + comment)             |
 | `tests/preview-evals-workflow.test.ts`                         | Create                                              |
 | `agent/subagents/release-manager/tools/write_release_notes.ts` | Modify (fallback + explicit 403)                    |
