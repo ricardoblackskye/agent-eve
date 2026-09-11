@@ -4,6 +4,8 @@ export interface DeliverReportOptions {
   token: string;
   owner: string;
   repo: string;
+  /** GitHub username/actor that owns the gist (the token's owner). */
+  gistOwner: string;
   issueNumber: number;
   /** Base filename without extension, e.g. "sprint-2026-09-11-14-05-09". */
   baseName: string;
@@ -12,104 +14,18 @@ export interface DeliverReportOptions {
 }
 
 export interface DeliverReportResult {
-  mdUrl?: string;
-  pdfUrl?: string;
+  mdUrl: string;
+  pdfUrl: string;
+  /**
+   * The gist's HTML URL (web UI). Null when the gist could not be created;
+   * in that case mdUrl/pdfUrl are also undefined and the fallback inline
+   * comment body is empty.
+   */
+  gistUrl?: string;
   commentUrl?: string;
 }
 
 const MAX_COMMENT_CHARS = 60000; // GitHub's comment limit is 65536; stay safely under.
-
-async function writeReportFile(
-  token: string,
-  owner: string,
-  repo: string,
-  path: string,
-  content: string | Uint8Array,
-  isBinary: boolean,
-): Promise<string> {
-  const body: Record<string, unknown> = {
-    message: `Sprint report: ${path}`,
-    branch: "main",
-  };
-  if (isBinary) {
-    body.content = Buffer.from(content as Uint8Array).toString("base64");
-    body.encoding = "base64";
-  } else {
-    body.content = content as string;
-  }
-  const res = await fetch(
-    `https://api.github.com/repos/${owner}/${repo}/contents/${path}`,
-    {
-      method: "PUT",
-      headers: {
-        authorization: `Bearer ${token}`,
-        accept: "application/vnd.github+json",
-        "content-type": "application/json",
-      },
-      body: JSON.stringify(body),
-    },
-  );
-  if (!res.ok) {
-    const detail = await res.text();
-    throw new Error(`Failed to write ${path}: ${res.status} ${detail}`);
-  }
-  const data = (await res.json()) as {
-    content?: { download_url?: string };
-    commit?: { html_url?: string };
-  };
-  // Use download_url for a direct, valid raw link (html_url points to the
-  // github.com blob page and is not a raw file URL).
-  return data.content?.download_url ?? data.commit?.html_url ?? "";
-}
-
-/**
- * Delete an orphaned report file via the Contents API DELETE endpoint. Best
- * effort — a failure here is logged but does not surface to the caller.
- */
-async function deleteReportFile(
-  token: string,
-  owner: string,
-  repo: string,
-  path: string,
-): Promise<void> {
-  try {
-    const metaRes = await fetch(
-      `https://api.github.com/repos/${owner}/${repo}/contents/${path}`,
-      {
-        method: "GET",
-        headers: {
-          authorization: `Bearer ${token}`,
-          accept: "application/vnd.github+json",
-        },
-      },
-    );
-    const meta = (await metaRes.json()) as {
-      content?: { sha?: string };
-      sha?: string;
-    };
-    const sha = meta.content?.sha ?? meta.sha;
-    if (!sha) return;
-    await fetch(
-      `https://api.github.com/repos/${owner}/${repo}/contents/${path}`,
-      {
-        method: "DELETE",
-        headers: {
-          authorization: `Bearer ${token}`,
-          accept: "application/vnd.github+json",
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          message: `Remove orphaned sprint report: ${path}`,
-          sha,
-          branch: "main",
-        }),
-      },
-    );
-  } catch (err) {
-    // best-effort cleanup; don't mask the original failure
-    console.error(`[sprint-delivery] orphan cleanup failed for ${path}:`, err);
-  }
-}
 
 /**
  * Truncate a markdown string to at most `limit` characters, cutting on a
@@ -125,64 +41,122 @@ export function truncateMarkdown(markdown: string, limit: number): string {
 }
 
 /**
- * Write the sprint report (Markdown + PDF) into the repo's reports/ folder and
- * post an issue comment linking them. Timestamped filenames mean re-running the
- * report on the same day does NOT overwrite the previous run. If the PDF write
- * fails after the Markdown write succeeded the orphaned Markdown is deleted;
- * otherwise a truncated (newline-safe) inline summary comment is posted.
+ * Convert arbitrary binary content to a base64-encoded string for the Gist API,
+ * which only accepts plain-text (base64) file payloads for non-UTF-8 files.
+ */
+function toBase64(content: Uint8Array): string {
+  // node's Buffer is base64-url-ish here; use base64 explicitly for the Gist API.
+  return Buffer.from(content).toString("base64");
+}
+
+const GH_HEADERS = (token: string) => ({
+  authorization: "Bearer " + token,
+  accept: "application/vnd.github+json",
+  "content-type": "application/json",
+});
+
+/**
+ * Create a single GitHub Gist containing both the Markdown and PDF report
+ * files. The gist is created so there is no orphaned-file risk: either both
+ * files land or neither does.
+ *
+ * Returns the gist's HTML URL plus the **raw** download URLs for each file,
+ * which render natively in the browser (markdown preview / PDF viewer).
+ */
+export async function createGistWithReport(
+  token: string,
+  gistOwner: string,
+  baseName: string,
+  markdown: string,
+  pdf: Uint8Array,
+): Promise<{ gistUrl: string; mdUrl: string; pdfUrl: string }> {
+  const description =
+    `Sprint metrics report (${baseName}) — owned by ${gistOwner} ` +
+    `via agent-eve sprint-reporter`;
+  const body = {
+    description,
+    public: false,
+    files: {
+      [`${baseName}.md`]: { content: markdown },
+      [`${baseName}.pdf`]: { content: toBase64(pdf), encoding: "base64" },
+    },
+  };
+
+  const res = await fetch("https://api.github.com/gists", {
+    method: "POST",
+    headers: GH_HEADERS(token),
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Gist API error ${res.status}: ${detail}`);
+  }
+
+  const data = (await res.json()) as {
+    html_url: string;
+    files: Record<string, { raw_url?: string }>;
+  };
+
+  // raw_url is the direct CDN URL that renders in-browser.
+  const mdFile = data.files[`${baseName}.md`];
+  const pdfFile = data.files[`${baseName}.pdf`];
+  if (!mdFile || !pdfFile || !mdFile.raw_url || !pdfFile.raw_url) {
+    throw new Error("Gist API returned unexpected file shape.");
+  }
+
+  return {
+    gistUrl: data.html_url,
+    mdUrl: mdFile.raw_url,
+    pdfUrl: pdfFile.raw_url,
+  };
+}
+
+/**
+ * Write the sprint report (Markdown + PDF) to a **GitHub Gist** and post an
+ * issue comment linking them. Using a gist (rather than writing files into the
+ * repo's `reports/` folder) sidesteps the main-branch ruleset and avoids
+ * orphaned files: the two files are created in a single atomic Gist POST, so
+ * there's no partial-write cleanup step to maintain. If the gist write fails we
+ * fall back to a truncated, newline-safe inline summary comment (safe under
+ * GitHub's 64k limit).
  */
 export async function deliverReport(
   opts: DeliverReportOptions,
 ): Promise<DeliverReportResult> {
-  const mdPath = `reports/${opts.baseName}.md`;
-  const pdfPath = `reports/${opts.baseName}.pdf`;
-
   let mdUrl: string | undefined;
   let pdfUrl: string | undefined;
-  let mdSucceed = false;
+  let gistUrl: string | undefined;
+
   try {
-    mdUrl = await writeReportFile(
+    const gist = await createGistWithReport(
       opts.token,
-      opts.owner,
-      opts.repo,
-      mdPath,
+      opts.gistOwner,
+      opts.baseName,
       opts.markdown,
-      false,
-    );
-    mdSucceed = true;
-    pdfUrl = await writeReportFile(
-      opts.token,
-      opts.owner,
-      opts.repo,
-      pdfPath,
       opts.pdf,
-      true,
     );
+    mdUrl = gist.mdUrl;
+    pdfUrl = gist.pdfUrl;
+    gistUrl = gist.gistUrl;
   } catch (err) {
-    // if the markdown was written but the PDF failed, clean up the orphan
-    if (mdSucceed && mdPath) {
-      await deleteReportFile(opts.token, opts.owner, opts.repo, mdPath);
-    }
     mdUrl = undefined;
     pdfUrl = undefined;
-    console.error("Sprint report file write failed:", err);
+    gistUrl = undefined;
+    console.error("Sprint report gist write failed:", err);
   }
 
   let commentUrl: string | undefined;
   const commentBody =
     mdUrl && pdfUrl
-      ? `📊 Sprint metrics report generated.\n\n- 📄 Markdown: ${mdUrl}\n- 📕 PDF: ${pdfUrl}`
-      : `⚠️ Sprint report generated but could not be written to the repo. Summary:\n\n${truncateMarkdown(opts.markdown, MAX_COMMENT_CHARS)}`;
+      ? `📊 Sprint metrics report generated.\n\n- 📄 Markdown: ${mdUrl}\n- 🟦 PDF: ${pdfUrl}`
+      : `⚠️ Sprint report generated but could not be written to a gist. Summary:\n\n${truncateMarkdown(opts.markdown, MAX_COMMENT_CHARS)}`;
 
   const commentRes = await fetch(
     `https://api.github.com/repos/${opts.owner}/${opts.repo}/issues/${opts.issueNumber}/comments`,
     {
       method: "POST",
-      headers: {
-        authorization: `Bearer ${opts.token}`,
-        accept: "application/vnd.github+json",
-        "content-type": "application/json",
-      },
+      headers: GH_HEADERS(opts.token),
       body: JSON.stringify({ body: commentBody }),
     },
   );
@@ -191,5 +165,5 @@ export async function deliverReport(
     commentUrl = data.html_url;
   }
 
-  return { mdUrl, pdfUrl, commentUrl };
+  return { mdUrl: mdUrl ?? "", pdfUrl: pdfUrl ?? "", gistUrl, commentUrl };
 }

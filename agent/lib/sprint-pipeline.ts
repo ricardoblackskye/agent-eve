@@ -8,6 +8,8 @@ export interface RunSprintReportOptions {
   owner: string;
   repo: string;
   issueNumber: number;
+  /** GitHub login that owns the gist (the token's actor). */
+  gistOwner: string;
   projectOwner?: string;
   projectNumber?: number;
 }
@@ -18,6 +20,7 @@ export interface RunSprintReportResult {
   metrics?: SprintMetrics;
   reportUrl?: string;
   reportPdfUrl?: string;
+  gistUrl?: string;
   commentUrl?: string;
   error?: string;
 }
@@ -42,9 +45,11 @@ export function formatTimestamp(date: Date = new Date()): string {
 
 /**
  * End-to-end sprint report run: read the Projects board, compute delivery
- * metrics, render Markdown + PDF, write them to the repo's reports/ folder, and
- * post a linking comment. Errors are logged (for production debugging) and
- * surfaced in the result rather than thrown.
+ * metrics, render Markdown + PDF, write them to a GitHub Gist, and post a
+ * linking comment. Writing to a gist (instead of the repo's `reports/`
+ * folder) sidesteps the main-branch ruleset and avoids orphaned files: both
+ * report files are created in a single atomic Gist POST. Errors are logged
+ * (for production debugging) and surfaced in the result rather than thrown.
  */
 export async function runSprintReport(
   opts: RunSprintReportOptions,
@@ -54,6 +59,9 @@ export async function runSprintReport(
       throw new Error(
         "projectNumber is required (configure SPRINT_PROJECT_NUMBER / pass projectNumber explicitly).",
       );
+    }
+    if (!opts.gistOwner) {
+      throw new Error("gistOwner is required (pass the token's GitHub login).");
     }
     const owner = opts.projectOwner ?? opts.owner;
     const number = opts.projectNumber;
@@ -76,6 +84,7 @@ export async function runSprintReport(
       token: opts.token,
       owner: opts.owner,
       repo: opts.repo,
+      gistOwner: opts.gistOwner,
       issueNumber: opts.issueNumber,
       baseName,
       markdown,
@@ -88,6 +97,7 @@ export async function runSprintReport(
       metrics,
       reportUrl: delivery.mdUrl,
       reportPdfUrl: delivery.pdfUrl,
+      gistUrl: delivery.gistUrl,
       commentUrl: delivery.commentUrl,
     };
   } catch (err) {

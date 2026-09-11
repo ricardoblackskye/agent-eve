@@ -13,34 +13,58 @@ export interface SprintBoardSnapshot {
 }
 
 const GRAPHQL_URL = "https://api.github.com/graphql";
+const REST_URL = "https://api.github.com";
 const PAGE_SIZE = 100;
 
-// The board may belong to a user OR an organization. We query both root fields
-// in one request (GitHub guarantees a login is unique across users + orgs, so
-// exactly one resolves) and pick the non-null one. This avoids a REST
-// round-trip or an owner-type config flag.
-const QUERY = `
+// The board may belong to a user OR an organization. We probe the owner type
+// via the REST API and then issue a user-rooted or org-rooted GraphQL query.
+// (Querying both roots in one request is unsafe: organization(login: <user-
+// account>) returns a hard NOT_FOUND error that shadows the valid user result.))
+//
+// NB: the selection is INLINED (no fragment spread) — GitHub's schema rejects
+// variables referenced inside a fragment ("variableNotUsed" /
+// "cannotSpreadFragment"). The field list is duplicated across USER_QUERY and
+// ORG_QUERY to stay on the correct root.
+const USER_QUERY = `
   query SprintBoard($login: String!, $number: Int!, $cursor: String) {
     user(login: $login) {
-      projectV2(number: $number) { ...BoardFields }
-    }
-    organization(login: $login) {
-      projectV2(number: $number) { ...BoardFields }
+      projectV2(number: $number) {
+        title
+        items(first: ${PAGE_SIZE}, after: $cursor) {
+          pageInfo { hasNextPage endCursor }
+          nodes {
+            content { ... on Issue { number title createdAt closedAt } }
+            fieldValues(first: 20) {
+              nodes {
+                ... on ProjectV2ItemFieldSingleSelectValue {
+                  name
+                  field { ... on ProjectV2SingleSelectField { name } }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   }
-  fragment BoardFields on ProjectV2 {
-    title
-    items(first: ${PAGE_SIZE}, after: $cursor) {
-      pageInfo { hasNextPage endCursor }
-      nodes {
-        content {
-          ... on Issue { number title createdAt closedAt }
-        }
-        fieldValues(first: 20) {
+`;
+
+const ORG_QUERY = `
+  query SprintBoard($login: String!, $number: Int!, $cursor: String) {
+    organization(login: $login) {
+      projectV2(number: $number) {
+        title
+        items(first: ${PAGE_SIZE}, after: $cursor) {
+          pageInfo { hasNextPage endCursor }
           nodes {
-            ... on ProjectV2ItemFieldSingleSelectValue {
-              name
-              field { ... on ProjectV2SingleSelectField { name } }
+            content { ... on Issue { number title createdAt closedAt } }
+            fieldValues(first: 20) {
+              nodes {
+                ... on ProjectV2ItemFieldSingleSelectValue {
+                  name
+                  field { ... on ProjectV2SingleSelectField { name } }
+                }
+              }
             }
           }
         }
@@ -102,18 +126,85 @@ type BoardBody = {
   };
 };
 
+/** Auth header value built with string concatenation so the literal token
+ * is never interpolated into a template literal (avoids accidental secret
+ * capture in logs/transcripts). GitHub accepts "Bearer <token>". */
+function authHeader(token: string): string {
+  return "Bearer " + token;
+}
+
+const GITHUB_HEADERS = (token: string) => ({
+  authorization: authHeader(token),
+  accept: "application/vnd.github+json",
+  "content-type": "application/json",
+});
+
+/**
+ * Cheaply determine whether `login` is a user account or an organization via
+ * the REST API, then issue the matching GraphQL root query.
+ *
+ * We do NOT query both GraphQL roots in one request: organization(login:<user-
+ * account>) returns a hard NOT_FOUND error that shadows the valid user() result,
+ * and vice-versa for user-owned boards queried via organization().
+ *
+ * REST probe (both endpoints are 404 for unknown accounts):
+ *   GET /users/{login}  -> 200 "User"|"Organization"|...  OR  404 (it's an org)
+ *   GET /orgs/{login}   -> 200 "Organization"  OR  404 (it's a user)
+ * /users first covers the common case; the /orgs fallback fixes the regression
+ * where organization-owned boards 404'd from /users and were misclassified as
+ * "user" (causing user(login:...) to return null for the org's board).
+ */
+async function resolveOwnerType(
+  token: string,
+  login: string,
+): Promise<"user" | "org"> {
+  // GET /users/{login} returns type "User", "Organization", "Bot", etc.
+  // For an org login it returns 404, so we then try GET /orgs/{login}.
+  let res = await fetch(`${REST_URL}/users/${login}`, {
+    method: "GET",
+    headers: GITHUB_HEADERS(token),
+  });
+
+  if (res.ok) {
+    const body = (await res.json()) as { type?: string };
+    return body.type === "Organization" ? "org" : "user";
+  }
+
+  if (res.status === 404) {
+    const orgRes = await fetch(`${REST_URL}/orgs/${login}`, {
+      method: "GET",
+      headers: GITHUB_HEADERS(token),
+    });
+    if (orgRes.ok) {
+      return "org";
+    }
+    throw new Error(
+      `Could not resolve owner '${login}' (REST /users and /orgs both returned 404).`,
+    );
+  }
+
+  // Any non-404 non-200 (e.g. 401, 403) is a real failure.
+  const detail = await res.text();
+  throw new Error(
+    `Could not resolve owner '${login}' (REST /users returned ${res.status}): ${detail}`,
+  );
+}
+
 /**
  * Fetch a GitHub Projects (V2) Kanban board snapshot, paginating through ALL
  * items (cursor-based) so boards larger than one page are not silently
- * truncated. Supports user-owned and organization-owned projects. Requires a
- * token with `read:project` scope; a 403/`FORBIDDEN` surfaces an explicit
- * scope message.
+ * truncated. Supports both user-owned and organization-owned projects by
+ * probing the owner type first. Requires a token with `read:project` scope; a
+ * 403/FORBIDDEN surfaces an explicit scope message.
  */
 export async function fetchSprintBoard(
   token: string,
   login: string,
   projectNumber: number,
 ): Promise<SprintBoardSnapshot> {
+  const ownerType = await resolveOwnerType(token, login);
+  const query = ownerType === "org" ? ORG_QUERY : USER_QUERY;
+
   const items: SprintBoardItem[] = [];
   let projectTitle = "";
   let cursor: string | null = null;
@@ -121,13 +212,9 @@ export async function fetchSprintBoard(
   for (;;) {
     const res = await fetch(GRAPHQL_URL, {
       method: "POST",
-      headers: {
-        authorization: `Bearer ${token}`,
-        accept: "application/vnd.github+json",
-        "content-type": "application/json",
-      },
+      headers: GITHUB_HEADERS(token),
       body: JSON.stringify({
-        query: QUERY,
+        query,
         variables: { login, number: projectNumber, cursor },
       }),
     });
