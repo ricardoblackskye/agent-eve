@@ -15,33 +15,32 @@ export interface SprintBoardSnapshot {
 const GRAPHQL_URL = "https://api.github.com/graphql";
 const PAGE_SIZE = 100;
 
+// The board may belong to a user OR an organization. We query both root fields
+// in one request (GitHub guarantees a login is unique across users + orgs, so
+// exactly one resolves) and pick the non-null one. This avoids a REST
+// round-trip or an owner-type config flag.
 const QUERY = `
   query SprintBoard($login: String!, $number: Int!, $cursor: String) {
     user(login: $login) {
-      projectV2(number: $number) {
-        title
-        items(first: ${PAGE_SIZE}, after: $cursor) {
-          pageInfo { hasNextPage endCursor }
+      projectV2(number: $number) { ...BoardFields }
+    }
+    organization(login: $login) {
+      projectV2(number: $number) { ...BoardFields }
+    }
+  }
+  fragment BoardFields on ProjectV2 {
+    title
+    items(first: ${PAGE_SIZE}, after: $cursor) {
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        content {
+          ... on Issue { number title createdAt closedAt }
+        }
+        fieldValues(first: 20) {
           nodes {
-            content {
-              ... on Issue {
-                number
-                title
-                createdAt
-                closedAt
-              }
-            }
-            fieldValues(first: 20) {
-              nodes {
-                ... on ProjectV2ItemFieldSingleSelectValue {
-                  name
-                  field {
-                    ... on ProjectV2SingleSelectField {
-                      name
-                    }
-                  }
-                }
-              }
+            ... on ProjectV2ItemFieldSingleSelectValue {
+              name
+              field { ... on ProjectV2SingleSelectField { name } }
             }
           }
         }
@@ -59,6 +58,13 @@ type ItemNode = {
     closedAt?: string | null;
   };
   fieldValues?: { nodes?: unknown[] };
+};
+type ProjectV2Data = {
+  title?: string;
+  items?: {
+    nodes?: ItemNode[];
+    pageInfo?: { hasNextPage?: boolean; endCursor?: string | null };
+  };
 };
 
 /**
@@ -91,23 +97,17 @@ function normalizeItem(node: ItemNode): SprintBoardItem {
 type BoardBody = {
   errors?: Array<{ type?: string; message?: string }>;
   data?: {
-    user?: {
-      projectV2?: {
-        title?: string;
-        items?: {
-          nodes?: ItemNode[];
-          pageInfo?: { hasNextPage?: boolean; endCursor?: string | null };
-        };
-      };
-    };
+    user?: { projectV2?: ProjectV2Data | null } | null;
+    organization?: { projectV2?: ProjectV2Data | null } | null;
   };
 };
 
 /**
  * Fetch a GitHub Projects (V2) Kanban board snapshot, paginating through ALL
  * items (cursor-based) so boards larger than one page are not silently
- * truncated. Requires a token with `read:project` scope; a 403/`FORBIDDEN`
- * surfaces an explicit scope message.
+ * truncated. Supports user-owned and organization-owned projects. Requires a
+ * token with `read:project` scope; a 403/`FORBIDDEN` surfaces an explicit
+ * scope message.
  */
 export async function fetchSprintBoard(
   token: string,
@@ -155,7 +155,8 @@ export async function fetchSprintBoard(
       throw new Error(`Projects API error: ${msg}`);
     }
 
-    const project = body.data?.user?.projectV2;
+    const project =
+      body.data?.user?.projectV2 ?? body.data?.organization?.projectV2;
     if (!project) {
       throw new Error(
         "Projects board not found (check login + project number)",

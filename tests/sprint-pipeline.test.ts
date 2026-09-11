@@ -42,7 +42,7 @@ function buildFetchMock(): { fetchMock: unknown } {
           status: 201,
           json: async () => ({
             content: {
-              html_url: `https://github.com/o/r/blob/main/reports/sprint-1.${
+              download_url: `https://raw.githubusercontent.com/o/r/main/reports/sprint-1.${
                 isPdf ? "pdf" : "md"
               }`,
             },

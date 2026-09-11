@@ -54,13 +54,12 @@ async function writeReportFile(
     throw new Error(`Failed to write ${path}: ${res.status} ${detail}`);
   }
   const data = (await res.json()) as {
-    content?: { html_url?: string };
+    content?: { download_url?: string };
     commit?: { html_url?: string };
   };
-  return (data.content?.html_url ?? data.commit?.html_url ?? "").replace(
-    "https://github.com/",
-    "https://raw.githubusercontent.com/",
-  );
+  // Use download_url for a direct, valid raw link (html_url points to the
+  // github.com blob page and is not a raw file URL).
+  return data.content?.download_url ?? data.commit?.html_url ?? "";
 }
 
 /**

@@ -17,7 +17,7 @@ describe("deliverReport", () => {
             status: 201,
             json: async () => ({
               content: {
-                html_url: `https://github.com/o/r/blob/main/reports/sprint-x.${isPdf ? "pdf" : "md"}`,
+                download_url: `https://raw.githubusercontent.com/o/r/main/reports/sprint-x.${isPdf ? "pdf" : "md"}`,
               },
             }),
           };
@@ -48,8 +48,12 @@ describe("deliverReport", () => {
     expect(
       calls["https://api.github.com/repos/o/r/contents/reports/sprint-x.pdf"],
     ).toBe("PUT");
-    expect(result.mdUrl).toContain("/reports/sprint-x.md");
-    expect(result.pdfUrl).toContain("/reports/sprint-x.pdf");
+    expect(result.mdUrl).toBe(
+      "https://raw.githubusercontent.com/o/r/main/reports/sprint-x.md",
+    );
+    expect(result.pdfUrl).toBe(
+      "https://raw.githubusercontent.com/o/r/main/reports/sprint-x.pdf",
+    );
     expect(result.commentUrl).toContain("#comment-1");
   });
 

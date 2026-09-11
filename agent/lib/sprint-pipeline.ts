@@ -32,8 +32,13 @@ export async function runSprintReport(
   opts: RunSprintReportOptions,
 ): Promise<RunSprintReportResult> {
   try {
+    if (!opts.projectNumber) {
+      throw new Error(
+        "projectNumber is required (configure SPRINT_PROJECT_NUMBER / pass projectNumber explicitly).",
+      );
+    }
     const owner = opts.projectOwner ?? opts.owner;
-    const number = opts.projectNumber ?? 3;
+    const number = opts.projectNumber;
     const snapshot: SprintBoardSnapshot = await fetchSprintBoard(
       opts.token,
       owner,

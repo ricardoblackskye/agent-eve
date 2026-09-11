@@ -12,12 +12,21 @@ vi.mock("next/server", () => ({
   },
 }));
 
-function createRequest(path: string, opts: { method?: string; headers?: Record<string, string>; body?: string } = {}): NextRequest {
+function createRequest(
+  path: string,
+  opts: {
+    method?: string;
+    headers?: Record<string, string>;
+    body?: string;
+  } = {},
+): NextRequest {
   const url = new URL(path, "http://localhost:3000");
   return {
     nextUrl: url,
     method: (opts.method || "POST") as any,
-    headers: new Headers(opts.headers || { "content-type": "application/json" }),
+    headers: new Headers(
+      opts.headers || { "content-type": "application/json" },
+    ),
     blob: vi.fn().mockResolvedValue(new Blob()),
     text: vi.fn().mockResolvedValue(opts.body || ""),
     cookies: {} as any,
@@ -83,9 +92,13 @@ describe("webhook handler (bug #39)", () => {
     // production when EVE_API_KEY is missing/misconfigured or the session
     // endpoint is unreachable. GitHub must see a non-200 so it can alert/retry
     // rather than believing the release-notes update was delivered.
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 }),
-    );
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401,
+        }),
+      );
     vi.stubGlobal("fetch", fetchMock);
 
     const { POST } = await import("../app/api/github/webhook/route");
@@ -107,9 +120,13 @@ describe("webhook handler (bug #39)", () => {
   });
 
   it("should surface the Eve API failure reason in the response body", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 }),
-    );
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401,
+        }),
+      );
     vi.stubGlobal("fetch", fetchMock);
 
     const { POST } = await import("../app/api/github/webhook/route");

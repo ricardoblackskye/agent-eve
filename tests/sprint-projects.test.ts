@@ -77,6 +77,7 @@ describe("fetchSprintBoard", () => {
       cursor: null,
     });
     expect(sent.query).toContain("projectV2");
+    expect(sent.query).toContain("organization(login");
   });
 
   it("paginates through all items across multiple pages", async () => {
@@ -135,6 +136,35 @@ describe("fetchSprintBoard", () => {
 
     const snapshot = await fetchSprintBoard("tok", "ricardoblackskye", 3);
     expect(snapshot.items[0].status).toBe("");
+  });
+
+  it("resolves organization-owned projects via the organization root field", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          data: {
+            user: null,
+            organization: {
+              projectV2: {
+                title: "Org Sprint",
+                items: {
+                  nodes: [makeItem(7, "Done")],
+                  pageInfo: { hasNextPage: false, endCursor: null },
+                },
+              },
+            },
+          },
+        }),
+      })),
+    );
+
+    const snapshot = await fetchSprintBoard("tok", "my-org", 3);
+    expect(snapshot.projectTitle).toBe("Org Sprint");
+    expect(snapshot.items).toHaveLength(1);
+    expect(snapshot.items[0].number).toBe(7);
   });
 
   it("surfaces a clear 403 for a missing read:project scope", async () => {
