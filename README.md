@@ -79,7 +79,7 @@ model: openrouter.chat("anthropic/claude-sonnet-5"), // OpenRouter model ID
 ### Environment Variables
 
 | Variable             | Required | Description                                                                             |
-| -------------------- | -------- | --------------------------------------------------------------------------------------- |
+|----------------------|----------|-----------------------------------------------------------------------------------------|
 | `OPENROUTER_API_KEY` | Yes      | OpenRouter API key for model access                                                     |
 | `EVE_API_KEY`        | Yes      | Bearer token for production auth (sent as `Authorization: Bearer <EVE_API_KEY>` header) |
 
@@ -110,7 +110,7 @@ Markdown and PDF, and posts a linking comment on the issue. Requires a token wit
 ## Scripts
 
 | Command             | Description                            |
-| ------------------- | -------------------------------------- |
+|---------------------|----------------------------------------|
 | `npm run build`     | Build the agent (`eve build`)          |
 | `npm run dev`       | Start the development server           |
 | `npm run start`     | Start the production server            |
@@ -135,7 +135,7 @@ eve eval smoke --verbose
 ### Current Evals
 
 | Eval           | Gates | Description                                |
-| -------------- | ----- | ------------------------------------------ |
+|----------------|-------|--------------------------------------------|
 | `smoke`        | 2/2   | Agent boots and responds                   |
 | `auth-valid`   | 2/2   | Authenticated requests succeed             |
 | `auth-invalid` | 1/1   | Unauthenticated requests rejected with 401 |
@@ -145,7 +145,7 @@ eve eval smoke --verbose
 Every PR triggers a GitHub Actions workflow with three checks:
 
 | Check          | What it does                                                    |
-| -------------- | --------------------------------------------------------------- |
+|----------------|-----------------------------------------------------------------|
 | **TypeScript** | `tsc --noEmit` — type safety verification                       |
 | **Eve Build**  | `eve build` — verifies the agent compiles                       |
 | **Eve Evals**  | `eve eval --strict` — runs all evals against a local dev server |
@@ -189,7 +189,7 @@ https://<your-deployment>.vercel.app/api/github/webhook
 Configure it once in the repo (**Settings → Webhooks → Add webhook**):
 
 | Field            | Value                                                     |
-| ---------------- | --------------------------------------------------------- |
+|------------------|-----------------------------------------------------------|
 | **Payload URL**  | `https://<your-deployment>.vercel.app/api/github/webhook` |
 | **Content type** | `application/json`                                        |
 | **Secret**       | the value of `GH_WEBHOOK_SECRET`                          |
@@ -203,7 +203,7 @@ The webhook verifies the `GH_WEBHOOK_SECRET` on every request
 Required environment variables (Vercel + GitHub Actions secrets):
 
 | Variable             | Required | Description                                                                                                                                                                                        |
-| -------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+|----------------------|----------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `GH_WEBHOOK_SECRET`  | Yes      | Shared secret that authenticates incoming webhook payloads. **Required on Vercel** — if unset in a deployed environment the handler returns HTTP 500 rather than processing an unverified payload. |
 | `GH_RELEASE_TOKEN`   | Yes      | GitHub token the Release Manager uses to write `releasenotes.md` on merge.                                                                                                                         |
 | `OPENROUTER_API_KEY` | Yes      | Powers the AI review + release-notes generation.                                                                                                                                                   |

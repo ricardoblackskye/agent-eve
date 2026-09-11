@@ -20,10 +20,10 @@
 
 This is a large feature with two *new* external integrations (Projects GraphQL + PDF) and an API-level delivery constraint. I recommend splitting:
 
-| Release | Scope | Why deferred |
-|---------|-------|--------------|
-| **R1** | Label trigger + Projects V2 fetch + metrics (cycle time / throughput / WIP) + **markdown** report posted to the issue | Proves the data pipeline + token scope before investing in PDF; no new heavy deps |
-| **R2** | **PDF** rendering (`pdf-lib`) + hosting/linking the PDF, kept alongside the markdown summary | `pdf-lib` dep + a delivery/hosting decision |
+| Release | Scope                                                                                                                 | Why deferred                                                                      |
+|---------|-----------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------|
+| **R1**  | Label trigger + Projects V2 fetch + metrics (cycle time / throughput / WIP) + **markdown** report posted to the issue | Proves the data pipeline + token scope before investing in PDF; no new heavy deps |
+| **R2**  | **PDF** rendering (`pdf-lib`) + hosting/linking the PDF, kept alongside the markdown summary                          | `pdf-lib` dep + a delivery/hosting decision                                       |
 
 R1 fully validates the riskiest parts (Projects access, `read:project` scope, metric correctness). R2 is rendering + delivery on top of already-correct numbers.
 
