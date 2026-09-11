@@ -169,7 +169,7 @@ sequenceDiagram
 ## Environment Variables
 
 | Variable                   | Purpose                                 | Required         |
-| -------------------------- | --------------------------------------- | ---------------- |
+|----------------------------|-----------------------------------------|------------------|
 | `OPENROUTER_API_KEY`       | API key for OpenRouter model access     | Yes              |
 | `EVE_API_KEY`              | Bearer token for Eve API authentication | Yes              |
 | `VERCEL_PROTECTION_BYPASS` | Bypass token for Vercel preview auth    | For preview only |

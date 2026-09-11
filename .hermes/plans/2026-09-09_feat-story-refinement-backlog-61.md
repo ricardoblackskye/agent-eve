@@ -51,12 +51,12 @@ Already implemented in R1 (Phase 2):
 
 ### What Phase 4 requires that is NOT yet done
 
-| Requirement (#61 Phase 4)                  | Current state                                       | Delta                       |
-| ------------------------------------------ | --------------------------------------------------- | --------------------------- |
-| "issue … linked as a child of the source"  | `[Story]` body says `Generated … from #85` (textual) | **Real parent/child link**  |
-| "`needs-story` label removed from source"  | label stays on the source issue                     | **Remove `needs-story`**    |
-| "`user-story-added` label applied"         | never applied                                       | **Apply `user-story-added`**|
-| "no re-trigger"                            | `user-story-added` label would NOT re-trigger        | Verify + test (guard)      |
+| Requirement (#61 Phase 4)                 | Current state                                        | Delta                        |
+|-------------------------------------------|------------------------------------------------------|------------------------------|
+| "issue … linked as a child of the source" | `[Story]` body says `Generated … from #85` (textual) | **Real parent/child link**   |
+| "`needs-story` label removed from source" | label stays on the source issue                      | **Remove `needs-story`**     |
+| "`user-story-added` label applied"        | never applied                                        | **Apply `user-story-added`** |
+| "no re-trigger"                           | `user-story-added` label would NOT re-trigger        | Verify + test (guard)        |
 
 **Trigger-safety analysis (why adding `user-story-added` won't loop):**
 `isStoryTrigger` only fires for the configured trigger label (`needs-story`) on

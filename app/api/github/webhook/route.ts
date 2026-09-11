@@ -3,6 +3,7 @@ import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 import { isStoryTrigger } from "../../../../agent/lib/story-trigger";
+import { isSprintReportTrigger } from "../../../../agent/lib/sprint-trigger";
 
 interface RepoConfig {
   webhook_secret_env: string;
@@ -292,6 +293,89 @@ async function handler(request: NextRequest) {
   if (event === "issues") {
     const action = data.action; // opened, edited, reopened, labeled, closed, ...
     const issue = data.issue;
+
+    // Sprint-report trigger: label "generate-sprint-report". Delegates to the
+    // Sprint Metrics Analyst subagent (disjoint from the story trigger below).
+    if (
+      isSprintReportTrigger({
+        action,
+        label: data.label ? { name: data.label.name } : undefined,
+      })
+    ) {
+      const sanitizeId = (
+        value: string | undefined,
+        fallback: string,
+      ): string =>
+        (value || fallback).replace(/[^A-Za-z0-9_.-]/g, "") || fallback;
+      const sprintOwner = sanitizeId(repoFullName.split("/")[0], "unknown");
+      const sprintRepo = sanitizeId(repoFullName.split("/")[1], "unknown");
+      const sprintIssueNumber = Number.isInteger(issue?.number)
+        ? issue.number
+        : 0;
+
+      const sprintMessage = [
+        `A GitHub issue has been labeled "generate-sprint-report". Please delegate to the Sprint Metrics Analyst subagent to generate a sprint metrics report.`,
+        ``,
+        `Repository (verified identifier): ${sprintOwner}/${sprintRepo}`,
+        `Issue number (verified identifier): ${sprintIssueNumber}`,
+        ``,
+        `The Sprint Metrics Analyst subagent must call generate_sprint_report with owner "${sprintOwner}", repo "${sprintRepo}", issueNumber ${sprintIssueNumber}, and the default board (login "ricardoblackskye", projectNumber 3).`,
+      ].join("\n");
+
+      const apiKey = process.env.EVE_API_KEY;
+      try {
+        const targetUrl = `${request.nextUrl.origin}/eve/v1/session`;
+        const apiHeaders: Record<string, string> = {
+          "content-type": "application/json",
+        };
+        if (apiKey) {
+          apiHeaders.authorization = `Bearer ${apiKey}`;
+        }
+        const bypass =
+          process.env.VERCEL_PROTECTION_BYPASS ||
+          request.headers.get("x-vercel-protection-bypass") ||
+          request.nextUrl.searchParams.get("x-vercel-protection-bypass");
+        if (bypass) {
+          apiHeaders["x-vercel-protection-bypass"] = bypass;
+        }
+        const cookie = request.headers.get("cookie");
+        if (cookie) {
+          apiHeaders["cookie"] = cookie;
+        }
+        const apiResponse = await fetch(targetUrl, {
+          method: "POST",
+          headers: apiHeaders,
+          body: JSON.stringify({ message: sprintMessage }),
+        });
+        if (!apiResponse.ok) {
+          return NextResponse.json(
+            {
+              ok: false,
+              error:
+                "Eve API session creation failed; sprint report was not generated.",
+            },
+            { status: 502 },
+          );
+        }
+      } catch (err) {
+        console.error(
+          `[webhook] Eve API call failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        return NextResponse.json(
+          {
+            ok: false,
+            error:
+              "Eve API session creation failed; sprint report was not generated.",
+          },
+          { status: 502 },
+        );
+      }
+
+      return NextResponse.json({
+        ok: true,
+        message: `Issue #${sprintIssueNumber} ${action} triggered sprint report`,
+      });
+    }
 
     // Detect the trigger (mention in body, or the trigger label) using the
     // shared, platform-neutral detector. Non-triggering issues fall through.
