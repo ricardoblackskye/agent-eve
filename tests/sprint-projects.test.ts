@@ -281,11 +281,16 @@ describe("fetchSprintBoard", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (u: string) => {
-        if (u.includes("/users/ghost-login-xyz")) {
+        // /users/{login} and /orgs/{login} both 404 for a nonexistent login.
+        if (
+          u.includes("/users/ghost-login-xyz") ||
+          u.includes("/orgs/ghost-login-xyz")
+        ) {
           return {
             ok: false,
             status: 404,
             json: async () => ({ message: "Not Found" }),
+            text: async () => "Not Found",
           };
         }
         return { ok: true, status: 200, json: async () => ({}) };

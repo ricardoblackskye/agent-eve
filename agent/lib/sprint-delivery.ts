@@ -50,7 +50,7 @@ function toBase64(content: Uint8Array): string {
 }
 
 const GH_HEADERS = (token: string) => ({
-  authorization: "token " + token,
+  authorization: "Bearer " + token,
   accept: "application/vnd.github+json",
   "content-type": "application/json",
 });
@@ -70,8 +70,9 @@ export async function createGistWithReport(
   markdown: string,
   pdf: Uint8Array,
 ): Promise<{ gistUrl: string; mdUrl: string; pdfUrl: string }> {
-  void gistOwner; // stable identifier available for callers; gist id is in html_url
-  const description = `Sprint metrics report: ${baseName}`;
+  const description =
+    `Sprint metrics report (${baseName}) — owned by ${gistOwner} ` +
+    `via agent-eve sprint-reporter`;
   const body = {
     description,
     public: false,

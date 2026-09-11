@@ -57,7 +57,7 @@ export default defineTool({
       const userRes = await fetch("https://api.github.com/user", {
         method: "GET",
         headers: {
-          authorization: `Bearer ${token}`,
+          authorization: "Bearer " + token,
           accept: "application/vnd.github+json",
         },
       });

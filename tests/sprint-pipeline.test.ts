@@ -127,7 +127,12 @@ describe("runSprintReport", () => {
           json: async () => ({ login: "cuill" }),
         };
       }
-      return { ok: false, status: 403, json: async () => ({}) };
+      return {
+        ok: false,
+        status: 403,
+        json: async () => ({}),
+        text: async () => "forbidden",
+      };
     });
     vi.stubGlobal("fetch", override);
 
@@ -145,6 +150,101 @@ describe("runSprintReport", () => {
     expect(result.error).toMatch(/read:project|403/i);
     expect(errorSpy).toHaveBeenCalled();
     errorSpy.mockRestore();
+  });
+
+  it("resolves org-owned boards via the /orgs fallback when /users 404s", async () => {
+    // /users/{login} returns 404 for an org; /orgs/{login} returns 200 → org query.
+    const orgMock = vi.fn(async (url: string | URL, init?: RequestInit) => {
+      const u = String(url);
+      if (u === "https://api.github.com/user") {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ login: "cuill" }),
+        };
+      }
+      if (u === "https://api.github.com/users/myorg") {
+        return {
+          ok: false,
+          status: 404,
+          json: async () => ({}),
+          text: async () => "not found",
+        };
+      }
+      if (u === "https://api.github.com/orgs/myorg") {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ type: "Organization" }),
+        };
+      }
+      if (u.includes("/graphql")) {
+        // org-rooted query succeeds
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            data: {
+              organization: {
+                projectV2: {
+                  title: "Team Board",
+                  items: { nodes: [], pageInfo: { hasNextPage: false } },
+                },
+              },
+            },
+          }),
+        };
+      }
+      if (u === "https://api.github.com/gists") {
+        // echo back the file keys the caller sent (dynamic sprint-<ts> baseName)
+        let keys: string[] = ["sprint-1.md", "sprint-1.pdf"];
+        try {
+          keys = Object.keys(
+            JSON.parse((init?.body as string) || "{}").files || {},
+          );
+        } catch {
+          keys = ["sprint-1.md", "sprint-1.pdf"];
+        }
+        return {
+          ok: true,
+          status: 201,
+          json: async () => ({
+            html_url: GIST_HTML,
+            files: Object.fromEntries(
+              keys.map((k) => [
+                k,
+                { raw_url: k.endsWith(".md") ? GIST_MD : GIST_PDF },
+              ]),
+            ),
+          }),
+        };
+      }
+      if (u.endsWith("/comments")) {
+        return {
+          ok: true,
+          status: 201,
+          json: async () => ({ html_url: "u/c#comment-1" }),
+        };
+      }
+      return { ok: true, status: 200, json: async () => ({}) };
+    });
+    vi.stubGlobal("fetch", orgMock);
+
+    const result = await runSprintReport({
+      token: "tok",
+      owner: "o",
+      repo: "r",
+      issueNumber: 9,
+      gistOwner: "cuill",
+      projectOwner: "myorg", // an organization
+      projectNumber: 3,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.projectTitle).toBe("Team Board");
+    expect(result.reportUrl).toBe(GIST_MD);
+    expect(result.reportPdfUrl).toBe(GIST_PDF);
+    expect(result.gistUrl).toBe(GIST_HTML);
   });
 
   it("fails fast when gistOwner is missing", async () => {
