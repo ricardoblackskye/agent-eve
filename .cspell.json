@@ -66,7 +66,10 @@
     "defence",
     "recognised",
     "sanitised",
-    "DOSOMETHINGBAD"
+    "DOSOMETHINGBAD",
+    "cuill",
+    "JVBERi",
+    "JVBE"
   ],
   "ignorePaths": [
     "node_modules/**",
