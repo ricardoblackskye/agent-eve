@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { runSprintReport } from "../agent/lib/sprint-pipeline";
+import { runSprintReport, formatTimestamp } from "../agent/lib/sprint-pipeline";
 
 function buildFetchMock(): { fetchMock: unknown } {
   const fetchMock = vi.fn(
@@ -107,5 +107,21 @@ describe("runSprintReport", () => {
     expect(result.error).toMatch(/read:project|403/i);
     expect(errorSpy).toHaveBeenCalled();
     errorSpy.mockRestore();
+  });
+});
+
+describe("formatTimestamp", () => {
+  it("produces a filesystem-safe YYYY-MM-DD-HH-MM-SS stamp", () => {
+    const stamp = formatTimestamp(new Date("2026-09-11T14:05:09.000Z"));
+    expect(stamp).toBe("2026-09-11-14-05-09");
+  });
+
+  it("throws on an invalid (NaN) system clock", () => {
+    expect(() => formatTimestamp(new Date("not-a-date"))).toThrow(/timestamp/i);
+  });
+
+  it("never contains characters illegal in Windows paths (: / \\)", () => {
+    const stamp = formatTimestamp();
+    expect(stamp).not.toMatch(/[:/\\]/);
   });
 });

@@ -23,10 +23,28 @@ export interface RunSprintReportResult {
 }
 
 /**
+ * Derive a deterministic, filesystem-safe timestamp for report filenames.
+ * Always `YYYY-MM-DD-HH-MM-SS` (locale-independent, no colons which are illegal
+ * in Windows paths). Throws if the input time is invalid, so a broken system
+ * clock surfaces loudly instead of producing a garbage filename.
+ */
+export function formatTimestamp(date: Date = new Date()): string {
+  if (Number.isNaN(date.getTime())) {
+    throw new Error(
+      "Invalid system clock: cannot derive report timestamp (Date is NaN).",
+    );
+  }
+  // toISOString always yields a stable YYYY-MM-DDTHH:MM:SS.sssZ in UTC;
+  // strip the 'T' and replace ':' with '-' for a colon-free, Windows-safe
+  // YYYY-MM-DD-HH-MM-SS stamp.
+  return date.toISOString().slice(0, 19).replace(/[:T]/g, "-");
+}
+
+/**
  * End-to-end sprint report run: read the Projects board, compute delivery
- * metrics, render Markdown + PDF, write them to the repo's reports/ folder,
- * and post a linking comment. Errors are logged (for production debugging)
- * and surfaced in the result rather than thrown.
+ * metrics, render Markdown + PDF, write them to the repo's reports/ folder, and
+ * post a linking comment. Errors are logged (for production debugging) and
+ * surfaced in the result rather than thrown.
  */
 export async function runSprintReport(
   opts: RunSprintReportOptions,
@@ -45,10 +63,7 @@ export async function runSprintReport(
       number,
     );
     const metrics = computeSprintMetrics(snapshot);
-    const generatedAt = new Date()
-      .toISOString()
-      .slice(0, 19)
-      .replace(/[:T]/g, "-"); // 2026-09-11-14-05-09
+    const generatedAt = formatTimestamp();
     const markdown = renderMarkdown(
       snapshot.projectTitle,
       metrics,
