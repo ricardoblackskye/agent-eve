@@ -153,7 +153,9 @@ describe("publish_story", () => {
       },
       {} as any,
     );
-    expect(r.payload.owner).toBe("evil..other");
+    // owner uses GitHub's stricter class (alphanumerics + hyphens only); the
+    // slashes/invalid chars are stripped entirely, not preserved as dots.
+    expect(r.payload.owner).toBe("evilother");
     expect(r.payload.repo).toBe("xrm-rf");
   });
 });

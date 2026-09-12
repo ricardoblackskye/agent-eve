@@ -2,6 +2,8 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   getProvider,
   toCanonicalPayload,
+  sanitizeOwnerId,
+  sanitizeRepoName,
 } from "../agent/lib/backlog-provider";
 import type { UserStory } from "../agent/lib/story-schema";
 
@@ -203,6 +205,41 @@ describe("GitHubProvider honors source owner/repo from payload (issue #119)", ()
     );
 
     delete process.env.STORY_ALLOWED_REPOS;
+  });
+
+  it("allow-list owner comparison is case-insensitive (GitHub usernames)", async () => {
+    // Operator configures with mixed-case owner; canonical payload uses lowercase.
+    process.env.STORY_ALLOWED_REPOS = "RicardoBlackSkye/agent-eve";
+    const { result, calls } = await publish(
+      { owner: "ricardoblackskye", repo: "agent-eve" },
+      { setAllowList: false },
+    );
+    expect(result.delivered).toBe(true);
+    expect(
+      calls.filter((c) => c.url.endsWith("/issues") && c.method === "POST"),
+    ).toHaveLength(1);
+    delete process.env.STORY_ALLOWED_REPOS;
+  });
+
+  it("returns mode: 'blocked' (not 'dry-run') on allow-list refusal", async () => {
+    process.env.STORY_ALLOWED_REPOS = "ricardoblackskye/agent-eve";
+    const { result } = await publish(
+      { owner: "evil", repo: "malicious" },
+      { setAllowList: false },
+    );
+    expect(result.delivered).toBe(false);
+    expect(result.mode).toBe("blocked");
+    delete process.env.STORY_ALLOWED_REPOS;
+  });
+
+  it("sanitizeOwnerId strips dots/underscores (GitHub owner class) and caps at 39", () => {
+    expect(sanitizeOwnerId("a.b_c/D")).toBe("abcD");
+    expect(sanitizeOwnerId("x".repeat(50)).length).toBe(39);
+  });
+
+  it("sanitizeRepoName keeps dots/underscores and caps at 100", () => {
+    expect(sanitizeRepoName("my.repo_name")).toBe("my.repo_name");
+    expect(sanitizeRepoName("y".repeat(120)).length).toBe(100);
   });
 
   it("re-sanitizes owner/repo at the provider boundary — strips control chars/newlines", async () => {

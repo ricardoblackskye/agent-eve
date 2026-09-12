@@ -45,16 +45,49 @@ export function toCanonicalPayload(story: UserStory): CanonicalPayload {
 }
 
 /**
- * Allowlist sanitizer for a GitHub owner/repo identifier fragment. Strips
- * everything outside `[A-Za-z0-9_.-]` (no slashes, newlines, control chars,
- * markdown). Shared so every provider — including the console/dry-run provider
- * that may echo the payload — receives already-safe identifier values.
+ * Identifier sanitisers for GitHub owner/repo fragments. They strip everything
+ * outside the allowed character class so the values are safe to embed in API URLs
+ * and LLM prompts (defense against control-char / markdown injection). Shared so
+ * every provider — including the console/dry-run provider that may echo the
+ * payload — receives already-safe values.
+ *
+ * Owner (username/org) and repo (repository name) have *different* valid
+ * character classes:
+ *   - owner: GitHub usernames/orgs allow alphanumerics and single hyphens only
+ *     (no dots or underscores) — `[A-Za-z0-9-]+`.
+ *   - repo: repository names additionally allow dots and underscores — `[A-Za-z0-9_.-]+`.
+ *
+ * GitHub also caps lengths: owner ≤ 39 chars, repo ≤ 100 chars. We truncate
+ * (not reject) after sanitising so a misconfigured allow-list or oversized LLM
+ * value can never push an absurdly long string to the API.
  *
  * Used both in `publish_story` (pre-provider) and `GitHubProvider.publish`
  * (boundary defense in depth).
  */
+const GITHUB_OWNER_MAX = 39;
+const GITHUB_REPO_MAX = 100;
+
+export function sanitizeOwnerId(value: string | undefined): string {
+  return (value || "")
+    .replace(/[^A-Za-z0-9-]/g, "")
+    .slice(0, GITHUB_OWNER_MAX);
+}
+
+export function sanitizeRepoName(value: string | undefined): string {
+  return (value || "")
+    .replace(/[^A-Za-z0-9_.-]/g, "")
+    .slice(0, GITHUB_REPO_MAX);
+}
+
+/** @deprecated use sanitizeOwnerId / sanitizeRepoName for correct character classes */
 export function sanitizeRepoId(value: string | undefined): string {
   return (value || "").replace(/[^A-Za-z0-9_.-]/g, "");
+}
+
+/** Merge warning arrays, returning `undefined` when there are none. */
+function mergeWarnings(...lists: string[][]): string[] | undefined {
+  const merged = lists.flat();
+  return merged.length ? merged : undefined;
 }
 
 /**
@@ -90,17 +123,20 @@ export function sanitizeOwnerRepo(
   }
 
   const owner =
-    sanitizeRepoId(payloadOwner) ||
-    sanitizeRepoId(rawOwnerEnv) ||
+    sanitizeOwnerId(payloadOwner) ||
+    sanitizeOwnerId(rawOwnerEnv) ||
     fallbackOwner;
   const repo =
-    sanitizeRepoId(payloadRepo) || sanitizeRepoId(rawRepoEnv) || fallbackRepo;
+    sanitizeRepoName(payloadRepo) || sanitizeRepoName(rawRepoEnv) || fallbackRepo;
   return { owner, repo, warnings };
 }
 
 export interface PublishResult {
   delivered: boolean;
-  mode: "dry-run" | "live";
+  /** "live" = created; "dry-run" = simulated/no-op by design (e.g. console provider);
+   *  "blocked" = an active refusal (allow-list gate / misconfig) — distinct from a
+   *  successful dry-run so callers don't mistake a denial for a simulation. */
+  mode: "dry-run" | "live" | "blocked";
   providerId: string;
   url?: string;
   /** The id/number of the newly created item (e.g. GitHub issue number). */
@@ -181,15 +217,23 @@ class GitHubProvider implements BacklogProvider {
     // approved repository. The gate is CLOSED by default — if STORY_ALLOWED_REPOS
     // is unset/empty we REFUSE rather than fall back to "allow anything", so a
     // misconfigured or unconfigured deployment cannot silently lose this defense.
+    // GitHub usernames are case-INSENSITIVE while repo names are case-sensitive,
+    // so we compare with a normalised (lowercased owner) target against
+    // lowercased-owner allow-list entries to avoid spurious rejections from
+    // differing owner casing (e.g. "RicardoBlackSkye" vs "ricardoblackskye").
     const allowed = (process.env.STORY_ALLOWED_REPOS || "")
       .split(",")
       .map((s) => s.trim())
-      .filter(Boolean);
-    const target = `${owner}/${repo}`;
+      .filter(Boolean)
+      .map((entry) => {
+        const [o, r] = entry.split("/");
+        return r ? `${o.toLowerCase()}/${r}` : entry.toLowerCase();
+      });
+    const target = `${owner.toLowerCase()}/${repo}`;
     if (allowed.length === 0) {
       return {
         delivered: false,
-        mode: "dry-run",
+        mode: "blocked",
         providerId: this.id,
         error:
           "Refusing to publish: STORY_ALLOWED_REPOS is not configured. " +
@@ -201,7 +245,7 @@ class GitHubProvider implements BacklogProvider {
     if (!allowed.includes(target)) {
       return {
         delivered: false,
-        mode: "dry-run",
+        mode: "blocked",
         providerId: this.id,
         error:
           `Refusing to publish: target repo '${target}' is not in the ` +
@@ -342,9 +386,7 @@ class GitHubProvider implements BacklogProvider {
         url: data.html_url,
         issueNumber: data.number,
         labelTransitions,
-        warnings: [...ownerWarnings, ...warnings].length
-          ? [...ownerWarnings, ...warnings]
-          : undefined,
+        warnings: mergeWarnings(ownerWarnings, warnings),
       };
     } catch (err) {
       return {
