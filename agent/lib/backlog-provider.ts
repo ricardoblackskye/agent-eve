@@ -44,6 +44,60 @@ export function toCanonicalPayload(story: UserStory): CanonicalPayload {
   };
 }
 
+/**
+ * Allowlist sanitizer for a GitHub owner/repo identifier fragment. Strips
+ * everything outside `[A-Za-z0-9_.-]` (no slashes, newlines, control chars,
+ * markdown). Shared so every provider — including the console/dry-run provider
+ * that may echo the payload — receives already-safe identifier values.
+ *
+ * Used both in `publish_story` (pre-provider) and `GitHubProvider.publish`
+ * (boundary defense in depth).
+ */
+export function sanitizeRepoId(value: string | undefined): string {
+  return (value || "").replace(/[^A-Za-z0-9_.-]/g, "");
+}
+
+/**
+ * Resolve a safe owner/repo pair for the GitHub provider.
+ *
+ * Priority: payload value (already sanitised upstream by `publish_story`) →
+ * env var → built-in default. Each source is sanitised; if an ENV var is set
+ * but strips to empty (e.g. whitespace-only misconfiguration), a warning is
+ * emitted so the operator is not silently redirected to the default repo.
+ */
+export function sanitizeOwnerRepo(
+  payloadOwner: string | undefined,
+  payloadRepo: string | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+): { owner: string; repo: string; warnings: string[] } {
+  const warnings: string[] = [];
+  const fallbackOwner = "ricardoblackskye";
+  const fallbackRepo = "agent-eve";
+
+  const rawOwnerEnv = env.GITHUB_REPO_OWNER;
+  const rawRepoEnv = env.GITHUB_REPO_NAME;
+  if (rawOwnerEnv && sanitizeRepoId(rawOwnerEnv) === "") {
+    warnings.push(
+      `GITHUB_REPO_OWNER is set but contains no valid identifier characters; ` +
+        `falling back to '${fallbackOwner}'.`,
+    );
+  }
+  if (rawRepoEnv && sanitizeRepoId(rawRepoEnv) === "") {
+    warnings.push(
+      `GITHUB_REPO_NAME is set but contains no valid identifier characters; ` +
+        `falling back to '${fallbackRepo}'.`,
+    );
+  }
+
+  const owner =
+    sanitizeRepoId(payloadOwner) ||
+    sanitizeRepoId(rawOwnerEnv) ||
+    fallbackOwner;
+  const repo =
+    sanitizeRepoId(payloadRepo) || sanitizeRepoId(rawRepoEnv) || fallbackRepo;
+  return { owner, repo, warnings };
+}
+
 export interface PublishResult {
   delivered: boolean;
   mode: "dry-run" | "live";
@@ -113,23 +167,14 @@ class GitHubProvider implements BacklogProvider {
       };
     }
 
-    // Re-sanitize at the provider boundary (defense in depth, PR #120 review):
-    // owner/repo may have arrived from LLM-supplied payload fields, so strip
-    // anything outside the GitHub identifier allowlist [A-Za-z0-9_.-] (no
-    // newlines, control chars, slashes, or markdown) before they touch a URL or
-    // prompt. This neutralises prompt/URL injection via crafted repo names.
-    const sanitizeId = (
-      value: string | undefined,
-      fallback: string | undefined,
-    ): string => {
-      const base = value || fallback || "";
-      return base.replace(/[^A-Za-z0-9_.-]/g, "");
-    };
-    const owner =
-      sanitizeId(payload.owner, process.env.GITHUB_REPO_OWNER) ||
-      "ricardoblackskye";
-    const repo =
-      sanitizeId(payload.repo, process.env.GITHUB_REPO_NAME) || "agent-eve";
+    // Resolve owner/repo through the shared helper (boundary sanitization +
+    // env-misconfig warnings). `publish_story` already sanitizes upstream, so this
+    // is defense-in-depth and also surfaces operator mistakes (e.g. a whitespace-
+    // only GITHUB_REPO_OWNER) instead of silently falling back to defaults.
+    const { owner, repo, warnings: ownerWarnings } = sanitizeOwnerRepo(
+      payload.owner,
+      payload.repo,
+    );
 
     // Allow-list guard (PR #120 review): the resolved target repo is where the
     // app's token will create an issue, so it MUST be an explicitly approved
@@ -147,9 +192,10 @@ class GitHubProvider implements BacklogProvider {
           mode: "dry-run",
           providerId: this.id,
           error:
-            `Refusing to publish: target repo '${target}' is not in the ` +
-            `STORY_ALLOWED_REPOS allow-list (${allowed.join(", ")}).`,
-        };
+              `Refusing to publish: target repo '${target}' is not in the ` +
+              `STORY_ALLOWED_REPOS allow-list (${allowed.join(", ")}).`,
+            ...(ownerWarnings.length ? { warnings: ownerWarnings } : {}),
+          };
       }
     }
     const story = payload.story;
@@ -285,7 +331,9 @@ class GitHubProvider implements BacklogProvider {
         url: data.html_url,
         issueNumber: data.number,
         labelTransitions,
-        warnings: warnings.length ? warnings : undefined,
+        warnings: [...ownerWarnings, ...warnings].length
+          ? [...ownerWarnings, ...warnings]
+          : undefined,
       };
     } catch (err) {
       return {

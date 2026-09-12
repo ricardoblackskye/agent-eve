@@ -2,6 +2,7 @@ import { defineTool } from "eve/tools";
 import { z } from "zod";
 import {
   getProvider,
+  sanitizeRepoId,
   type CanonicalPayload,
 } from "../../../lib/backlog-provider";
 import { UserStorySchema } from "../../../lib/story-schema";
@@ -52,11 +53,19 @@ export default defineTool({
       };
     }
 
+    // Sanitize owner/repo BEFORE they enter the canonical payload, so every
+    // provider (including the console/dry-run provider that may echo the payload)
+    // receives already-safe identifier values. This is the shared validation layer
+    // the PR #120 review asked for — the GitHubProvider still re-sanitizes at its
+    // boundary as defense in depth.
+    const safeOwner = sanitizeRepoId(owner);
+    const safeRepo = sanitizeRepoId(repo);
+
     const canonical = {
       ...(payload as unknown as CanonicalPayload),
       sourceIssueNumber,
-      ...(owner ? { owner } : {}),
-      ...(repo ? { repo } : {}),
+      ...(safeOwner ? { owner: safeOwner } : {}),
+      ...(safeRepo ? { repo: safeRepo } : {}),
     };
 
     const result = await getProvider(provider || "console").publish(canonical);
