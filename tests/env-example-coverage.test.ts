@@ -60,8 +60,7 @@ function extractSourceEnvVars(): Set<string> {
   const vars = new Set<string>();
   const re = /process\.env\.([A-Z][A-Z0-9_]*)/g;
   for (const file of walk(ROOT)) {
-    // only application source, not the test file itself
-    if (relative(ROOT, file).startsWith("tests" + require("node:path").sep)) continue;
+    // skip this test file itself (it references env var names as strings)
     if (file.endsWith("env-example-coverage.test.ts")) continue;
     const text = readFileSync(file, "utf8");
     let m: RegExpExecArray | null;
@@ -73,8 +72,11 @@ function extractSourceEnvVars(): Set<string> {
 function extractDocumentedVars(): Set<string> {
   const text = readFileSync(join(ROOT, ".env.example"), "utf8");
   const vars = new Set<string>();
-  // A documented var is any line `<optional # and whitespace>NAME=...`
-  const re = /^\s*#?\s*([A-Z][A-Z0-9_]*)\s*=/gm;
+  // A documented var is an ACTIVE (uncommented) line `NAME=...`. The file uses
+  // CRLF line endings, so allow an optional leading \r after the line break.
+  // Lines whose first non-whitespace character is `#` are examples/comments
+  // and must NOT count — an uncommented KEY= line must exist for coverage.
+  const re = /^\r?([A-Z][A-Z0-9_]*)\s*=/gm;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text))) vars.add(m[1]);
   return vars;
@@ -96,12 +98,14 @@ describe("env.example coverage", () => {
     ).toEqual([]);
   });
 
-  it("does not whitelist a var that is actually used in source", () => {
-    // Guard against an over-broad whitelist: every whitelisted var should
-    // still be referenced somewhere so the whitelist stays meaningful.
-    const usedWhitelisted = [...WHITELIST].filter((v) => sourceVars.has(v));
-    expect(usedWhitelisted.sort()).toEqual(
-      [...WHITELIST].filter((v) => sourceVars.has(v)).sort(),
-    );
+  it("whitelist contains only vars actually referenced in source", () => {
+    // Guard against dead whitelist entries: every whitelisted var MUST still
+    // be referenced somewhere in source, otherwise the whitelist is silently
+    // broader than the code requires and the "required" set is mis-scoped.
+    const deadEntries = [...WHITELIST].filter((v) => !sourceVars.has(v));
+    expect(
+      deadEntries,
+      `These whitelisted vars are NOT referenced in source — remove them or they hide a real required var: ${deadEntries.join(", ")}`,
+    ).toEqual([]);
   });
 });
