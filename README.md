@@ -88,7 +88,7 @@ be flagged **Sensitive** in Vercel (masked, not readable via `vercel env pull`);
 |--------------------------|----------|--------|---------------------------------------------------------------------------------------------------|
 | `OPENROUTER_API_KEY`      | Yes      | Secret | OpenRouter API key for model access                                                               |
 | `EVE_API_KEY`            | Yes      | Secret | Bearer token for production auth (sent as `Authorization: Bearer` header)                         |
-| `NEXT_PUBLIC_EVE_API_KEY` | Yes*     | Secret | Client-side copy of the Eve API key (inlined into the browser bundle for the chat widget)         |
+| `NEXT_PUBLIC_EVE_API_KEY` | Yes*     | Public | Client-side chat-widget key sent to your own `/api/eve` proxy (inlined in the browser bundle — **public by design, never a real secret**) |
 | `GH_RELEASE_TOKEN`       | Yes      | Secret | GitHub token the Release Manager uses to write `releasenotes.md` on merge (needs `Contents` + `Issues: write`) |
 | `GH_STORY_TOKEN`         | Yes*     | Secret | Token the Product Owner uses to create `[Story]` issues (needs `Issues: read and write`); read before `GH_RELEASE_TOKEN` |
 | `GITHUB_TOKEN`           | No       | Secret | Final fallback token if neither `GH_RELEASE_TOKEN` nor `GH_STORY_TOKEN` is set                   |
@@ -280,7 +280,7 @@ they live only in Vercel (Sensitive, masked); locally in `.env.local` (git-ignor
 |-----------------------------|--------|-------------------------------------------------|----------------------------------------------------------|
 | `OPENROUTER_API_KEY`        | Secret | Vercel (Sensitive) / `.env.local`               | OpenRouter API access                                    |
 | `EVE_API_KEY`               | Secret | Vercel (Sensitive) / `.env.local`               | Production auth bearer token                             |
-| `NEXT_PUBLIC_EVE_API_KEY`   | Secret | Vercel (Sensitive) / `.env.local`               | Client-side chat widget auth (inlined in bundle)         |
+| `NEXT_PUBLIC_EVE_API_KEY`   | Public  | Vercel (plain — **not** Sensitive) / `.env.local` | Chat-widget key for your own `/api/eve` proxy; inlined in the browser bundle (public by design) |
 | `GH_RELEASE_TOKEN`          | Secret | Vercel (Sensitive) / `.env.local` / Actions     | `Contents: write` **+** `Issues: write` (or `public_repo` / `repo`) |
 | `GH_STORY_TOKEN`            | Secret | Vercel (Sensitive) / `.env.local` / Actions     | `Issues: read and write` (read before `GH_RELEASE_TOKEN`) |
 | `GITHUB_TOKEN`              | Secret | Vercel / Actions (fallback)                      | Same as above                                            |
