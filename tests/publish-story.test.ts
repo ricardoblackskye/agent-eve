@@ -167,7 +167,11 @@ describe("sanitizeOwnerRepo", () => {
   });
 
   it("F-2: warns when GITHUB_REPO_OWNER is set but strips to empty (no silent fallback)", () => {
-    process.env.GITHUB_REPO_OWNER = "   "; // whitespace-only -> strips to ""
+    // Underscores-only: a GitHub owner name strips to "" under the strict owner
+    // class (sanitizeOwnerId), so the warning must fire. (This also guards against
+    // the earlier bug where sanitizeRepoId — which KEEPS underscores — was used for
+    // the check, masking the misconfiguration.)
+    process.env.GITHUB_REPO_OWNER = "___";
     const { owner, warnings } = sanitizeOwnerRepo(undefined, undefined);
     expect(owner).toBe("ricardoblackskye"); // default still applies
     expect(warnings.some((w) => w.includes("GITHUB_REPO_OWNER"))).toBe(true);

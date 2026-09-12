@@ -109,13 +109,16 @@ export function sanitizeOwnerRepo(
 
   const rawOwnerEnv = env.GITHUB_REPO_OWNER;
   const rawRepoEnv = env.GITHUB_REPO_NAME;
-  if (rawOwnerEnv && sanitizeRepoId(rawOwnerEnv) === "") {
+  // Use the correct per-field character classes for the empty-strip check so the
+  // warning reflects what resolution will actually do (an owner like "my_org"
+  // would strip to "myorg" under sanitizeOwnerId, not stay "my_org").
+  if (rawOwnerEnv && sanitizeOwnerId(rawOwnerEnv) === "") {
     warnings.push(
       `GITHUB_REPO_OWNER is set but contains no valid identifier characters; ` +
         `falling back to '${fallbackOwner}'.`,
     );
   }
-  if (rawRepoEnv && sanitizeRepoId(rawRepoEnv) === "") {
+  if (rawRepoEnv && sanitizeRepoName(rawRepoEnv) === "") {
     warnings.push(
       `GITHUB_REPO_NAME is set but contains no valid identifier characters; ` +
         `falling back to '${fallbackRepo}'.`,
