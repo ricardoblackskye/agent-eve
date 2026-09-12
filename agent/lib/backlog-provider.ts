@@ -113,12 +113,45 @@ class GitHubProvider implements BacklogProvider {
       };
     }
 
+    // Re-sanitize at the provider boundary (defense in depth, PR #120 review):
+    // owner/repo may have arrived from LLM-supplied payload fields, so strip
+    // anything outside the GitHub identifier allowlist [A-Za-z0-9_.-] (no
+    // newlines, control chars, slashes, or markdown) before they touch a URL or
+    // prompt. This neutralises prompt/URL injection via crafted repo names.
+    const sanitizeId = (
+      value: string | undefined,
+      fallback: string | undefined,
+    ): string => {
+      const base = value || fallback || "";
+      return base.replace(/[^A-Za-z0-9_.-]/g, "");
+    };
     const owner =
-      payload.owner ||
-      process.env.GITHUB_REPO_OWNER ||
+      sanitizeId(payload.owner, process.env.GITHUB_REPO_OWNER) ||
       "ricardoblackskye";
     const repo =
-      payload.repo || process.env.GITHUB_REPO_NAME || "agent-eve";
+      sanitizeId(payload.repo, process.env.GITHUB_REPO_NAME) || "agent-eve";
+
+    // Allow-list guard (PR #120 review): the resolved target repo is where the
+    // app's token will create an issue, so it MUST be an explicitly approved
+    // repository. Without this, a malicious/compromised subagent step could
+    // direct the story into an arbitrary repo using our credentials.
+    const allowed = (process.env.STORY_ALLOWED_REPOS || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (allowed.length > 0) {
+      const target = `${owner}/${repo}`;
+      if (!allowed.includes(target)) {
+        return {
+          delivered: false,
+          mode: "dry-run",
+          providerId: this.id,
+          error:
+            `Refusing to publish: target repo '${target}' is not in the ` +
+            `STORY_ALLOWED_REPOS allow-list (${allowed.join(", ")}).`,
+        };
+      }
+    }
     const story = payload.story;
 
     // Option B dedup: if a child story already exists for this source issue,

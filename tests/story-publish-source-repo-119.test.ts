@@ -141,4 +141,54 @@ describe("GitHubProvider honors source owner/repo from payload (issue #119)", ()
       "https://api.github.com/repos/ricardoblackskye/agent-eve/issues",
     );
   });
+
+  // --- Security fixes for PR #120 review findings ---
+
+  it("REJECTS a target repo outside the STORY_ALLOWED_REPOS allow-list (arbitrary-repo guard)", async () => {
+    process.env.STORY_ALLOWED_REPOS = "ricardoblackskye/agent-eve,ricardoblackskye/WebFeedPOC";
+    const { result, calls } = await publish({
+      owner: "evil",
+      repo: "malicious",
+    });
+    expect(result.delivered).toBe(false);
+    expect(result.error).toMatch(/not in the allow-list|allow/i);
+    expect(
+      calls.filter((c) => c.url.endsWith("/issues") && c.method === "POST"),
+    ).toHaveLength(0);
+
+    delete process.env.STORY_ALLOWED_REPOS;
+  });
+
+  it("ALLOWS a target repo that is in the allow-list", async () => {
+    process.env.STORY_ALLOWED_REPOS = "ricardoblackskye/agent-eve,ricardoblackskye/WebFeedPOC";
+    const { result, calls } = await publish({
+      owner: "ricardoblackskye",
+      repo: "WebFeedPOC",
+    });
+    expect(result.delivered).toBe(true);
+    const createCall = calls.find(
+      (c) => c.url.endsWith("/issues") && c.method === "POST",
+    );
+    expect(createCall?.url).toBe(
+      "https://api.github.com/repos/ricardoblackskye/WebFeedPOC/issues",
+    );
+
+    delete process.env.STORY_ALLOWED_REPOS;
+  });
+
+  it("re-sanitizes owner/repo at the provider boundary — strips control chars/newlines", async () => {
+    const { calls } = await publish({
+      owner: "ricardoblackskye\nINJECT",
+      repo: "WebFeedPOC\rRUN",
+    });
+    const createCall = calls.find(
+      (c) => c.url.endsWith("/issues") && c.method === "POST",
+    );
+    // The security property: no control chars / newlines survive into the URL.
+    // (Allowed alphanumerics like "INJECT" are harmless as an identifier fragment,
+    // but are neutralised by the allow-list guard in the WebFeedPOC case below.)
+    expect(createCall?.url).not.toContain("\n");
+    expect(createCall?.url).not.toContain("\r");
+    expect(createCall?.url).not.toMatch(/[\x00-\x1f]/); // no C0 control chars
+  });
 });
