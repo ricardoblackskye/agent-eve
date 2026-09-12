@@ -24,15 +24,21 @@ export default defineTool({
     payload: z.record(z.string(), z.unknown()),
     provider: z.string().optional().default("console"),
     sourceIssueNumber: z.number().optional(),
+    owner: z.string().optional(),
+    repo: z.string().optional(),
   }),
   async execute({
     payload,
     provider,
     sourceIssueNumber,
+    owner,
+    repo,
   }: {
     payload: Record<string, unknown>;
     provider?: string;
     sourceIssueNumber?: number;
+    owner?: string;
+    repo?: string;
   }) {
     const storyCheck = UserStorySchema.safeParse(
       (payload as Record<string, unknown>).story,
@@ -49,6 +55,8 @@ export default defineTool({
     const canonical = {
       ...(payload as unknown as CanonicalPayload),
       sourceIssueNumber,
+      ...(owner ? { owner } : {}),
+      ...(repo ? { repo } : {}),
     };
 
     const result = await getProvider(provider || "console").publish(canonical);

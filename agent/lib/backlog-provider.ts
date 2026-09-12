@@ -21,6 +21,16 @@ export interface CanonicalPayload {
   openQuestions: string[];
   /** The GitHub issue that triggered generation; stamped onto the new story issue. */
   sourceIssueNumber?: number;
+  /**
+   * Source repo the trigger issue lives in. When set, the GitHub provider
+   * creates the child story in THIS repo (and finalizes/linking there) instead
+   * of the hardcoded `agent-eve` default. Falls back to the
+   * GITHUB_REPO_OWNER/GITHUB_REPO_NAME env vars, then to `ricardoblackskye`/
+   * `agent-eve`. Fixes issue #119 (stories were always written to agent-eve).
+   */
+  owner?: string;
+  /** See `owner`. The repo (within `owner`) to target. */
+  repo?: string;
 }
 
 export function toCanonicalPayload(story: UserStory): CanonicalPayload {
@@ -103,8 +113,12 @@ class GitHubProvider implements BacklogProvider {
       };
     }
 
-    const owner = process.env.GITHUB_REPO_OWNER || "ricardoblackskye";
-    const repo = process.env.GITHUB_REPO_NAME || "agent-eve";
+    const owner =
+      payload.owner ||
+      process.env.GITHUB_REPO_OWNER ||
+      "ricardoblackskye";
+    const repo =
+      payload.repo || process.env.GITHUB_REPO_NAME || "agent-eve";
     const story = payload.story;
 
     // Option B dedup: if a child story already exists for this source issue,
