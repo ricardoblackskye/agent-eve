@@ -9,6 +9,7 @@ afterEach(() => {
   delete process.env.GITHUB_TOKEN;
   delete process.env.GITHUB_REPO_OWNER;
   delete process.env.GITHUB_REPO_NAME;
+  delete process.env.STORY_ALLOWED_REPOS;
 });
 
 const payload = {
@@ -84,6 +85,8 @@ describe("publish_story", () => {
 
   it("surfaces the provider's issue number and label transitions", async () => {
     process.env.GH_STORY_TOKEN = "tok";
+    // The allow-list gate is CLOSED by default; permit the default target.
+    process.env.STORY_ALLOWED_REPOS = "ricardoblackskye/agent-eve";
     const fetchMock = vi.fn(async (url: string, init?: { method?: string }) => {
       const method = init?.method || "GET";
       const u = String(url);

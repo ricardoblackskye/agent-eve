@@ -176,27 +176,38 @@ class GitHubProvider implements BacklogProvider {
       payload.repo,
     );
 
-    // Allow-list guard (PR #120 review): the resolved target repo is where the
-    // app's token will create an issue, so it MUST be an explicitly approved
-    // repository. Without this, a malicious/compromised subagent step could
-    // direct the story into an arbitrary repo using our credentials.
+    // Allow-list guard (PR #120 review, hardened): the resolved target repo is
+    // where the app's token will create an issue, so it MUST be an explicitly
+    // approved repository. The gate is CLOSED by default — if STORY_ALLOWED_REPOS
+    // is unset/empty we REFUSE rather than fall back to "allow anything", so a
+    // misconfigured or unconfigured deployment cannot silently lose this defense.
     const allowed = (process.env.STORY_ALLOWED_REPOS || "")
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean);
-    if (allowed.length > 0) {
-      const target = `${owner}/${repo}`;
-      if (!allowed.includes(target)) {
-        return {
-          delivered: false,
-          mode: "dry-run",
-          providerId: this.id,
-          error:
-              `Refusing to publish: target repo '${target}' is not in the ` +
-              `STORY_ALLOWED_REPOS allow-list (${allowed.join(", ")}).`,
-            ...(ownerWarnings.length ? { warnings: ownerWarnings } : {}),
-          };
-      }
+    const target = `${owner}/${repo}`;
+    if (allowed.length === 0) {
+      return {
+        delivered: false,
+        mode: "dry-run",
+        providerId: this.id,
+        error:
+          "Refusing to publish: STORY_ALLOWED_REPOS is not configured. " +
+          "Set it to a comma-separated allow-list of 'owner/repo' targets " +
+          "(e.g. ricardoblackskye/agent-eve,ricardoblackskye/WebFeedPOC) to enable story creation.",
+        ...(ownerWarnings.length ? { warnings: ownerWarnings } : {}),
+      };
+    }
+    if (!allowed.includes(target)) {
+      return {
+        delivered: false,
+        mode: "dry-run",
+        providerId: this.id,
+        error:
+          `Refusing to publish: target repo '${target}' is not in the ` +
+          `STORY_ALLOWED_REPOS allow-list (${allowed.join(", ")}).`,
+        ...(ownerWarnings.length ? { warnings: ownerWarnings } : {}),
+      };
     }
     const story = payload.story;
 

@@ -80,10 +80,20 @@ describe("GitHubProvider honors source owner/repo from payload (issue #119)", ()
     delete process.env.GITHUB_TOKEN;
     delete process.env.GITHUB_REPO_OWNER;
     delete process.env.GITHUB_REPO_NAME;
+    delete process.env.STORY_ALLOWED_REPOS;
   });
 
-  async function publish(extra: { owner?: string; repo?: string }) {
+  async function publish(
+    extra: { owner?: string; repo?: string },
+    opts: { setAllowList?: boolean } = {},
+  ) {
     process.env.GH_STORY_TOKEN = "tok";
+    // The allow-list gate is CLOSED by default; the happy-path tests opt in by
+    // setting STORY_ALLOWED_REPOS so real creation is exercised.
+    if (opts.setAllowList !== false) {
+      process.env.STORY_ALLOWED_REPOS =
+        "ricardoblackskye/agent-eve,ricardoblackskye/WebFeedPOC";
+    }
     const { calls, fetchMock } = stubFetch();
     vi.stubGlobal("fetch", fetchMock);
     const result = await getProvider("github").publish({
@@ -123,13 +133,15 @@ describe("GitHubProvider honors source owner/repo from payload (issue #119)", ()
   it("falls back to env vars when payload owner/repo omitted", async () => {
     process.env.GITHUB_REPO_OWNER = "acme";
     process.env.GITHUB_REPO_NAME = "widget";
-    const { calls } = await publish({});
+    process.env.STORY_ALLOWED_REPOS = "acme/widget";
+    const { calls } = await publish({}, { setAllowList: false });
     const createCall = calls.find(
       (c) => c.url.endsWith("/issues") && c.method === "POST",
     );
     expect(createCall?.url).toBe(
       "https://api.github.com/repos/acme/widget/issues",
     );
+    delete process.env.STORY_ALLOWED_REPOS;
   });
 
   it("falls back to agent-eve default when no payload/env owner/repo", async () => {
@@ -159,6 +171,23 @@ describe("GitHubProvider honors source owner/repo from payload (issue #119)", ()
     delete process.env.STORY_ALLOWED_REPOS;
   });
 
+  it("FAILS CLOSED: refuses to publish when STORY_ALLOWED_REPOS is unset (gate not silently open)", async () => {
+    // The gate must be CLOSED by default. With the env var absent, even a valid
+    // configured repo is refused (not silently allowed), so a misconfigured
+    // deployment cannot lose the allow-list defense.
+    const { result, calls } = await publish(
+      { owner: "ricardoblackskye", repo: "WebFeedPOC" },
+      { setAllowList: false },
+    );
+    expect(result.delivered).toBe(false);
+    expect(result.error).toMatch(/STORY_ALLOWED_REPOS is not configured/i);
+    expect(
+      calls.filter((c) => c.url.endsWith("/issues") && c.method === "POST"),
+    ).toHaveLength(0);
+
+    delete process.env.STORY_ALLOWED_REPOS;
+  });
+
   it("ALLOWS a target repo that is in the allow-list", async () => {
     process.env.STORY_ALLOWED_REPOS = "ricardoblackskye/agent-eve,ricardoblackskye/WebFeedPOC";
     const { result, calls } = await publish({
@@ -177,18 +206,24 @@ describe("GitHubProvider honors source owner/repo from payload (issue #119)", ()
   });
 
   it("re-sanitizes owner/repo at the provider boundary — strips control chars/newlines", async () => {
-    const { calls } = await publish({
-      owner: "ricardoblackskye\nINJECT",
-      repo: "WebFeedPOC\rRUN",
-    });
+    // Note: the allow-list gate permits exactly the sanitized target so this test
+    // isolates the sanitization behavior (the gate itself is covered elsewhere).
+    process.env.STORY_ALLOWED_REPOS =
+      "ricardoblackskyeINJECT/WebFeedPOCRUN";
+    const { calls } = await publish(
+      {
+        owner: "ricardoblackskye\nINJECT",
+        repo: "WebFeedPOC\rRUN",
+      },
+      { setAllowList: false },
+    );
     const createCall = calls.find(
       (c) => c.url.endsWith("/issues") && c.method === "POST",
     );
     // The security property: no control chars / newlines survive into the URL.
-    // (Allowed alphanumerics like "INJECT" are harmless as an identifier fragment,
-    // but are neutralised by the allow-list guard in the WebFeedPOC case below.)
     expect(createCall?.url).not.toContain("\n");
     expect(createCall?.url).not.toContain("\r");
-    expect(createCall?.url).not.toMatch(/[\x00-\x1f]/); // no C0 control chars
+    expect(createCall?.url).not.toMatch(/[\x00-\x1f]/);
+    delete process.env.STORY_ALLOWED_REPOS;
   });
 });

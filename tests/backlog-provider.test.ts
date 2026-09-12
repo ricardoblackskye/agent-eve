@@ -150,6 +150,7 @@ describe("GitHubProvider.publish", () => {
     delete process.env.GH_STORY_TOKEN;
     delete process.env.GH_RELEASE_TOKEN;
     delete process.env.GITHUB_TOKEN;
+    delete process.env.STORY_ALLOWED_REPOS;
   });
 
   async function publish(
@@ -157,6 +158,9 @@ describe("GitHubProvider.publish", () => {
     sourceIssueNumber = 85,
   ) {
     process.env.GH_STORY_TOKEN = "tok";
+    // The allow-list gate is CLOSED by default (fail-closed). These legacy tests
+    // target ricardoblackskye/agent-eve, so permit it explicitly.
+    process.env.STORY_ALLOWED_REPOS = "ricardoblackskye/agent-eve";
     const { calls, fetchMock } = stubFetch(opts);
     vi.stubGlobal("fetch", fetchMock);
     const result = await getProvider("github").publish({
