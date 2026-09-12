@@ -68,20 +68,50 @@ const openrouter = createOpenAI({
 });
 ```
 
-The default model is `gpt-4o` with a 128k context window set explicitly for compaction support.
+The default model is `deepseek/deepseek-v4-pro` with a 128k context window set explicitly for compaction support.
 
-To switch models, edit `agent/agent.ts`:
+To switch models, edit `agent/agent.ts` or override the env var:
 
 ```ts
-model: openrouter.chat("anthropic/claude-sonnet-5"), // OpenRouter model ID
+model: openrouter.chat(process.env.EVE_CHAT_MODEL ?? "deepseek/deepseek-v4-pro"), // OpenRouter model ID
 ```
 
 ### Environment Variables
 
-| Variable             | Required | Description                                                                             |
-|----------------------|----------|-----------------------------------------------------------------------------------------|
-| `OPENROUTER_API_KEY` | Yes      | OpenRouter API key for model access                                                     |
-| `EVE_API_KEY`        | Yes      | Bearer token for production auth (sent as `Authorization: Bearer <EVE_API_KEY>` header) |
+All variables are set as **Vercel environment variables** (Project Settings →
+Environment Variables) in production, or in a local `.env.local` copied from
+[`.env.example`](.env.example) for development. Variables marked **Secret** must
+be flagged **Sensitive** in Vercel (masked, not readable via `vercel env pull`);
+**Config** values are non-sensitive (e.g. allow-lists, board ids).
+
+| Variable                 | Required | Type   | Description                                                                                       |
+|--------------------------|----------|--------|---------------------------------------------------------------------------------------------------|
+| `OPENROUTER_API_KEY`      | Yes      | Secret | OpenRouter API key for model access                                                               |
+| `EVE_API_KEY`            | Yes      | Secret | Bearer token for production auth (sent as `Authorization: Bearer` header)                         |
+| `NEXT_PUBLIC_EVE_API_KEY` | Yes*     | Public | Client-side chat-widget key sent to your own `/api/eve` proxy (inlined in the browser bundle — **public by design, never a real secret**) |
+| `GH_RELEASE_TOKEN`       | Yes      | Secret | GitHub token the Release Manager uses to write `releasenotes.md` on merge (needs `Contents` + `Issues: write`) |
+| `GH_STORY_TOKEN`         | Yes*     | Secret | Token the Product Owner uses to create `[Story]` issues (needs `Issues: read and write`); read before `GH_RELEASE_TOKEN` |
+| `GITHUB_TOKEN`           | No       | Secret | Final fallback token if neither `GH_RELEASE_TOKEN` nor `GH_STORY_TOKEN` is set                   |
+| `GH_WEBHOOK_SECRET`      | Yes      | Secret | Shared secret that authenticates incoming webhook payloads (required on Vercel; see Webhooks)    |
+| `GH_SPRINT_TOKEN`        | No*      | Secret | Token for reading the Projects V2 board (`read:project` scope); falls back to `GH_RELEASE_TOKEN` |
+| `VERCEL_PROTECTION_BYPASS` | No     | Secret | Bypass secret for Vercel Protection (password/SSO) so server-to-server calls reach the app       |
+| `EVE_CHAT_MODEL`         | No       | Config | Override the root chat model id (default `deepseek/deepseek-v4-pro`)                              |
+| `MODEL_NAME`             | No       | Config | Model id for subagents (Sprint Metrics Analyst, PR-reviewer Action); default `deepseek/deepseek-v4-pro` |
+| `EVE_STORY_MENTION`      | No       | Config | Mention that triggers the Product Owner in an issue body (default `@eve-agent`)                  |
+| `EVE_STORY_LABEL`        | No       | Config | Label that triggers the Product Owner (default `needs-story`)                                     |
+| `STORY_ALLOWED_REPOS`    | Yes      | Config | **Fail-closed** comma-separated `owner/repo` allow-list for story publishing; refusing if unset  |
+| `GITHUB_REPO_OWNER`      | No       | Config | Optional env override for the default publish owner                                               |
+| `GITHUB_REPO_NAME`       | No       | Config | Optional env override for the default publish repo                                                |
+| `SPRINT_PROJECT_OWNER`   | No       | Config | Projects V2 board owner for sprint reports (default `ricardoblackskye`)                           |
+| `SPRINT_PROJECT_NUMBER`  | No       | Config | Projects V2 board number for sprint reports (default `3`)                                         |
+| `PR_REVIEW_MAX_DIFF_CHARS` | No     | Config | Cap on diff chars sent to the PR-reviewer LLM (default `20000`)                                   |
+
+\* `NEXT_PUBLIC_EVE_API_KEY` and `GH_STORY_TOKEN` are required for the chat
+widget and story generation respectively; `GH_SPRINT_TOKEN` is only needed for
+the sprint-metrics report. `GH_RELEASE_TOKEN` alone covers releases.
+
+> **Provisioning rule:** after adding or changing ANY environment variable on
+> Vercel, you must **redeploy** — changes do not apply to existing deployments.
 
 ### User Story Generation
 
@@ -159,7 +189,7 @@ The workflow requires these GitHub Action secrets:
 
 ## Deployment
 
-### Vercel
+### Vercel Deployment Settings
 
 1. Link the project:
 
@@ -167,20 +197,49 @@ The workflow requires these GitHub Action secrets:
    vercel link    # or: eve link --project agent-eve --non-interactive
    ```
 
-2. Set environment variables in the Vercel dashboard:
-   - `OPENROUTER_API_KEY`
+2. In the Vercel dashboard (**Project Settings → Environment Variables**), add
+   every **Secret** variable from the [Environment Variables](#environment-variables)
+   table. For each token tick **Sensitive** so it is masked and cannot be read
+   back with `vercel env pull`. The **Config** variables (allow-lists, board ids,
+   model overrides) are plain text — they are not credentials.
+
+   At minimum for a working deploy you need:
+   `OPENROUTER_API_KEY`, `EVE_API_KEY`, `NEXT_PUBLIC_EVE_API_KEY`,
+   `GH_RELEASE_TOKEN`, `GH_STORY_TOKEN`, `GH_WEBHOOK_SECRET`, and
+   `STORY_ALLOWED_REPOS`.
 
 3. Deploy:
+
    ```bash
    eve deploy --project agent-eve --non-interactive --yes
    ```
 
-The `eve deploy` command handles building, bundling, and deploying with Vercel Workflow, Sandbox, and Cron integrations.
+The `eve deploy` command handles building, bundling, and deploying with Vercel
+Workflow, Sandbox, and Cron integrations.
 
-### GitHub Webhook (PR Code Review & Release Notes)
+> **Redeploy rule:** after adding or changing ANY environment variable, you must
+> **redeploy** — values do not apply to existing deployments.
 
-The agent reacts to GitHub Pull Request events through a webhook that Vercel
-hosts at:
+### Git Configuration Steps
+
+- **Clone & branch protection:** the repo enforces a GitHub **branch ruleset** on
+  `main` (required status check *Unit Tests*, non-fast-forward merges). Do not
+  push directly to `main`; open a PR from a feature branch and let CI merge it.
+- **Enabling a new repo for webhooks / release notes:** the mapping from repo →
+  webhook-secret-env + release-notes path lives in
+  [`release-manager.config.json`](release-manager.config.json). Add an entry
+  there to let the agent process that repo's events.
+- **Allowing story publishing to a repo:** the agent only writes `[Story]` issues
+  to repos listed in `STORY_ALLOWED_REPOS` (a **fail-closed** allow-list — unset
+  means *refuse everything*). Add every repo the agent should be able to publish
+  to, comma-separated:
+  `STORY_ALLOWED_REPOS=ricardoblackskye/agent-eve,ricardoblackskye/WebFeedPOC`.
+- **Local development:** copy [`.env.example`](.env.example) to `.env.local` and
+  fill in values. `.env.local` is git-ignored; only `.env.example` is committed.
+
+### Webhook Setup
+
+The agent reacts to GitHub events through a webhook that Vercel hosts at:
 
 ```text
 https://<your-deployment>.vercel.app/api/github/webhook
@@ -195,29 +254,51 @@ Configure it once in the repo (**Settings → Webhooks → Add webhook**):
 | **Secret**       | the value of `GH_WEBHOOK_SECRET`                          |
 | **Events**       | **Pull request** (subscribe to Pull request events)       |
 
-The webhook verifies the `GH_WEBHOOK_SECRET` on every request
+The webhook verifies `GH_WEBHOOK_SECRET` on every request
 (`app/api/github/webhook/route.ts` reads it from
 `process.env[repoConfig.webhook_secret_env]`), so the secret must match the
-`GH_WEBHOOK_SECRET` set in your Vercel environment variables.
+`GH_WEBHOOK_SECRET` set in your Vercel environment variables. If it is unset in a
+deployed environment the handler returns HTTP 500 rather than processing an
+unverified payload.
 
-Required environment variables (Vercel + GitHub Actions secrets):
+Two issue **labels** drive subagents (apply them in the source repo):
 
-| Variable             | Required | Description                                                                                                                                                                                        |
-|----------------------|----------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `GH_WEBHOOK_SECRET`  | Yes      | Shared secret that authenticates incoming webhook payloads. **Required on Vercel** — if unset in a deployed environment the handler returns HTTP 500 rather than processing an unverified payload. |
-| `GH_RELEASE_TOKEN`   | Yes      | GitHub token the Release Manager uses to write `releasenotes.md` on merge.                                                                                                                         |
-| `OPENROUTER_API_KEY` | Yes      | Powers the AI review + release-notes generation.                                                                                                                                                   |
+- `needs-story` → the Product Owner drafts a `[Story]` issue in that repo
+  (gated by `STORY_ALLOWED_REPOS`).
+- `generate-sprint-report` → the Sprint Metrics Analyst reads the Projects V2
+  board and posts a report (token: `GH_SPRINT_TOKEN`, scope `read:project`).
 
-> **Provisioning:** start from [`.env.example`](.env.example) — copy it to `.env.local`
-> and fill in the values. In production these are set as **Vercel environment variables**
-> (Project Settings → Environment Variables), not in a file; mark the tokens **Sensitive**.
-> Sensitive Vercel values are masked and cannot be read back with `vercel env pull`.
->
-> `GH_RELEASE_TOKEN` needs **Issues: Read and write** in addition to Contents — the Product
-> Owner creates story issues and posts clarifying comments, and a Contents-only token returns
-> `403` on those calls. On a classic PAT, tick `public_repo` (or `repo` for private repos).
-> After adding or changing an environment variable, **redeploy** — changes do not apply to
-> existing deployments.
+> The webhook must be created in GitHub repo Settings for the flow to run — this
+> documents how; it does not create the webhook for you.
+
+### Secrets / Tokens Management
+
+All credentials are **environment variables**, never hard-coded. In production
+they live only in Vercel (Sensitive, masked); locally in `.env.local` (git-ignored).
+
+| Variable                    | Kind   | Where it lives                                  | Scope needed                                              |
+|-----------------------------|--------|-------------------------------------------------|----------------------------------------------------------|
+| `OPENROUTER_API_KEY`        | Secret | Vercel (Sensitive) / `.env.local`               | OpenRouter API access                                    |
+| `EVE_API_KEY`               | Secret | Vercel (Sensitive) / `.env.local`               | Production auth bearer token                             |
+| `NEXT_PUBLIC_EVE_API_KEY`   | Public  | Vercel (plain — **not** Sensitive) / `.env.local` | Chat-widget key for your own `/api/eve` proxy; inlined in the browser bundle (public by design) |
+| `GH_RELEASE_TOKEN`          | Secret | Vercel (Sensitive) / `.env.local` / Actions     | `Contents: write` **+** `Issues: write` (or `public_repo` / `repo`) |
+| `GH_STORY_TOKEN`            | Secret | Vercel (Sensitive) / `.env.local` / Actions     | `Issues: read and write` (read before `GH_RELEASE_TOKEN`) |
+| `GITHUB_TOKEN`              | Secret | Vercel / Actions (fallback)                      | Same as above                                            |
+| `GH_WEBHOOK_SECRET`         | Secret | Vercel (Sensitive) + GitHub webhook config       | Webhook payload verification                             |
+| `GH_SPRINT_TOKEN`           | Secret | Vercel (Sensitive) / Actions                     | `read:project` (Projects V2 board read)                  |
+| `VERCEL_PROTECTION_BYPASS`  | Secret | Vercel (Sensitive)                              | Bypass Vercel Protection for server-to-server calls      |
+
+**Rules:**
+
+- Mark every **Secret** row **Sensitive** in Vercel. Config rows (`STORY_ALLOWED_REPOS`,
+  `EVE_CHAT_MODEL`, `MODEL_NAME`, `SPRINT_PROJECT_*`, `EVE_STORY_*`, `PR_REVIEW_MAX_DIFF_CHARS`,
+  `GITHUB_REPO_*`) are plain text.
+- `GH_RELEASE_TOKEN` needs **Issues: Read and write** in addition to Contents — a
+  Contents-only token returns `403` on story/comment calls. On a classic PAT, tick
+  `public_repo` (or `repo` for private repos).
+- Never commit real values. `.env.example` holds only placeholder lines and
+  descriptions; `.gitignore` excludes every other `.env*`.
+- After any change, **redeploy** (see [Vercel Deployment Settings](#vercel-deployment-settings)).
 
 Repo → webhook-secret + release-notes-path mapping lives in
 [`release-manager.config.json`](release-manager.config.json). Add a new repo
@@ -230,9 +311,6 @@ there to enable webhook processing for it.
   `deepseek/deepseek-v4-pro`).
 - Merging a PR fires the webhook → the **Release Manager** subagent updates
   [`releasenotes.md`](releasenotes.md) with a summary of the change.
-
-> The webhook must be created in GitHub repo Settings for the flow to run — this
-> documents how; it does not create the webhook for you.
 
 ### Self-Hosted / Docker
 
