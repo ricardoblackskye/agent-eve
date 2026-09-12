@@ -221,6 +221,21 @@ describe("GitHubProvider honors source owner/repo from payload (issue #119)", ()
     delete process.env.STORY_ALLOWED_REPOS;
   });
 
+  it("allow-list repo comparison is case-insensitive (GitHub repo names)", async () => {
+    // GitHub repository names are case-insensitive, so a config with mixed-case
+    // repo ('Agent-Eve') must accept the canonical lowercase 'agent-eve'.
+    process.env.STORY_ALLOWED_REPOS = "ricardoblackskye/Agent-Eve";
+    const { result, calls } = await publish(
+      { owner: "ricardoblackskye", repo: "agent-eve" },
+      { setAllowList: false },
+    );
+    expect(result.delivered).toBe(true);
+    expect(
+      calls.filter((c) => c.url.endsWith("/issues") && c.method === "POST"),
+    ).toHaveLength(1);
+    delete process.env.STORY_ALLOWED_REPOS;
+  });
+
   it("returns mode: 'blocked' (not 'dry-run') on allow-list refusal", async () => {
     process.env.STORY_ALLOWED_REPOS = "ricardoblackskye/agent-eve";
     const { result } = await publish(

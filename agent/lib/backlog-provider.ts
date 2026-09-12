@@ -230,9 +230,11 @@ class GitHubProvider implements BacklogProvider {
       .filter(Boolean)
       .map((entry) => {
         const [o, r] = entry.split("/");
-        return r ? `${o.toLowerCase()}/${r}` : entry.toLowerCase();
+        // GitHub repository names are case-INSENSITIVE, so normalise both owner
+        // and repo to lowercase for comparison.
+        return r ? `${o.toLowerCase()}/${r.toLowerCase()}` : entry.toLowerCase();
       });
-    const target = `${owner.toLowerCase()}/${repo}`;
+    const target = `${owner.toLowerCase()}/${repo.toLowerCase()}`;
     if (allowed.length === 0) {
       return {
         delivered: false,
