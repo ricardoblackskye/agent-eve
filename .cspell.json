@@ -70,7 +70,15 @@
     "cuill",
     "myorg",
     "JVBERi",
-    "JVBE"
+    "JVBE",
+    "sanitisers",
+    "sanitising",
+    "misconfig",
+    "unconfigured",
+    "normalised",
+    "normalise",
+    "POCRUN",
+    "evilother"
   ],
   "ignorePaths": [
     "node_modules/**",

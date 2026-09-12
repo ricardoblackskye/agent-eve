@@ -2,6 +2,8 @@ import { defineTool } from "eve/tools";
 import { z } from "zod";
 import {
   getProvider,
+  sanitizeOwnerId,
+  sanitizeRepoName,
   type CanonicalPayload,
 } from "../../../lib/backlog-provider";
 import { UserStorySchema } from "../../../lib/story-schema";
@@ -24,15 +26,21 @@ export default defineTool({
     payload: z.record(z.string(), z.unknown()),
     provider: z.string().optional().default("console"),
     sourceIssueNumber: z.number().optional(),
+    owner: z.string().optional(),
+    repo: z.string().optional(),
   }),
   async execute({
     payload,
     provider,
     sourceIssueNumber,
+    owner,
+    repo,
   }: {
     payload: Record<string, unknown>;
     provider?: string;
     sourceIssueNumber?: number;
+    owner?: string;
+    repo?: string;
   }) {
     const storyCheck = UserStorySchema.safeParse(
       (payload as Record<string, unknown>).story,
@@ -46,9 +54,20 @@ export default defineTool({
       };
     }
 
+    // Sanitize owner/repo BEFORE they enter the canonical payload, so every
+    // provider (including the console/dry-run provider that may echo the payload)
+    // receives already-safe identifier values. The owner uses GitHub's stricter
+    // character class (alphanumerics + hyphens only, ≤39 chars); the repo name
+    // allows dots/underscores and is capped at ≤100 chars. The GitHubProvider
+    // still re-sanitizes at its boundary as defense in depth.
+    const safeOwner = sanitizeOwnerId(owner);
+    const safeRepo = sanitizeRepoName(repo);
+
     const canonical = {
       ...(payload as unknown as CanonicalPayload),
       sourceIssueNumber,
+      ...(safeOwner ? { owner: safeOwner } : {}),
+      ...(safeRepo ? { repo: safeRepo } : {}),
     };
 
     const result = await getProvider(provider || "console").publish(canonical);

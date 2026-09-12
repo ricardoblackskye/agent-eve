@@ -436,8 +436,10 @@ ${body}`
       `2. If it returns status "needs_clarification", call comment_questions with ` +
         `owner "${owner}", repo "${repo}", issueNumber ${issueNumber}, and the questions - then STOP.`,
       `3. If it returns status "complete", call publish_story with ` +
-        `provider: "github", sourceIssueNumber: ${issueNumber}, and the returned payload ` +
-        `so a linked [Story] issue is created on GitHub. Do NOT use the console dry-run default.`,
+        `provider: "github", sourceIssueNumber: ${issueNumber}, owner: "${owner}", ` +
+        `repo: "${repo}", and the returned payload so a linked [Story] issue is ` +
+        `created in the SAME repo (${owner}/${repo}) as the source issue. Do NOT use ` +
+        `the console dry-run default, and do NOT hardcode the target repo.`,
     ]
       .filter(Boolean)
       .join("\n");

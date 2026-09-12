@@ -21,6 +21,16 @@ export interface CanonicalPayload {
   openQuestions: string[];
   /** The GitHub issue that triggered generation; stamped onto the new story issue. */
   sourceIssueNumber?: number;
+  /**
+   * Source repo the trigger issue lives in. When set, the GitHub provider
+   * creates the child story in THIS repo (and finalizes/linking there) instead
+   * of the hardcoded `agent-eve` default. Falls back to the
+   * GITHUB_REPO_OWNER/GITHUB_REPO_NAME env vars, then to `ricardoblackskye`/
+   * `agent-eve`. Fixes issue #119 (stories were always written to agent-eve).
+   */
+  owner?: string;
+  /** See `owner`. The repo (within `owner`) to target. */
+  repo?: string;
 }
 
 export function toCanonicalPayload(story: UserStory): CanonicalPayload {
@@ -34,9 +44,102 @@ export function toCanonicalPayload(story: UserStory): CanonicalPayload {
   };
 }
 
+/**
+ * Identifier sanitisers for GitHub owner/repo fragments. They strip everything
+ * outside the allowed character class so the values are safe to embed in API URLs
+ * and LLM prompts (defense against control-char / markdown injection). Shared so
+ * every provider — including the console/dry-run provider that may echo the
+ * payload — receives already-safe values.
+ *
+ * Owner (username/org) and repo (repository name) have *different* valid
+ * character classes:
+ *   - owner: GitHub usernames/orgs allow alphanumerics and single hyphens only
+ *     (no dots or underscores) — `[A-Za-z0-9-]+`.
+ *   - repo: repository names additionally allow dots and underscores — `[A-Za-z0-9_.-]+`.
+ *
+ * GitHub also caps lengths: owner ≤ 39 chars, repo ≤ 100 chars. We truncate
+ * (not reject) after sanitising so a misconfigured allow-list or oversized LLM
+ * value can never push an absurdly long string to the API.
+ *
+ * Used both in `publish_story` (pre-provider) and `GitHubProvider.publish`
+ * (boundary defense in depth).
+ */
+const GITHUB_OWNER_MAX = 39;
+const GITHUB_REPO_MAX = 100;
+
+export function sanitizeOwnerId(value: string | undefined): string {
+  return (value || "")
+    .replace(/[^A-Za-z0-9-]/g, "")
+    .slice(0, GITHUB_OWNER_MAX);
+}
+
+export function sanitizeRepoName(value: string | undefined): string {
+  return (value || "")
+    .replace(/[^A-Za-z0-9_.-]/g, "")
+    .slice(0, GITHUB_REPO_MAX);
+}
+
+/** @deprecated use sanitizeOwnerId / sanitizeRepoName for correct character classes */
+export function sanitizeRepoId(value: string | undefined): string {
+  return (value || "").replace(/[^A-Za-z0-9_.-]/g, "");
+}
+
+/** Merge warning arrays, returning `undefined` when there are none. */
+function mergeWarnings(...lists: string[][]): string[] | undefined {
+  const merged = lists.flat();
+  return merged.length ? merged : undefined;
+}
+
+/**
+ * Resolve a safe owner/repo pair for the GitHub provider.
+ *
+ * Priority: payload value (already sanitised upstream by `publish_story`) →
+ * env var → built-in default. Each source is sanitised; if an ENV var is set
+ * but strips to empty (e.g. whitespace-only misconfiguration), a warning is
+ * emitted so the operator is not silently redirected to the default repo.
+ */
+export function sanitizeOwnerRepo(
+  payloadOwner: string | undefined,
+  payloadRepo: string | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+): { owner: string; repo: string; warnings: string[] } {
+  const warnings: string[] = [];
+  const fallbackOwner = "ricardoblackskye";
+  const fallbackRepo = "agent-eve";
+
+  const rawOwnerEnv = env.GITHUB_REPO_OWNER;
+  const rawRepoEnv = env.GITHUB_REPO_NAME;
+  // Use the correct per-field character classes for the empty-strip check so the
+  // warning reflects what resolution will actually do (an owner like "my_org"
+  // would strip to "myorg" under sanitizeOwnerId, not stay "my_org").
+  if (rawOwnerEnv && sanitizeOwnerId(rawOwnerEnv) === "") {
+    warnings.push(
+      `GITHUB_REPO_OWNER is set but contains no valid identifier characters; ` +
+        `falling back to '${fallbackOwner}'.`,
+    );
+  }
+  if (rawRepoEnv && sanitizeRepoName(rawRepoEnv) === "") {
+    warnings.push(
+      `GITHUB_REPO_NAME is set but contains no valid identifier characters; ` +
+        `falling back to '${fallbackRepo}'.`,
+    );
+  }
+
+  const owner =
+    sanitizeOwnerId(payloadOwner) ||
+    sanitizeOwnerId(rawOwnerEnv) ||
+    fallbackOwner;
+  const repo =
+    sanitizeRepoName(payloadRepo) || sanitizeRepoName(rawRepoEnv) || fallbackRepo;
+  return { owner, repo, warnings };
+}
+
 export interface PublishResult {
   delivered: boolean;
-  mode: "dry-run" | "live";
+  /** "live" = created; "dry-run" = simulated/no-op by design (e.g. console provider);
+   *  "blocked" = an active refusal (allow-list gate / misconfig) — distinct from a
+   *  successful dry-run so callers don't mistake a denial for a simulation. */
+  mode: "dry-run" | "live" | "blocked";
   providerId: string;
   url?: string;
   /** The id/number of the newly created item (e.g. GitHub issue number). */
@@ -103,8 +206,58 @@ class GitHubProvider implements BacklogProvider {
       };
     }
 
-    const owner = process.env.GITHUB_REPO_OWNER || "ricardoblackskye";
-    const repo = process.env.GITHUB_REPO_NAME || "agent-eve";
+    // Resolve owner/repo through the shared helper (boundary sanitization +
+    // env-misconfig warnings). `publish_story` already sanitizes upstream, so this
+    // is defense-in-depth and also surfaces operator mistakes (e.g. a whitespace-
+    // only GITHUB_REPO_OWNER) instead of silently falling back to defaults.
+    const { owner, repo, warnings: ownerWarnings } = sanitizeOwnerRepo(
+      payload.owner,
+      payload.repo,
+    );
+
+    // Allow-list guard (PR #120 review, hardened): the resolved target repo is
+    // where the app's token will create an issue, so it MUST be an explicitly
+    // approved repository. The gate is CLOSED by default — if STORY_ALLOWED_REPOS
+    // is unset/empty we REFUSE rather than fall back to "allow anything", so a
+    // misconfigured or unconfigured deployment cannot silently lose this defense.
+    // GitHub usernames are case-INSENSITIVE while repo names are case-sensitive,
+    // so we compare with a normalised (lowercased owner) target against
+    // lowercased-owner allow-list entries to avoid spurious rejections from
+    // differing owner casing (e.g. "RicardoBlackSkye" vs "ricardoblackskye").
+    const allowed = (process.env.STORY_ALLOWED_REPOS || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .map((entry) => {
+        const [o, r] = entry.split("/");
+        // GitHub repository names are case-INSENSITIVE, so normalise both owner
+        // and repo to lowercase for comparison.
+        return r ? `${o.toLowerCase()}/${r.toLowerCase()}` : entry.toLowerCase();
+      });
+    const target = `${owner.toLowerCase()}/${repo.toLowerCase()}`;
+    if (allowed.length === 0) {
+      return {
+        delivered: false,
+        mode: "blocked",
+        providerId: this.id,
+        error:
+          "Refusing to publish: STORY_ALLOWED_REPOS is not configured. " +
+          "Set it to a comma-separated allow-list of 'owner/repo' targets " +
+          "(e.g. ricardoblackskye/agent-eve,ricardoblackskye/WebFeedPOC) to enable story creation.",
+        ...(ownerWarnings.length ? { warnings: ownerWarnings } : {}),
+      };
+    }
+    if (!allowed.includes(target)) {
+      return {
+        delivered: false,
+        mode: "blocked",
+        providerId: this.id,
+        error:
+          `Refusing to publish: target repo '${target}' is not in the ` +
+          `STORY_ALLOWED_REPOS allow-list (${allowed.join(", ")}).`,
+        ...(ownerWarnings.length ? { warnings: ownerWarnings } : {}),
+      };
+    }
     const story = payload.story;
 
     // Option B dedup: if a child story already exists for this source issue,
@@ -238,7 +391,7 @@ class GitHubProvider implements BacklogProvider {
         url: data.html_url,
         issueNumber: data.number,
         labelTransitions,
-        warnings: warnings.length ? warnings : undefined,
+        warnings: mergeWarnings(ownerWarnings, warnings),
       };
     } catch (err) {
       return {
