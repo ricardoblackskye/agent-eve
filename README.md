@@ -68,13 +68,68 @@ const openrouter = createOpenAI({
 });
 ```
 
-The default model is `deepseek/deepseek-v4-pro` with a 128k context window set explicitly for compaction support.
+The default model is `deepseek/deepseek-v4.1-flash` with a 128k context window set explicitly for compaction support.
 
 To switch models, edit `agent/agent.ts` or override the env var:
 
 ```ts
-model: openrouter.chat(process.env.EVE_CHAT_MODEL ?? "deepseek/deepseek-v4-pro"), // OpenRouter model ID
+model: openrouter.chat(process.env.EVE_CHAT_MODEL ?? "deepseek/deepseek-v4.1-flash"), // OpenRouter model ID
 ```
+
+### Model Performance & Quality Benchmarks
+
+A model swap must not silently degrade latency or output quality. Two
+skippable, live benchmark tests guard this (they run only when an
+`OPENROUTER_API_KEY` is present; they skip in CI/offline so the suite never
+flakes):
+
+- **L1 — Latency** (`tests/model-latency.bench.contract.test.ts`): sends a
+  fixed prompt to the configured model via OpenRouter streaming and asserts
+  time-to-first-token + total latency stay within the committed budget in
+  `tests/fixtures/model-baseline.json`.
+- **L2 — Quality** (`tests/model-quality.regression.contract.test.ts`): sends a
+  fixed graded prompt and asserts the output still meets capability gates
+  (required story sections present, no refusal/error, not truncated).
+
+The pure policy logic (`assertLatencyWithinBudget`, `gradeStoryQuality`) lives
+in `tests/helpers/model-bench.ts` and is unit-tested offline in
+`tests/model-bench-helpers.test.ts`.
+
+**Re-baselining after a real measurement.** The fixture ships with
+`latency.baselineMs: null`, so only the absolute **ceiling** (30s) is enforced
+today. To capture a real baseline (so future swaps are compared against a
+measured value, not just the ceiling):
+
+```bash
+# 1. Put your OpenRouter key in the environment (never commit it)
+export OPENROUTER_API_KEY=sk-or-...        # or add to .env.local
+
+# 2. Run the benchmarks recording the measured values
+MODEL_BENCH_RECORD=1 npx vitest run \
+  tests/model-latency.bench.contract.test.ts \
+  tests/model-quality.regression.contract.test.ts
+# → prints e.g. [model-latency] RECORD ttftMs=820 totalMs=4100
+#   and        [model-quality] RECORD output: <the model's story>
+
+# 3. Edit tests/fixtures/model-baseline.json and set
+#      "latency": { "ceilingMs": 30000, "baselineMs": 4100, "tolerance": 1.5 }
+#    (baselineMs = the recorded totalMs; tolerance lets a future model be up
+#    to 50% slower before the test fails).
+#    Keep the quality gate (minChars / requiredSections / refusalMarkers) as-is
+#    unless the graded prompt or acceptance bar should change.
+
+# 4. Commit the updated fixture (no secret is stored — only the measured number)
+git add tests/fixtures/model-baseline.json
+git commit -m "bench: re-baseline model latency (totalMs=4100)"
+```
+
+After this, a future model whose `totalMs` exceeds `baselineMs * tolerance`
+(4100 × 1.5 = 6150 ms) will **fail** the latency test, catching a real
+regression. Re-run the record step whenever you change models or the hosting
+region/infra shifts the latency profile.
+
+To force the live tests to skip (e.g. in a constrained CI slice) set
+`MODEL_BENCH_OFFLINE=1`.
 
 ### Environment Variables
 
@@ -95,8 +150,8 @@ be flagged **Sensitive** in Vercel (masked, not readable via `vercel env pull`);
 | `GH_WEBHOOK_SECRET`      | Yes      | Secret | Shared secret that authenticates incoming webhook payloads (required on Vercel; see Webhooks)    |
 | `GH_SPRINT_TOKEN`        | No*      | Secret | Token for reading the Projects V2 board (`read:project` scope); falls back to `GH_RELEASE_TOKEN` |
 | `VERCEL_PROTECTION_BYPASS` | No     | Secret | Bypass secret for Vercel Protection (password/SSO) so server-to-server calls reach the app       |
-| `EVE_CHAT_MODEL`         | No       | Config | Override the root chat model id (default `deepseek/deepseek-v4-pro`)                              |
-| `MODEL_NAME`             | No       | Config | Model id for subagents (Sprint Metrics Analyst, PR-reviewer Action); default `deepseek/deepseek-v4-pro` |
+| `EVE_CHAT_MODEL`         | No       | Config | Override the root chat model id (default `deepseek/deepseek-v4.1-flash`)                              |
+| `MODEL_NAME`             | No       | Config | Model id for subagents (Sprint Metrics Analyst, PR-reviewer Action); default `deepseek/deepseek-v4.1-flash` |
 | `EVE_STORY_MENTION`      | No       | Config | Mention that triggers the Product Owner in an issue body (default `@eve-agent`)                  |
 | `EVE_STORY_LABEL`        | No       | Config | Label that triggers the Product Owner (default `needs-story`)                                     |
 | `STORY_ALLOWED_REPOS`    | Yes      | Config | **Fail-closed** comma-separated `owner/repo` allow-list for story publishing; refusing if unset  |
@@ -308,7 +363,7 @@ there to enable webhook processing for it.
 
 - Opening or editing a PR triggers the **PR-reviewer** GitHub Action, which posts
   an AI code review (model set by the `MODEL_NAME` repo variable — defaults to
-  `deepseek/deepseek-v4-pro`).
+  `deepseek/deepseek-v4.1-flash`).
 - Merging a PR fires the webhook → the **Release Manager** subagent updates
   [`releasenotes.md`](releasenotes.md) with a summary of the change.
 

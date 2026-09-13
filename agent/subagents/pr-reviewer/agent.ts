@@ -1,5 +1,6 @@
 import { createOpenAI } from "@ai-sdk/openai";
 import { defineAgent } from "eve";
+import { DEFAULT_MODEL_ID } from "../../model-config";
 
 const openrouter = createOpenAI({
   baseURL: "https://openrouter.ai/api/v1",
@@ -7,8 +8,7 @@ const openrouter = createOpenAI({
   name: "openrouter",
 });
 
-const MODEL_NAME =
-  process.env.MODEL_NAME || "deepseek/deepseek-v4-pro";
+const MODEL_NAME = process.env.MODEL_NAME || DEFAULT_MODEL_ID;
 
 export default defineAgent({
   description:

@@ -20,9 +20,13 @@ describe("product-owner subagent", () => {
     expect(src).toMatch(/MODEL_NAME/);
   });
 
-  it("defaults to deepseek-v4-pro (not the retired nemotron free model)", () => {
+  it("defaults to DeepSeek V4.1 Flash (not the retired nemotron free model)", () => {
     const src = fs.readFileSync(path.join(dir, "agent.ts"), "utf8");
-    expect(src).toContain("deepseek/deepseek-v4-pro");
+    // New default is sourced from the shared model-config module (which sets
+    // DEFAULT_MODEL_ID = deepseek/deepseek-v4.1-flash). Assert the import and
+    // that no hardcoded old/nemotron id remains.
+    expect(src).toMatch(/DEFAULT_MODEL_ID/);
+    expect(src).not.toContain("deepseek/deepseek-v4-pro");
     expect(src).not.toContain("nemotron");
   });
 

@@ -1,6 +1,9 @@
 import fs from "fs";
 
-// Read the GitHub event payload
+// Default model for the PR-review LLM call. Mirrors agent/model-config.ts so the
+// script and the agent stay on the same default. Falls back to this when
+// MODEL_NAME is unset (previously it sent `undefined`, which OpenRouter rejects).
+const DEFAULT_MODEL_ID = "deepseek/deepseek-v4.1-flash";
 const eventPath = process.env.GITHUB_EVENT_PATH;
 if (!eventPath) {
   console.error("GITHUB_EVENT_PATH environment variable is not set.");
@@ -162,7 +165,7 @@ try {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: process.env.MODEL_NAME,
+        model: process.env.MODEL_NAME || DEFAULT_MODEL_ID,
         messages: [
           {
             role: "system",
