@@ -68,12 +68,12 @@ const openrouter = createOpenAI({
 });
 ```
 
-The default model is `deepseek/deepseek-v4-pro` with a 128k context window set explicitly for compaction support.
+The default model is `deepseek/deepseek-v4.1-flash` with a 128k context window set explicitly for compaction support.
 
 To switch models, edit `agent/agent.ts` or override the env var:
 
 ```ts
-model: openrouter.chat(process.env.EVE_CHAT_MODEL ?? "deepseek/deepseek-v4-pro"), // OpenRouter model ID
+model: openrouter.chat(process.env.EVE_CHAT_MODEL ?? "deepseek/deepseek-v4.1-flash"), // OpenRouter model ID
 ```
 
 ### Environment Variables
@@ -95,8 +95,8 @@ be flagged **Sensitive** in Vercel (masked, not readable via `vercel env pull`);
 | `GH_WEBHOOK_SECRET`      | Yes      | Secret | Shared secret that authenticates incoming webhook payloads (required on Vercel; see Webhooks)    |
 | `GH_SPRINT_TOKEN`        | No*      | Secret | Token for reading the Projects V2 board (`read:project` scope); falls back to `GH_RELEASE_TOKEN` |
 | `VERCEL_PROTECTION_BYPASS` | No     | Secret | Bypass secret for Vercel Protection (password/SSO) so server-to-server calls reach the app       |
-| `EVE_CHAT_MODEL`         | No       | Config | Override the root chat model id (default `deepseek/deepseek-v4-pro`)                              |
-| `MODEL_NAME`             | No       | Config | Model id for subagents (Sprint Metrics Analyst, PR-reviewer Action); default `deepseek/deepseek-v4-pro` |
+| `EVE_CHAT_MODEL`         | No       | Config | Override the root chat model id (default `deepseek/deepseek-v4.1-flash`)                              |
+| `MODEL_NAME`             | No       | Config | Model id for subagents (Sprint Metrics Analyst, PR-reviewer Action); default `deepseek/deepseek-v4.1-flash` |
 | `EVE_STORY_MENTION`      | No       | Config | Mention that triggers the Product Owner in an issue body (default `@eve-agent`)                  |
 | `EVE_STORY_LABEL`        | No       | Config | Label that triggers the Product Owner (default `needs-story`)                                     |
 | `STORY_ALLOWED_REPOS`    | Yes      | Config | **Fail-closed** comma-separated `owner/repo` allow-list for story publishing; refusing if unset  |
@@ -308,7 +308,7 @@ there to enable webhook processing for it.
 
 - Opening or editing a PR triggers the **PR-reviewer** GitHub Action, which posts
   an AI code review (model set by the `MODEL_NAME` repo variable — defaults to
-  `deepseek/deepseek-v4-pro`).
+  `deepseek/deepseek-v4.1-flash`).
 - Merging a PR fires the webhook → the **Release Manager** subagent updates
   [`releasenotes.md`](releasenotes.md) with a summary of the change.
 
