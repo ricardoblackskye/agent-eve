@@ -198,3 +198,28 @@ The user wants this to be a **foundation for other model work**. Three test laye
   requires `deepseek/deepseek-v4.1-flash`. We use the prefixed form (the only one
   that routes) and document why.
 - **cspell**: `v4.1`, `nemotron` may need dictionary entries if flagged.
+
+---
+
+## L1/L2 benchmarks & re-baselining (added after approval)
+
+The model swap is guarded by live, skippable benchmarks:
+
+- `tests/model-latency.bench.contract.test.ts` (L1) — streaming latency vs budget.
+- `tests/model-quality.regression.contract.test.ts` (L2) — graded-prompt quality gate.
+- `tests/helpers/model-bench.ts` — pure `assertLatencyWithinBudget` / `gradeStoryQuality`
+  + `measureLatency`; unit-tested offline in `tests/model-bench-helpers.test.ts`.
+- `tests/fixtures/model-baseline.json` — committed ceiling (30s) + quality gate + prompt.
+
+**Re-baseline procedure (run once with a real key, then commit the number):**
+```bash
+export OPENROUTER_API_KEY=sk-or-...          # never commit
+MODEL_BENCH_RECORD=1 npx vitest run \
+  tests/model-latency.bench.contract.test.ts \
+  tests/model-quality.regression.contract.test.ts
+# copy printed totalMs into tests/fixtures/model-baseline.json latency.baselineMs
+git add tests/fixtures/model-baseline.json && git commit -m "bench: re-baseline model latency"
+```
+After that, a future model slower than `baselineMs * tolerance` (1.5) FAILS the
+latency test. `MODEL_BENCH_OFFLINE=1` forces the live tests to skip. This is
+documented in the README "Model Performance & Quality Benchmarks" section.
