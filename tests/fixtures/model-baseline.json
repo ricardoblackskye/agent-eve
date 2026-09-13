@@ -1,0 +1,20 @@
+{
+  "latency": {
+    "ceilingMs": 30000,
+    "baselineMs": null,
+    "tolerance": 1.5
+  },
+  "quality": {
+    "minChars": 200,
+    "requiredSections": ["intent", "acceptance"],
+    "refusalMarkers": [
+      "i cannot",
+      "i can't",
+      "as an ai language model",
+      "i am unable",
+      "error:",
+      "rate limit"
+    ]
+  },
+  "gradedPrompt": "Write a short user story for this request: 'As a developer I want the agent to retry a failed webhook so that transient errors don't lose work.' Use a clear Intent section and an Acceptance Criteria section."
+}
