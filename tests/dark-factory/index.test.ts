@@ -182,6 +182,27 @@ describe("state DB path hardening (reviewer follow-up)", () => {
     store.close?.();
   });
 
+  it("matches the platform's case sensitivity for the sandbox root", () => {
+    const root = makeRoot();
+    const env = {
+      DF_STATE_DRIVER: "sqlite",
+      DF_STATE_DB_DIR: root.toUpperCase(),
+      DF_STATE_DB_PATH: join(root, "state.sqlite"),
+    };
+
+    if (process.platform === "win32") {
+      // Windows filesystems are case-INsensitive, so C:\x IS c:\x: this path is
+      // inside the sandbox and must not be refused.
+      const store = createStateStore(env);
+      expect(store.id).toBe("sqlite");
+      store.close?.();
+    } else {
+      // POSIX is case-SENSITIVE: a differently-cased path is a different, and
+      // therefore outside, location.
+      expect(() => createStateStore(env)).toThrow(/DF_STATE_DB_DIR/);
+    }
+  });
+
   it("keeps the operator-trusted default when no sandbox root is set", () => {
     const root = makeRoot();
     const store = createStateStore({

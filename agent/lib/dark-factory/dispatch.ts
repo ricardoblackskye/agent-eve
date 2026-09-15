@@ -175,9 +175,14 @@ export class Dispatcher {
   }
 
   /**
-   * Bound one handler invocation. `Promise.race` attaches handlers to `work`, so
-   * an abandoned attempt that later rejects cannot surface as an unhandled
-   * rejection.
+   * Bound one handler invocation.
+   *
+   * `Promise.race` attaches a rejection handler to EVERY promise it is given,
+   * including the one that loses, so an abandoned attempt that later rejects
+   * cannot surface as an unhandled rejection. (Measured, not assumed: with an
+   * `unhandledRejection` listener installed, a control promise with no handler
+   * fires while an abandoned-race promise rejecting after the deadline does not.)
+   * `finally` clears the timer so a fast handler does not hold the event loop.
    */
   private async withDeadline<T>(work: Promise<T>, label: string): Promise<T> {
     if (!Number.isFinite(this.handlerTimeoutMs) || this.handlerTimeoutMs <= 0) return work;

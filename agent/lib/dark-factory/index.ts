@@ -7,7 +7,7 @@
  * silently non-persistent in-process store.
  */
 
-import { resolve, sep } from "node:path";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import { ConsoleStateProvider, SqliteStateAdapter, type StateStore } from "./state";
 import { DEFAULT_RETRY_POLICY, type RetryPolicy } from "./dispatch";
 import type { DispatchObserver } from "./dispatch";
@@ -94,8 +94,17 @@ export function resolveStateDbPath(rawPath: string, sandboxRoot?: string): strin
   if (root === "") return resolved;
 
   const resolvedRoot = resolve(root);
-  const prefix = resolvedRoot.endsWith(sep) ? resolvedRoot : resolvedRoot + sep;
-  if (resolved === resolvedRoot || resolved.startsWith(prefix)) return resolved;
+  // Containment is decided by path.relative, NOT startsWith(resolvedRoot + sep):
+  // relative() follows the PLATFORM's case sensitivity (Node's win32
+  // implementation compares case-insensitively, matching a case-insensitive
+  // filesystem, while POSIX stays case-sensitive), whereas a raw prefix compare
+  // false-rejected a legitimate path whose drive letter differed in case
+  // ('c:\x' vs 'C:\x'). It also handles a different drive/root correctly by
+  // returning an absolute path.
+  const rel = relative(resolvedRoot, resolved);
+  const inside =
+    rel === "" || (!isAbsolute(rel) && rel !== ".." && !rel.startsWith(".." + sep));
+  if (inside) return resolved;
 
   throw new Error(
     `DF_STATE_DB_PATH '${resolved}' resolves outside DF_STATE_DB_DIR '${resolvedRoot}'. ` +
