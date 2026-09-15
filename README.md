@@ -139,27 +139,33 @@ Environment Variables) in production, or in a local `.env.local` copied from
 be flagged **Sensitive** in Vercel (masked, not readable via `vercel env pull`);
 **Config** values are non-sensitive (e.g. allow-lists, board ids).
 
-| Variable                 | Required | Type   | Description                                                                                       |
-|--------------------------|----------|--------|---------------------------------------------------------------------------------------------------|
-| `OPENROUTER_API_KEY`      | Yes      | Secret | OpenRouter API key for model access                                                               |
-| `EVE_API_KEY`            | Yes      | Secret | Bearer token for production auth (sent as `Authorization: Bearer` header)                         |
-| `NEXT_PUBLIC_EVE_API_KEY` | Yes*     | Public | Client-side chat-widget key sent to your own `/api/eve` proxy (inlined in the browser bundle — **public by design, never a real secret**) |
-| `GH_RELEASE_TOKEN`       | Yes      | Secret | GitHub token the Release Manager uses to write `releasenotes.md` on merge (needs `Contents` + `Issues: write`) |
-| `GH_STORY_TOKEN`         | Yes*     | Secret | Token the Product Owner uses to create `[Story]` issues (needs `Issues: read and write`); read before `GH_RELEASE_TOKEN` |
-| `GITHUB_TOKEN`           | No       | Secret | Final fallback token if neither `GH_RELEASE_TOKEN` nor `GH_STORY_TOKEN` is set                   |
-| `GH_WEBHOOK_SECRET`      | Yes      | Secret | Shared secret that authenticates incoming webhook payloads (required on Vercel; see Webhooks)    |
-| `GH_SPRINT_TOKEN`        | No*      | Secret | Token for reading the Projects V2 board (`read:project` scope); falls back to `GH_RELEASE_TOKEN` |
-| `VERCEL_PROTECTION_BYPASS` | No     | Secret | Bypass secret for Vercel Protection (password/SSO) so server-to-server calls reach the app       |
-| `EVE_CHAT_MODEL`         | No       | Config | Override the root chat model id (default `deepseek/deepseek-v4.1-flash`)                              |
-| `MODEL_NAME`             | No       | Config | Model id for subagents (Sprint Metrics Analyst, PR-reviewer Action); default `deepseek/deepseek-v4.1-flash` |
-| `EVE_STORY_MENTION`      | No       | Config | Mention that triggers the Product Owner in an issue body (default `@eve-agent`)                  |
-| `EVE_STORY_LABEL`        | No       | Config | Label that triggers the Product Owner (default `needs-story`)                                     |
-| `STORY_ALLOWED_REPOS`    | Yes      | Config | **Fail-closed** comma-separated `owner/repo` allow-list for story publishing; refusing if unset  |
-| `GITHUB_REPO_OWNER`      | No       | Config | Optional env override for the default publish owner                                               |
-| `GITHUB_REPO_NAME`       | No       | Config | Optional env override for the default publish repo                                                |
-| `SPRINT_PROJECT_OWNER`   | No       | Config | Projects V2 board owner for sprint reports (default `ricardoblackskye`)                           |
-| `SPRINT_PROJECT_NUMBER`  | No       | Config | Projects V2 board number for sprint reports (default `3`)                                         |
-| `PR_REVIEW_MAX_DIFF_CHARS` | No     | Config | Cap on diff chars sent to the PR-reviewer LLM (default `20000`)                                   |
+| Variable                    | Required | Type   | Description                                                                                                                               |
+|-----------------------------|----------|--------|-------------------------------------------------------------------------------------------------------------------------------------------|
+| `OPENROUTER_API_KEY`        | Yes      | Secret | OpenRouter API key for model access                                                                                                       |
+| `EVE_API_KEY`               | Yes      | Secret | Bearer token for production auth (sent as `Authorization: Bearer` header)                                                                 |
+| `NEXT_PUBLIC_EVE_API_KEY`   | Yes*     | Public | Client-side chat-widget key sent to your own `/api/eve` proxy (inlined in the browser bundle — **public by design, never a real secret**) |
+| `GH_RELEASE_TOKEN`          | Yes      | Secret | GitHub token the Release Manager uses to write `releasenotes.md` on merge (needs `Contents` + `Issues: write`)                            |
+| `GH_STORY_TOKEN`            | Yes*     | Secret | Token the Product Owner uses to create `[Story]` issues (needs `Issues: read and write`); read before `GH_RELEASE_TOKEN`                  |
+| `GITHUB_TOKEN`              | No       | Secret | Final fallback token if neither `GH_RELEASE_TOKEN` nor `GH_STORY_TOKEN` is set                                                            |
+| `GH_WEBHOOK_SECRET`         | Yes      | Secret | Shared secret that authenticates incoming webhook payloads (required on Vercel; see Webhooks)                                             |
+| `GH_SPRINT_TOKEN`           | No*      | Secret | Token for reading the Projects V2 board (`read:project` scope); falls back to `GH_RELEASE_TOKEN`                                          |
+| `VERCEL_PROTECTION_BYPASS`  | No       | Secret | Bypass secret for Vercel Protection (password/SSO) so server-to-server calls reach the app                                                |
+| `EVE_CHAT_MODEL`            | No       | Config | Override the root chat model id (default `deepseek/deepseek-v4.1-flash`)                                                                  |
+| `MODEL_NAME`                | No       | Config | Model id for subagents (Sprint Metrics Analyst, PR-reviewer Action); default `deepseek/deepseek-v4.1-flash`                               |
+| `EVE_STORY_MENTION`         | No       | Config | Mention that triggers the Product Owner in an issue body (default `@eve-agent`)                                                           |
+| `EVE_STORY_LABEL`           | No       | Config | Label that triggers the Product Owner (default `needs-story`)                                                                             |
+| `STORY_ALLOWED_REPOS`       | Yes      | Config | **Fail-closed** comma-separated `owner/repo` allow-list for story publishing; refusing if unset                                           |
+| `GITHUB_REPO_OWNER`         | No       | Config | Optional env override for the default publish owner                                                                                       |
+| `GITHUB_REPO_NAME`          | No       | Config | Optional env override for the default publish repo                                                                                        |
+| `SPRINT_PROJECT_OWNER`      | No       | Config | Projects V2 board owner for sprint reports (default `ricardoblackskye`)                                                                   |
+| `SPRINT_PROJECT_NUMBER`     | No       | Config | Projects V2 board number for sprint reports (default `3`)                                                                                 |
+| `PR_REVIEW_MAX_DIFF_CHARS`  | No       | Config | Cap on diff chars sent to the PR-reviewer LLM (default `20000`)                                                                           |
+| `DF_STATE_DRIVER`           | No       | Config | Dark Factory execution-memory store: `sqlite` = file-backed adapter; unset = fail-closed refusing default                                 |
+| `DF_STATE_DB_PATH`          | No*      | Config | Required when `DF_STATE_DRIVER=sqlite` — path to the SQLite file (ephemeral on Vercel)                                                    |
+| `DF_STATE_DB_DIR`           | No       | Config | Optional sandbox root: when set, `DF_STATE_DB_PATH` must resolve inside it or boot refuses                                                |
+| `DF_DISPATCH_MAX_RETRIES`   | No       | Config | Retry budget for a failed worker dispatch (default `2`)                                                                                   |
+| `DF_DISPATCH_BASE_DELAY_MS` | No       | Config | Base backoff delay in ms, multiplied per retry (default `1000`)                                                                           |
+| `DF_METRICS_DRIVER`         | No       | Config | Dark Factory observability store; unset or `memory` = in-process (default)                                                                |
 
 \* `NEXT_PUBLIC_EVE_API_KEY` and `GH_STORY_TOKEN` are required for the chat
 widget and story generation respectively; `GH_SPRINT_TOKEN` is only needed for
@@ -167,6 +173,33 @@ the sprint-metrics report. `GH_RELEASE_TOKEN` alone covers releases.
 
 > **Provisioning rule:** after adding or changing ANY environment variable on
 > Vercel, you must **redeploy** — changes do not apply to existing deployments.
+
+### Dark Factory (R1)
+
+The Dark Factory turns Eve from a stateless prompt-responder into an
+orchestrator with durable execution memory. R1 ships the three foundation seams
+under `agent/lib/dark-factory/` — no containers and no worker agents yet (those
+are R2/R3):
+
+- **`state.ts` (#134)** — `StateStore` seam for execution memory (current issue,
+  assigned worker, last test outcome, delivery-loop step). Ships a file-backed
+  `node:sqlite` adapter and a `console` default that **refuses** to claim a write
+  it did not persist.
+- **`dispatch.ts` (#138)** — canonical CI-event payload, at-most-once dispatch
+  (dedup keyed on the run id, persisted so it survives a restart), bounded
+  exponential-backoff retry with a terminal `failed` status, and worker routing.
+- **`metrics.ts` (#140)** — `TaskMetric` ingestion any component can feed,
+  exact test-fail→fix cycle counts, success rate per task type, and a buffered
+  recorder that retains and retries records the backend rejected ("must not lose
+  records").
+- **`index.ts`** — env-driven factories and the `dispatch → metrics` observer.
+
+`DF_STATE_DRIVER` is **fail-closed**: leaving it unset yields the refusing
+default rather than an in-process store that would silently lose state on the
+next request. A file-backed store is enough to prove real external-state
+semantics locally and in CI, but a Vercel function filesystem is ephemeral — so
+production persistence needs a Redis/pgvector adapter in a later release. See
+[`ARCHITECTURE.md`](ARCHITECTURE.md#dark-factory-r1) for the seam design.
 
 ### User Story Generation
 
@@ -331,17 +364,17 @@ Two issue **labels** drive subagents (apply them in the source repo):
 All credentials are **environment variables**, never hard-coded. In production
 they live only in Vercel (Sensitive, masked); locally in `.env.local` (git-ignored).
 
-| Variable                    | Kind   | Where it lives                                  | Scope needed                                              |
-|-----------------------------|--------|-------------------------------------------------|----------------------------------------------------------|
-| `OPENROUTER_API_KEY`        | Secret | Vercel (Sensitive) / `.env.local`               | OpenRouter API access                                    |
-| `EVE_API_KEY`               | Secret | Vercel (Sensitive) / `.env.local`               | Production auth bearer token                             |
-| `NEXT_PUBLIC_EVE_API_KEY`   | Public  | Vercel (plain — **not** Sensitive) / `.env.local` | Chat-widget key for your own `/api/eve` proxy; inlined in the browser bundle (public by design) |
-| `GH_RELEASE_TOKEN`          | Secret | Vercel (Sensitive) / `.env.local` / Actions     | `Contents: write` **+** `Issues: write` (or `public_repo` / `repo`) |
-| `GH_STORY_TOKEN`            | Secret | Vercel (Sensitive) / `.env.local` / Actions     | `Issues: read and write` (read before `GH_RELEASE_TOKEN`) |
-| `GITHUB_TOKEN`              | Secret | Vercel / Actions (fallback)                      | Same as above                                            |
-| `GH_WEBHOOK_SECRET`         | Secret | Vercel (Sensitive) + GitHub webhook config       | Webhook payload verification                             |
-| `GH_SPRINT_TOKEN`           | Secret | Vercel (Sensitive) / Actions                     | `read:project` (Projects V2 board read)                  |
-| `VERCEL_PROTECTION_BYPASS`  | Secret | Vercel (Sensitive)                              | Bypass Vercel Protection for server-to-server calls      |
+| Variable                   | Kind   | Where it lives                                    | Scope needed                                                                                    |
+|----------------------------|--------|---------------------------------------------------|-------------------------------------------------------------------------------------------------|
+| `OPENROUTER_API_KEY`       | Secret | Vercel (Sensitive) / `.env.local`                 | OpenRouter API access                                                                           |
+| `EVE_API_KEY`              | Secret | Vercel (Sensitive) / `.env.local`                 | Production auth bearer token                                                                    |
+| `NEXT_PUBLIC_EVE_API_KEY`  | Public | Vercel (plain — **not** Sensitive) / `.env.local` | Chat-widget key for your own `/api/eve` proxy; inlined in the browser bundle (public by design) |
+| `GH_RELEASE_TOKEN`         | Secret | Vercel (Sensitive) / `.env.local` / Actions       | `Contents: write` **+** `Issues: write` (or `public_repo` / `repo`)                             |
+| `GH_STORY_TOKEN`           | Secret | Vercel (Sensitive) / `.env.local` / Actions       | `Issues: read and write` (read before `GH_RELEASE_TOKEN`)                                       |
+| `GITHUB_TOKEN`             | Secret | Vercel / Actions (fallback)                       | Same as above                                                                                   |
+| `GH_WEBHOOK_SECRET`        | Secret | Vercel (Sensitive) + GitHub webhook config        | Webhook payload verification                                                                    |
+| `GH_SPRINT_TOKEN`          | Secret | Vercel (Sensitive) / Actions                      | `read:project` (Projects V2 board read)                                                         |
+| `VERCEL_PROTECTION_BYPASS` | Secret | Vercel (Sensitive)                                | Bypass Vercel Protection for server-to-server calls                                             |
 
 **Rules:**
 
