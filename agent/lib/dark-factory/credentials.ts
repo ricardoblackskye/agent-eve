@@ -4,7 +4,16 @@ import { createServer } from "node:http";
 /**
  * Dark Factory — Credential ingress / worker privilege boundary (issues #141 / story #142).
  *
- * STUB — implementation pending (TDD RED).
+ * A BROKER, not a token dispenser: it holds the operator's token, mints opaque
+ * short-lived leases (handle + TTL + repo allow-list) and adjudicates every
+ * worker access request. The token is never handed to a sandbox — which is what
+ * makes #142 AC4 ("MUST NOT deliver a broad long-lived PAT to any worker
+ * sandbox") true by construction rather than by policy.
+ *
+ * R2 scope: this is the policy/adjudication seam. It performs NO GitHub API call
+ * itself — the concrete privileged operation that consumes the token is wired by
+ * the R3 worker. `mode: "live"` therefore means "a token is configured and leases
+ * may be issued", not "GitHub has been contacted".
  */
 
 /** The longest lease we will mint, per #142 AC1 ("TTL of at most 60 minutes"). */
@@ -42,13 +51,13 @@ export class InvalidGrantError extends Error {
 }
 
 /**
- * `owner/repo` restricted to the characters GitHub actually allows: an owner is
- * alphanumerics + hyphens (no underscore or dot), a repo is alphanumerics plus
- * `-`, `_`, `.`. Shared with worker-env. A looser `[^/]` class accepted
- * `foo@bar/baz#qux` and only failed later when the broker used the token, so we
- * reject at intake for early, precise operator feedback.
+ * `owner/repo` restricted to what GitHub actually allows. Owner: alphanumerics
+ * and single internal hyphens (no leading/trailing hyphen, no `--`). Repo:
+ * alphanumerics plus `-`, `_`, `.`. Shared with worker-env. This is the intake
+ * filter — rejecting here gives precise operator feedback instead of a late
+ * failure when the broker uses the token.
  */
-export const REPO_PAIR_PATTERN = /^[A-Za-z0-9-]+\/[A-Za-z0-9_.-]+$/;
+export const REPO_PAIR_PATTERN = /^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*\/[A-Za-z0-9_.-]+$/;
 
 /**
  * Normalise a grant. Repos are lowercased and deduped for comparison (GitHub
@@ -181,6 +190,14 @@ export interface LocalBrokerOptions {
   now?: () => number;
   /** Injected lease-id minter, so tests are deterministic. */
   mintLeaseId?: () => string;
+  /**
+   * Global `DF_WORKER_ALLOWED_REPOS` policy (normalised `owner/repo`). When
+   * provided, `issue` refuses any grant containing a repo outside it —
+   * defence in depth, so the allow-list is a property of the credential
+   * boundary and not only of the worker handler. Fail-closed: an empty list
+   * refuses every grant. Omit to skip the global gate (direct construction).
+   */
+  allowedRepos?: string[];
 }
 
 /**
@@ -202,6 +219,11 @@ export class LocalCredentialBroker implements CredentialBroker {
   readonly #token: string;
   private readonly now: () => number;
   private readonly mintLeaseId: () => string;
+  /**
+   * Global allow-list, or `undefined` when the caller opted out (direct
+   * construction). Normalised lowercase by the resolver.
+   */
+  private readonly allowedRepos?: string[];
   private readonly leases = new Map<
     string,
     { repos: string[]; issuedAt: number; expiresAt: number; revoked: boolean }
@@ -212,6 +234,7 @@ export class LocalCredentialBroker implements CredentialBroker {
     this.tokenSource = options.tokenSource ?? "unknown";
     this.now = options.now ?? (() => Date.now());
     this.mintLeaseId = options.mintLeaseId ?? (() => randomUUID());
+    this.allowedRepos = options.allowedRepos;
   }
 
   get mode(): "live" | "blocked" {
@@ -243,6 +266,23 @@ export class LocalCredentialBroker implements CredentialBroker {
         mode: "blocked",
         error: `${CREDENTIALS_NOT_CONFIGURED} Refusing to issue a worker lease.`,
       };
+    }
+
+    // Defence in depth: the GLOBAL worker allow-list is enforced here too, not
+    // only at the worker handler, so a caller that reaches the broker directly
+    // still cannot obtain a lease for a repo the operator never allowed.
+    // Fail-closed: an empty list refuses every grant.
+    if (this.allowedRepos) {
+      const outside = grant.repos.filter((repo) => !this.allowedRepos!.includes(repo));
+      if (outside.length > 0) {
+        return {
+          ok: false,
+          mode: "blocked",
+          error:
+            `Repo(s) ${outside.join(", ")} are not in DF_WORKER_ALLOWED_REPOS ` +
+            `[${this.allowedRepos.join(", ")}]. Refusing to issue a worker lease.`,
+        };
+      }
     }
 
     const issuedAt = this.now();
@@ -316,13 +356,48 @@ export function resolveRepoToken(
   return null;
 }
 
+/**
+ * Reads `DF_WORKER_ALLOWED_REPOS` (comma-separated `owner/repo`).
+ *
+ * Fail-closed: an unset/blank list yields `[]`, which makes BOTH `withWorker`
+ * (worker-env) and `LocalCredentialBroker.issue` refuse every task/repo — an
+ * unconfigured deployment can provision nothing, matching the
+ * `STORY_ALLOWED_REPOS` stance. Lives here (next to the repo-pair pattern and
+ * the broker that enforces it); worker-env re-exports it for its own callers.
+ */
+export function resolveWorkerAllowedRepos(
+  env: Record<string, string | undefined> = process.env,
+): string[] {
+  const raw = (env.DF_WORKER_ALLOWED_REPOS || "").trim();
+  if (raw === "") return [];
+
+  const repos: string[] = [];
+  for (const entry of raw.split(",")) {
+    const value = entry.trim().toLowerCase();
+    if (value === "") continue;
+    if (!REPO_PAIR_PATTERN.test(value)) {
+      throw new Error(
+        `DF_WORKER_ALLOWED_REPOS entry ${JSON.stringify(entry)} is not an owner/repo pair.`,
+      );
+    }
+    repos.push(value);
+  }
+  return [...new Set(repos)];
+}
+
 /** Fail-closed factory: no token anywhere -> the refusing console broker. */
 export function createCredentialBroker(
   env: Record<string, string | undefined> = process.env,
 ): CredentialBroker {
   const resolved = resolveRepoToken(env);
   if (!resolved) return new ConsoleCredentialBroker();
-  return new LocalCredentialBroker({ token: resolved.token, tokenSource: resolved.source });
+  return new LocalCredentialBroker({
+    token: resolved.token,
+    tokenSource: resolved.source,
+    // The global allow-list is a property of the credential boundary, so the
+    // broker enforces it too — not only the worker handler (defence in depth).
+    allowedRepos: resolveWorkerAllowedRepos(env),
+  });
 }
 
 // ---------------------------------------------------------------------------

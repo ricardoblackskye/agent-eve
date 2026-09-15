@@ -271,6 +271,56 @@ describe("REPO_PAIR_PATTERN rejects non-GitHub characters (PR #148 review)", () 
       "acme/agent_eve.js",
     ]);
   });
+
+  it("rejects invalid hyphen placement in the owner (no leading/trailing/consecutive)", () => {
+    for (const bad of ["-owner/repo", "owner-/repo", "owner--name/repo"]) {
+      expect(() => toRepoGrant({ repos: [bad] }), bad).toThrow(InvalidGrantError);
+    }
+  });
+
+  it("accepts single internal hyphens in the owner", () => {
+    expect(toRepoGrant({ repos: ["owner-name/repo"] }).repos).toEqual(["owner-name/repo"]);
+    expect(toRepoGrant({ repos: ["a-b-c/repo-1"] }).repos).toEqual(["a-b-c/repo-1"]);
+  });
+});
+
+describe("broker enforces the global DF_WORKER_ALLOWED_REPOS policy (PR #148 review)", () => {
+  const SECRET = "ghp_SUPERSECRET_TOKEN_VALUE";
+  const REPO = "ricardoblackskye/agent-eve";
+
+  it("refuses a grant outside the global allow-list even when the broker is called directly", async () => {
+    const broker = new LocalCredentialBroker({ token: SECRET, allowedRepos: [REPO] });
+
+    const res = await broker.issue(toRepoGrant({ repos: ["someone/else"] }));
+
+    expect(res.ok).toBe(false);
+    expect(res.mode).toBe("blocked");
+    expect(res.error).toMatch(/DF_WORKER_ALLOWED_REPOS|allow-list/i);
+  });
+
+  it("issues a lease for a repo inside the global allow-list", async () => {
+    const broker = new LocalCredentialBroker({ token: SECRET, allowedRepos: [REPO] });
+
+    expect((await broker.issue(toRepoGrant({ repos: [REPO] }))).ok).toBe(true);
+  });
+
+  it("is fail-closed: an unconfigured global list refuses every grant", async () => {
+    const broker = createCredentialBroker({ GITHUB_TOKEN: SECRET });
+
+    const res = await broker.issue(toRepoGrant({ repos: [REPO] }));
+
+    expect(res.ok).toBe(false);
+    expect(res.mode).toBe("blocked");
+  });
+
+  it("issues via the env factory when both the token and the allow-list are set", async () => {
+    const broker = createCredentialBroker({
+      GITHUB_TOKEN: SECRET,
+      DF_WORKER_ALLOWED_REPOS: REPO,
+    });
+
+    expect((await broker.issue(toRepoGrant({ repos: [REPO] }))).ok).toBe(true);
+  });
 });
 
 describe("createCredentialBroker env wiring (#142)", () => {

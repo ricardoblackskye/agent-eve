@@ -1,7 +1,11 @@
 /**
  * Dark Factory — Containerised compute & code access (issues #130 / story #135).
  *
- * STUB — implementation pending (TDD RED).
+ * A PROVIDER SEAM: provision -> pushContext -> exec -> destroy, with a selector
+ * for WHERE the environment runs and a `local` default honestly reported as a
+ * dry-run (`mode: "dry-run"`, `isolated: false`) rather than claiming isolation
+ * it cannot provide. Real isolation arrives with an e2b/modal adapter once keys
+ * exist — R2 ships the seam, not a container.
  */
 
 import type { CredentialBroker } from "./credentials";
@@ -419,31 +423,11 @@ export function createWorkerHandler(
 }
 
 /**
- * Reads `DF_WORKER_ALLOWED_REPOS` (comma-separated `owner/repo`).
- *
- * Fail-closed: an unset/blank list yields `[]`, which makes `withWorker` refuse
- * EVERY task with a 403 — an unconfigured deployment can provision nothing,
- * matching the `STORY_ALLOWED_REPOS` stance.
+ * Re-exported from the credential boundary, its canonical home (see
+ * `credentials.ts`). The global worker allow-list is enforced fail-closed by
+ * BOTH `withWorker` here and `LocalCredentialBroker.issue`.
  */
-export function resolveWorkerAllowedRepos(
-  env: Record<string, string | undefined> = process.env,
-): string[] {
-  const raw = (env.DF_WORKER_ALLOWED_REPOS || "").trim();
-  if (raw === "") return [];
-
-  const repos: string[] = [];
-  for (const entry of raw.split(",")) {
-    const value = entry.trim().toLowerCase();
-    if (value === "") continue;
-    if (!REPO_PAIR_PATTERN.test(value)) {
-      throw new Error(
-        `DF_WORKER_ALLOWED_REPOS entry ${JSON.stringify(entry)} is not an owner/repo pair.`,
-      );
-    }
-    repos.push(value);
-  }
-  return [...new Set(repos)];
-}
+export { resolveWorkerAllowedRepos } from "./credentials";
 
 /** Reads `DF_WORKER_RUNTIME` (`node` | `python`, default `node`). */
 export function resolveWorkerRuntime(
