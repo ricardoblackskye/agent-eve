@@ -2,8 +2,9 @@ import { describe, it, expect, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createStateStore } from "../../agent/lib/dark-factory/index";
+import { createStateStore, createRetryPolicy } from "../../agent/lib/dark-factory/index";
 import { toExecutionContext, saveContext, loadContext } from "../../agent/lib/dark-factory/state";
+import { DEFAULT_RETRY_POLICY } from "../../agent/lib/dark-factory/dispatch";
 
 const ctx = toExecutionContext({
   issue: 134,
@@ -51,5 +52,29 @@ describe("createStateStore env wiring (#134)", () => {
 
   it("requires a database path for the sqlite driver", () => {
     expect(() => createStateStore({ DF_STATE_DRIVER: "sqlite" })).toThrow(/DF_STATE_DB_PATH/);
+  });
+});
+
+describe("createRetryPolicy env wiring (#138)", () => {
+  it("defaults to the shipped retry policy", () => {
+    expect(createRetryPolicy({})).toEqual(DEFAULT_RETRY_POLICY);
+  });
+
+  it("reads the retry limit and base delay from the environment", () => {
+    expect(
+      createRetryPolicy({ DF_DISPATCH_MAX_RETRIES: "5", DF_DISPATCH_BASE_DELAY_MS: "50" }),
+    ).toEqual({ maxRetries: 5, baseDelayMs: 50, backoffMultiplier: 3 });
+  });
+
+  it("rejects a non-numeric retry limit instead of silently ignoring it", () => {
+    expect(() => createRetryPolicy({ DF_DISPATCH_MAX_RETRIES: "many" })).toThrow(
+      /DF_DISPATCH_MAX_RETRIES/,
+    );
+  });
+
+  it("rejects a negative base delay", () => {
+    expect(() => createRetryPolicy({ DF_DISPATCH_BASE_DELAY_MS: "-5" })).toThrow(
+      /DF_DISPATCH_BASE_DELAY_MS/,
+    );
   });
 });

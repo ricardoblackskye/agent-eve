@@ -8,6 +8,44 @@
  */
 
 import { ConsoleStateProvider, SqliteStateAdapter, type StateStore } from "./state";
+import { DEFAULT_RETRY_POLICY, type RetryPolicy } from "./dispatch";
+
+/**
+ * Read the dispatch retry policy from the environment. A malformed numeric
+ * value is a configuration error and throws: silently falling back to the
+ * default would hide an operator's intent to change retry behaviour.
+ */
+export function createRetryPolicy(
+  env: Record<string, string | undefined> = process.env,
+): RetryPolicy {
+  return {
+    maxRetries: readInt(
+      "DF_DISPATCH_MAX_RETRIES",
+      env.DF_DISPATCH_MAX_RETRIES,
+      DEFAULT_RETRY_POLICY.maxRetries,
+      0,
+    ),
+    baseDelayMs: readInt(
+      "DF_DISPATCH_BASE_DELAY_MS",
+      env.DF_DISPATCH_BASE_DELAY_MS,
+      DEFAULT_RETRY_POLICY.baseDelayMs,
+      0,
+    ),
+    backoffMultiplier: DEFAULT_RETRY_POLICY.backoffMultiplier,
+  };
+}
+
+/** Parse a non-negative integer env var, throwing on garbage (naming the var). */
+function readInt(name: string, raw: string | undefined, fallback: number, min: number): number {
+  if (raw === undefined || raw.trim() === "") return fallback;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < min) {
+    throw new Error(
+      `${name} must be an integer >= ${min} (received ${JSON.stringify(raw)}).`,
+    );
+  }
+  return parsed;
+}
 
 /**
  * Choose the execution-memory store from the environment.
