@@ -41,8 +41,8 @@ export class InvalidGrantError extends Error {
   }
 }
 
-/** `owner/repo`, with no whitespace or extra separators. */
-const REPO_PAIR = /^[^/\s]+\/[^/\s]+$/;
+/** `owner/repo`, with no whitespace or extra separators. Shared with worker-env. */
+export const REPO_PAIR_PATTERN = /^[^/\s]+\/[^/\s]+$/;
 
 /**
  * Normalise a grant. Repos are lowercased and deduped for comparison (GitHub
@@ -61,7 +61,7 @@ export function toRepoGrant(input: {
   for (const entry of raw) {
     const value = typeof entry === "string" ? entry.trim() : "";
     if (value === "") continue;
-    if (!REPO_PAIR.test(value)) {
+    if (!REPO_PAIR_PATTERN.test(value)) {
       throw new InvalidGrantError(
         `Repo grant entry ${JSON.stringify(entry)} is not an owner/repo pair.`,
       );

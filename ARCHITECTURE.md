@@ -179,6 +179,10 @@ sequenceDiagram
 | `DF_DISPATCH_MAX_RETRIES`   | Dispatch retry budget                                               | No               |
 | `DF_DISPATCH_BASE_DELAY_MS` | Dispatch base backoff delay in ms                                   | No               |
 | `DF_METRICS_DRIVER`         | Observability store (`memory`; unset = in-process)                  | No               |
+| `DF_WORKER_PROVIDER`        | Worker sandbox location (`local` dry-run; unset = local)            | No               |
+| `DF_WORKER_ALLOWED_REPOS`   | Fail-closed allow-list of repos a worker task may target            | No               |
+| `DF_WORKER_RUNTIME`         | Runtime inside the sandbox (`node` \| `python`)                     | No               |
+| `DF_CREDENTIAL_TTL_SECONDS` | Per-task credential lease lifetime (1..3600)                        | No               |
 
 ## Dark Factory (R1)
 
@@ -251,3 +255,31 @@ record the backend rejected while returning `ok: false` — an unsaved metric is
 never reported as stored. `createDispatchObserver(store)` adapts the dispatch
 attempt stream into this store, so terminal dispatch outcomes become
 `{iterations: attempts, fixCycles: attempts - 1, status}`.
+
+### Worker environment + credential boundary (R2)
+
+R2 gives the factory hands without giving the sandbox a key to the building.
+
+- **`credentials.ts` (#142)** — a `CredentialBroker` holds the operator's token and
+  issues the worker an opaque **lease** (repo allow-list + TTL ≤ 60 min). The sandbox
+  receives the lease id and nothing else, so "MUST NOT deliver a broad PAT to any
+  worker sandbox" holds by construction — the token is a real ECMAScript `#private`
+  field, unreachable by property enumeration or `JSON.stringify`. Adjudication answers
+  200 / 403 / 401 over **real HTTP** (`POST /authorize`, loopback-bound); lease
+  **issuance is deliberately not routable**, because a sandbox must never be able to
+  mint its own credential.
+- **`worker-env.ts` (#135)** — a `WorkerProvider` seam
+  (`provision → pushContext → exec → destroy`) with a `local` default that reports
+  `isolated: false` and executes nothing. `withWorker` owns the lifecycle: it refuses
+  a repo outside `DF_WORKER_ALLOWED_REPOS` **before** provisioning (403, no side
+  effects), pushes the skeletal file map + PBI data before anything runs, and tears
+  the environment down on every path — success, thrown error, or failed context push —
+  revoking the lease alongside it.
+- **`createWorkerHandler`** adapts a dispatched CI event into a worker run and records
+  a `worker-env` task metric through the R1 observability seam. The default task is a
+  probe, because the Developer/Tester agents are R3.
+
+Honest limits: no live container isolation is exercised in R2 (no E2B/Modal key), so
+the default provider is a dry-run that never claims otherwise. The e2b/modal adapters
+plug into the same seam once credentials exist, and the credential source can be
+swapped to a GitHub App installation token without changing the broker's API.
