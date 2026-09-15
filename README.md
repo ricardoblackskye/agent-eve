@@ -160,6 +160,11 @@ be flagged **Sensitive** in Vercel (masked, not readable via `vercel env pull`);
 | `SPRINT_PROJECT_OWNER`   | No       | Config | Projects V2 board owner for sprint reports (default `ricardoblackskye`)                           |
 | `SPRINT_PROJECT_NUMBER`  | No       | Config | Projects V2 board number for sprint reports (default `3`)                                         |
 | `PR_REVIEW_MAX_DIFF_CHARS` | No     | Config | Cap on diff chars sent to the PR-reviewer LLM (default `20000`)                                   |
+| `DF_STATE_DRIVER`        | No       | Config | Dark Factory execution-memory store: `sqlite` = file-backed adapter; unset = fail-closed refusing default |
+| `DF_STATE_DB_PATH`       | No*      | Config | Required when `DF_STATE_DRIVER=sqlite` — path to the SQLite file (ephemeral on Vercel)            |
+| `DF_DISPATCH_MAX_RETRIES` | No      | Config | Retry budget for a failed worker dispatch (default `2`)                                           |
+| `DF_DISPATCH_BASE_DELAY_MS` | No    | Config | Base backoff delay in ms, multiplied per retry (default `1000`)                                   |
+| `DF_METRICS_DRIVER`      | No       | Config | Dark Factory observability store; unset or `memory` = in-process (default)                        |
 
 \* `NEXT_PUBLIC_EVE_API_KEY` and `GH_STORY_TOKEN` are required for the chat
 widget and story generation respectively; `GH_SPRINT_TOKEN` is only needed for
@@ -167,6 +172,33 @@ the sprint-metrics report. `GH_RELEASE_TOKEN` alone covers releases.
 
 > **Provisioning rule:** after adding or changing ANY environment variable on
 > Vercel, you must **redeploy** — changes do not apply to existing deployments.
+
+### Dark Factory (R1)
+
+The Dark Factory turns Eve from a stateless prompt-responder into an
+orchestrator with durable execution memory. R1 ships the three foundation seams
+under `agent/lib/dark-factory/` — no containers and no worker agents yet (those
+are R2/R3):
+
+- **`state.ts` (#134)** — `StateStore` seam for execution memory (current issue,
+  assigned worker, last test outcome, delivery-loop step). Ships a file-backed
+  `node:sqlite` adapter and a `console` default that **refuses** to claim a write
+  it did not persist.
+- **`dispatch.ts` (#138)** — canonical CI-event payload, at-most-once dispatch
+  (dedup keyed on the run id, persisted so it survives a restart), bounded
+  exponential-backoff retry with a terminal `failed` status, and worker routing.
+- **`metrics.ts` (#140)** — `TaskMetric` ingestion any component can feed,
+  exact test-fail→fix cycle counts, success rate per task type, and a buffered
+  recorder that retains and retries records the backend rejected ("must not lose
+  records").
+- **`index.ts`** — env-driven factories and the `dispatch → metrics` observer.
+
+`DF_STATE_DRIVER` is **fail-closed**: leaving it unset yields the refusing
+default rather than an in-process store that would silently lose state on the
+next request. A file-backed store is enough to prove real external-state
+semantics locally and in CI, but a Vercel function filesystem is ephemeral — so
+production persistence needs a Redis/pgvector adapter in a later release. See
+[`ARCHITECTURE.md`](ARCHITECTURE.md#dark-factory-r1) for the seam design.
 
 ### User Story Generation
 
