@@ -205,6 +205,74 @@ describe("TTL expiry and revocation (#142 AC3)", () => {
   });
 });
 
+describe("broker lease eviction — bounded memory (PR #148 review)", () => {
+  const TOKEN = "ghp_SUPERSECRET_TOKEN_VALUE";
+  const REPO = "ricardoblackskye/agent-eve";
+
+  it("prunes expired leases on the next issue so the map cannot grow without bound", async () => {
+    let clock = 1_000;
+    let n = 0;
+    const broker = new LocalCredentialBroker({
+      token: TOKEN,
+      now: () => clock,
+      mintLeaseId: () => `lease-${++n}`,
+    });
+    const grant = toRepoGrant({ repos: [REPO], ttlSeconds: 60 });
+
+    await broker.issue(grant);
+    await broker.issue(grant);
+    expect(broker.size).toBe(2);
+
+    // Both expire; the next issue evicts them before adding the new one.
+    clock = 1_000 + 60_000 + 1;
+    await broker.issue(grant);
+    expect(broker.size).toBe(1);
+  });
+
+  it("evicts revoked leases too — they can never authorise again", async () => {
+    let n = 0;
+    const broker = new LocalCredentialBroker({
+      token: TOKEN,
+      now: () => 1_000,
+      mintLeaseId: () => `lease-${++n}`,
+    });
+    const grant = toRepoGrant({ repos: [REPO] });
+
+    const first = (await broker.issue(grant)).lease as Lease;
+    await broker.revoke(first.leaseId);
+    // Still 401 (reason "revoked") until the next issue prunes it.
+    expect((await broker.authorize(first.leaseId, REPO)).status).toBe(401);
+
+    await broker.issue(grant);
+    expect(broker.size).toBe(1);
+  });
+});
+
+describe("REPO_PAIR_PATTERN rejects non-GitHub characters (PR #148 review)", () => {
+  it("rejects pairs with characters GitHub does not allow", () => {
+    const bad = [
+      "foo@bar/baz#qux",
+      "my_org/repo", // underscore is not valid in a GitHub owner
+      "owner/re po", // whitespace
+      "owner/repo:tag",
+      "a/b/c", // extra separator
+    ];
+    for (const entry of bad) {
+      expect(() => toRepoGrant({ repos: [entry] }), entry).toThrow(InvalidGrantError);
+    }
+  });
+
+  it("accepts realistic owner/repo pairs (hyphens, and _ or . in the repo)", () => {
+    expect(toRepoGrant({ repos: ["ricardoblackskye/agent-eve"] }).repos).toEqual([
+      "ricardoblackskye/agent-eve",
+    ]);
+    // Repo names allow underscore and dot; owner names do not.
+    expect(toRepoGrant({ repos: ["acme/Agent_Eve.js"] }).repos).toEqual([
+      "acme/agent_eve.js",
+    ]);
+  });
+});
+
 describe("createCredentialBroker env wiring (#142)", () => {
   const SECRET = "ghp_SUPERSECRET_TOKEN_VALUE";
 

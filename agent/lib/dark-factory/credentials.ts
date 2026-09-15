@@ -41,8 +41,14 @@ export class InvalidGrantError extends Error {
   }
 }
 
-/** `owner/repo`, with no whitespace or extra separators. Shared with worker-env. */
-export const REPO_PAIR_PATTERN = /^[^/\s]+\/[^/\s]+$/;
+/**
+ * `owner/repo` restricted to the characters GitHub actually allows: an owner is
+ * alphanumerics + hyphens (no underscore or dot), a repo is alphanumerics plus
+ * `-`, `_`, `.`. Shared with worker-env. A looser `[^/]` class accepted
+ * `foo@bar/baz#qux` and only failed later when the broker used the token, so we
+ * reject at intake for early, precise operator feedback.
+ */
+export const REPO_PAIR_PATTERN = /^[A-Za-z0-9-]+\/[A-Za-z0-9_.-]+$/;
 
 /**
  * Normalise a grant. Repos are lowercased and deduped for comparison (GitHub
@@ -212,6 +218,24 @@ export class LocalCredentialBroker implements CredentialBroker {
     return this.#token ? "live" : "blocked";
   }
 
+  /** Leases currently tracked (observability only; never exposes the token). */
+  get size(): number {
+    return this.leases.size;
+  }
+
+  /**
+   * Bound memory: drop leases that can never authorise again — expired or
+   * revoked. Called on every `issue`, so a long-lived broker's map tracks only
+   * leases that are still live and cannot grow without bound. (A `setInterval`
+   * timer is deliberately avoided: this module runs in a serverless deployment
+   * where a live timer would keep the process awake.)
+   */
+  private pruneDead(now: number): void {
+    for (const [id, entry] of this.leases) {
+      if (entry.revoked || now >= entry.expiresAt) this.leases.delete(id);
+    }
+  }
+
   async issue(grant: RepoGrant): Promise<IssueResult> {
     if (!this.#token) {
       return {
@@ -222,6 +246,8 @@ export class LocalCredentialBroker implements CredentialBroker {
     }
 
     const issuedAt = this.now();
+    // Evict dead leases before adding a new one, so the map stays bounded.
+    this.pruneDead(issuedAt);
     const lease: Lease = {
       leaseId: this.mintLeaseId(),
       repos: [...grant.repos],
