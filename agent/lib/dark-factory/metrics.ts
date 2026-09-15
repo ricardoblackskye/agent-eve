@@ -129,7 +129,21 @@ export class InMemoryMetricsStore implements MetricsStore {
   }
 }
 
-/** Buffered recorder — implementation pending (TDD RED). */
+/**
+ * Metrics recorder that adds a no-loss retry buffer around ANY `MetricsStore`.
+ *
+ * Deliberately a DECORATOR rather than a separate `RetryQueue` fed by callers:
+ * the "MUST NOT lose metric records" constraint then lives in exactly one place
+ * and holds for every store (in-memory today, Redis/pgvector later) without each
+ * caller remembering to enqueue. It composes with — and is tested against — a
+ * failing backend in isolation (see the `FlakyStore` suite), so retry semantics
+ * are still verifiable without a real outage; splitting the buffer out would
+ * scatter the guarantee across layers with nothing left to enforce it.
+ *
+ * `record()` validates input (a caller bug throws), writes through, and on a
+ * store failure retains the record for `flush()` while returning `ok: false`, so
+ * an unsaved metric is never reported as stored.
+ */
 export class BufferedMetricsRecorder {
   id = "buffered";
   private readonly store: MetricsStore;

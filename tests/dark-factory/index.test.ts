@@ -145,3 +145,51 @@ describe("dispatch -> metrics wiring (#140 AC4)", () => {
     state.close?.();
   });
 });
+
+describe("state DB path hardening (reviewer follow-up)", () => {
+  const dirs: string[] = [];
+  const makeRoot = () => {
+    const root = mkdtempSync(join(tmpdir(), "df-sandbox-"));
+    dirs.push(root);
+    return root;
+  };
+  afterEach(() => {
+    while (dirs.length) rmSync(dirs.pop() as string, { recursive: true, force: true });
+  });
+
+  it("refuses a path that escapes the configured DF_STATE_DB_DIR sandbox", () => {
+    const root = makeRoot();
+
+    expect(() =>
+      createStateStore({
+        DF_STATE_DRIVER: "sqlite",
+        DF_STATE_DB_PATH: join(root, "..", "escape.sqlite"),
+        DF_STATE_DB_DIR: root,
+      }),
+    ).toThrow(/DF_STATE_DB_DIR/);
+  });
+
+  it("canonicalises a traversal path that stays inside the sandbox", async () => {
+    const root = makeRoot();
+    const store = createStateStore({
+      DF_STATE_DRIVER: "sqlite",
+      DF_STATE_DB_PATH: join(root, "nested", "..", "state.sqlite"),
+      DF_STATE_DB_DIR: root,
+    });
+
+    expect(store.id).toBe("sqlite");
+    expect((await saveContext(store, ctx)).ok).toBe(true);
+    store.close?.();
+  });
+
+  it("keeps the operator-trusted default when no sandbox root is set", () => {
+    const root = makeRoot();
+    const store = createStateStore({
+      DF_STATE_DRIVER: "sqlite",
+      DF_STATE_DB_PATH: join(root, "state.sqlite"),
+    });
+
+    expect(store.id).toBe("sqlite");
+    store.close?.();
+  });
+});

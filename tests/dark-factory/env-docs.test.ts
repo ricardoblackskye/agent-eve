@@ -14,6 +14,7 @@ const raw = readFileSync(resolve(process.cwd(), ".env.example"), "utf-8");
 const DARK_FACTORY_VARS = [
   "DF_STATE_DRIVER",
   "DF_STATE_DB_PATH",
+  "DF_STATE_DB_DIR",
   "DF_DISPATCH_MAX_RETRIES",
   "DF_DISPATCH_BASE_DELAY_MS",
   "DF_METRICS_DRIVER",

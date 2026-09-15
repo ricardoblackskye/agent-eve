@@ -7,6 +7,7 @@
  * silently non-persistent in-process store.
  */
 
+import { resolve, sep } from "node:path";
 import { ConsoleStateProvider, SqliteStateAdapter, type StateStore } from "./state";
 import { DEFAULT_RETRY_POLICY, type RetryPolicy } from "./dispatch";
 import type { DispatchObserver } from "./dispatch";
@@ -71,6 +72,38 @@ function readInt(name: string, raw: string | undefined, fallback: number, min: n
 }
 
 /**
+ * Canonicalise the configured SQLite path and, when `DF_STATE_DB_DIR` is set,
+ * refuse anything that resolves outside that directory.
+ *
+ * `DF_STATE_DB_PATH` comes from the environment, which is operator-controlled
+ * configuration rather than request input (the same trust boundary as the GitHub
+ * tokens this repo already reads from env), so the default trusts the operator.
+ * The optional sandbox root is defence in depth for deployments that want to
+ * bound where state may be written — and it follows the fail-closed shape of the
+ * `STORY_ALLOWED_REPOS` allow-list: once configured, an escaping path is
+ * REFUSED rather than silently used. Canonicalising also means an error message
+ * names the real target, not a `../..`-laden string.
+ *
+ * Note: this is lexical (like `path.resolve`). A symlink inside the sandbox that
+ * points outside it is not detected — that is a filesystem/container concern
+ * (R2's worker privilege boundary), not something path string math can solve.
+ */
+export function resolveStateDbPath(rawPath: string, sandboxRoot?: string): string {
+  const resolved = resolve(rawPath);
+  const root = (sandboxRoot || "").trim();
+  if (root === "") return resolved;
+
+  const resolvedRoot = resolve(root);
+  const prefix = resolvedRoot.endsWith(sep) ? resolvedRoot : resolvedRoot + sep;
+  if (resolved === resolvedRoot || resolved.startsWith(prefix)) return resolved;
+
+  throw new Error(
+    `DF_STATE_DB_PATH '${resolved}' resolves outside DF_STATE_DB_DIR '${resolvedRoot}'. ` +
+      "Refusing to open a state store outside the configured sandbox root.",
+  );
+}
+
+/**
  * Choose the execution-memory store from the environment.
  *
  * `DF_STATE_DRIVER` unset/empty -> fail-closed `console` provider (refuses every
@@ -91,7 +124,7 @@ export function createStateStore(
         "DF_STATE_DRIVER=sqlite requires DF_STATE_DB_PATH (filesystem path to the SQLite database).",
       );
     }
-    return new SqliteStateAdapter(dbPath);
+    return new SqliteStateAdapter(resolveStateDbPath(dbPath, env.DF_STATE_DB_DIR));
   }
 
   throw new Error(

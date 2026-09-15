@@ -1,4 +1,4 @@
-import type { StateStore } from "./state";
+import type { StateReadResult, StateStore } from "./state";
 
 /**
  * Dark Factory — Orchestration Core (issues #137 / story #138).
@@ -113,6 +113,12 @@ export interface DispatchAttemptMetric {
 export type DispatchObserver = (metric: DispatchAttemptMetric) => void | Promise<void>;
 
 export interface DispatchOutcome {
+  /**
+   * "This call was handled without an error" — NOT "the run succeeded".
+   * A deduplicated delivery is `ok: true` even when the earlier run FAILED,
+   * because the duplicate was handled correctly; read `status` for the run's
+   * real state and `duplicate` to know that no work was performed.
+   */
   ok: boolean;
   status: DispatchStatus;
   attempts: number;
@@ -121,10 +127,28 @@ export interface DispatchOutcome {
   error?: string;
 }
 
+/**
+ * A single worker invocation must not hold the delivery loop open forever. A
+ * hung handler otherwise blocks the retry loop indefinitely (and on serverless
+ * the function would be killed with no structured outcome); the deadline
+ * converts it into an ordinary failed attempt that retries or terminates.
+ */
+export const DEFAULT_HANDLER_TIMEOUT_MS = 30_000;
+
 export interface DispatcherOptions {
   store: StateStore;
   handler: (event: DispatchEvent, worker: string) => Promise<void>;
   policy?: RetryPolicy;
+  /**
+   * Deadline for ONE handler invocation, in ms. Defaults to
+   * `DEFAULT_HANDLER_TIMEOUT_MS`; 0 or a negative value disables the deadline
+   * (useful for a worker that is legitimately long-running).
+   *
+   * The deadline bounds the LOOP, not the worker: JavaScript cannot cancel an
+   * in-flight promise, so the abandoned attempt may still finish in the
+   * background — it simply stops blocking delivery.
+   */
+  handlerTimeoutMs?: number;
   route?: (event: DispatchEvent) => string;
   observer?: DispatchObserver;
   sleep?: (ms: number) => Promise<void>;
@@ -137,6 +161,7 @@ export class Dispatcher {
   private readonly route: (event: DispatchEvent) => string;
   private readonly observer: DispatchObserver;
   private readonly sleep: (ms: number) => Promise<void>;
+  private readonly handlerTimeoutMs: number;
 
   constructor(options: DispatcherOptions) {
     this.store = options.store;
@@ -144,26 +169,70 @@ export class Dispatcher {
     this.policy = options.policy ?? DEFAULT_RETRY_POLICY;
     this.route = options.route ?? (() => "developer");
     this.observer = options.observer ?? (() => {});
+    this.handlerTimeoutMs = options.handlerTimeoutMs ?? DEFAULT_HANDLER_TIMEOUT_MS;
     this.sleep =
       options.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
   }
 
   /**
-   * Persist dispatch state. A store that cannot persist is fatal for this
-   * operation: retries must survive a process restart, so silently continuing
-   * with un-persisted state would break the at-most-once guarantee.
+   * Bound one handler invocation. `Promise.race` attaches handlers to `work`, so
+   * an abandoned attempt that later rejects cannot surface as an unhandled
+   * rejection.
    */
-  private async persist(record: DispatchRecord): Promise<void> {
-    const res = await this.store.save(dispatchKey(record.event.runId), record);
-    if (!res.ok) {
-      throw new Error(
-        `Cannot persist dispatch state for run '${record.event.runId}': ${res.error ?? "unknown error"}`,
+  private async withDeadline<T>(work: Promise<T>, label: string): Promise<T> {
+    if (!Number.isFinite(this.handlerTimeoutMs) || this.handlerTimeoutMs <= 0) return work;
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(
+        () => reject(new Error(`${label} exceeded the ${this.handlerTimeoutMs}ms deadline`)),
+        this.handlerTimeoutMs,
       );
+    });
+
+    try {
+      return await Promise.race([work, deadline]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  /**
+   * Persist dispatch state, converting BOTH failure shapes into a message the
+   * caller can return: a structured `{ ok: false }` result, and a store
+   * implementation that throws instead (the seam permits async backends whose
+   * driver rejects). Retries must survive a process restart, so an un-persisted
+   * write is fatal for the operation rather than something to swallow.
+   *
+   * Returns null on success.
+   */
+  private async persist(record: DispatchRecord): Promise<string | null> {
+    const runId = record.event.runId;
+    try {
+      const res = await this.store.save(dispatchKey(runId), record);
+      if (!res.ok) {
+        return `Cannot persist dispatch state for run '${runId}': ${res.error ?? "unknown error"}`;
+      }
+      return null;
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      return `Cannot persist dispatch state for run '${runId}': store threw: ${detail}`;
     }
   }
 
   async dispatch(event: DispatchEvent): Promise<DispatchOutcome> {
-    const existing = await this.store.get<DispatchRecord>(dispatchKey(event.runId));
+    let existing: StateReadResult<DispatchRecord>;
+    try {
+      existing = await this.store.get<DispatchRecord>(dispatchKey(event.runId));
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      return {
+        ok: false,
+        status: "failed",
+        attempts: 0,
+        error: `Cannot read dispatch state for run '${event.runId}': store threw: ${detail}`,
+      };
+    }
     if (!existing.ok) {
       return {
         ok: false,
@@ -175,8 +244,16 @@ export class Dispatcher {
     if (existing.value) {
       // At-most-once: anything already recorded for this run (in flight or
       // finished) is a duplicate delivery, never a second dispatch.
+      //
+      // `ok` here means "this call was handled with no error" — NOT "the run
+      // succeeded". A duplicate of a previously FAILED run is still a
+      // successfully handled duplicate, so `ok` is true and the run's real
+      // state travels in `status` (plus `duplicate: true` to say no work was
+      // performed). Reporting `ok: false` for a duplicate would conflate "this
+      // request errored" with "the earlier run failed" and invite a caller to
+      // re-dispatch — the exact thing this guard exists to prevent.
       return {
-        ok: existing.value.status === "succeeded",
+        ok: true,
         status: existing.value.status,
         attempts: existing.value.attempts,
         worker: existing.value.worker,
@@ -192,7 +269,10 @@ export class Dispatcher {
       attempts: 0,
       updatedAt: new Date().toISOString(),
     };
-    await this.persist(base);
+    const basePersistError = await this.persist(base);
+    if (basePersistError) {
+      return { ok: false, status: "failed", attempts: 0, worker, error: basePersistError };
+    }
 
     let attempt = 0;
     let lastError = "";
@@ -208,19 +288,31 @@ export class Dispatcher {
       });
 
       try {
-        await this.handler(event, worker);
+        await this.withDeadline(
+          this.handler(event, worker),
+          `handler for run '${event.runId}' (attempt ${attempt})`,
+        );
       } catch (err) {
         lastError = err instanceof Error ? err.message : String(err);
         const schedule = nextRetry(this.policy, attempt);
         if (!schedule) break;
 
-        await this.persist({
+        const retryPersistError = await this.persist({
           ...base,
           status: "retrying",
           attempts: attempt,
           updatedAt: new Date().toISOString(),
           error: lastError,
         });
+        if (retryPersistError) {
+          return {
+            ok: false,
+            status: "failed",
+            attempts: attempt,
+            worker,
+            error: retryPersistError,
+          };
+        }
         await this.observer({
           type: "dispatch.attempt",
           runId: event.runId,
@@ -233,12 +325,24 @@ export class Dispatcher {
         continue;
       }
 
-      await this.persist({
+      const successPersistError = await this.persist({
         ...base,
         status: "succeeded",
         attempts: attempt,
         updatedAt: new Date().toISOString(),
       });
+      if (successPersistError) {
+        // The worker did the work, but the outcome could not be recorded, so the
+        // at-most-once guard is not durable. Report the error rather than a clean
+        // success that would hide a lost state write.
+        return {
+          ok: false,
+          status: "failed",
+          attempts: attempt,
+          worker,
+          error: successPersistError,
+        };
+      }
       await this.observer({
         type: "dispatch.attempt",
         runId: event.runId,
@@ -250,7 +354,7 @@ export class Dispatcher {
     }
 
     // Retry budget exhausted — terminal failure, never an infinite retry.
-    await this.persist({
+    const terminalPersistError = await this.persist({
       ...base,
       status: "failed",
       attempts: attempt,
@@ -264,6 +368,12 @@ export class Dispatcher {
       status: "failed",
       worker,
     });
-    return { ok: false, status: "failed", attempts: attempt, worker, error: lastError };
+    return {
+      ok: false,
+      status: "failed",
+      attempts: attempt,
+      worker,
+      error: terminalPersistError ? `${lastError} (also: ${terminalPersistError})` : lastError,
+    };
   }
 }

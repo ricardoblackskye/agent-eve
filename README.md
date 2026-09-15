@@ -162,6 +162,7 @@ be flagged **Sensitive** in Vercel (masked, not readable via `vercel env pull`);
 | `PR_REVIEW_MAX_DIFF_CHARS`  | No       | Config | Cap on diff chars sent to the PR-reviewer LLM (default `20000`)                                                                           |
 | `DF_STATE_DRIVER`           | No       | Config | Dark Factory execution-memory store: `sqlite` = file-backed adapter; unset = fail-closed refusing default                                 |
 | `DF_STATE_DB_PATH`          | No*      | Config | Required when `DF_STATE_DRIVER=sqlite` — path to the SQLite file (ephemeral on Vercel)                                                    |
+| `DF_STATE_DB_DIR`           | No       | Config | Optional sandbox root: when set, `DF_STATE_DB_PATH` must resolve inside it or boot refuses                                                |
 | `DF_DISPATCH_MAX_RETRIES`   | No       | Config | Retry budget for a failed worker dispatch (default `2`)                                                                                   |
 | `DF_DISPATCH_BASE_DELAY_MS` | No       | Config | Base backoff delay in ms, multiplied per retry (default `1000`)                                                                           |
 | `DF_METRICS_DRIVER`         | No       | Config | Dark Factory observability store; unset or `memory` = in-process (default)                                                                |

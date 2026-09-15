@@ -10,6 +10,27 @@ import {
   type DispatchRecord,
   type DispatchAttemptMetric,
 } from "../../agent/lib/dark-factory/dispatch";
+import type { StateReadResult, StateStore, StateWriteResult } from "../../agent/lib/dark-factory/state";
+
+/** Store whose backend THROWS instead of returning a structured error. */
+class ThrowingStore implements StateStore {
+  id = "throwing";
+  private readonly mode: "read" | "write";
+
+  constructor(mode: "read" | "write") {
+    this.mode = mode;
+  }
+
+  async get<T = unknown>(): Promise<StateReadResult<T>> {
+    if (this.mode === "read") throw new Error("redis exploded");
+    return { ok: true, mode: "dry-run", providerId: this.id, value: null };
+  }
+
+  async save(): Promise<StateWriteResult> {
+    if (this.mode === "write") throw new Error("disk on fire");
+    return { ok: true, mode: "live", providerId: this.id };
+  }
+}
 
 const failure = { runId: "abc123", repo: "o/r", ref: "main", status: "failure" as const };
 
@@ -233,5 +254,87 @@ describe("dispatch lifecycle + routing (#138 AC1)", () => {
     expect(result.ok).toBe(false);
     expect(result.status).toBe("failed");
     expect(result.error).toMatch(/unreachable/i);
+  });
+});
+
+describe("reviewer follow-ups on dispatch (#138)", () => {
+  const ev = { runId: "rev-1", repo: "o/r", ref: "main", status: "failure" as const };
+  const noRetry = { maxRetries: 0, baseDelayMs: 1, backoffMultiplier: 2 };
+
+  it("reports a duplicate of a FAILED run as accepted-not-actioned, not as a fresh error", async () => {
+    const state = new SqliteStateAdapter(":memory:");
+    const first = await new Dispatcher({
+      store: state,
+      policy: noRetry,
+      handler: async () => {
+        throw new Error("runner down");
+      },
+      sleep: async () => {},
+    }).dispatch(toDispatchEvent(ev));
+    expect(first.ok).toBe(false);
+
+    let replayed = 0;
+    const dupe = await new Dispatcher({
+      store: state,
+      policy: noRetry,
+      handler: async () => {
+        replayed += 1;
+      },
+      sleep: async () => {},
+    }).dispatch(toDispatchEvent(ev));
+
+    expect(dupe.duplicate).toBe(true);
+    expect(dupe.status).toBe("failed");
+    expect(dupe.ok).toBe(true);
+    expect(replayed).toBe(0);
+
+    state.close?.();
+  });
+
+  it("bounds a hung handler with a deadline instead of holding the loop forever", async () => {
+    const state = new SqliteStateAdapter(":memory:");
+    const dispatcher = new Dispatcher({
+      store: state,
+      policy: noRetry,
+      handler: () => new Promise<void>(() => {}),
+      handlerTimeoutMs: 25,
+      sleep: async () => {},
+    });
+
+    const started = Date.now();
+    const result = await dispatcher.dispatch(toDispatchEvent(ev));
+
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(result.ok).toBe(false);
+    expect(result.status).toBe("failed");
+    expect(result.error).toMatch(/deadline/i);
+
+    state.close?.();
+  }, 5000);
+
+  it("converts a throwing store READ into the structured error shape", async () => {
+    const dispatcher = new Dispatcher({
+      store: new ThrowingStore("read"),
+      handler: async () => {},
+      sleep: async () => {},
+    });
+
+    const result = await dispatcher.dispatch(toDispatchEvent(ev));
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/redis exploded/);
+  });
+
+  it("converts a throwing store WRITE into the structured error shape", async () => {
+    const dispatcher = new Dispatcher({
+      store: new ThrowingStore("write"),
+      handler: async () => {},
+      sleep: async () => {},
+    });
+
+    const result = await dispatcher.dispatch(toDispatchEvent(ev));
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/disk on fire/);
   });
 });

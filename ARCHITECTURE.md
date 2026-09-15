@@ -175,6 +175,7 @@ sequenceDiagram
 | `VERCEL_PROTECTION_BYPASS`  | Bypass token for Vercel preview auth                                | For preview only |
 | `DF_STATE_DRIVER`           | Dark Factory execution-memory store (`sqlite`; unset = fail-closed) | No               |
 | `DF_STATE_DB_PATH`          | SQLite file path, required when `DF_STATE_DRIVER=sqlite`            | No               |
+| `DF_STATE_DB_DIR`           | Optional sandbox root the state DB path must stay inside            | No               |
 | `DF_DISPATCH_MAX_RETRIES`   | Dispatch retry budget                                               | No               |
 | `DF_DISPATCH_BASE_DELAY_MS` | Dispatch base backoff delay in ms                                   | No               |
 | `DF_METRICS_DRIVER`         | Observability store (`memory`; unset = in-process)                  | No               |
@@ -215,6 +216,14 @@ throws. A file-backed SQLite store satisfies the "external store" acceptance
 criterion with no dependency and no credentials, but a Vercel function's
 filesystem is ephemeral, so production persistence needs a Redis/pgvector
 adapter behind the same seam (later release).
+
+`DF_STATE_DB_PATH` is canonicalised with `path.resolve` before use, and when the
+optional `DF_STATE_DB_DIR` sandbox root is configured the store **refuses** any
+path that resolves outside it — the same fail-closed shape as
+`STORY_ALLOWED_REPOS`. The check is lexical (a symlink inside the root that points
+outside it is a filesystem/container concern, part of R2's worker privilege
+boundary), and with no sandbox configured the operator-trusted default applies,
+since an env var is configuration rather than request input.
 
 ### Dispatch / self-correction (#138)
 
