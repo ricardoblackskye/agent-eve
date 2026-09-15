@@ -96,7 +96,9 @@ describe("bounded retry policy (#138 AC3/AC4)", () => {
         attempts += 1;
         throw new Error("CI runner unavailable");
       },
-      observer: (m) => metrics.push(m),
+      observer: (m) => {
+        metrics.push(m);
+      },
       sleep: async (ms) => {
         delays.push(ms);
       },
@@ -130,7 +132,9 @@ describe("bounded retry policy (#138 AC3/AC4)", () => {
         attempts += 1;
         if (attempts === 1) throw new Error("flaky runner");
       },
-      observer: (m) => metrics.push(m),
+      observer: (m) => {
+        metrics.push(m);
+      },
       sleep: async (ms) => {
         delays.push(ms);
       },

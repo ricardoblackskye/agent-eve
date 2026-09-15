@@ -9,6 +9,29 @@
 
 import { ConsoleStateProvider, SqliteStateAdapter, type StateStore } from "./state";
 import { DEFAULT_RETRY_POLICY, type RetryPolicy } from "./dispatch";
+import type { DispatchObserver } from "./dispatch";
+import type { MetricsStore } from "./metrics";
+
+export { createMetricsStore } from "./metrics";
+
+/**
+ * Adapt the dispatch attempt stream into the observability store (#140 AC4).
+ *
+ * Only TERMINAL events are recorded, because a `TaskMetric` describes a
+ * completed task: `iterations` is the attempt count and `fixCycles` the number
+ * of fail->retry cycles that preceded the outcome, so a dispatch that succeeded
+ * on the second attempt is `{iterations: 2, fixCycles: 1, status: "success"}`.
+ */
+export function createDispatchObserver(recorder: MetricsStore): DispatchObserver {
+  return async (metric) => {
+    if (metric.status !== "succeeded" && metric.status !== "failed") return;
+    await recorder.record("dispatch", {
+      iterations: metric.attempt,
+      fixCycles: Math.max(0, metric.attempt - 1),
+      status: metric.status === "succeeded" ? "success" : "failure",
+    });
+  };
+}
 
 /**
  * Read the dispatch retry policy from the environment. A malformed numeric

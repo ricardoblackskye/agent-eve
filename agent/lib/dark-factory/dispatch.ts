@@ -105,7 +105,12 @@ export interface DispatchAttemptMetric {
   delayMs?: number;
 }
 
-export type DispatchObserver = (metric: DispatchAttemptMetric) => void;
+/**
+ * Receives each structured dispatch-attempt event. May be async: `dispatch`
+ * awaits every emission so a metrics sink can never lose an event to a floating
+ * promise (see the no-loss constraint in #140).
+ */
+export type DispatchObserver = (metric: DispatchAttemptMetric) => void | Promise<void>;
 
 export interface DispatchOutcome {
   ok: boolean;
@@ -194,7 +199,7 @@ export class Dispatcher {
 
     for (;;) {
       attempt += 1;
-      this.observer({
+      await this.observer({
         type: "dispatch.attempt",
         runId: event.runId,
         attempt,
@@ -216,7 +221,7 @@ export class Dispatcher {
           updatedAt: new Date().toISOString(),
           error: lastError,
         });
-        this.observer({
+        await this.observer({
           type: "dispatch.attempt",
           runId: event.runId,
           attempt,
@@ -234,7 +239,7 @@ export class Dispatcher {
         attempts: attempt,
         updatedAt: new Date().toISOString(),
       });
-      this.observer({
+      await this.observer({
         type: "dispatch.attempt",
         runId: event.runId,
         attempt,
@@ -252,7 +257,7 @@ export class Dispatcher {
       updatedAt: new Date().toISOString(),
       error: lastError,
     });
-    this.observer({
+    await this.observer({
       type: "dispatch.attempt",
       runId: event.runId,
       attempt,

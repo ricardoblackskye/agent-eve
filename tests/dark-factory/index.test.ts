@@ -2,9 +2,10 @@ import { describe, it, expect, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createStateStore, createRetryPolicy } from "../../agent/lib/dark-factory/index";
-import { toExecutionContext, saveContext, loadContext } from "../../agent/lib/dark-factory/state";
-import { DEFAULT_RETRY_POLICY } from "../../agent/lib/dark-factory/dispatch";
+import { createStateStore, createRetryPolicy, createDispatchObserver } from "../../agent/lib/dark-factory/index";
+import { toExecutionContext, saveContext, loadContext, SqliteStateAdapter } from "../../agent/lib/dark-factory/state";
+import { DEFAULT_RETRY_POLICY, Dispatcher, toDispatchEvent } from "../../agent/lib/dark-factory/dispatch";
+import { InMemoryMetricsStore } from "../../agent/lib/dark-factory/metrics";
 
 const ctx = toExecutionContext({
   issue: 134,
@@ -76,5 +77,71 @@ describe("createRetryPolicy env wiring (#138)", () => {
     expect(() => createRetryPolicy({ DF_DISPATCH_BASE_DELAY_MS: "-5" })).toThrow(
       /DF_DISPATCH_BASE_DELAY_MS/,
     );
+  });
+});
+
+describe("dispatch -> metrics wiring (#140 AC4)", () => {
+  const ciEvent = { runId: "run-1", repo: "o/r", ref: "main", status: "failure" as const };
+
+  it("awaits the observer so the metric is recorded before dispatch resolves", async () => {
+    const metrics = new InMemoryMetricsStore();
+    const state = new SqliteStateAdapter(":memory:");
+    const dispatcher = new Dispatcher({
+      store: state,
+      handler: async () => {},
+      observer: createDispatchObserver(metrics),
+      sleep: async () => {},
+    });
+
+    await dispatcher.dispatch(toDispatchEvent(ciEvent));
+
+    expect(metrics.getRecords()).toHaveLength(1);
+    expect(metrics.successRateByType("dispatch")).toBeCloseTo(1, 2);
+    state.close?.();
+  });
+
+  it("counts retries as fix cycles for the completed dispatch task", async () => {
+    const metrics = new InMemoryMetricsStore();
+    const state = new SqliteStateAdapter(":memory:");
+    let attempts = 0;
+    const dispatcher = new Dispatcher({
+      store: state,
+      policy: { maxRetries: 2, baseDelayMs: 1, backoffMultiplier: 2 },
+      handler: async () => {
+        attempts += 1;
+        if (attempts === 1) throw new Error("flaky runner");
+      },
+      observer: createDispatchObserver(metrics),
+      sleep: async () => {},
+    });
+
+    await dispatcher.dispatch(toDispatchEvent(ciEvent));
+
+    expect(metrics.getRecords()).toEqual([
+      { taskType: "dispatch", iterations: 2, fixCycles: 1, status: "success" },
+    ]);
+    state.close?.();
+  });
+
+  it("records an exhausted dispatch as a failed task of its own type", async () => {
+    const metrics = new InMemoryMetricsStore();
+    const state = new SqliteStateAdapter(":memory:");
+    const dispatcher = new Dispatcher({
+      store: state,
+      policy: { maxRetries: 1, baseDelayMs: 1, backoffMultiplier: 2 },
+      handler: async () => {
+        throw new Error("runner down");
+      },
+      observer: createDispatchObserver(metrics),
+      sleep: async () => {},
+    });
+
+    await dispatcher.dispatch(toDispatchEvent(ciEvent));
+
+    expect(metrics.getRecords()).toEqual([
+      { taskType: "dispatch", iterations: 2, fixCycles: 1, status: "failure" },
+    ]);
+    expect(metrics.successRateByType("dispatch")).toBeCloseTo(0, 2);
+    state.close?.();
   });
 });
