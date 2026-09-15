@@ -168,16 +168,16 @@ sequenceDiagram
 
 ## Environment Variables
 
-| Variable                   | Purpose                                 | Required         |
-|----------------------------|-----------------------------------------|------------------|
-| `OPENROUTER_API_KEY`       | API key for OpenRouter model access     | Yes              |
-| `EVE_API_KEY`              | Bearer token for Eve API authentication | Yes              |
-| `VERCEL_PROTECTION_BYPASS` | Bypass token for Vercel preview auth    | For preview only |
-| `DF_STATE_DRIVER`          | Dark Factory execution-memory store (`sqlite`; unset = fail-closed) | No |
-| `DF_STATE_DB_PATH`         | SQLite file path, required when `DF_STATE_DRIVER=sqlite` | No |
-| `DF_DISPATCH_MAX_RETRIES`  | Dispatch retry budget                   | No |
-| `DF_DISPATCH_BASE_DELAY_MS` | Dispatch base backoff delay in ms      | No |
-| `DF_METRICS_DRIVER`        | Observability store (`memory`; unset = in-process) | No |
+| Variable                    | Purpose                                                             | Required         |
+|-----------------------------|---------------------------------------------------------------------|------------------|
+| `OPENROUTER_API_KEY`        | API key for OpenRouter model access                                 | Yes              |
+| `EVE_API_KEY`               | Bearer token for Eve API authentication                             | Yes              |
+| `VERCEL_PROTECTION_BYPASS`  | Bypass token for Vercel preview auth                                | For preview only |
+| `DF_STATE_DRIVER`           | Dark Factory execution-memory store (`sqlite`; unset = fail-closed) | No               |
+| `DF_STATE_DB_PATH`          | SQLite file path, required when `DF_STATE_DRIVER=sqlite`            | No               |
+| `DF_DISPATCH_MAX_RETRIES`   | Dispatch retry budget                                               | No               |
+| `DF_DISPATCH_BASE_DELAY_MS` | Dispatch base backoff delay in ms                                   | No               |
+| `DF_METRICS_DRIVER`         | Observability store (`memory`; unset = in-process)                  | No               |
 
 ## Dark Factory (R1)
 
@@ -192,11 +192,11 @@ provider-seam pattern from `agent/lib/backlog-provider.ts`: a canonical,
 provider-agnostic payload → a provider interface → concrete adapters, with a
 default that refuses rather than silently degrading.
 
-| Seam | File | Canonical payload | R1 adapter | Default |
-|------|------|-------------------|-----------|---------|
-| Execution memory (#134) | `state.ts` | `ExecutionContext` | `SqliteStateAdapter` (`node:sqlite`) | `ConsoleStateProvider` — refuses (fail-closed) |
-| Dispatch (#138) | `dispatch.ts` | `DispatchEvent` | `Dispatcher` over the state seam | `console`-equivalent: throws on unconfigured driver |
-| Observability (#140) | `metrics.ts` | `TaskMetric` | `InMemoryMetricsStore` | in-memory; failed writes buffered |
+| Seam                    | File          | Canonical payload  | R1 adapter                           | Default                                             |
+|-------------------------|---------------|--------------------|--------------------------------------|-----------------------------------------------------|
+| Execution memory (#134) | `state.ts`    | `ExecutionContext` | `SqliteStateAdapter` (`node:sqlite`) | `ConsoleStateProvider` — refuses (fail-closed)      |
+| Dispatch (#138)         | `dispatch.ts` | `DispatchEvent`    | `Dispatcher` over the state seam     | `console`-equivalent: throws on unconfigured driver |
+| Observability (#140)    | `metrics.ts`  | `TaskMetric`       | `InMemoryMetricsStore`               | in-memory; failed writes buffered                   |
 
 ### Execution memory (#134)
 
