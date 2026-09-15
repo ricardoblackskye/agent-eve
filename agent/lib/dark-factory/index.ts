@@ -1,10 +1,12 @@
 /**
- * Dark Factory — R1 wiring (issues #134, #138, #140).
+ * Dark Factory — wiring hub (R1: #134, #138, #140 · R2: #135, #142).
  *
  * Single place where the seam adapters are chosen from the environment, so the
  * orchestrator never imports a concrete adapter directly. Every factory is
  * fail-closed: an unset driver yields the refusing default rather than a
- * silently non-persistent in-process store.
+ * silently non-persistent in-process store — and, for R2, an unset token yields
+ * a broker that refuses to issue a lease, and an unset provider yields an
+ * honest dry-run that never claims isolation.
  */
 
 import { isAbsolute, relative, resolve, sep } from "node:path";
@@ -14,6 +16,12 @@ import type { DispatchObserver } from "./dispatch";
 import type { MetricsStore } from "./metrics";
 
 export { createMetricsStore } from "./metrics";
+
+// R2 seams re-exported so index.ts stays the single import surface (mirrors the
+// createMetricsStore re-export above). Factories live next to their seam so the
+// canonical shapes and their env wiring stay in one module.
+export { createCredentialBroker } from "./credentials";
+export { createWorkerProvider, createWorkerHandler } from "./worker-env";
 
 /**
  * Adapt the dispatch attempt stream into the observability store (#140 AC4).
