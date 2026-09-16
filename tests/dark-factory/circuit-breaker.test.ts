@@ -636,9 +636,80 @@ describe("readInt integer overflow protection", () => {
   });
 
   it("accepts value at MAX_SAFE_INTEGER boundary", () => {
-    // MAX_SAFE_INTEGER = 9007199254740991
     expect(() =>
       createCircuitBreaker({ DF_MAX_FAILED_SELFCORRECT: String(Number.MAX_SAFE_INTEGER) }),
     ).not.toThrow();
+  });
+});
+
+// --- Additional boundary conditions and rate limiting ---
+
+describe("Math.ceil boundary conditions", () => {
+  it("59,999ms rounds up to 1 minute (max over-count)", () => {
+    const breaker = new CircuitBreaker({ maxWorkerMinutesPerPbi: 1 });
+
+    // 59,999ms is just under 1 minute, but Math.ceil rounds up
+    breaker.recordWorkerActivity({ pbiId: "PBI-59999", durationMs: 59_999, status: "success" });
+    expect(breaker.isTripped("PBI-59999")).toBe(true);
+    expect(breaker.getWorkerMinutes("PBI-59999")).toBe(1);
+  });
+
+  it("60,000ms rounds to exactly 1 minute", () => {
+    const breaker = new CircuitBreaker({ maxWorkerMinutesPerPbi: 1 });
+
+    breaker.recordWorkerActivity({ pbiId: "PBI-60000", durationMs: 60_000, status: "success" });
+    expect(breaker.isTripped("PBI-60000")).toBe(true);
+    expect(breaker.getWorkerMinutes("PBI-60000")).toBe(1);
+  });
+
+  it("exactly at threshold trips immediately", () => {
+    const breaker = new CircuitBreaker({ maxWorkerMinutesPerPbi: 60 });
+
+    breaker.recordWorkerActivity({ pbiId: "PBI-THRESHOLD", durationMs: 60 * 60_000, status: "success" });
+    expect(breaker.isTripped("PBI-THRESHOLD")).toBe(true);
+  });
+});
+
+describe("autoCleanupIntervalMs validation", () => {
+  it("rejects autoCleanupIntervalMs below 1 minute", () => {
+    expect(() =>
+      new CircuitBreaker({ autoCleanupIntervalMs: 59_999 }),
+    ).toThrow(/autoCleanupIntervalMs must be >= 60000ms/);
+  });
+
+  it("accepts autoCleanupIntervalMs at exactly 1 minute", () => {
+    expect(() =>
+      new CircuitBreaker({ autoCleanupIntervalMs: 60_000 }),
+    ).not.toThrow();
+  });
+});
+
+describe("maxTotalTripEvents rate limiting", () => {
+  it("drops events when global limit reached", () => {
+    const breaker = new CircuitBreaker({
+      maxWorkerMinutesPerPbi: 10,
+      maxTripsPerPbi: 50,
+      maxTotalTripEvents: 3,
+    });
+
+    // Trip 3 PBIs to hit the global limit
+    for (let i = 0; i < 3; i++) {
+      breaker.recordWorkerActivity({
+        pbiId: `PBI-GLOBAL-${i}`,
+        durationMs: 15 * 60_000, // trips immediately
+        status: "success",
+      });
+    }
+
+    expect(breaker.getTripEvents()).toHaveLength(3);
+
+    // 4th PBI should not trip because global limit reached
+    breaker.recordWorkerActivity({
+      pbiId: "PBI-GLOBAL-3",
+      durationMs: 15 * 60_000,
+      status: "success",
+    });
+
+    expect(breaker.getTripEvents()).toHaveLength(3); // still 3
   });
 });

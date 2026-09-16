@@ -38,17 +38,25 @@ export interface CircuitBreakerConfig {
   maxWorkerMinutesPerPbi?: number;
   maxFailedSelfCorrect?: number;
   /** Minimum duration in milliseconds to record (default: 5,000).
-   * Smaller values are silently ignored to prevent Math.ceil exploitation. */
+   * Values 0..4999ms are silently ignored.
+   * ENV: DF_MIN_DURATION_MS */
   minDurationMs?: number;
   /** Maximum trip events per PBI (default: 100).
-   * After this limit, additional trip events are dropped. */
+   * After this limit, additional trip events are dropped for that PBI.
+   * ENV: DF_MAX_TRIPS_PER_PBI */
   maxTripsPerPbi?: number;
   /** Maximum number of PBIs to track (default: 10,000).
-   * Set to 0 to disable cleanup checks. */
+   * Set to 0 to disable cleanup checks.
+   * ENV: DF_MAX_STATE_ENTRIES */
   maxStateEntries?: number;
   /** Enable automatic cleanup interval in milliseconds (default: 0, disabled).
-   * When > 0, cleanupStaleStates() is called periodically. */
+   * Minimum: 60,000ms (1 minute). Shorter intervals are rejected.
+   * ENV: DF_AUTO_CLEANUP_INTERVAL_MS */
   autoCleanupIntervalMs?: number;
+  /** Maximum total trip events across all PBIs (default: 10,000).
+   * Protects against DoS via flood of unique PBIs.
+   * ENV: DF_MAX_TOTAL_TRIP_EVENTS */
+  maxTotalTripEvents?: number;
 }
 
 /** One unit of worker execution the breaker observes (already in canonical form). */
@@ -111,6 +119,12 @@ export const PBI_ID_MAX_LENGTH = 128;
 /** Default maximum PBIs to track in memory. */
 export const DFLT_MAX_STATE_ENTRIES = 10_000;
 
+/** Default maximum total trip events across all PBIs (prevents DoS via unique PIBs). */
+export const DFLT_MAX_TOTAL_TRIP_EVENTS = 10_000;
+
+/** Minimum auto-cleanup interval (1 minute) to prevent timer spam. */
+export const MIN_AUTO_CLEANUP_MS = 60_000;
+
 /** Default config baked into the breaker when env vars are unset. */
 const DEFAULTS = {
   maxWorkerMinutesPerPbi: 60,
@@ -119,6 +133,7 @@ const DEFAULTS = {
   maxTripsPerPbi: DFLT_MAX_TRIPS_PER_PBI,
   maxStateEntries: DFLT_MAX_STATE_ENTRIES,
   autoCleanupIntervalMs: 0,
+  maxTotalTripEvents: DFLT_MAX_TOTAL_TRIP_EVENTS,
 } as const;
 
 const VALID_REASONS: readonly TripReason[] = [
@@ -258,6 +273,7 @@ export class CircuitBreaker {
     const maxTripsPerPbi = config.maxTripsPerPbi ?? DEFAULTS.maxTripsPerPbi;
     const maxStateEntries = config.maxStateEntries ?? DEFAULTS.maxStateEntries;
     const autoCleanupIntervalMs = config.autoCleanupIntervalMs ?? DEFAULTS.autoCleanupIntervalMs;
+    const maxTotalTripEvents = config.maxTotalTripEvents ?? DEFAULTS.maxTotalTripEvents;
 
     // Guard: validate thresholds make sense
     if (maxWorkerMinutes < 1 || maxWorkerMinutes > DFLT_MAX_WORKER_MINUTES) {
@@ -265,7 +281,6 @@ export class CircuitBreaker {
         `maxWorkerMinutesPerPbi must be in range 1..${DFLT_MAX_WORKER_MINUTES} (received ${maxWorkerMinutes}).`,
       );
     }
-    // Protect against integer overflow in accumulation
     if (maxWorkerMinutes > Number.MAX_SAFE_INTEGER / 2) {
       throw new EnvConfigError(
         `maxWorkerMinutesPerPbi would risk integer overflow (${maxWorkerMinutes} > ${Number.MAX_SAFE_INTEGER / 2}).`,
@@ -283,6 +298,17 @@ export class CircuitBreaker {
     if (maxStateEntries < 0) {
       throw new EnvConfigError(`maxStateEntries must be >= 0 (received ${maxStateEntries}).`);
     }
+    if (autoCleanupIntervalMs < 0) {
+      throw new EnvConfigError(`autoCleanupIntervalMs must be >= 0 (received ${autoCleanupIntervalMs}).`);
+    }
+    if (autoCleanupIntervalMs > 0 && autoCleanupIntervalMs < MIN_AUTO_CLEANUP_MS) {
+      throw new EnvConfigError(
+        `autoCleanupIntervalMs must be >= ${MIN_AUTO_CLEANUP_MS}ms (1 minute) when > 0 (received ${autoCleanupIntervalMs}ms).`,
+      );
+    }
+    if (maxTotalTripEvents < 1) {
+      throw new EnvConfigError(`maxTotalTripEvents must be >= 1 (received ${maxTotalTripEvents}).`);
+    }
 
     this.config = {
       maxWorkerMinutesPerPbi: maxWorkerMinutes,
@@ -291,6 +317,7 @@ export class CircuitBreaker {
       maxTripsPerPbi,
       maxStateEntries,
       autoCleanupIntervalMs,
+      maxTotalTripEvents,
     };
 
     // Start auto-cleanup if configured
@@ -457,11 +484,11 @@ export class CircuitBreaker {
 
   private trip(pbiId: string, workerMinutes: number, reason: TripReason): void {
     const s = this.getOrCreateState(pbiId);
-    // Trip count starts at 0, so s.tripCount holds the count of trips that have occurred.
-    // The check >= maxTripsPerPbi means we've already reached the limit before incrementing.
-    // Result: exactly maxTripsPerPbi trips will be emitted (1-based counting from the caller's
-    // perspective, 0-based in implementation). This is the intended behavior — the
-    // breaker emits up to maxTripsPerPbi events for a PBI before rate-limiting.
+    // Global rate limit: check total trip events first
+    if (this.tripEvents.length >= this.config.maxTotalTripEvents) {
+      return; // Drop event to prevent DoS via flood of unique PBIs
+    }
+    // Per-PBI rate limit
     if (s.tripCount >= this.config.maxTripsPerPbi) return;
 
     s.tripped = true;
