@@ -166,32 +166,139 @@ describe("PR Reviewer Agent - TDD Tests", () => {
       expect(content).toMatch(/AbortSignal\.timeout|timeout|signal:/);
     });
 
-    // Regression: reasoning models (deepseek-v4-pro) spend max_tokens on a
-    // separate `reasoning` field. At 1500 the budget was exhausted before any
-    // answer was emitted, so `content` was null on an HTTP 200 and every review
-    // silently degraded to the fallback. See PR #77.
-    it("should request enough tokens for a reasoning model to emit content", () => {
+    // Regression (#87): `effort` is a HINT, not a hard cap. With a 4k budget
+    // deepseek-v4.1-flash spent ALL of it on reasoning (finish_reason:
+    // "length", reasoning ~16k chars) and returned null content, so every
+    // review silently degraded to the stub. The budget must be sized for a
+    // capped reasoning spend PLUS a full answer.
+    it("sizes max_tokens for a capped reasoning budget plus a full review (#87)", () => {
       const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
       const content = fs.readFileSync(scriptPath, "utf8");
 
-      const match = content.match(/max_tokens:\s*(\d+)/);
+      const match = content.match(
+        /REVIEW_MAX_TOKENS\s*=\s*Number\([^)]*\)\s*\|\|\s*(\d+)/,
+      );
       expect(match).not.toBeNull();
-      const maxTokens = parseInt(match![1], 10);
-      expect(maxTokens).toBeGreaterThanOrEqual(4000);
+      expect(parseInt(match![1], 10)).toBeGreaterThanOrEqual(6000);
     });
 
-    // Regression: the reasoning budget is NON-DETERMINISTIC (0, ~5.5k and
-    // ~17k reasoning tokens observed for the SAME 20k diff), so sizing
-    // max_tokens alone cannot guarantee an answer. Pin an explicit cap.
-    it("caps reasoning effort so the answer always has token budget", () => {
+    // Regression (#87): reasoning must be HARD-capped in tokens (not merely
+    // hinted via `effort`) so the answer always has room, and the total budget
+    // must exceed that cap.
+    it("hard-caps reasoning tokens so the answer always has budget (#87)", () => {
       const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
       const content = fs.readFileSync(scriptPath, "utf8");
 
-      expect(content).toMatch(/reasoning:\s*\{\s*effort:\s*"low"\s*\}/);
-      // max_tokens must comfortably exceed the low-effort reasoning budget.
-      const maxTokens = content.match(/max_tokens:\s*(\d+)/);
-      expect(maxTokens).not.toBeNull();
-      expect(parseInt(maxTokens![1], 10)).toBeGreaterThanOrEqual(4000);
+      // OpenRouter allows only ONE of effort/max_tokens per request (sending
+      // both returns HTTP 400), so the script must send the hard cap ALONE.
+      expect(content).toMatch(
+        /reasoning:\s*\{\s*max_tokens:\s*REVIEW_REASONING_MAX_TOKENS\s*\}/,
+      );
+      expect(content).not.toMatch(/reasoning:\s*\{[^}]*effort:/);
+
+      const cap = content.match(
+        /REVIEW_REASONING_MAX_TOKENS\s*=\s*Number\([^)]*\)\s*\|\|\s*(\d+)/,
+      );
+      expect(cap).not.toBeNull();
+      expect(parseInt(cap![1], 10)).toBeLessThanOrEqual(4000);
+
+      const total = content.match(
+        /REVIEW_MAX_TOKENS\s*=\s*Number\([^)]*\)\s*\|\|\s*(\d+)/,
+      );
+      expect(total).not.toBeNull();
+      expect(parseInt(total![1], 10)).toBeGreaterThan(parseInt(cap![1], 10));
+    });
+
+    // CodeQL: escaping backticks alone is INCOMPLETE — a preceding backslash can
+    // escape the escaping backslash. A single canonical sanitiser (backslashes
+    // first, then backticks) must be used by BOTH attempts and the retry.
+    it("uses one canonical diff sanitiser for both attempts (CodeQL)", () => {
+      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
+      const content = fs.readFileSync(scriptPath, "utf8");
+
+      expect(content).toMatch(/function sanitizeForPrompt\(/);
+      expect(content).toMatch(
+        /sanitizedPrDiff\s*=\s*sanitizeForPrompt\(reviewDiff\)/,
+      );
+      expect(content).toMatch(/sanitizeForPrompt\(retry\.diff\)/);
+    });
+
+    // AI review of PR #149: if the diff already fits in half the cap, halving it
+    // changes nothing, so the "retry" would resend an identical payload and burn
+    // an API call to fail the same way. Detect that and skip the wasted call.
+    it("skips the retry when halving the diff would change nothing", () => {
+      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
+      const content = fs.readFileSync(scriptPath, "utf8");
+
+      expect(content).toMatch(
+        /const retryWouldBeIdentical = retry\.diff === reviewDiff/,
+      );
+      expect(content).toMatch(
+        /finishReason === "length" && retryWouldBeIdentical/,
+      );
+      expect(content).toMatch(
+        /finishReason === "length" && !retryWouldBeIdentical/,
+      );
+      expect(content).toMatch(/Skipping retry:/);
+    });
+
+    // #87 ROOT CAUSE: the reviewer must NOT use the project's reasoning model by
+    // default — measured on a live 14k-char diff, that model spent its entire
+    // completion budget on chain-of-thought and returned NO content (under a cap,
+    // under reasoning.effort, and uncapped). A non-reasoning model always answers.
+    it("defaults to a NON-reasoning model with a PR_REVIEW_MODEL override (#87)", () => {
+      const content = fs.readFileSync(
+        path.join(process.cwd(), "scripts", "pr-reviewer.js"),
+        "utf8",
+      );
+
+      expect(content).toMatch(/process\.env\.PR_REVIEW_MODEL/);
+      expect(content).toMatch(
+        /const REVIEW_MODEL = process\.env\.PR_REVIEW_MODEL \|\| "deepseek\/deepseek-chat"/,
+      );
+      // BOTH call sites (first attempt + retry) must use the reviewed model.
+      expect(content.match(/model: REVIEW_MODEL,/g) || []).toHaveLength(2);
+      // The project's reasoning model must no longer be wired into this script.
+      expect(content).not.toMatch(/MODEL_NAME \|\| DEFAULT_MODEL_ID/);
+    });
+
+    // AI review of PR #149 (valid finding): the generic "no content" reason used
+    // to clobber the specific length-exhausted reason set when the retry was
+    // skipped, so the posted comment misreported the cause.
+    it("does not clobber the length-exhausted fallback reason", () => {
+      const content = fs.readFileSync(
+        path.join(process.cwd(), "scripts", "pr-reviewer.js"),
+        "utf8",
+      );
+      expect(content).toMatch(
+        /else if \(!content && finishReason !== "length"\)/,
+      );
+    });
+
+    // #87: on a length-exhausted response the script must RETRY with a smaller
+    // diff instead of immediately posting the structural stub.
+    it("retries on an empty length-exhausted response instead of stubbing (#87)", () => {
+      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
+      const content = fs.readFileSync(scriptPath, "utf8");
+
+      expect(content).toMatch(/finishReason\s*===\s*"length"/);
+      // The retry must shrink the diff (reasoning pressure scales with input).
+      expect(content).toMatch(
+        /truncateDiff\(codeDiff,\s*Math\.floor\(MAX_DIFF_CHARS\s*\/\s*2\)\)/,
+      );
+    });
+
+    // #87: the fallback must state the real cause. Blaming "model unavailable"
+    // is wrong when the model answered HTTP 200 and merely ran out of budget.
+    it("states the real cause in the fallback instead of 'model unavailable' (#87)", () => {
+      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
+      const content = fs.readFileSync(scriptPath, "utf8");
+
+      expect(content).not.toMatch(
+        /The AI model was unavailable \(rate-limited or offline\)/,
+      );
+      expect(content).toMatch(/generateFallbackReview\([^)]*reason/);
+      expect(content).toMatch(/\$\{reason\}/);
     });
 
     // Regression: documentation dominated the diff (a single 70KB plan file
@@ -229,9 +336,11 @@ describe("PR Reviewer Agent - TDD Tests", () => {
       // Should not contain the hardcoded model string
       expect(content).not.toContain("nvidia/nemotron-3-ultra-550b-a55b:free");
 
-      // Should get model from config/environment
+      // Should get model from config/environment. The reviewer is deliberately
+      // pinned to a non-reasoning model via PR_REVIEW_MODEL (#87) — the project's
+      // reasoning model exhausts the completion budget and returns no content.
       expect(content).toMatch(
-        /process\.env\.OPENROUTER_MODEL|MODEL_NAME|config\.model/,
+        /process\.env\.PR_REVIEW_MODEL|process\.env\.OPENROUTER_MODEL|MODEL_NAME|config\.model/,
       );
     });
 
@@ -284,7 +393,9 @@ describe("PR Reviewer Agent - TDD Tests", () => {
 
       // The sanitized diff that reaches the prompt must derive from a
       // truncated value, not the raw diff.
-      expect(source).toMatch(/sanitizedPrDiff\s*=\s*reviewDiff\.replace/);
+      expect(source).toMatch(
+        /sanitizedPrDiff\s*=\s*sanitizeForPrompt\(reviewDiff\)/,
+      );
       expect(source).toMatch(/truncateDiff\(/);
       // And the cap must be small enough to leave room for reasoning tokens.
       const cap = source.match(
