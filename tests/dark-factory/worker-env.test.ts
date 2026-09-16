@@ -11,7 +11,7 @@ import {
   withWorker,
   type WorkerProvider,
 } from "../../agent/lib/dark-factory/worker-env";
-import { LocalCredentialBroker } from "../../agent/lib/dark-factory/credentials";
+import { LocalCredentialBroker, type CredentialBroker } from "../../agent/lib/dark-factory/credentials";
 import { toDispatchEvent } from "../../agent/lib/dark-factory/dispatch";
 import { InMemoryMetricsStore } from "../../agent/lib/dark-factory/metrics";
 
@@ -352,5 +352,69 @@ describe("worker env resolvers (#135 AC3)", () => {
     expect(() => resolveCredentialTtlSeconds({ DF_CREDENTIAL_TTL_SECONDS: "nope" })).toThrow(
       /DF_CREDENTIAL_TTL_SECONDS/,
     );
+  });
+});
+
+/** Broker that records the grant it is asked to issue, so the TTL is observable. */
+function recordingBroker(sink: { ttl?: number }): CredentialBroker {
+  return {
+    id: "recording",
+    mode: "live",
+    async issue(grant) {
+      sink.ttl = grant.ttlSeconds;
+      return {
+        ok: true,
+        mode: "live",
+        lease: { leaseId: "l1", repos: grant.repos, issuedAt: 0, expiresAt: 0 },
+      };
+    },
+    async authorize() {
+      return { status: 401, reason: "n/a" };
+    },
+    async revoke() {
+      return { ok: true };
+    },
+  };
+}
+
+describe("DF_CREDENTIAL_TTL_SECONDS is enforced when building the grant (PR #148 review round 2)", () => {
+  const withEnv = async (value: string, run: () => Promise<void>) => {
+    const original = process.env.DF_CREDENTIAL_TTL_SECONDS;
+    process.env.DF_CREDENTIAL_TTL_SECONDS = value;
+    try {
+      await run();
+    } finally {
+      if (original === undefined) delete process.env.DF_CREDENTIAL_TTL_SECONDS;
+      else process.env.DF_CREDENTIAL_TTL_SECONDS = original;
+    }
+  };
+
+  it("uses the env TTL when deps.ttlSeconds is omitted", async () => {
+    await withEnv("600", async () => {
+      const sink: { ttl?: number } = {};
+      await withWorker(
+        { broker: recordingBroker(sink), provider: new LocalWorkerProvider(), allowedRepos: [REPO] },
+        makeTask(),
+        async () => "ok",
+      );
+      expect(sink.ttl).toBe(600);
+    });
+  });
+
+  it("lets an explicit deps.ttlSeconds override the env", async () => {
+    await withEnv("600", async () => {
+      const sink: { ttl?: number } = {};
+      await withWorker(
+        {
+          broker: recordingBroker(sink),
+          provider: new LocalWorkerProvider(),
+          allowedRepos: [REPO],
+          ttlSeconds: 60,
+        },
+        makeTask(),
+        async () => "ok",
+      );
+      expect(sink.ttl).toBe(60);
+    });
   });
 });

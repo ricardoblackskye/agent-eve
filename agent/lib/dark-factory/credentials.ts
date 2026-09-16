@@ -260,6 +260,12 @@ export class LocalCredentialBroker implements CredentialBroker {
   }
 
   async issue(grant: RepoGrant): Promise<IssueResult> {
+    // Sweep dead leases FIRST, before any early return, so the in-memory map
+    // cannot grow even while issuance is being refused (blocked broker or
+    // allow-list miss).
+    const issuedAt = this.now();
+    this.pruneDead(issuedAt);
+
     if (!this.#token) {
       return {
         ok: false,
@@ -268,12 +274,30 @@ export class LocalCredentialBroker implements CredentialBroker {
       };
     }
 
+    // Never trust the caller: re-run the canonical normaliser/validator inside
+    // the boundary. A direct caller can hand us a raw object (TTL of Infinity,
+    // an empty repo list, mixed-case or malformed entries). Only a validated
+    // RepoGrant may become a lease, which is what enforces AC1's <= 60-minute
+    // cap and repo normalisation at the boundary itself.
+    let normalised: RepoGrant;
+    try {
+      normalised = toRepoGrant(grant);
+    } catch (err) {
+      return {
+        ok: false,
+        mode: "blocked",
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+
     // Defence in depth: the GLOBAL worker allow-list is enforced here too, not
     // only at the worker handler, so a caller that reaches the broker directly
     // still cannot obtain a lease for a repo the operator never allowed.
-    // Fail-closed: an empty list refuses every grant.
-    if (this.allowedRepos) {
-      const outside = grant.repos.filter((repo) => !this.allowedRepos!.includes(repo));
+    // Explicitly fail-closed: `undefined` means "no global gate" (direct
+    // construction), while an EMPTY list refuses every grant. Comparing against
+    // `undefined` rather than array truthiness keeps that intent unmissable.
+    if (this.allowedRepos !== undefined) {
+      const outside = normalised.repos.filter((repo) => !this.allowedRepos!.includes(repo));
       if (outside.length > 0) {
         return {
           ok: false,
@@ -285,14 +309,11 @@ export class LocalCredentialBroker implements CredentialBroker {
       }
     }
 
-    const issuedAt = this.now();
-    // Evict dead leases before adding a new one, so the map stays bounded.
-    this.pruneDead(issuedAt);
     const lease: Lease = {
       leaseId: this.mintLeaseId(),
-      repos: [...grant.repos],
+      repos: [...normalised.repos],
       issuedAt,
-      expiresAt: issuedAt + grant.ttlSeconds * 1000,
+      expiresAt: issuedAt + normalised.ttlSeconds * 1000,
     };
     // The token is deliberately absent from the lease and from anything the
     // caller receives: the sandbox holds an opaque id, nothing more.
@@ -473,6 +494,12 @@ export function createCredentialEndpoint(broker: CredentialBroker): CredentialEn
     const result = await broker.authorize(leaseId, repo);
     if (result.status === 200) {
       return { status: 200, body: { status: 200, leaseId: result.leaseId, repo: result.repo } };
+    }
+    if (result.status === 401) {
+      // Sandbox-facing: do not disclose whether the lease exists, was revoked,
+      // or when it expired. The detailed reason is logged server-side only.
+      console.warn(`[dark-factory] credential 401 for lease ${leaseId}: ${result.reason}`);
+      return { status: 401, body: { status: 401, reason: "Lease is unknown, revoked or expired." } };
     }
     return { status: result.status, body: { status: result.status, reason: result.reason } };
   };

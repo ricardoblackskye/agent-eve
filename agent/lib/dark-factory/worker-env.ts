@@ -271,7 +271,7 @@ export async function withWorker<T>(
   }
 
   const issued = await deps.broker.issue(
-    toRepoGrant({ repos: [repo], ttlSeconds: deps.ttlSeconds }),
+    toRepoGrant({ repos: [repo], ttlSeconds: deps.ttlSeconds ?? resolveCredentialTtlSeconds() }),
   );
   if (!issued.ok || !issued.lease) {
     return {

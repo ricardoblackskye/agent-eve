@@ -323,6 +323,106 @@ describe("broker enforces the global DF_WORKER_ALLOWED_REPOS policy (PR #148 rev
   });
 });
 
+describe("broker does not trust its caller (PR #148 review round 2)", () => {
+  const SECRET = "ghp_SUPERSECRET_TOKEN_VALUE";
+  const REPO = "ricardoblackskye/agent-eve";
+
+  it("refuses an out-of-range or non-finite TTL on a directly-constructed grant (AC1)", async () => {
+    const broker = new LocalCredentialBroker({ token: SECRET });
+    const bad = [Infinity, MAX_TTL_SECONDS + 1, 0, -1, 12.5, NaN];
+
+    for (const ttlSeconds of bad) {
+      const res = await broker.issue({ repos: [REPO], ttlSeconds } as never);
+      expect(res.ok, `ttl=${ttlSeconds}`).toBe(false);
+      expect(res.mode, `ttl=${ttlSeconds}`).toBe("blocked");
+    }
+  });
+
+  it("refuses an empty repo list", async () => {
+    const broker = new LocalCredentialBroker({ token: SECRET });
+
+    const res = await broker.issue({ repos: [], ttlSeconds: 60 });
+
+    expect(res.ok).toBe(false);
+    expect(res.mode).toBe("blocked");
+  });
+
+  it("normalises repo casing itself rather than trusting the caller", async () => {
+    const broker = new LocalCredentialBroker({ token: SECRET });
+
+    const issued = await broker.issue({ repos: ["RicardoBlackSkye/Agent-Eve"], ttlSeconds: 60 });
+
+    expect(issued.ok).toBe(true);
+    expect(issued.lease?.repos).toEqual([REPO]);
+    expect((await broker.authorize(issued.lease!.leaseId, REPO)).status).toBe(200);
+  });
+
+  it("treats an explicitly-empty allow-list as fail-closed, not as 'gate disabled'", async () => {
+    const broker = new LocalCredentialBroker({ token: SECRET, allowedRepos: [] });
+
+    const res = await broker.issue(toRepoGrant({ repos: [REPO] }));
+
+    expect(res.ok).toBe(false);
+    expect(res.mode).toBe("blocked");
+  });
+
+  it("prunes dead leases even when issuance is refused early", async () => {
+    let clock = 1_000;
+    const broker = new LocalCredentialBroker({ token: SECRET, now: () => clock, allowedRepos: [REPO] });
+    await broker.issue(toRepoGrant({ repos: [REPO], ttlSeconds: 60 }));
+    expect(broker.size).toBe(1);
+
+    clock = 1_000 + 60_000 + 1; // the lease is now expired
+    // Outside the allow-list -> refused BEFORE a lease is minted. The expired
+    // lease must still be swept (prune runs before any early return).
+    const refused = await broker.issue(toRepoGrant({ repos: ["someone/else"], ttlSeconds: 60 }));
+
+    expect(refused.ok).toBe(false);
+    expect(broker.size).toBe(0);
+  });
+});
+
+describe("authorization responses do not leak lease state (PR #148 review round 2)", () => {
+  const SECRET = "ghp_SUPERSECRET_TOKEN_VALUE";
+  const REPO = "ricardoblackskye/agent-eve";
+
+  it("returns one generic 401 for unknown, revoked and expired leases", async () => {
+    let clock = 1_000;
+    const broker = new LocalCredentialBroker({ token: SECRET, now: () => clock });
+    const revoked = (await broker.issue(toRepoGrant({ repos: [REPO], ttlSeconds: 60 })))
+      .lease as Lease;
+    const expiring = (await broker.issue(toRepoGrant({ repos: [REPO], ttlSeconds: 60 })))
+      .lease as Lease;
+    await broker.revoke(revoked.leaseId);
+    const listener = await listenCredentialEndpoint(broker, { port: 0 });
+    try {
+      const call = async (lease: string) => {
+        const res = await fetch(`${listener.url}/authorize`, {
+          method: "POST",
+          headers: { "content-type": "application/json", authorization: `Bearer ${lease}` },
+          body: JSON.stringify({ repo: REPO }),
+        });
+        return { status: res.status, body: await res.text() };
+      };
+
+      const unknown = await call("forged-lease");
+      const wasRevoked = await call(revoked.leaseId);
+      clock = 1_000 + 60_000 + 1;
+      const expired = await call(expiring.leaseId);
+
+      for (const r of [unknown, wasRevoked, expired]) {
+        expect(r.status).toBe(401);
+        // Never reveal the expiry timestamp or which cause applied.
+        expect(r.body).not.toContain(String(expiring.expiresAt));
+      }
+      expect(wasRevoked.body).toBe(unknown.body);
+      expect(expired.body).toBe(unknown.body);
+    } finally {
+      await listener.close();
+    }
+  });
+});
+
 describe("createCredentialBroker env wiring (#142)", () => {
   const SECRET = "ghp_SUPERSECRET_TOKEN_VALUE";
 
