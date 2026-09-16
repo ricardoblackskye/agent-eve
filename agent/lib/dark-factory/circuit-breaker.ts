@@ -356,6 +356,16 @@ export class CircuitBreaker {
     return [...this.tripEvents];
   }
 
+  /** Get the current cumulative worker minutes for a PBI (for monitoring). */
+  getWorkerMinutes(pbiId: string): number {
+    return this.state.get(pbiId)?.workerMinutes ?? 0;
+  }
+
+  /** Get the current number of tracked PBIs (for monitoring memory growth). */
+  getStateSize(): number {
+    return this.state.size;
+  }
+
   /** Clear state for a specific PBI (useful for testing or cancellation).
    * Also removes associated trip events to keep state consistent. */
   reset(pbiId: string): void {
@@ -419,13 +429,15 @@ export class CircuitBreaker {
 
   /**
    * Dispose the breaker and release resources.
-   * Stops any auto-cleanup timer if configured.
+   * Stops any auto-cleanup timer if configured and clears all in-memory state.
    */
   destroy(): void {
     if (this.cleanupTimer) {
       clearInterval(this.cleanupTimer);
       this.cleanupTimer = undefined;
     }
+    this.state.clear();
+    this.tripEvents.length = 0;
   }
 
   private getOrCreateState(pbiId: string): PbiState {
