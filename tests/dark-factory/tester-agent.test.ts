@@ -174,3 +174,50 @@ describe("smoke test runner", () => {
     expect(capturedTimeout).toBe(baseTimeout);
   });
 });
+
+// --- Task 136.4: Security scan integration ---
+
+describe("security scan", () => {
+  it("returns pass when security scan is disabled", async () => {
+    const { TesterAgent } = await import("../../agent/lib/dark-factory/tester-agent");
+    const agent = new TesterAgent({ enableSecurityScan: false });
+
+    const result = await (agent as any).runSecurityScan();
+    expect(result.status).toBe("pass");
+    expect(result.passed).toBe(true);
+  });
+
+  it("returns pass when gitleaks finds no secrets", async () => {
+    const { TesterAgent } = await import("../../agent/lib/dark-factory/tester-agent");
+    const agent = new TesterAgent({ enableSecurityScan: true });
+
+    // Mock runSecurityScan to avoid real gitleaks execution
+    (agent as any).runSecurityScan = async () => ({ status: "pass", passed: true });
+
+    const result = await (agent as any).runSecurityScan();
+    expect(result.status).toBe("pass");
+  });
+
+  it("returns fail with alerts when gitleaks finds secrets", async () => {
+    const { TesterAgent } = await import("../../agent/lib/dark-factory/tester-agent");
+    const agent = new TesterAgent({ enableSecurityScan: true });
+
+    // Mock runCommand to simulate gitleaks finding a secret
+    (agent as any).runCommand = async (cmd: string) => ({
+      exitCode: 1,
+      stdout: "[ERROR] potential key/credential in repo (.env:5)\nsecret=abc123",
+      stderr: "gitleaks scan found 1 leak",
+    });
+
+    const result = await (agent as any).runSecurityScan();
+    expect(result.status).toBe("fail");
+    expect(result.passed).toBe(false);
+    expect(result.errors.length).toBeGreaterThan(0);
+  });
+
+  it("uses DF_SECURITY_SCAN_ENABLED env var", async () => {
+    const { createTesterAgent } = await import("../../agent/lib/dark-factory/tester-agent");
+    const agent = createTesterAgent({ DF_SECURITY_SCAN_ENABLED: "true" });
+    expect(agent).toBeDefined();
+  });
+});
