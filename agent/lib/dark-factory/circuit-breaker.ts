@@ -87,6 +87,9 @@ export const DFLT_MIN_DURATION_MS = 5_000;
 /** Default max trip events per PBI to prevent DoS via event flooding. */
 export const DFLT_MAX_TRIPS_PER_PBI = 100;
 
+/** Maximum PBI ID length to prevent downstream system issues with overly long IDs. */
+export const PBI_ID_MAX_LENGTH = 128;
+
 /** Default config baked into the breaker when env vars are unset. */
 const DEFAULTS = {
   maxWorkerMinutesPerPbi: 60,
@@ -105,9 +108,11 @@ const VALID_REASONS: readonly TripReason[] = [
  * Alphanumeric, underscores, hyphens only (NO periods to prevent path traversal).
  * Must start with a letter (prevents numeric injection).
  * Examples: "PBI-123", "task_v1", "feature_branch", "T-42".
+ * Maximum length: 128 characters (see PBI_ID_MAX_LENGTH).
  *
  * SECURITY: Periods are deliberately excluded to prevent path traversal attacks
  * if IDs are used in file paths, URLs, or database queries without proper escaping.
+ * Length is capped to prevent issues in downstream systems that index/log IDs.
  */
 const PBI_ID_PATTERN = /^[A-Za-z][A-Za-z0-9_-]*$/;
 
@@ -125,6 +130,11 @@ export function toTripEvent(input: {
   if (!rawPbiId) {
     throw new InvalidTripEventError(
       `Trip event requires a non-empty "pbiId" (received ${JSON.stringify(input.pbiId)}).`,
+    );
+  }
+  if (rawPbiId.length > PBI_ID_MAX_LENGTH) {
+    throw new InvalidTripEventError(
+      `Trip event "pbiId" must be <= ${PBI_ID_MAX_LENGTH} characters (received ${rawPbiId.length}).`,
     );
   }
   if (!PBI_ID_PATTERN.test(rawPbiId)) {
@@ -161,6 +171,8 @@ interface PbiState {
   failedSelfCorrectCycles: number;
   tripped: boolean;
   tripCount: number;
+  /** Timestamp of last activity for age-based cleanup. */
+  lastActivityAt: number;
 }
 
 /**
@@ -254,6 +266,7 @@ export class CircuitBreaker {
     const minutes = Math.ceil(activity.durationMs / 60_000);
     const s = this.getOrCreateState(activity.pbiId);
     s.workerMinutes += minutes;
+    s.lastActivityAt = Date.now();
 
     if (s.workerMinutes >= this.config.maxWorkerMinutesPerPbi) {
       this.trip(activity.pbiId, s.workerMinutes, "worker-minutes-exceeded");
@@ -278,7 +291,8 @@ export class CircuitBreaker {
     return [...this.tripEvents];
   }
 
-  /** Clear state for a specific PBI (useful for testing or cancellation). */
+  /** Clear state for a specific PBI (useful for testing or cancellation).
+   * Also removes associated trip events to keep state consistent. */
   reset(pbiId: string): void {
     const s = this.state.get(pbiId);
     if (s) {
@@ -286,6 +300,13 @@ export class CircuitBreaker {
       s.failedSelfCorrectCycles = 0;
       s.tripped = false;
       s.tripCount = 0;
+      s.lastActivityAt = Date.now();
+    }
+    // Remove trip events for this PBI to keep tripEvents array consistent
+    for (let i = this.tripEvents.length - 1; i >= 0; i--) {
+      if (this.tripEvents[i].pbiId === pbiId) {
+        this.tripEvents.splice(i, 1);
+      }
     }
   }
 
@@ -294,16 +315,21 @@ export class CircuitBreaker {
    *
    * @param maxAgeMinutes For tripped states: removes if tripCount >= maxTripsPerPbi.
    *                      For non-tripped states: removes if no activity for maxAgeMinutes.
-   *                      Default clears all fully-expended tripped states.
+   *                      Default 60 minutes for non-tripped cleanup.
    * @returns Number of state entries cleared
    */
-  cleanupStaleStates(maxAgeMinutes?: number): number {
+  cleanupStaleStates(maxAgeMinutes: number = 60): number {
     let cleared = 0;
     const now = Date.now();
-    const maxAgeMs = (maxAgeMinutes ?? 60) * 60_000;
+    const maxAgeMs = maxAgeMinutes * 60_000;
 
     for (const [pbiId, s] of this.state) {
       if (s.tripped && s.tripCount >= this.config.maxTripsPerPbi) {
+        // Fully-expended tripped state → safe to remove
+        this.state.delete(pbiId);
+        cleared++;
+      } else if (!s.tripped && maxAgeMinutes > 0 && now - s.lastActivityAt > maxAgeMs) {
+        // Non-tripped state with no recent activity → remove to free memory
         this.state.delete(pbiId);
         cleared++;
       }
@@ -314,7 +340,13 @@ export class CircuitBreaker {
   private getOrCreateState(pbiId: string): PbiState {
     let s = this.state.get(pbiId);
     if (!s) {
-      s = { workerMinutes: 0, failedSelfCorrectCycles: 0, tripped: false, tripCount: 0 };
+      s = {
+        workerMinutes: 0,
+        failedSelfCorrectCycles: 0,
+        tripped: false,
+        tripCount: 0,
+        lastActivityAt: Date.now(),
+      };
       this.state.set(pbiId, s);
     }
     return s;
@@ -325,7 +357,8 @@ export class CircuitBreaker {
     // Trip count starts at 0, so s.tripCount holds the count of trips that have occurred.
     // The check >= maxTripsPerPbi means we've already reached the limit before incrementing.
     // Result: exactly maxTripsPerPbi trips will be emitted (1-based counting from the caller's
-    // perspective, 0-based in implementation).
+    // perspective, 0-based in implementation). This is the intended behavior — the
+    // breaker emits up to maxTripsPerPbi events for a PBI before rate-limiting.
     if (s.tripCount >= this.config.maxTripsPerPbi) return;
 
     s.tripped = true;
@@ -360,7 +393,8 @@ export function createWorkerActivityObserver(breaker: CircuitBreaker): WorkerAct
  *
  * Non-integer strings (e.g., `"123abc"`, `"-5"`, `"3.14"`) throw immediately.
  *
- * @param env - Environment record (defaults to `process.env`)
+ * @param env - Environment record (defaults to `process.env`). For testing,
+ *              pass a plain object to avoid coupling to process.env.
  */
 export function createCircuitBreaker(
   env: Record<string, string | undefined> = process.env,
@@ -378,6 +412,7 @@ export function createCircuitBreaker(
       env.DF_MAX_FAILED_SELFCORRECT,
       DEFAULTS.maxFailedSelfCorrect,
       1,
+      Number.MAX_SAFE_INTEGER,
     ),
   });
 }
@@ -411,6 +446,12 @@ function readInt(
   }
 
   const parsed = Number(trimmed);
+  // Explicit overflow check against MAX_SAFE_INTEGER
+  if (parsed > Number.MAX_SAFE_INTEGER) {
+    throw new EnvConfigError(
+      `${name} must be <= ${Number.MAX_SAFE_INTEGER} (received ${JSON.stringify(raw)}).`,
+    );
+  }
   if (parsed < min || parsed > max) {
     const range = `${min}..${max}`;
     throw new EnvConfigError(

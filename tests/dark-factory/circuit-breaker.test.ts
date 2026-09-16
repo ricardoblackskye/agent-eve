@@ -420,10 +420,11 @@ describe("CircuitBreaker.reset()", () => {
     const breaker = new CircuitBreaker({ maxWorkerMinutesPerPbi: 60 });
     breaker.recordWorkerActivity({ pbiId: "PBI-RESET", durationMs: 65 * 60_000, status: "success" });
     expect(breaker.isTripped("PBI-RESET")).toBe(true);
+    expect(breaker.getTripEvents()).toHaveLength(1); // trip recorded
 
     breaker.reset("PBI-RESET");
     expect(breaker.isTripped("PBI-RESET")).toBe(false);
-    expect(breaker.getTripEvents()).toHaveLength(1); // trip still recorded
+    expect(breaker.getTripEvents()).toHaveLength(0); // trip events cleared by reset
 
     // After reset, new activity counts fresh
     breaker.recordWorkerActivity({ pbiId: "PBI-RESET", durationMs: 50 * 60_000, status: "success" });
@@ -502,65 +503,41 @@ describe("createCircuitBreaker negative testing", () => {
 // preventing event array from growing unbounded.
 
 describe("maxTripsPerPbi boundary conditions", () => {
-  it("tripCount is capped at maxTripsPerPbi (tested via direct state inspection)", () => {
-    // We verify the rate limiting logic by testing the boundary condition
-    // through the public API: after tripping, reset() clears tripCount
-    const breaker = new CircuitBreaker({ maxTripsPerPbi: 2 });
-
-    // Trip 1
-    breaker.recordWorkerActivity({ pbiId: "PBI-A", durationMs: 70 * 60_000, status: "success" });
-    expect(breaker.getTripEvents()).toHaveLength(1);
-
-    // Reset and trip again
-    breaker.reset("PBI-A");
-    breaker.recordWorkerActivity({ pbiId: "PBI-A", durationMs: 70 * 60_000, status: "success" });
-    expect(breaker.getTripEvents()).toHaveLength(2);
-
-    // Reset and trip again - this is the 3rd potential trip, but maxTripsPerPbi=2
-    // So after reset, tripCount starts at 0, trip 2 sets it to 2, which is >= maxTrips
-    // The 3rd trip attempt should be rate-limited
-    // But since tripped PBIs are ignored, we can't observe this directly
-    // Instead, we test cleanupStaleStates removes fully-expended trip states
-  });
-
   it("cleanupStaleStates removes PBIs with tripCount >= maxTripsPerPbi", () => {
-    const breaker = new CircuitBreaker({
-      maxWorkerMinutesPerPbi: 120,
-      maxTripsPerPbi: 2,
-    });
-
-    // First trip (70 min < 120 min threshold)
-    breaker.recordWorkerActivity({ pbiId: "PBI-CLEAN", durationMs: 70 * 60_000, status: "success" });
-    expect(breaker.getTripEvents()).toHaveLength(0);
-    expect(breaker.isTripped("PBI-CLEAN")).toBe(false);
-
-    // Second activity (another 70 min, total 140 >= 120, trips)
-    breaker.recordWorkerActivity({ pbiId: "PBI-CLEAN", durationMs: 70 * 60_000, status: "success" });
-    expect(breaker.getTripEvents()).toHaveLength(1);
-
-    // Simulate another trip by forcing it via reset and activity that trips again
-    breaker.reset("PBI-CLEAN");
-    // After reset, we can trip again but only once per run due to isTripped check
-    // So we need to test with maxTripsPerPbi=1 scenario
-
-    // For this test, we need tripCount >= maxTripsPerPbi
-    // Let's use a different approach - test with maxTripsPerPbi=1
-  });
-
-  it("cleanupStaleStates removes tripped PBI with maxTripsPerPbi=1", () => {
     const breaker = new CircuitBreaker({
       maxWorkerMinutesPerPbi: 60,
       maxTripsPerPbi: 1,
     });
 
     // Trip once (65 min >= 60)
-    breaker.recordWorkerActivity({ pbiId: "PBI-ONE", durationMs: 65 * 60_000, status: "success" });
+    breaker.recordWorkerActivity({ pbiId: "PBI-CLEAN", durationMs: 65 * 60_000, status: "success" });
     expect(breaker.getTripEvents()).toHaveLength(1);
-    expect(breaker.isTripped("PBI-ONE")).toBe(true);
+    expect(breaker.isTripped("PBI-CLEAN")).toBe(true);
 
     // Cleanup should remove this PBI since tripCount (1) >= maxTripsPerPbi (1)
     const cleared = breaker.cleanupStaleStates();
     expect(cleared).toBe(1);
+    expect(breaker.isTripped("PBI-CLEAN")).toBe(false);
+  });
+
+  it("cleanupStaleStates keeps PBIs below trip limit", () => {
+    const breaker = new CircuitBreaker({
+      maxWorkerMinutesPerPbi: 120,
+      maxTripsPerPbi: 5,
+    });
+
+    // Trip once (70 min < 120 min)
+    breaker.recordWorkerActivity({ pbiId: "PBI-KEPT", durationMs: 70 * 60_000, status: "success" });
+    expect(breaker.getTripEvents()).toHaveLength(0);
+
+    // Trip again (another 70 min, total 140 >= 120)
+    breaker.recordWorkerActivity({ pbiId: "PBI-KEPT", durationMs: 70 * 60_000, status: "success" });
+    expect(breaker.getTripEvents()).toHaveLength(1);
+
+    // Cleanup should NOT remove this PBI (tripCount 1 < maxTripsPerPbi 5)
+    const cleared = breaker.cleanupStaleStates();
+    expect(cleared).toBe(0);
+    expect(breaker.isTripped("PBI-KEPT")).toBe(true);
   });
 });
 
@@ -581,5 +558,80 @@ describe("Error classes have machine-readable codes", () => {
       expect((e as Error).constructor.name).toBe("InvalidTripEventError");
       expect((e as any).code).toBe("ERR_INVALID_TRIP_EVENT");
     }
+  });
+});
+
+// --- Additional security validations ---
+
+describe("PBI ID length validation", () => {
+  it("rejects PBI IDs exceeding 128 characters", () => {
+    const longId = "PBI-" + "x".repeat(200);
+    expect(longId.length).toBeGreaterThan(128);
+    expect(() =>
+      toTripEvent({ pbiId: longId, workerMinutes: 10, reason: "worker-minutes-exceeded" }),
+    ).toThrow(/must be <= 128 characters/);
+  });
+
+  it("accepts PBI IDs at exactly 128 characters", () => {
+    const validId = "P" + "x".repeat(127);
+    expect(validId.length).toBe(128);
+    const event = toTripEvent({
+      pbiId: validId,
+      workerMinutes: 10,
+      reason: "worker-minutes-exceeded",
+    });
+    expect(event.pbiId).toBe(validId);
+  });
+});
+
+describe("reset removes associated trip events", () => {
+  it("clears trip events for a PBI when reset() is called", () => {
+    const breaker = new CircuitBreaker({ maxWorkerMinutesPerPbi: 60 });
+
+    breaker.recordWorkerActivity({ pbiId: "PBI-RESET-EVENT", durationMs: 65 * 60_000, status: "success" });
+    expect(breaker.getTripEvents()).toHaveLength(1);
+
+    breaker.reset("PBI-RESET-EVENT");
+    expect(breaker.getTripEvents()).toHaveLength(0);
+    expect(breaker.isTripped("PBI-RESET-EVENT")).toBe(false);
+  });
+});
+
+describe("cleanupStaleStates handles non-tripped states by age", () => {
+  it("removes non-tripped states with no activity for maxAgeMinutes", () => {
+    const breaker = new CircuitBreaker();
+
+    // Record activity
+    breaker.recordWorkerActivity({ pbiId: "PBI-OLD", durationMs: 10 * 60_000, status: "success" });
+    expect(breaker.isTripped("PBI-OLD")).toBe(false);
+
+    // Simulate old activity by mocking Date.now
+    const originalNow = Date.now;
+    Date.now = () => originalNow() + 61 * 60_000; // 61 min later
+
+    const cleared = breaker.cleanupStaleStates(60);
+    expect(cleared).toBe(1);
+    expect(breaker.isTripped("PBI-OLD")).toBe(false);
+
+    // Restore
+    Date.now = originalNow;
+  });
+
+  it("keeps non-tripped states with recent activity", () => {
+    const breaker = new CircuitBreaker();
+
+    breaker.recordWorkerActivity({ pbiId: "PBI-RECENT", durationMs: 10 * 60_000, status: "success" });
+
+    const cleared = breaker.cleanupStaleStates(60);
+    expect(cleared).toBe(0);
+    expect(breaker.isTripped("PBI-RECENT")).toBe(false);
+  });
+});
+
+describe("readInt integer overflow protection", () => {
+  it("throws for values exceeding MAX_SAFE_INTEGER", () => {
+    expect(() =>
+      createCircuitBreaker({ DF_MAX_FAILED_SELFCORRECT: String(Number.MAX_SAFE_INTEGER + 1) }),
+    ).toThrow(/must be <= /);
   });
 });
