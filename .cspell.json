@@ -99,7 +99,8 @@
     "normaliser",
     "POCRUN",
     "evilother",
-    "Pbis"
+    "Pbis",
+    "SELFFCORRECT"
   ],
   "ignorePaths": [
     "node_modules/**",
