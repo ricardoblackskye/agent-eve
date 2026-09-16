@@ -32,6 +32,7 @@ export interface WorkerActivity {
 /** Sink the worker-environment handler calls when a task finishes. */
 export type WorkerActivitySink = (activity: WorkerActivity) => void;
 
+/** Error thrown when a circuit-breaker trip event is invalid. */
 export class InvalidTripEventError extends Error {
   constructor(message: string) {
     super(message);
@@ -39,16 +40,18 @@ export class InvalidTripEventError extends Error {
   }
 }
 
-/** Environment variable specification for CircuitBreaker settings. */
-export interface EnvSpec {
-  /** Env var name for max worker minutes per PBI. */
-  maxWorkerMinutesPerPbi: string;
-  /** Env var name for max failed self-correct counts. */
-  maxFailedSelfCorrect: string;
+/** Error thrown when environment configuration is invalid or missing. */
+export class EnvConfigError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "EnvConfigError";
+  }
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call
-const MAX_SAFE = Number.MAX_SAFE_INTEGER;
+/** Maximum reasonable worker minutes: 7 days * 24 hours * 60 minutes = 10080.
+ * This prevents cost explosion from malicious env var injection while
+ * still allowing legitimate long-running tasks. */
+const MAX_WORKER_MINUTES = 10080; // 7 days
 
 /** Default config baked into the breaker when env vars are unset. */
 const DEFAULTS = {
@@ -61,6 +64,9 @@ const VALID_REASONS: readonly TripReason[] = [
   "failed-selfcorrect-exceeded",
 ] as const;
 
+/** Pattern for valid PBI identifiers: e.g., "PBI-123", "PBI_abc", "task-xyz". */
+const PBI_ID_PATTERN = /^[A-Za-z][A-Za-z0-9_.-]*$/;
+
 /**
  * Validate and normalise a circuit-breaker trip event. Invalid input THROWS
  * (a caller bug — the guard contract was violated), so a malformed trip can
@@ -71,17 +77,22 @@ export function toTripEvent(input: {
   workerMinutes?: number;
   reason?: string;
 }): TripEvent {
-  const pbiId = typeof input.pbiId === "string" ? input.pbiId.trim() : "";
-  if (!pbiId) {
+  const rawPbiId = typeof input.pbiId === "string" ? input.pbiId.trim() : "";
+  if (!rawPbiId) {
     throw new InvalidTripEventError(
       `Trip event requires a non-empty "pbiId" (received ${JSON.stringify(input.pbiId)}).`,
+    );
+  }
+  if (!PBI_ID_PATTERN.test(rawPbiId)) {
+    throw new InvalidTripEventError(
+      `Trip event "pbiId" must match pattern ${PBI_ID_PATTERN.source} (received "${input.pbiId}").`,
     );
   }
 
   const minutes = input.workerMinutes;
   if (typeof minutes !== "number" || !Number.isFinite(minutes) || minutes < 0) {
     throw new InvalidTripEventError(
-      `Trip event requires "workerMinutes" to be a finite number >= 0 (received ${JSON.stringify(minutes)}).`,
+      `Trip event requires "workerMinutes" to be a finite number >= 0 (received ${JSON.stringify(minutes)}, got ${typeof minutes}).`,
     );
   }
 
@@ -93,7 +104,7 @@ export function toTripEvent(input: {
   }
 
   return {
-    pbiId,
+    pbiId: rawPbiId,
     workerMinutes: minutes,
     reason: reason as TripReason,
     timestamp: new Date().toISOString(),
@@ -118,6 +129,9 @@ interface PbiState {
  * for it, so no additional cost is incurred after the trip (AC3). The guard is
  * INDEPENDENT of the per-task retry/iteration bounds in #138/#133: it tripped on
  * its own cap and is additive, never resetting or observing those counters.
+ *
+ * Note: This class is NOT thread-safe. In the Eve architecture, each PBI's
+ * worker execution is serialized, so concurrent modifications cannot occur.
  */
 export class CircuitBreaker {
   private readonly state = new Map<string, PbiState>();
@@ -139,7 +153,9 @@ export class CircuitBreaker {
   recordWorkerActivity(activity: WorkerActivity): void {
     if (this.isTripped(activity.pbiId)) return;
 
-    const minutes = activity.durationMs / 60_000;
+    // Use integer math: convert ms to minutes, rounding up to ensure we don't
+    // under-count toward the threshold.
+    const minutes = Math.ceil(activity.durationMs / 60_000);
     const s = this.getOrCreateState(activity.pbiId);
     s.workerMinutes += minutes;
 
@@ -164,6 +180,16 @@ export class CircuitBreaker {
   /** All trip events emitted so far (machine-readable for the escalation channel). */
   getTripEvents(): TripEvent[] {
     return [...this.tripEvents];
+  }
+
+  /** Clear state for a specific PBI (useful for testing or cancellation). */
+  reset(pbiId: string): void {
+    const s = this.state.get(pbiId);
+    if (s) {
+      s.workerMinutes = 0;
+      s.failedSelfCorrectCycles = 0;
+      s.tripped = false;
+    }
   }
 
   private getOrCreateState(pbiId: string): PbiState {
@@ -202,8 +228,11 @@ export function createWorkerActivityObserver(breaker: CircuitBreaker): WorkerAct
  * default and hiding the operator's intent. Unset/empty values use the
  * documented defaults (60 minutes, 3 failures).
  *
- * Valid range: `>= min` and `<= MAX_SAFE_INTEGER` (Number.MAX_SAFE_INTEGER).
- * Non-numeric strings (e.g., `"123abc"`, `"-5"`, `"3.14"`) throw immediately.
+ * Valid ranges:
+ * - `DF_MAX_WORKER_MINUTES_PER_PBI`: 1..10080 minutes (max 7 days)
+ * - `DF_MAX_FAILED_SELFCORRECT`: 1..MAX_SAFE_INTEGER
+ *
+ * Non-integer strings (e.g., `"123abc"`, `"-5"`, `"3.14"`) throw immediately.
  *
  * @param env - Environment record (defaults to `process.env`)
  */
@@ -216,6 +245,7 @@ export function createCircuitBreaker(
       env.DF_MAX_WORKER_MINUTES_PER_PBI,
       DEFAULTS.maxWorkerMinutesPerPbi,
       1,
+      MAX_WORKER_MINUTES,
     ),
     maxFailedSelfCorrect: readInt(
       "DF_MAX_FAILED_SELFCORRECT",
@@ -227,39 +257,39 @@ export function createCircuitBreaker(
 }
 
 /**
- * Parse a positive integer environment variable.
+ * Parse an integer environment variable within a valid range.
  *
  * @param name - Env var name (used in error messages)
  * @param raw - The raw env value or undefined if unset
  * @param fallback - Default value to return when unset/empty
  * @param min - Minimum allowed value (inclusive)
+ * @param max - Maximum allowed value (inclusive, defaults to MAX_SAFE_INTEGER)
  * @returns The parsed integer
- * @throws If the value is malformed, non-integer, or outside [min, MAX_SAFE_INTEGER]
- *
- * @example
- * readInt("MY_VAR", undefined, 10)  // returns 10 (default)
- * readInt("MY_VAR", "42", 10)       // returns 42
- * readInt("MY_VAR", "0", 10)         // throws: must be >= 10
- * readInt("MY_VAR", "hello", 10)     // throws: not a valid integer
+ * @throws EnvConfigError if the value is malformed, non-integer, or outside [min, max]
  */
 function readInt(
   name: string,
   raw: string | undefined,
   fallback: number,
   min: number,
+  max: number = Number.MAX_SAFE_INTEGER,
 ): number {
   if (raw === undefined || raw.trim() === "") return fallback;
 
-  // Reject strings with non-numeric trailing content early
   const trimmed = raw.trim();
-  if (!/^-?\d+$/.test(trimmed)) {
-    throw new Error(`${name} must be a valid integer (received ${JSON.stringify(raw)}).`);
+  // Reject non-numeric strings early (including "123abc", "3.14", "  ")
+  if (!/^\d+$/.test(trimmed)) {
+    throw new EnvConfigError(
+      `${name} must be a valid positive integer (received ${JSON.stringify(raw)}).`,
+    );
   }
 
   const parsed = Number(trimmed);
-  if (!Number.isInteger(parsed) || parsed < min || parsed > MAX_SAFE) {
-    const range = `${min}..${MAX_SAFE}`;
-    throw new Error(`${name} must be an integer in range ${range} (received ${JSON.stringify(raw)}).`);
+  if (parsed < min || parsed > max) {
+    const range = `${min}..${max}`;
+    throw new EnvConfigError(
+      `${name} must be an integer in range ${range} (received ${JSON.stringify(raw)}).`,
+    );
   }
   return parsed;
 }

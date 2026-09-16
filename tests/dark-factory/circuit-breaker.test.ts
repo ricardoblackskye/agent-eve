@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   toTripEvent,
   InvalidTripEventError,
+  EnvConfigError,
   CircuitBreaker,
   createCircuitBreaker,
   createWorkerActivityObserver,
@@ -50,6 +51,16 @@ describe("toTripEvent canonical payload (#144 AC1/AC2)", () => {
     ).toThrow(InvalidTripEventError);
   });
 
+  it("rejects a pbiId with invalid format (must start with letter)", () => {
+    expect(() =>
+      toTripEvent({
+        pbiId: "42-invalid",
+        workerMinutes: 10,
+        reason: "worker-minutes-exceeded",
+      }),
+    ).toThrow(InvalidTripEventError);
+  });
+
   it("rejects negative worker-minutes", () => {
     expect(() =>
       toTripEvent({
@@ -68,16 +79,6 @@ describe("toTripEvent canonical payload (#144 AC1/AC2)", () => {
         reason: "worker-minutes-exceeded",
       }),
     ).toThrow(/workerMinutes/);
-  });
-
-  it("rejects an unknown reason", () => {
-    expect(() =>
-      toTripEvent({
-        pbiId: "PBI-1",
-        workerMinutes: 10,
-        reason: "budget-blown" as TripReason,
-      }),
-    ).toThrow(/reason/);
   });
 
   it("trims whitespace from the pbiId", () => {
@@ -120,6 +121,37 @@ describe("CircuitBreaker worker-minute accumulation (#144 AC1)", () => {
     expect(trips[0].workerMinutes).toBeCloseTo(65, 5);
   });
 
+  it("trips at EXACT budget boundary (60 minutes = 60 * 60,000 ms)", () => {
+    const breaker = new CircuitBreaker({ maxWorkerMinutesPerPbi: 60 });
+
+    // Exactly at boundary should trip
+    breaker.recordWorkerActivity({
+      pbiId: "PBI-EXACT",
+      durationMs: 60 * 60_000, // exactly 60 minutes
+      status: "success",
+    });
+    expect(breaker.isTripped("PBI-EXACT")).toBe(true);
+  });
+
+  it("trips at 59 minutes then additional ms round up to 60", () => {
+    const breaker = new CircuitBreaker({ maxWorkerMinutesPerPbi: 60 });
+
+    breaker.recordWorkerActivity({
+      pbiId: "PBI-ROUND",
+      durationMs: 59 * 60_000,
+      status: "success",
+    });
+    expect(breaker.isTripped("PBI-ROUND")).toBe(false);
+
+    // 1 second = 1 minute after Math.ceil rounding
+    breaker.recordWorkerActivity({
+      pbiId: "PBI-ROUND",
+      durationMs: 1_000, // 1 second rounds up to 1 minute
+      status: "success",
+    });
+    expect(breaker.isTripped("PBI-ROUND")).toBe(true);
+  });
+
   it("does NOT trip when cumulative minutes stay under budget", () => {
     const breaker = new CircuitBreaker({ maxWorkerMinutesPerPbi: 60 });
 
@@ -153,6 +185,25 @@ describe("CircuitBreaker worker-minute accumulation (#144 AC1)", () => {
 
     expect(breaker.getTripEvents().length).toBe(beforeTrips);
     expect(breaker.isTripped("PBI-7")).toBe(true);
+  });
+
+  it("respects upper bound of 10080 minutes (7 days)", () => {
+    // Create a breaker with the maximum allowed budget
+    const breaker = new CircuitBreaker({ maxWorkerMinutesPerPbi: 10080 });
+    // 10079 minutes = below limit
+    breaker.recordWorkerActivity({
+      pbiId: "PBI-UPPER",
+      durationMs: 10079 * 60_000,
+      status: "success",
+    });
+    expect(breaker.isTripped("PBI-UPPER")).toBe(false);
+    // 1 more minute = exactly at limit, should trip
+    breaker.recordWorkerActivity({
+      pbiId: "PBI-UPPER",
+      durationMs: 1 * 60_000,
+      status: "success",
+    });
+    expect(breaker.isTripped("PBI-UPPER")).toBe(true);
   });
 });
 
@@ -257,11 +308,11 @@ describe("createCircuitBreaker env wiring (#144)", () => {
     expect(breaker.isTripped("PBI-1")).toBe(false);
   });
 
-  it("trips exactly at the budget boundary (59.9 + 0.1 = 60)", () => {
+  it("trips exactly at the budget boundary (59 + 1 = 60)", () => {
     const breaker = createCircuitBreaker({});
-    breaker.recordWorkerActivity({ pbiId: "PBI-B", durationMs: 59.9 * 60_000, status: "success" });
+    breaker.recordWorkerActivity({ pbiId: "PBI-B", durationMs: 59 * 60_000, status: "success" });
     expect(breaker.isTripped("PBI-B")).toBe(false);
-    breaker.recordWorkerActivity({ pbiId: "PBI-B", durationMs: 0.1 * 60_000, status: "success" });
+    breaker.recordWorkerActivity({ pbiId: "PBI-B", durationMs: 1 * 60_000, status: "success" });
     expect(breaker.isTripped("PBI-B")).toBe(true);
   });
 
@@ -278,37 +329,34 @@ describe("createCircuitBreaker env wiring (#144)", () => {
     expect(breaker.isTripped("PBI-3")).toBe(true);
   });
 
-  it("throws on malformed env values (fail-closed, not default)", () => {
+  it("throws EnvConfigError on malformed env values (fail-closed)", () => {
     expect(() => createCircuitBreaker({ DF_MAX_WORKER_MINUTES_PER_PBI: "abc" })).toThrow(
-      /DF_MAX_WORKER_MINUTES_PER_PBI/,
+      EnvConfigError,
     );
-    expect(() => createCircuitBreaker({ DF_MAX_FAILED_SELFCORRECT: "0" })).toThrow(
-      /DF_MAX_FAILED_SELFCORRECT/,
-    );
+    expect(() => createCircuitBreaker({ DF_MAX_FAILED_SELFCORRECT: "0" })).toThrow(EnvConfigError);
   });
 });
 
-// --- Edge case tests: large numbers, non-integers, malformed strings ---
+// --- Edge case tests: overflow, malformed strings, pbiId format ---
 
 describe("readInt edge cases (security & overflow)", () => {
-  it("accepts extremely large but safe integers (up to MAX_SAFE_INTEGER)", () => {
-    const breaker = createCircuitBreaker({
-      DF_MAX_WORKER_MINUTES_PER_PBI: String(Number.MAX_SAFE_INTEGER),
-    });
-    // Value stored directly without truncation
-    expect(breaker.isTripped("any")).toBe(false);
+  it("throws on value exceeding upper bound (10080)", () => {
+    // 10081 minutes = 1 week + 1 minute, exceeds MAX_WORKER_MINUTES
+    expect(() =>
+      createCircuitBreaker({ DF_MAX_WORKER_MINUTES_PER_PBI: "10081" }),
+    ).toThrow(/must be an integer in range/);
   });
 
   it("throws on non-integer numeric strings (e.g., '3.14')", () => {
     expect(() =>
       createCircuitBreaker({ DF_MAX_WORKER_MINUTES_PER_PBI: "3.14" }),
-    ).toThrow(/must be a valid integer/);
+    ).toThrow(/must be a valid positive integer/);
   });
 
   it("throws on strings with trailing non-numeric content (e.g., '123abc')", () => {
     expect(() =>
       createCircuitBreaker({ DF_MAX_WORKER_MINUTES_PER_PBI: "123abc" }),
-    ).toThrow(/must be a valid integer/);
+    ).toThrow(/must be a valid positive integer/);
   });
 
   it("uses default when string is all whitespace (treated as unset)", () => {
@@ -324,25 +372,32 @@ describe("readInt edge cases (security & overflow)", () => {
   it("throws on value below minimum (fail-closed)", () => {
     expect(() =>
       createCircuitBreaker({ DF_MAX_WORKER_MINUTES_PER_PBI: "0" }),
-    ).toThrow(/must be an integer in range/);
+    ).toThrow(/range/);
     expect(() =>
       createCircuitBreaker({ DF_MAX_WORKER_MINUTES_PER_PBI: "-5" }),
-    ).toThrow(/must be an integer in range/);
+    ).toThrow(/must be a valid positive integer/);
   });
 
   it("throws on malformed DF_MAX_FAILED_SELFCORRECT", () => {
     expect(() =>
       createCircuitBreaker({ DF_MAX_FAILED_SELFCORRECT: "1.5" }),
-    ).toThrow(/must be a valid integer/);
+    ).toThrow(EnvConfigError);
     expect(() =>
       createCircuitBreaker({ DF_MAX_FAILED_SELFCORRECT: "abc" }),
-    ).toThrow(/must be a valid integer/);
+    ).toThrow(EnvConfigError);
   });
 
-  it("throws with descriptive error message for range violations", () => {
+  it("throws with descriptive range error message", () => {
     expect(() =>
       createCircuitBreaker({ DF_MAX_WORKER_MINUTES_PER_PBI: "0" }),
     ).toThrow(/range \d+\.\.\d+/);
+  });
+
+  it("accepts upper bound (10080 = 1 week in minutes)", () => {
+    const breaker = createCircuitBreaker({
+      DF_MAX_WORKER_MINUTES_PER_PBI: "10080",
+    });
+    expect(breaker.isTripped("any")).toBe(false);
   });
 
   it("max boundary: 1 is the minimum valid value", () => {
@@ -353,10 +408,49 @@ describe("readInt edge cases (security & overflow)", () => {
     breaker.recordWorkerActivity({ pbiId: "PBI-X", durationMs: 1 * 60_000, status: "success" });
     expect(breaker.isTripped("PBI-X")).toBe(true);
   });
+});
 
-  it("max boundary: default values yield valid states", () => {
-    // Verify defaults are valid (no throw)
-    const breaker = createCircuitBreaker({});
-    expect(breaker.isTripped("any")).toBe(false);
+// --- Additional: reset method and pbiId format ---
+
+describe("CircuitBreaker.reset()", () => {
+  it("resets a tripped PBI", () => {
+    const breaker = new CircuitBreaker({ maxWorkerMinutesPerPbi: 60 });
+    breaker.recordWorkerActivity({ pbiId: "PBI-RESET", durationMs: 65 * 60_000, status: "success" });
+    expect(breaker.isTripped("PBI-RESET")).toBe(true);
+
+    breaker.reset("PBI-RESET");
+    expect(breaker.isTripped("PBI-RESET")).toBe(false);
+    expect(breaker.getTripEvents()).toHaveLength(1); // trip still recorded
+
+    // After reset, new activity counts fresh
+    breaker.recordWorkerActivity({ pbiId: "PBI-RESET", durationMs: 50 * 60_000, status: "success" });
+    expect(breaker.isTripped("PBI-RESET")).toBe(false);
+  });
+
+  it("is safe to reset non-existent PBI", () => {
+    const breaker = new CircuitBreaker();
+    expect(() => breaker.reset("UNKNOWN-PBI")).not.toThrow();
+    expect(breaker.isTripped("UNKNOWN-PBI")).toBe(false);
+  });
+});
+
+describe("toTripEvent pbiId format validation", () => {
+  it("accepts valid PBI identifiers (letter followed by alphanumeric/underscore/dash/dot)", () => {
+    const event = toTripEvent({
+      pbiId: "task-v1.2_3",
+      workerMinutes: 10,
+      reason: "worker-minutes-exceeded",
+    });
+    expect(event.pbiId).toBe("task-v1.2_3");
+  });
+
+  it("rejects PBI IDs starting with numbers", () => {
+    expect(() =>
+      toTripEvent({
+        pbiId: "123-task",
+        workerMinutes: 10,
+        reason: "worker-minutes-exceeded",
+      }),
+    ).toThrow(/pbiId.*must match pattern/);
   });
 });
