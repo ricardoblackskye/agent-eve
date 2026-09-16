@@ -344,6 +344,34 @@ export class CircuitBreaker {
    * - workerMinutes addition uses Number-safe bounds to prevent overflow.
    */
   recordWorkerActivity(activity: WorkerActivity): void {
+    // Strict validation: reject malformed activity objects
+    if (!activity || typeof activity !== "object") {
+      throw new InvalidTripEventError("WorkerActivity must be a non-null object.");
+    }
+    if (typeof activity.pbiId !== "string" || activity.pbiId.length === 0) {
+      throw new InvalidTripEventError("WorkerActivity requires a non-empty string pbiId.");
+    }
+    if (activity.pbiId.length > PBI_ID_MAX_LENGTH) {
+      throw new InvalidTripEventError(
+        `pbiId exceeds maximum length of ${PBI_ID_MAX_LENGTH} characters (received ${activity.pbiId.length}).`,
+      );
+    }
+    if (!PBI_ID_PATTERN.test(activity.pbiId)) {
+      throw new InvalidTripEventError(
+        `pbiId "${activity.pbiId}" must match pattern ${PBI_ID_PATTERN.source}.`,
+      );
+    }
+    if (typeof activity.durationMs !== "number" || !Number.isFinite(activity.durationMs) || activity.durationMs < 0) {
+      throw new InvalidTripEventError(
+        `WorkerActivity.durationMs must be a finite number >= 0 (received ${JSON.stringify(activity.durationMs)}).`,
+      );
+    }
+    if (activity.status !== "success" && activity.status !== "failure") {
+      throw new InvalidTripEventError(
+        `WorkerActivity.status must be "success" or "failure" (received ${JSON.stringify(activity.status)}).`,
+      );
+    }
+
     if (this.isTripped(activity.pbiId)) return;
 
     // Security: discard sub-threshold durations to prevent Math.ceil exploitation
@@ -351,12 +379,23 @@ export class CircuitBreaker {
 
     // Round up to ensure we don't under-count toward the threshold
     // Math.ceil(x/60000) for x < 60000 gives 1 (max over-count: 59,999ms)
+    // NOTE: Math.ceil is intentionally chosen over Math.floor — we bias toward
+    // OVER-counting worker minutes so a PBI can never escape its budget by
+    // splitting work into many sub-minute tasks. The max over-count per task is
+    // 59,999ms (just under 1 minute).
     const minutes = Math.ceil(activity.durationMs / 60_000);
 
     // Overflow protection: ensure addition won't exceed safe integer
-    const state = this.getOrCreateState(activity.pbiId);
+    const current = this.state.get(activity.pbiId);
+    if (current && current.workerMinutes > Number.MAX_SAFE_INTEGER / 2) {
+      // Would overflow on next addition; trip defensively
+      this.trip(activity.pbiId, current.workerMinutes, "worker-minutes-exceeded");
+      return;
+    }
 
-    // Guard against memory bloat - clean up oldest entries if we exceed max
+    // Guard against memory bloat — check BEFORE adding new state so we never
+    // temporarily exceed maxStateEntries.
+    const state = this.getOrCreateState(activity.pbiId);
     if (this.state.size > this.config.maxStateEntries) {
       this.enforceStateLimit();
     }

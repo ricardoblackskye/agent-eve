@@ -7,6 +7,7 @@ import {
   createCircuitBreaker,
   createWorkerActivityObserver,
   type TripReason,
+  type WorkerActivity,
   type WorkerActivitySink,
 } from "../../agent/lib/dark-factory/circuit-breaker";
 
@@ -829,5 +830,60 @@ describe("Unicode PBI ID handling", () => {
       reason: "worker-minutes-exceeded",
     });
     expect(event.pbiId).toBe("task_123_main");
+  });
+});
+
+describe("recordWorkerActivity input validation", () => {
+  it("rejects non-object activity", () => {
+    const breaker = new CircuitBreaker({});
+    expect(() => breaker.recordWorkerActivity(null as unknown as WorkerActivity)).toThrow(
+      /non-null object/,
+    );
+    expect(() => breaker.recordWorkerActivity("string" as unknown as WorkerActivity)).toThrow(
+      /non-null object/,
+    );
+  });
+
+  it("rejects empty pbiId", () => {
+    const breaker = new CircuitBreaker({});
+    expect(() => breaker.recordWorkerActivity({ pbiId: "", durationMs: 60_000, status: "success" })).toThrow(
+      /non-empty string/,
+    );
+  });
+
+  it("rejects pbiId exceeding max length", () => {
+    const breaker = new CircuitBreaker({});
+    const longId = "P".repeat(129);
+    expect(() => breaker.recordWorkerActivity({ pbiId: longId, durationMs: 60_000, status: "success" })).toThrow(
+      /exceeds maximum length/,
+    );
+  });
+
+  it("rejects invalid pbiId pattern", () => {
+    const breaker = new CircuitBreaker({});
+    expect(() =>
+      breaker.recordWorkerActivity({ pbiId: "1bad", durationMs: 60_000, status: "success" }),
+    ).toThrow(/must match pattern/);
+  });
+
+  it("rejects non-finite durationMs", () => {
+    const breaker = new CircuitBreaker({});
+    expect(() =>
+      breaker.recordWorkerActivity({ pbiId: "PBI-1", durationMs: NaN, status: "success" }),
+    ).toThrow(/finite number/);
+  });
+
+  it("rejects invalid status", () => {
+    const breaker = new CircuitBreaker({});
+    expect(() =>
+      breaker.recordWorkerActivity({ pbiId: "PBI-1", durationMs: 60_000, status: "pending" as "success" }),
+    ).toThrow(/must be "success" or "failure"/);
+  });
+
+  it("accepts valid activity", () => {
+    const breaker = new CircuitBreaker({});
+    expect(() =>
+      breaker.recordWorkerActivity({ pbiId: "PBI-1", durationMs: 60_000, status: "success" }),
+    ).not.toThrow();
   });
 });
