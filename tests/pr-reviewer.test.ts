@@ -242,6 +242,39 @@ describe("PR Reviewer Agent - TDD Tests", () => {
       expect(content).toMatch(/Skipping retry:/);
     });
 
+    // #87 ROOT CAUSE: the reviewer must NOT use the project's reasoning model by
+    // default — measured on a live 14k-char diff, that model spent its entire
+    // completion budget on chain-of-thought and returned NO content (under a cap,
+    // under reasoning.effort, and uncapped). A non-reasoning model always answers.
+    it("defaults to a NON-reasoning model with a PR_REVIEW_MODEL override (#87)", () => {
+      const content = fs.readFileSync(
+        path.join(process.cwd(), "scripts", "pr-reviewer.js"),
+        "utf8",
+      );
+
+      expect(content).toMatch(/process\.env\.PR_REVIEW_MODEL/);
+      expect(content).toMatch(
+        /const REVIEW_MODEL = process\.env\.PR_REVIEW_MODEL \|\| "deepseek\/deepseek-chat"/,
+      );
+      // BOTH call sites (first attempt + retry) must use the reviewed model.
+      expect(content.match(/model: REVIEW_MODEL,/g) || []).toHaveLength(2);
+      // The project's reasoning model must no longer be wired into this script.
+      expect(content).not.toMatch(/MODEL_NAME \|\| DEFAULT_MODEL_ID/);
+    });
+
+    // AI review of PR #149 (valid finding): the generic "no content" reason used
+    // to clobber the specific length-exhausted reason set when the retry was
+    // skipped, so the posted comment misreported the cause.
+    it("does not clobber the length-exhausted fallback reason", () => {
+      const content = fs.readFileSync(
+        path.join(process.cwd(), "scripts", "pr-reviewer.js"),
+        "utf8",
+      );
+      expect(content).toMatch(
+        /else if \(!content && finishReason !== "length"\)/,
+      );
+    });
+
     // #87: on a length-exhausted response the script must RETRY with a smaller
     // diff instead of immediately posting the structural stub.
     it("retries on an empty length-exhausted response instead of stubbing (#87)", () => {
@@ -303,9 +336,11 @@ describe("PR Reviewer Agent - TDD Tests", () => {
       // Should not contain the hardcoded model string
       expect(content).not.toContain("nvidia/nemotron-3-ultra-550b-a55b:free");
 
-      // Should get model from config/environment
+      // Should get model from config/environment. The reviewer is deliberately
+      // pinned to a non-reasoning model via PR_REVIEW_MODEL (#87) — the project's
+      // reasoning model exhausts the completion budget and returns no content.
       expect(content).toMatch(
-        /process\.env\.OPENROUTER_MODEL|MODEL_NAME|config\.model/,
+        /process\.env\.PR_REVIEW_MODEL|process\.env\.OPENROUTER_MODEL|MODEL_NAME|config\.model/,
       );
     });
 

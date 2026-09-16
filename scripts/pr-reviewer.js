@@ -1,9 +1,8 @@
 import fs from "fs";
 
-// Default model for the PR-review LLM call. Mirrors agent/model-config.ts so the
-// script and the agent stay on the same default. Falls back to this when
-// MODEL_NAME is unset (previously it sent `undefined`, which OpenRouter rejects).
-const DEFAULT_MODEL_ID = "deepseek/deepseek-v4.1-flash";
+// NOTE: the reviewer deliberately does NOT use the project's default model —
+// that default is a REASONING model, which is the #87 root cause. See REVIEW_MODEL
+// below for the measured evidence.
 const eventPath = process.env.GITHUB_EVENT_PATH;
 if (!eventPath) {
   console.error("GITHUB_EVENT_PATH environment variable is not set.");
@@ -138,6 +137,21 @@ const REVIEW_MAX_TOKENS = Number(process.env.PR_REVIEW_MAX_TOKENS) || 6000;
 const REVIEW_REASONING_MAX_TOKENS =
   Number(process.env.PR_REVIEW_REASONING_MAX_TOKENS) || 1500;
 
+// #87 ROOT CAUSE: the project default (deepseek/deepseek-v4.1-flash) is a
+// REASONING model, and its chain-of-thought can consume the ENTIRE completion
+// budget, leaving no content to post. Measured against the live API on a 14k-char
+// diff, it returned finish_reason="length" with ZERO content:
+//   - reasoning.max_tokens=1500 -> ~22.6k chars of reasoning (cap IGNORED)
+//   - reasoning.effort="low"    -> ~32.5k chars of reasoning (hint IGNORED)
+//   - no reasoning param        -> ~23.6k chars of reasoning
+// Reasoning also GROWS with max_tokens (~40k chars at max_tokens=32000), so
+// raising the budget only moves the wall — no fixed budget is safe. A
+// NON-reasoning model cannot fail this way: it answered in ~30s with
+// finish_reason="stop" every time, and it tolerates the reasoning block below.
+// Override with PR_REVIEW_MODEL if you want a reasoning model here, and raise
+// PR_REVIEW_MAX_TOKENS well above its observed reasoning length.
+const REVIEW_MODEL = process.env.PR_REVIEW_MODEL || "deepseek/deepseek-chat";
+
 function truncateDiff(diff, maxChars) {
   if (diff.length <= maxChars) return { diff, truncated: false, omitted: 0 };
 
@@ -213,7 +227,7 @@ try {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: process.env.MODEL_NAME || DEFAULT_MODEL_ID,
+        model: REVIEW_MODEL,
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
           {
@@ -302,7 +316,7 @@ try {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: process.env.MODEL_NAME || DEFAULT_MODEL_ID,
+          model: REVIEW_MODEL,
           messages: [
             { role: "system", content: SYSTEM_PROMPT },
             {
@@ -333,7 +347,10 @@ try {
       fallbackReason =
         "the model spent its entire output budget on internal reasoning and emitted no answer, even after a retry with a smaller diff";
     }
-  } else if (!content) {
+  } else if (!content && finishReason !== "length") {
+    // Do NOT clobber the specific length-exhausted reason set above when the
+    // retry was skipped — otherwise the comment misreports the cause (bug found
+    // in the AI review of PR #149).
     fallbackReason = "the model returned no review content";
   }
 
