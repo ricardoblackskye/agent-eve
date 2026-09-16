@@ -2,8 +2,11 @@ import { describe, it, expect } from "vitest";
 import {
   toTripEvent,
   InvalidTripEventError,
+  CircuitBreaker,
   type TripReason,
 } from "../../agent/lib/dark-factory/circuit-breaker";
+
+// --- Task 144.1: toTripEvent canonical payload ---
 
 describe("toTripEvent canonical payload (#144 AC1/AC2)", () => {
   it("produces a valid event for worker-minutes-exceeded", () => {
@@ -81,5 +84,136 @@ describe("toTripEvent canonical payload (#144 AC1/AC2)", () => {
       reason: "worker-minutes-exceeded",
     });
     expect(event.pbiId).toBe("PBI-99");
+  });
+});
+
+// --- Task 144.2: worker-minute tracking per PBI ---
+
+describe("CircuitBreaker worker-minute accumulation (#144 AC1)", () => {
+  it("trips when cumulative worker-minutes reach the PBI budget", () => {
+    const breaker = new CircuitBreaker({ maxWorkerMinutesPerPbi: 60 });
+
+    breaker.recordWorkerActivity({
+      pbiId: "PBI-42",
+      durationMs: 20 * 60_000,
+      status: "success",
+    });
+    breaker.recordWorkerActivity({
+      pbiId: "PBI-42",
+      durationMs: 25 * 60_000,
+      status: "success",
+    });
+    breaker.recordWorkerActivity({
+      pbiId: "PBI-42",
+      durationMs: 20 * 60_000,
+      status: "success",
+    });
+
+    // 20 + 25 + 20 = 65 > 60 → tripped
+    expect(breaker.isTripped("PBI-42")).toBe(true);
+    const trips = breaker.getTripEvents();
+    expect(trips).toHaveLength(1);
+    expect(trips[0].reason).toBe("worker-minutes-exceeded");
+    expect(trips[0].workerMinutes).toBeCloseTo(65, 5);
+  });
+
+  it("does NOT trip when cumulative minutes stay under budget", () => {
+    const breaker = new CircuitBreaker({ maxWorkerMinutesPerPbi: 60 });
+
+    breaker.recordWorkerActivity({ pbiId: "PBI-1", durationMs: 30 * 60_000, status: "success" });
+    breaker.recordWorkerActivity({ pbiId: "PBI-1", durationMs: 29 * 60_000, status: "success" });
+
+    expect(breaker.isTripped("PBI-1")).toBe(false);
+    expect(breaker.getTripEvents()).toHaveLength(0);
+  });
+
+  it("keeps PBIs independent — one PBI tripping does not affect another", () => {
+    const breaker = new CircuitBreaker({ maxWorkerMinutesPerPbi: 30 });
+
+    breaker.recordWorkerActivity({ pbiId: "PBI-A", durationMs: 35 * 60_000, status: "success" });
+    breaker.recordWorkerActivity({ pbiId: "PBI-B", durationMs: 10 * 60_000, status: "success" });
+
+    expect(breaker.isTripped("PBI-A")).toBe(true);
+    expect(breaker.isTripped("PBI-B")).toBe(false);
+  });
+
+  it("does not consume additional minutes after tripping (AC3)", () => {
+    const breaker = new CircuitBreaker({ maxWorkerMinutesPerPbi: 60 });
+
+    breaker.recordWorkerActivity({ pbiId: "PBI-7", durationMs: 65 * 60_000, status: "success" });
+    expect(breaker.isTripped("PBI-7")).toBe(true);
+
+    const beforeTrips = breaker.getTripEvents().length;
+
+    // More work after trip — must NOT add new trips or change state
+    breaker.recordWorkerActivity({ pbiId: "PBI-7", durationMs: 100 * 60_000, status: "success" });
+
+    expect(breaker.getTripEvents().length).toBe(beforeTrips);
+    expect(breaker.isTripped("PBI-7")).toBe(true);
+  });
+});
+
+// --- Task 144.3: self-correct cycle escalation (#144 AC2) ---
+
+describe("CircuitBreaker self-correct cycle escalation (#144 AC2)", () => {
+  it("trips after N failed self-correct cycles (default N=3)", () => {
+    const breaker = new CircuitBreaker({ maxFailedSelfCorrect: 3 });
+
+    breaker.recordWorkerActivity({ pbiId: "PBI-7", durationMs: 5 * 60_000, status: "failure" });
+    breaker.recordWorkerActivity({ pbiId: "PBI-7", durationMs: 5 * 60_000, status: "failure" });
+    expect(breaker.isTripped("PBI-7")).toBe(false);
+
+    // Third failure → trip
+    breaker.recordWorkerActivity({ pbiId: "PBI-7", durationMs: 5 * 60_000, status: "failure" });
+
+    expect(breaker.isTripped("PBI-7")).toBe(true);
+    const trips = breaker.getTripEvents();
+    expect(trips).toHaveLength(1);
+    expect(trips[0].reason).toBe("failed-selfcorrect-exceeded");
+  });
+
+  it("does NOT trip if a cycle succeeds before reaching N", () => {
+    const breaker = new CircuitBreaker({ maxFailedSelfCorrect: 3 });
+
+    breaker.recordWorkerActivity({ pbiId: "PBI-1", durationMs: 5 * 60_000, status: "failure" });
+    breaker.recordWorkerActivity({ pbiId: "PBI-1", durationMs: 5 * 60_000, status: "success" });
+    breaker.recordWorkerActivity({ pbiId: "PBI-1", durationMs: 5 * 60_000, status: "failure" });
+
+    expect(breaker.isTripped("PBI-1")).toBe(false);
+    expect(breaker.getTripEvents()).toHaveLength(0);
+  });
+
+  it("uses a configurable threshold (N=1)", () => {
+    const breaker = new CircuitBreaker({ maxFailedSelfCorrect: 1 });
+
+    breaker.recordWorkerActivity({ pbiId: "PBI-X", durationMs: 1 * 60_000, status: "failure" });
+
+    expect(breaker.isTripped("PBI-X")).toBe(true);
+    expect(breaker.getTripEvents()[0].reason).toBe("failed-selfcorrect-exceeded");
+  });
+
+  it("keeps PBIs independent for self-correct trips too", () => {
+    const breaker = new CircuitBreaker({ maxFailedSelfCorrect: 2 });
+
+    breaker.recordWorkerActivity({ pbiId: "PBI-A", durationMs: 1 * 60_000, status: "failure" });
+    breaker.recordWorkerActivity({ pbiId: "PBI-A", durationMs: 1 * 60_000, status: "failure" });
+    breaker.recordWorkerActivity({ pbiId: "PBI-B", durationMs: 1 * 60_000, status: "failure" });
+
+    expect(breaker.isTripped("PBI-A")).toBe(true);
+    expect(breaker.isTripped("PBI-B")).toBe(false);
+  });
+
+  it("stops retrying after trip: no more trips on later failures (AC2)", () => {
+    const breaker = new CircuitBreaker({ maxFailedSelfCorrect: 2 });
+
+    breaker.recordWorkerActivity({ pbiId: "PBI-9", durationMs: 1 * 60_000, status: "failure" });
+    breaker.recordWorkerActivity({ pbiId: "PBI-9", durationMs: 1 * 60_000, status: "failure" });
+    expect(breaker.isTripped("PBI-9")).toBe(true);
+
+    const beforeTrips = breaker.getTripEvents().length;
+    breaker.recordWorkerActivity({ pbiId: "PBI-9", durationMs: 1 * 60_000, status: "failure" });
+    breaker.recordWorkerActivity({ pbiId: "PBI-9", durationMs: 1 * 60_000, status: "failure" });
+
+    expect(breaker.getTripEvents().length).toBe(beforeTrips);
   });
 });

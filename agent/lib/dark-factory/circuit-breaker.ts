@@ -21,6 +21,14 @@ export interface CircuitBreakerConfig {
   maxFailedSelfCorrect?: number;
 }
 
+/** One unit of worker execution the breaker observes (already in canonical form). */
+export interface WorkerActivity {
+  pbiId: string;
+  /** Wall-clock duration the sandbox ran, in milliseconds. */
+  durationMs: number;
+  status: "success" | "failure";
+}
+
 export class InvalidTripEventError extends Error {
   constructor(message: string) {
     super(message);
@@ -70,4 +78,86 @@ export function toTripEvent(input: {
     reason: reason as TripReason,
     timestamp: new Date().toISOString(),
   };
+}
+
+/** Internal per-PBI accumulator the breaker maintains. */
+interface PbiState {
+  workerMinutes: number;
+  failedSelfCorrectCycles: number;
+  tripped: boolean;
+}
+
+/**
+ * The factory-level circuit breaker. Observes worker activity per PBI and trips
+ * (halts further work + emits a `TripEvent`) when either guard is exceeded:
+ *
+ *  - cumulative worker-minutes >= `maxWorkerMinutesPerPbi`
+ *  - failed self-correct cycles >= `maxFailedSelfCorrect`
+ *
+ * A tripped PBI stays halted — the breaker records no further minutes or trips
+ * for it, so no additional cost is incurred after the trip (AC3). The guard is
+ * INDEPENDENT of the per-task retry/iteration bounds in #138/#133: it tripped on
+ * its own cap and is additive, never resetting or observing those counters.
+ */
+export class CircuitBreaker {
+  private readonly state = new Map<string, PbiState>();
+  private readonly tripEvents: TripEvent[] = [];
+  private readonly config: Required<CircuitBreakerConfig>;
+
+  constructor(config: CircuitBreakerConfig = {}) {
+    this.config = {
+      maxWorkerMinutesPerPbi: config.maxWorkerMinutesPerPbi ?? 60,
+      maxFailedSelfCorrect: config.maxFailedSelfCorrect ?? 3,
+    };
+  }
+
+  /**
+   * Record one completed unit of worker activity for a PBI. May trip the
+   * breaker if a budget is now exceeded. A tripped PBI is ignored thereafter,
+   * so post-trip work neither counts nor re-trips (AC3).
+   */
+  recordWorkerActivity(activity: WorkerActivity): void {
+    if (this.isTripped(activity.pbiId)) return;
+
+    const minutes = activity.durationMs / 60_000;
+    const s = this.getOrCreateState(activity.pbiId);
+    s.workerMinutes += minutes;
+
+    if (s.workerMinutes >= this.config.maxWorkerMinutesPerPbi) {
+      this.trip(activity.pbiId, s.workerMinutes, "worker-minutes-exceeded");
+      return;
+    }
+
+    if (activity.status === "failure") {
+      s.failedSelfCorrectCycles += 1;
+      if (s.failedSelfCorrectCycles >= this.config.maxFailedSelfCorrect) {
+        this.trip(activity.pbiId, s.workerMinutes, "failed-selfcorrect-exceeded");
+      }
+    }
+  }
+
+  /** Has this PBI's breaker tripped? */
+  isTripped(pbiId: string): boolean {
+    return this.state.get(pbiId)?.tripped ?? false;
+  }
+
+  /** All trip events emitted so far (machine-readable for the escalation channel). */
+  getTripEvents(): TripEvent[] {
+    return [...this.tripEvents];
+  }
+
+  private getOrCreateState(pbiId: string): PbiState {
+    let s = this.state.get(pbiId);
+    if (!s) {
+      s = { workerMinutes: 0, failedSelfCorrectCycles: 0, tripped: false };
+      this.state.set(pbiId, s);
+    }
+    return s;
+  }
+
+  private trip(pbiId: string, workerMinutes: number, reason: TripReason): void {
+    const s = this.getOrCreateState(pbiId);
+    s.tripped = true;
+    this.tripEvents.push(toTripEvent({ pbiId, workerMinutes, reason }));
+  }
 }
