@@ -166,32 +166,71 @@ describe("PR Reviewer Agent - TDD Tests", () => {
       expect(content).toMatch(/AbortSignal\.timeout|timeout|signal:/);
     });
 
-    // Regression: reasoning models (deepseek-v4-pro) spend max_tokens on a
-    // separate `reasoning` field. At 1500 the budget was exhausted before any
-    // answer was emitted, so `content` was null on an HTTP 200 and every review
-    // silently degraded to the fallback. See PR #77.
-    it("should request enough tokens for a reasoning model to emit content", () => {
+    // Regression (#87): `effort` is a HINT, not a hard cap. With a 4k budget
+    // deepseek-v4.1-flash spent ALL of it on reasoning (finish_reason:
+    // "length", reasoning ~16k chars) and returned null content, so every
+    // review silently degraded to the stub. The budget must be sized for a
+    // capped reasoning spend PLUS a full answer.
+    it("sizes max_tokens for a capped reasoning budget plus a full review (#87)", () => {
       const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
       const content = fs.readFileSync(scriptPath, "utf8");
 
-      const match = content.match(/max_tokens:\s*(\d+)/);
+      const match = content.match(
+        /REVIEW_MAX_TOKENS\s*=\s*Number\([^)]*\)\s*\|\|\s*(\d+)/,
+      );
       expect(match).not.toBeNull();
-      const maxTokens = parseInt(match![1], 10);
-      expect(maxTokens).toBeGreaterThanOrEqual(4000);
+      expect(parseInt(match![1], 10)).toBeGreaterThanOrEqual(6000);
     });
 
-    // Regression: the reasoning budget is NON-DETERMINISTIC (0, ~5.5k and
-    // ~17k reasoning tokens observed for the SAME 20k diff), so sizing
-    // max_tokens alone cannot guarantee an answer. Pin an explicit cap.
-    it("caps reasoning effort so the answer always has token budget", () => {
+    // Regression (#87): reasoning must be HARD-capped in tokens (not merely
+    // hinted via `effort`) so the answer always has room, and the total budget
+    // must exceed that cap.
+    it("hard-caps reasoning tokens so the answer always has budget (#87)", () => {
       const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
       const content = fs.readFileSync(scriptPath, "utf8");
 
-      expect(content).toMatch(/reasoning:\s*\{\s*effort:\s*"low"\s*\}/);
-      // max_tokens must comfortably exceed the low-effort reasoning budget.
-      const maxTokens = content.match(/max_tokens:\s*(\d+)/);
-      expect(maxTokens).not.toBeNull();
-      expect(parseInt(maxTokens![1], 10)).toBeGreaterThanOrEqual(4000);
+      expect(content).toMatch(/reasoning:\s*\{[^}]*effort:\s*"low"/);
+      expect(content).toMatch(
+        /reasoning:\s*\{[^}]*max_tokens:\s*REVIEW_REASONING_MAX_TOKENS/,
+      );
+
+      const cap = content.match(
+        /REVIEW_REASONING_MAX_TOKENS\s*=\s*Number\([^)]*\)\s*\|\|\s*(\d+)/,
+      );
+      expect(cap).not.toBeNull();
+      expect(parseInt(cap![1], 10)).toBeLessThanOrEqual(4000);
+
+      const total = content.match(
+        /REVIEW_MAX_TOKENS\s*=\s*Number\([^)]*\)\s*\|\|\s*(\d+)/,
+      );
+      expect(total).not.toBeNull();
+      expect(parseInt(total![1], 10)).toBeGreaterThan(parseInt(cap![1], 10));
+    });
+
+    // #87: on a length-exhausted response the script must RETRY with a smaller
+    // diff instead of immediately posting the structural stub.
+    it("retries on an empty length-exhausted response instead of stubbing (#87)", () => {
+      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
+      const content = fs.readFileSync(scriptPath, "utf8");
+
+      expect(content).toMatch(/finishReason\s*===\s*"length"/);
+      // The retry must shrink the diff (reasoning pressure scales with input).
+      expect(content).toMatch(
+        /truncateDiff\(codeDiff,\s*Math\.floor\(MAX_DIFF_CHARS\s*\/\s*2\)\)/,
+      );
+    });
+
+    // #87: the fallback must state the real cause. Blaming "model unavailable"
+    // is wrong when the model answered HTTP 200 and merely ran out of budget.
+    it("states the real cause in the fallback instead of 'model unavailable' (#87)", () => {
+      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
+      const content = fs.readFileSync(scriptPath, "utf8");
+
+      expect(content).not.toMatch(
+        /The AI model was unavailable \(rate-limited or offline\)/,
+      );
+      expect(content).toMatch(/generateFallbackReview\([^)]*reason/);
+      expect(content).toMatch(/\$\{reason\}/);
     });
 
     // Regression: documentation dominated the diff (a single 70KB plan file

@@ -120,13 +120,23 @@ if (removedFiles.length > 0) {
   );
 }
 
-// Reasoning models (deepseek-v4-pro) spend `max_tokens` on a separate
-// `reasoning` field before emitting any answer. A large diff makes them
-// exhaust that budget, so `content` comes back null on an HTTP 200 and the
-// review silently degrades to the structural fallback. Cap the prompt instead
-// of raising max_tokens forever: measure the budget in characters here, and
-// keep the plan/doc noise out of a code review.
+// Reasoning models (e.g. deepseek-v4.1-flash) spend part of the completion
+// budget on a separate `reasoning` field before emitting any answer, and their
+// reasoning length is NON-DETERMINISTIC. `effort` is only a HINT: with a 4k
+// budget the model spent ALL of it thinking and returned null `content` on an
+// HTTP 200 (finish_reason: "length"), so every review silently degraded to the
+// structural stub (#87). Two guards:
+//   1. HARD-cap the reasoning tokens so the answer always has room, and
+//   2. RETRY once with a smaller diff if the budget is still exhausted.
+// Input is also kept small: docs are stripped, and the diff is capped here.
 const MAX_DIFF_CHARS = Number(process.env.PR_REVIEW_MAX_DIFF_CHARS) || 20000;
+
+// Total completion budget, and the slice reasoning must not exceed. max_tokens
+// has to comfortably exceed the reasoning cap so a full review still fits after
+// the model finishes thinking.
+const REVIEW_MAX_TOKENS = Number(process.env.PR_REVIEW_MAX_TOKENS) || 6000;
+const REVIEW_REASONING_MAX_TOKENS =
+  Number(process.env.PR_REVIEW_REASONING_MAX_TOKENS) || 1500;
 
 function truncateDiff(diff, maxChars) {
   if (diff.length <= maxChars) return { diff, truncated: false, omitted: 0 };
@@ -153,6 +163,24 @@ if (truncated) {
 // Sanitize PR diff to prevent prompt injection (escape backticks)
 const sanitizedPrDiff = reviewDiff.replace(/`/g, "\\`");
 
+const SYSTEM_PROMPT =
+  "You are a senior software engineer reviewing this code diff. Look for architectural anti-patterns, security risks, and off-by-one errors. You MUST reference the exact line numbers from the diff headers (@@ -x,y +a,b @@) in your feedback.";
+
+/**
+ * Assemble the user message for one attempt from an already-sanitized diff.
+ * Extracted so the retry path can reuse it with a smaller diff (#87).
+ */
+function buildUserMessage(sanitizedDiff, wasTruncated, omittedChars) {
+  const excludedNote =
+    removedFiles.length > 0
+      ? `\n\nNote: ${removedFiles.length} documentation file(s) were excluded (${removedFiles.join(", ")}).`
+      : "";
+  const truncationNote = wasTruncated
+    ? `\n\nNote: this diff was truncated to ${sanitizedDiff.length} of ${codeDiff.length} characters (${omittedChars} omitted). Review what is shown; do not speculate about the omitted part.`
+    : "";
+  return `Please review the following diff and provide your feedback with specific line number citations:${excludedNote}${truncationNote}\n\n\`\`\`diff\n${sanitizedDiff}\n\`\`\``;
+}
+
 // Call OpenRouter API to generate review, with fallback for rate limits
 let review;
 try {
@@ -167,82 +195,121 @@ try {
       body: JSON.stringify({
         model: process.env.MODEL_NAME || DEFAULT_MODEL_ID,
         messages: [
-          {
-            role: "system",
-            content:
-              "You are a senior software engineer reviewing this code diff. Look for architectural anti-patterns, security risks, and off-by-one errors. You MUST reference the exact line numbers from the diff headers (@@ -x,y +a,b @@) in your feedback.",
-          },
+          { role: "system", content: SYSTEM_PROMPT },
           {
             role: "user",
-            content: `Please review the following diff and provide your feedback with specific line number citations:${
-              removedFiles.length > 0
-                ? `\n\nNote: ${removedFiles.length} documentation file(s) were excluded (${removedFiles.join(", ")}).`
-                : ""
-            }${
-              truncated
-                ? `\n\nNote: this diff was truncated to ${reviewDiff.length} of ${codeDiff.length} characters (${omitted} omitted). Review what is shown; do not speculate about the omitted part.`
-                : ""
-            }\n\n\`\`\`diff\n${sanitizedPrDiff}\n\`\`\``,
+            content: buildUserMessage(sanitizedPrDiff, truncated, omitted),
           },
         ],
         temperature: 0.2,
-        // Reasoning models (e.g. deepseek-v4-pro) report their thinking in a
-        // separate `reasoning` field and spend `max_tokens` on it. Their
-        // reasoning length is NON-DETERMINISTIC — the same diff has produced
-        // 0, ~5.5k and ~17k reasoning tokens — so sizing `max_tokens` alone
-        // cannot guarantee an answer: when the budget runs out mid-thought,
-        // `content` is null on an HTTP 200 and the review silently degrades to
-        // the structural fallback. Cap the reasoning explicitly so the answer
-        // always has room, and keep max_tokens above reasoning + answer.
-        reasoning: { effort: "low" },
-        max_tokens: 4000,
+        // HARD cap on reasoning: `effort` alone is a hint the model may exceed
+        // (#87), and reasoning length is non-deterministic — the same diff has
+        // produced 0, ~5.5k and ~17k reasoning tokens. max_tokens must
+        // comfortably exceed this cap so a full review still fits afterwards.
+        reasoning: { effort: "low", max_tokens: REVIEW_REASONING_MAX_TOKENS },
+        max_tokens: REVIEW_MAX_TOKENS,
       }),
     },
   );
 
   console.log(`OpenRouter response status: ${openrouterResponse.status}`);
 
+  let content = "";
+  let finishReason = "unknown";
+  let fallbackReason = "the model did not return a review";
+
   if (!openrouterResponse.ok) {
     const errorText = await openrouterResponse.text();
-    console.warn(
-      `OpenRouter call failed (${openrouterResponse.status}), using fallback review.\nResponse: ${errorText}`,
-    );
-    // Fallback: generate a basic review without the model
-    review = generateFallbackReview(prNumber, repoOwner, repoName, prDiff);
+    console.warn(`OpenRouter call failed (${openrouterResponse.status}). Response: ${errorText}`);
+    fallbackReason = `the model API returned HTTP ${openrouterResponse.status}`;
   } else {
     const openrouterData = await openrouterResponse.json();
-    const message = openrouterData.choices?.[0]?.message;
+    const choice = openrouterData.choices?.[0];
+    const message = choice?.message;
 
-    if (!message) {
-      console.warn("Invalid OpenRouter response, using fallback review.");
-      review = generateFallbackReview(prNumber, repoOwner, repoName, prDiff);
-    } else if (!message.content) {
-      // Reasoning models can emit all their output into `reasoning` and leave
-      // `content` null when the token budget runs out. Report that precisely
-      // instead of the generic "Invalid OpenRouter response", and fall back to
-      // the reasoning text when there is nothing else to post.
-      const reasoning = message.reasoning;
-      console.warn(
-        `OpenRouter returned no message content (finish_reason: ${
-          openrouterData.choices?.[0]?.finish_reason ?? "unknown"
-        }, reasoning length: ${
-          typeof reasoning === "string" ? reasoning.length : 0
-        }), using fallback review.`,
-      );
-      review = generateFallbackReview(prNumber, repoOwner, repoName, prDiff);
+    if (message && message.content) {
+      content = message.content;
     } else {
-      review = message.content;
-      console.log(`Generated review of length ${review.length}`);
+      // A null-content success is usually the reasoning budget: the model put
+      // its whole completion budget into `reasoning` and never answered.
+      finishReason = choice?.finish_reason ?? "unknown";
+      const reasoning = message?.reasoning;
+      console.warn(
+        `OpenRouter returned no message content (finish_reason: ${finishReason}, reasoning length: ${
+          typeof reasoning === "string" ? reasoning.length : 0
+        })`,
+      );
     }
+  }
+
+  // #87: a length-exhausted response is NOT an outage — the model spent its
+  // whole output budget reasoning. RETRY once with a smaller diff (reasoning
+  // pressure scales with input) instead of immediately posting the stub.
+  if (!content && finishReason === "length") {
+    console.warn("Reasoning exhausted the token budget; retrying with a smaller diff (#87).");
+    const retry = truncateDiff(codeDiff, Math.floor(MAX_DIFF_CHARS / 2));
+
+    const retryResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: process.env.MODEL_NAME || DEFAULT_MODEL_ID,
+        messages: [
+          { role: "system", content: SYSTEM_PROMPT },
+          {
+            role: "user",
+            content: buildUserMessage(
+              retry.diff.replace(/`/g, "\\`"),
+              retry.truncated,
+              retry.omitted,
+            ),
+          },
+        ],
+        temperature: 0.2,
+        reasoning: { effort: "low", max_tokens: REVIEW_REASONING_MAX_TOKENS },
+        max_tokens: REVIEW_MAX_TOKENS,
+      }),
+    });
+    console.log(`OpenRouter retry response status: ${retryResponse.status}`);
+
+    if (retryResponse.ok) {
+      const retryData = await retryResponse.json();
+      content = retryData.choices?.[0]?.message?.content ?? "";
+    }
+    if (content) {
+      console.log(`Generated review of length ${content.length} (retry)`);
+    } else {
+      fallbackReason =
+        "the model spent its entire output budget on internal reasoning and emitted no answer, even after a retry with a smaller diff";
+    }
+  } else if (!content) {
+    fallbackReason = "the model returned no review content";
+  }
+
+  if (content) {
+    review = content;
+    console.log(`Generated review of length ${review.length}`);
+  } else {
+    review = generateFallbackReview(prNumber, repoOwner, repoName, prDiff, fallbackReason);
   }
 } catch (error) {
   console.error(`Error calling OpenRouter: ${error.message}`);
-  console.warn("Using fallback review.");
-  review = generateFallbackReview(prNumber, repoOwner, repoName, prDiff);
+  review = generateFallbackReview(
+    prNumber,
+    repoOwner,
+    repoName,
+    prDiff,
+    `a transport error (${error.message})`,
+  );
 }
 
-// Generate a deterministic fallback review when the model is unavailable
-function generateFallbackReview(number, owner, repo, diff) {
+// Generate a deterministic fallback review when the model produced no content.
+// `reason` carries the REAL cause (reasoning budget exhausted vs a transport
+// error) so the comment stops blaming a model outage that never happened (#87).
+function generateFallbackReview(number, owner, repo, diff, reason) {
   const lineCount = diff.split("\n").length;
   const addedLines = diff
     .split("\n")
@@ -253,9 +320,9 @@ function generateFallbackReview(number, owner, repo, diff) {
   const filesChanged = (diff.match(/diff --git/g) || []).length;
 
   return [
-    "## Automated PR Review (Fallback Mode)",
+    "## Automated PR Review (Structural Fallback)",
     "",
-    "> ⚠️ The AI model was unavailable (rate-limited or offline). This is a structural review only — please review manually for deeper analysis.",
+    `> ⚠️ The AI review could not be completed: ${reason}. This is a structural review only — please review manually.`,
     "",
     `**PR #${number}** in \`${owner}/${repo}\``,
     "",
@@ -272,7 +339,7 @@ function generateFallbackReview(number, owner, repo, diff) {
     "- [ ] Documentation updated if needed",
     "- [ ] No breaking changes to public APIs",
     "",
-    "Please address the above items and request a re-review once the AI model is available.",
+    "Please review the points above manually.",
   ].join("\n");
 }
 
