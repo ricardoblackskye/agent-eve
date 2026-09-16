@@ -9,7 +9,7 @@
 
 ## Root cause (verified from the CI log on PR #148)
 
-```
+```text
 OpenRouter response status: 200
 OpenRouter returned no message content (finish_reason: length, reasoning length: 16068),
 using fallback review.
@@ -37,10 +37,12 @@ a real review while others return nothing.
 
 ## Fix
 
-1. **Hard-cap reasoning tokens** — replace the effort-only hint with an explicit cap:
-   `reasoning: { effort: "low", max_tokens: REVIEW_REASONING_MAX_TOKENS }` (default
-   1500). The answer then always has room, regardless of how much the model *wants*
-   to think.
+1. **Hard-cap reasoning tokens** — replace the effort-only hint with an explicit
+   token cap: `reasoning: { max_tokens: REVIEW_REASONING_MAX_TOKENS }` (default
+   1500). The answer then always has room, regardless of how much the model wants
+   to think. NOTE: OpenRouter rejects a request that sets BOTH `reasoning.effort`
+   and `reasoning.max_tokens` (HTTP 400 — found on PR #149), so the cap is sent
+   ALONE.
 2. **Raise `max_tokens`** to 6000 so `reasoning cap + a full review` fits
    (env-overridable via `PR_REVIEW_MAX_TOKENS`).
 3. **Retry once instead of degrading to the stub** — on `null content` with
@@ -66,6 +68,7 @@ script, not an importable module) — e.g. `max_tokens >= 4000`,
 They all still pass while the reviewer fails, so they do not capture this bug.
 
 RED (new invariants, which fail today):
+
 - reasoning must carry an explicit **`max_tokens` cap** (not just `effort`).
 - `max_tokens` must be ≥ 6000 (so a capped reasoning budget leaves room).
 - the script must contain a **retry** path for the length-exhausted case.

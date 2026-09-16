@@ -160,8 +160,18 @@ if (truncated) {
   );
 }
 
-// Sanitize PR diff to prevent prompt injection (escape backticks)
-const sanitizedPrDiff = reviewDiff.replace(/`/g, "\\`");
+/**
+ * Escape a diff for safe interpolation into the prompt: backslashes FIRST, then
+ * backticks. Order matters — escaping backticks alone leaves a preceding
+ * backslash able to escape the escaping backslash, i.e. incomplete escaping
+ * (CodeQL flags exactly this). One canonical sanitiser, used by both attempts.
+ */
+function sanitizeForPrompt(text) {
+  return text.replace(/\\/g, "\\\\").replace(/`/g, "\\`");
+}
+
+// Sanitize PR diff to prevent prompt injection (escape backslashes, then backticks)
+const sanitizedPrDiff = sanitizeForPrompt(reviewDiff);
 
 const SYSTEM_PROMPT =
   "You are a senior software engineer reviewing this code diff. Look for architectural anti-patterns, security risks, and off-by-one errors. You MUST reference the exact line numbers from the diff headers (@@ -x,y +a,b @@) in your feedback.";
@@ -202,11 +212,12 @@ try {
           },
         ],
         temperature: 0.2,
-        // HARD cap on reasoning: `effort` alone is a hint the model may exceed
-        // (#87), and reasoning length is non-deterministic — the same diff has
-        // produced 0, ~5.5k and ~17k reasoning tokens. max_tokens must
-        // comfortably exceed this cap so a full review still fits afterwards.
-        reasoning: { effort: "low", max_tokens: REVIEW_REASONING_MAX_TOKENS },
+        // HARD cap on reasoning tokens. OpenRouter allows only ONE of
+        // `reasoning.effort` / `reasoning.max_tokens` per request (sending both
+        // returns HTTP 400), so we send the cap: `effort` is only a hint the
+        // model may exceed, and reasoning length is non-deterministic (0, ~5.5k,
+        // ~17k tokens for the same diff). max_tokens must comfortably exceed it.
+        reasoning: { max_tokens: REVIEW_REASONING_MAX_TOKENS },
         max_tokens: REVIEW_MAX_TOKENS,
       }),
     },
@@ -220,7 +231,9 @@ try {
 
   if (!openrouterResponse.ok) {
     const errorText = await openrouterResponse.text();
-    console.warn(`OpenRouter call failed (${openrouterResponse.status}). Response: ${errorText}`);
+    console.warn(
+      `OpenRouter call failed (${openrouterResponse.status}). Response: ${errorText}`,
+    );
     fallbackReason = `the model API returned HTTP ${openrouterResponse.status}`;
   } else {
     const openrouterData = await openrouterResponse.json();
@@ -246,33 +259,38 @@ try {
   // whole output budget reasoning. RETRY once with a smaller diff (reasoning
   // pressure scales with input) instead of immediately posting the stub.
   if (!content && finishReason === "length") {
-    console.warn("Reasoning exhausted the token budget; retrying with a smaller diff (#87).");
+    console.warn(
+      "Reasoning exhausted the token budget; retrying with a smaller diff (#87).",
+    );
     const retry = truncateDiff(codeDiff, Math.floor(MAX_DIFF_CHARS / 2));
 
-    const retryResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
-        "Content-Type": "application/json",
+    const retryResponse = await fetch(
+      "https://openrouter.ai/api/v1/chat/completions",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: process.env.MODEL_NAME || DEFAULT_MODEL_ID,
+          messages: [
+            { role: "system", content: SYSTEM_PROMPT },
+            {
+              role: "user",
+              content: buildUserMessage(
+                sanitizeForPrompt(retry.diff),
+                retry.truncated,
+                retry.omitted,
+              ),
+            },
+          ],
+          temperature: 0.2,
+          reasoning: { max_tokens: REVIEW_REASONING_MAX_TOKENS },
+          max_tokens: REVIEW_MAX_TOKENS,
+        }),
       },
-      body: JSON.stringify({
-        model: process.env.MODEL_NAME || DEFAULT_MODEL_ID,
-        messages: [
-          { role: "system", content: SYSTEM_PROMPT },
-          {
-            role: "user",
-            content: buildUserMessage(
-              retry.diff.replace(/`/g, "\\`"),
-              retry.truncated,
-              retry.omitted,
-            ),
-          },
-        ],
-        temperature: 0.2,
-        reasoning: { effort: "low", max_tokens: REVIEW_REASONING_MAX_TOKENS },
-        max_tokens: REVIEW_MAX_TOKENS,
-      }),
-    });
+    );
     console.log(`OpenRouter retry response status: ${retryResponse.status}`);
 
     if (retryResponse.ok) {
@@ -293,7 +311,13 @@ try {
     review = content;
     console.log(`Generated review of length ${review.length}`);
   } else {
-    review = generateFallbackReview(prNumber, repoOwner, repoName, prDiff, fallbackReason);
+    review = generateFallbackReview(
+      prNumber,
+      repoOwner,
+      repoName,
+      prDiff,
+      fallbackReason,
+    );
   }
 } catch (error) {
   console.error(`Error calling OpenRouter: ${error.message}`);

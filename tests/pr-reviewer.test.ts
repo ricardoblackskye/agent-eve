@@ -189,10 +189,12 @@ describe("PR Reviewer Agent - TDD Tests", () => {
       const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
       const content = fs.readFileSync(scriptPath, "utf8");
 
-      expect(content).toMatch(/reasoning:\s*\{[^}]*effort:\s*"low"/);
+      // OpenRouter allows only ONE of effort/max_tokens per request (sending
+      // both returns HTTP 400), so the script must send the hard cap ALONE.
       expect(content).toMatch(
-        /reasoning:\s*\{[^}]*max_tokens:\s*REVIEW_REASONING_MAX_TOKENS/,
+        /reasoning:\s*\{\s*max_tokens:\s*REVIEW_REASONING_MAX_TOKENS\s*\}/,
       );
+      expect(content).not.toMatch(/reasoning:\s*\{[^}]*effort:/);
 
       const cap = content.match(
         /REVIEW_REASONING_MAX_TOKENS\s*=\s*Number\([^)]*\)\s*\|\|\s*(\d+)/,
@@ -205,6 +207,18 @@ describe("PR Reviewer Agent - TDD Tests", () => {
       );
       expect(total).not.toBeNull();
       expect(parseInt(total![1], 10)).toBeGreaterThan(parseInt(cap![1], 10));
+    });
+
+    // CodeQL: escaping backticks alone is INCOMPLETE — a preceding backslash can
+    // escape the escaping backslash. A single canonical sanitiser (backslashes
+    // first, then backticks) must be used by BOTH attempts and the retry.
+    it("uses one canonical diff sanitiser for both attempts (CodeQL)", () => {
+      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
+      const content = fs.readFileSync(scriptPath, "utf8");
+
+      expect(content).toMatch(/function sanitizeForPrompt\(/);
+      expect(content).toMatch(/sanitizedPrDiff\s*=\s*sanitizeForPrompt\(reviewDiff\)/);
+      expect(content).toMatch(/sanitizeForPrompt\(retry\.diff\)/);
     });
 
     // #87: on a length-exhausted response the script must RETRY with a smaller
@@ -323,7 +337,7 @@ describe("PR Reviewer Agent - TDD Tests", () => {
 
       // The sanitized diff that reaches the prompt must derive from a
       // truncated value, not the raw diff.
-      expect(source).toMatch(/sanitizedPrDiff\s*=\s*reviewDiff\.replace/);
+      expect(source).toMatch(/sanitizedPrDiff\s*=\s*sanitizeForPrompt\(reviewDiff\)/);
       expect(source).toMatch(/truncateDiff\(/);
       // And the cap must be small enough to leave room for reasoning tokens.
       const cap = source.match(
