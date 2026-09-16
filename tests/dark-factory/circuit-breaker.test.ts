@@ -3,7 +3,10 @@ import {
   toTripEvent,
   InvalidTripEventError,
   CircuitBreaker,
+  createCircuitBreaker,
+  createWorkerActivityObserver,
   type TripReason,
+  type WorkerActivitySink,
 } from "../../agent/lib/dark-factory/circuit-breaker";
 
 // --- Task 144.1: toTripEvent canonical payload ---
@@ -215,5 +218,72 @@ describe("CircuitBreaker self-correct cycle escalation (#144 AC2)", () => {
     breaker.recordWorkerActivity({ pbiId: "PBI-9", durationMs: 1 * 60_000, status: "failure" });
 
     expect(breaker.getTripEvents().length).toBe(beforeTrips);
+  });
+});
+
+// --- Task 144.5: worker-activity observer integration ---
+
+describe("createWorkerActivityObserver integration (#144)", () => {
+  it("forwards worker activity to the breaker", () => {
+    const breaker = new CircuitBreaker({ maxWorkerMinutesPerPbi: 30 });
+    const sink: WorkerActivitySink = createWorkerActivityObserver(breaker);
+
+    sink({ pbiId: "PBI-1", durationMs: 35 * 60_000, status: "success" });
+
+    expect(breaker.isTripped("PBI-1")).toBe(true);
+    expect(breaker.getTripEvents()[0].reason).toBe("worker-minutes-exceeded");
+  });
+
+  it("can mount independently of the breaker instance", () => {
+    const breaker = new CircuitBreaker({ maxFailedSelfCorrect: 1 });
+    const sink = createWorkerActivityObserver(breaker);
+
+    sink({ pbiId: "PBI-2", durationMs: 1 * 60_000, status: "failure" });
+
+    expect(breaker.isTripped("PBI-2")).toBe(true);
+  });
+});
+
+// --- Task 144.6: environment wiring ---
+
+describe("createCircuitBreaker env wiring (#144)", () => {
+  it("uses defaults when env is empty (normal usage stays under budget)", () => {
+    const breaker = createCircuitBreaker({});
+    // 60 min budget, 3 failures — normal usage stays under both
+    breaker.recordWorkerActivity({ pbiId: "PBI-1", durationMs: 10 * 60_000, status: "success" });
+    breaker.recordWorkerActivity({ pbiId: "PBI-1", durationMs: 10 * 60_000, status: "success" });
+    breaker.recordWorkerActivity({ pbiId: "PBI-1", durationMs: 1 * 60_000, status: "failure" });
+    breaker.recordWorkerActivity({ pbiId: "PBI-1", durationMs: 1 * 60_000, status: "failure" });
+    expect(breaker.isTripped("PBI-1")).toBe(false);
+  });
+
+  it("trips exactly at the budget boundary (59.9 + 0.1 = 60)", () => {
+    const breaker = createCircuitBreaker({});
+    breaker.recordWorkerActivity({ pbiId: "PBI-B", durationMs: 59.9 * 60_000, status: "success" });
+    expect(breaker.isTripped("PBI-B")).toBe(false);
+    breaker.recordWorkerActivity({ pbiId: "PBI-B", durationMs: 0.1 * 60_000, status: "success" });
+    expect(breaker.isTripped("PBI-B")).toBe(true);
+  });
+
+  it("reads DF_MAX_WORKER_MINUTES_PER_PBI from env", () => {
+    const breaker = createCircuitBreaker({ DF_MAX_WORKER_MINUTES_PER_PBI: "45" });
+    breaker.recordWorkerActivity({ pbiId: "PBI-2", durationMs: 46 * 60_000, status: "success" });
+    expect(breaker.isTripped("PBI-2")).toBe(true);
+  });
+
+  it("reads DF_MAX_FAILED_SELFCORRECT from env", () => {
+    const breaker = createCircuitBreaker({ DF_MAX_FAILED_SELFCORRECT: "2" });
+    breaker.recordWorkerActivity({ pbiId: "PBI-3", durationMs: 1 * 60_000, status: "failure" });
+    breaker.recordWorkerActivity({ pbiId: "PBI-3", durationMs: 1 * 60_000, status: "failure" });
+    expect(breaker.isTripped("PBI-3")).toBe(true);
+  });
+
+  it("throws on malformed env values (fail-closed, not default)", () => {
+    expect(() => createCircuitBreaker({ DF_MAX_WORKER_MINUTES_PER_PBI: "abc" })).toThrow(
+      /DF_MAX_WORKER_MINUTES_PER_PBI/,
+    );
+    expect(() => createCircuitBreaker({ DF_MAX_FAILED_SELFCORRECT: "0" })).toThrow(
+      /DF_MAX_FAILED_SELFCORRECT/,
+    );
   });
 });

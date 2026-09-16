@@ -29,6 +29,9 @@ export interface WorkerActivity {
   status: "success" | "failure";
 }
 
+/** Sink the worker-environment handler calls when a task finishes. */
+export type WorkerActivitySink = (activity: WorkerActivity) => void;
+
 export class InvalidTripEventError extends Error {
   constructor(message: string) {
     super(message);
@@ -160,4 +163,54 @@ export class CircuitBreaker {
     s.tripped = true;
     this.tripEvents.push(toTripEvent({ pbiId, workerMinutes, reason }));
   }
+}
+
+/**
+ * Adapt a `CircuitBreaker` into the `WorkerActivitySink` the worker-environment
+ * handler calls. Keeping this as a one-line adapter (rather than having the
+ * handler import the breaker directly) means the integration point is explicit
+ * and unit-testable in isolation.
+ */
+export function createWorkerActivityObserver(breaker: CircuitBreaker): WorkerActivitySink {
+  return (activity: WorkerActivity) => {
+    breaker.recordWorkerActivity(activity);
+  };
+}
+
+/**
+ * Choose the circuit-breaker thresholds from the environment.
+ *
+ * Fail-closed: a malformed numeric value is a configuration error and throws,
+ * rather than silently falling back to the default and hiding the operator's
+ * intent. Unset values use the documented defaults (60 min, 3 failures).
+ */
+export function createCircuitBreaker(
+  env: Record<string, string | undefined> = process.env,
+): CircuitBreaker {
+  return new CircuitBreaker({
+    maxWorkerMinutesPerPbi: readInt(
+      "DF_MAX_WORKER_MINUTES_PER_PBI",
+      env.DF_MAX_WORKER_MINUTES_PER_PBI,
+      60,
+      1,
+    ),
+    maxFailedSelfCorrect: readInt("DF_MAX_FAILED_SELFCORRECT", env.DF_MAX_FAILED_SELFCORRECT, 3, 1),
+  });
+}
+
+/** Parse a positive integer env var, throwing on garbage (naming the var). */
+function readInt(
+  name: string,
+  raw: string | undefined,
+  fallback: number,
+  min: number,
+): number {
+  if (raw === undefined || raw.trim() === "") return fallback;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < min) {
+    throw new Error(
+      `${name} must be an integer >= ${min} (received ${JSON.stringify(raw)}).`,
+    );
+  }
+  return parsed;
 }
