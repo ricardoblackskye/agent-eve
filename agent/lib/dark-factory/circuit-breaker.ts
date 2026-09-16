@@ -39,6 +39,23 @@ export class InvalidTripEventError extends Error {
   }
 }
 
+/** Environment variable specification for CircuitBreaker settings. */
+export interface EnvSpec {
+  /** Env var name for max worker minutes per PBI. */
+  maxWorkerMinutesPerPbi: string;
+  /** Env var name for max failed self-correct counts. */
+  maxFailedSelfCorrect: string;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call
+const MAX_SAFE = Number.MAX_SAFE_INTEGER;
+
+/** Default config baked into the breaker when env vars are unset. */
+const DEFAULTS = {
+  maxWorkerMinutesPerPbi: 60,
+  maxFailedSelfCorrect: 3,
+} as const;
+
 const VALID_REASONS: readonly TripReason[] = [
   "worker-minutes-exceeded",
   "failed-selfcorrect-exceeded",
@@ -109,8 +126,8 @@ export class CircuitBreaker {
 
   constructor(config: CircuitBreakerConfig = {}) {
     this.config = {
-      maxWorkerMinutesPerPbi: config.maxWorkerMinutesPerPbi ?? 60,
-      maxFailedSelfCorrect: config.maxFailedSelfCorrect ?? 3,
+      maxWorkerMinutesPerPbi: config.maxWorkerMinutesPerPbi ?? DEFAULTS.maxWorkerMinutesPerPbi,
+      maxFailedSelfCorrect: config.maxFailedSelfCorrect ?? DEFAULTS.maxFailedSelfCorrect,
     };
   }
 
@@ -180,9 +197,15 @@ export function createWorkerActivityObserver(breaker: CircuitBreaker): WorkerAct
 /**
  * Choose the circuit-breaker thresholds from the environment.
  *
- * Fail-closed: a malformed numeric value is a configuration error and throws,
- * rather than silently falling back to the default and hiding the operator's
- * intent. Unset values use the documented defaults (60 min, 3 failures).
+ * **Fail-closed semantics:** a malformed or out-of-range numeric value is a
+ * configuration error and throws, rather than silently falling back to the
+ * default and hiding the operator's intent. Unset/empty values use the
+ * documented defaults (60 minutes, 3 failures).
+ *
+ * Valid range: `>= min` and `<= MAX_SAFE_INTEGER` (Number.MAX_SAFE_INTEGER).
+ * Non-numeric strings (e.g., `"123abc"`, `"-5"`, `"3.14"`) throw immediately.
+ *
+ * @param env - Environment record (defaults to `process.env`)
  */
 export function createCircuitBreaker(
   env: Record<string, string | undefined> = process.env,
@@ -191,14 +214,34 @@ export function createCircuitBreaker(
     maxWorkerMinutesPerPbi: readInt(
       "DF_MAX_WORKER_MINUTES_PER_PBI",
       env.DF_MAX_WORKER_MINUTES_PER_PBI,
-      60,
+      DEFAULTS.maxWorkerMinutesPerPbi,
       1,
     ),
-    maxFailedSelfCorrect: readInt("DF_MAX_FAILED_SELFCORRECT", env.DF_MAX_FAILED_SELFCORRECT, 3, 1),
+    maxFailedSelfCorrect: readInt(
+      "DF_MAX_FAILED_SELFCORRECT",
+      env.DF_MAX_FAILED_SELFCORRECT,
+      DEFAULTS.maxFailedSelfCorrect,
+      1,
+    ),
   });
 }
 
-/** Parse a positive integer env var, throwing on garbage (naming the var). */
+/**
+ * Parse a positive integer environment variable.
+ *
+ * @param name - Env var name (used in error messages)
+ * @param raw - The raw env value or undefined if unset
+ * @param fallback - Default value to return when unset/empty
+ * @param min - Minimum allowed value (inclusive)
+ * @returns The parsed integer
+ * @throws If the value is malformed, non-integer, or outside [min, MAX_SAFE_INTEGER]
+ *
+ * @example
+ * readInt("MY_VAR", undefined, 10)  // returns 10 (default)
+ * readInt("MY_VAR", "42", 10)       // returns 42
+ * readInt("MY_VAR", "0", 10)         // throws: must be >= 10
+ * readInt("MY_VAR", "hello", 10)     // throws: not a valid integer
+ */
 function readInt(
   name: string,
   raw: string | undefined,
@@ -206,11 +249,17 @@ function readInt(
   min: number,
 ): number {
   if (raw === undefined || raw.trim() === "") return fallback;
-  const parsed = Number(raw);
-  if (!Number.isInteger(parsed) || parsed < min) {
-    throw new Error(
-      `${name} must be an integer >= ${min} (received ${JSON.stringify(raw)}).`,
-    );
+
+  // Reject strings with non-numeric trailing content early
+  const trimmed = raw.trim();
+  if (!/^-?\d+$/.test(trimmed)) {
+    throw new Error(`${name} must be a valid integer (received ${JSON.stringify(raw)}).`);
+  }
+
+  const parsed = Number(trimmed);
+  if (!Number.isInteger(parsed) || parsed < min || parsed > MAX_SAFE) {
+    const range = `${min}..${MAX_SAFE}`;
+    throw new Error(`${name} must be an integer in range ${range} (received ${JSON.stringify(raw)}).`);
   }
   return parsed;
 }

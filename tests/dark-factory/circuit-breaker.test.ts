@@ -244,7 +244,7 @@ describe("createWorkerActivityObserver integration (#144)", () => {
   });
 });
 
-// --- Task 144.6: environment wiring ---
+// --- Task 144.6: environment wiring + edge cases ---
 
 describe("createCircuitBreaker env wiring (#144)", () => {
   it("uses defaults when env is empty (normal usage stays under budget)", () => {
@@ -285,5 +285,78 @@ describe("createCircuitBreaker env wiring (#144)", () => {
     expect(() => createCircuitBreaker({ DF_MAX_FAILED_SELFCORRECT: "0" })).toThrow(
       /DF_MAX_FAILED_SELFCORRECT/,
     );
+  });
+});
+
+// --- Edge case tests: large numbers, non-integers, malformed strings ---
+
+describe("readInt edge cases (security & overflow)", () => {
+  it("accepts extremely large but safe integers (up to MAX_SAFE_INTEGER)", () => {
+    const breaker = createCircuitBreaker({
+      DF_MAX_WORKER_MINUTES_PER_PBI: String(Number.MAX_SAFE_INTEGER),
+    });
+    // Value stored directly without truncation
+    expect(breaker.isTripped("any")).toBe(false);
+  });
+
+  it("throws on non-integer numeric strings (e.g., '3.14')", () => {
+    expect(() =>
+      createCircuitBreaker({ DF_MAX_WORKER_MINUTES_PER_PBI: "3.14" }),
+    ).toThrow(/must be a valid integer/);
+  });
+
+  it("throws on strings with trailing non-numeric content (e.g., '123abc')", () => {
+    expect(() =>
+      createCircuitBreaker({ DF_MAX_WORKER_MINUTES_PER_PBI: "123abc" }),
+    ).toThrow(/must be a valid integer/);
+  });
+
+  it("uses default when string is all whitespace (treated as unset)", () => {
+    const breaker = createCircuitBreaker({ DF_MAX_WORKER_MINUTES_PER_PBI: "   " });
+    expect(breaker.isTripped("any")).toBe(false);
+  });
+
+  it("uses default when empty string provided", () => {
+    const breaker = createCircuitBreaker({ DF_MAX_WORKER_MINUTES_PER_PBI: "" });
+    expect(breaker.isTripped("any")).toBe(false);
+  });
+
+  it("throws on value below minimum (fail-closed)", () => {
+    expect(() =>
+      createCircuitBreaker({ DF_MAX_WORKER_MINUTES_PER_PBI: "0" }),
+    ).toThrow(/must be an integer in range/);
+    expect(() =>
+      createCircuitBreaker({ DF_MAX_WORKER_MINUTES_PER_PBI: "-5" }),
+    ).toThrow(/must be an integer in range/);
+  });
+
+  it("throws on malformed DF_MAX_FAILED_SELFCORRECT", () => {
+    expect(() =>
+      createCircuitBreaker({ DF_MAX_FAILED_SELFCORRECT: "1.5" }),
+    ).toThrow(/must be a valid integer/);
+    expect(() =>
+      createCircuitBreaker({ DF_MAX_FAILED_SELFCORRECT: "abc" }),
+    ).toThrow(/must be a valid integer/);
+  });
+
+  it("throws with descriptive error message for range violations", () => {
+    expect(() =>
+      createCircuitBreaker({ DF_MAX_WORKER_MINUTES_PER_PBI: "0" }),
+    ).toThrow(/range \d+\.\.\d+/);
+  });
+
+  it("max boundary: 1 is the minimum valid value", () => {
+    const breaker = createCircuitBreaker({
+      DF_MAX_WORKER_MINUTES_PER_PBI: "1",
+      DF_MAX_FAILED_SELFCORRECT: "1",
+    });
+    breaker.recordWorkerActivity({ pbiId: "PBI-X", durationMs: 1 * 60_000, status: "success" });
+    expect(breaker.isTripped("PBI-X")).toBe(true);
+  });
+
+  it("max boundary: default values yield valid states", () => {
+    // Verify defaults are valid (no throw)
+    const breaker = createCircuitBreaker({});
+    expect(breaker.isTripped("any")).toBe(false);
   });
 });
