@@ -22,6 +22,17 @@ export { createMetricsStore } from "./metrics";
 // canonical shapes and their env wiring stay in one module.
 export { createCredentialBroker } from "./credentials";
 export { createWorkerProvider, createWorkerHandler } from "./worker-env";
+export {
+  createCircuitBreaker,
+  createWorkerActivityObserver,
+  CircuitBreaker,
+  validateWorkerActivity,
+  type WorkerActivity,
+  type WorkerActivitySink,
+  type TripEvent,
+  type TripReason,
+  type CircuitBreakerConfig,
+} from "./circuit-breaker";
 
 /**
  * Adapt the dispatch attempt stream into the observability store (#140 AC4).
