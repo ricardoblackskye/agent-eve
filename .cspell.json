@@ -39,6 +39,7 @@
     "browsable",
     "Capitalise",
     "behaviour",
+    "behavioural",
     "capitalised",
     "nfr",
     "nfrs",
@@ -70,6 +71,7 @@
     "normalize",
     "normalise",
     "normalises",
+    "normalised",
     "normalizing",
     "normalisation",
     "canonicalise",
@@ -81,7 +83,8 @@
     "defences",
     "unconfigured",
     "baselining",
-    "ttft"
+    "ttft",
+    "üñíçödé"
   ],
   "ignorePaths": [
     "node_modules/**",

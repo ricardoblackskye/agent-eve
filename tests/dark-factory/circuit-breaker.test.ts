@@ -815,9 +815,11 @@ describe("boundary condition tests", () => {
 
 describe("Unicode PBI ID handling", () => {
   it("rejects PBI IDs with Unicode characters", () => {
+    // Unicode string intentionally in source to test rejection - keep as-is for readability
+    const unicodeId = "PBI-üñíçödé" as string;
     expect(() =>
       toTripEvent({
-        pbiId: "PBI-üñíçödé", // Unicode chars rejected by regex
+        pbiId: unicodeId, // Unicode chars rejected by regex
         workerMinutes: 10,
         reason: "worker-minutes-exceeded",
       }),
