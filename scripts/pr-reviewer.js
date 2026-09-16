@@ -273,11 +273,25 @@ try {
   // #87: a length-exhausted response is NOT an outage — the model spent its
   // whole output budget reasoning. RETRY once with a smaller diff (reasoning
   // pressure scales with input) instead of immediately posting the stub.
-  if (!content && finishReason === "length") {
+  const retry = truncateDiff(codeDiff, Math.floor(MAX_DIFF_CHARS / 2));
+  // Halving the diff is the retry's only lever: if the diff already fits within
+  // half the cap, the "retry" would send an IDENTICAL payload and exhaust the
+  // same budget — skip the wasted call and fall through to the fallback with a
+  // cause-accurate reason (raised in the AI review of PR #149).
+  const retryWouldBeIdentical = retry.diff === reviewDiff;
+
+  if (!content && finishReason === "length" && retryWouldBeIdentical) {
+    console.warn(
+      "Skipping retry: the diff already fits in half the cap, so the retry would send an identical payload (#87).",
+    );
+    fallbackReason =
+      "the model spent its entire output budget on internal reasoning and emitted no answer";
+  }
+
+  if (!content && finishReason === "length" && !retryWouldBeIdentical) {
     console.warn(
       "Reasoning exhausted the token budget; retrying with a smaller diff (#87).",
     );
-    const retry = truncateDiff(codeDiff, Math.floor(MAX_DIFF_CHARS / 2));
 
     const retryResponse = await fetch(
       "https://openrouter.ai/api/v1/chat/completions",

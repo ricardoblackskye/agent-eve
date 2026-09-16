@@ -217,8 +217,29 @@ describe("PR Reviewer Agent - TDD Tests", () => {
       const content = fs.readFileSync(scriptPath, "utf8");
 
       expect(content).toMatch(/function sanitizeForPrompt\(/);
-      expect(content).toMatch(/sanitizedPrDiff\s*=\s*sanitizeForPrompt\(reviewDiff\)/);
+      expect(content).toMatch(
+        /sanitizedPrDiff\s*=\s*sanitizeForPrompt\(reviewDiff\)/,
+      );
       expect(content).toMatch(/sanitizeForPrompt\(retry\.diff\)/);
+    });
+
+    // AI review of PR #149: if the diff already fits in half the cap, halving it
+    // changes nothing, so the "retry" would resend an identical payload and burn
+    // an API call to fail the same way. Detect that and skip the wasted call.
+    it("skips the retry when halving the diff would change nothing", () => {
+      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
+      const content = fs.readFileSync(scriptPath, "utf8");
+
+      expect(content).toMatch(
+        /const retryWouldBeIdentical = retry\.diff === reviewDiff/,
+      );
+      expect(content).toMatch(
+        /finishReason === "length" && retryWouldBeIdentical/,
+      );
+      expect(content).toMatch(
+        /finishReason === "length" && !retryWouldBeIdentical/,
+      );
+      expect(content).toMatch(/Skipping retry:/);
     });
 
     // #87: on a length-exhausted response the script must RETRY with a smaller
@@ -337,7 +358,9 @@ describe("PR Reviewer Agent - TDD Tests", () => {
 
       // The sanitized diff that reaches the prompt must derive from a
       // truncated value, not the raw diff.
-      expect(source).toMatch(/sanitizedPrDiff\s*=\s*sanitizeForPrompt\(reviewDiff\)/);
+      expect(source).toMatch(
+        /sanitizedPrDiff\s*=\s*sanitizeForPrompt\(reviewDiff\)/,
+      );
       expect(source).toMatch(/truncateDiff\(/);
       // And the cap must be small enough to leave room for reasoning tokens.
       const cap = source.match(
