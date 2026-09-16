@@ -159,6 +159,39 @@ const VALID_REASONS: readonly TripReason[] = [
 const PBI_ID_PATTERN = /^[A-Za-z][A-Za-z0-9_-]*$/;
 
 /**
+ * Validate a WorkerActivity object for strict type safety and security.
+ * Separated from recordWorkerActivity for testability and maintainability.
+ */
+export function validateWorkerActivity(activity: WorkerActivity): void {
+  if (!activity || typeof activity !== "object") {
+    throw new InvalidTripEventError("WorkerActivity must be a non-null object.");
+  }
+  if (typeof activity.pbiId !== "string" || activity.pbiId.length === 0) {
+    throw new InvalidTripEventError("WorkerActivity requires a non-empty string pbiId.");
+  }
+  if (activity.pbiId.length > PBI_ID_MAX_LENGTH) {
+    throw new InvalidTripEventError(
+      `WorkerActivity pbiId exceeds maximum length of ${PBI_ID_MAX_LENGTH} characters (received ${activity.pbiId.length}).`,
+    );
+  }
+  if (!PBI_ID_PATTERN.test(activity.pbiId)) {
+    throw new InvalidTripEventError(
+      `WorkerActivity pbiId "${activity.pbiId}" must match pattern ${PBI_ID_PATTERN.source}.`,
+    );
+  }
+  if (typeof activity.durationMs !== "number" || !Number.isFinite(activity.durationMs) || activity.durationMs < 0) {
+    throw new InvalidTripEventError(
+      `WorkerActivity durationMs must be a finite number >= 0 (received ${JSON.stringify(activity.durationMs)}).`,
+    );
+  }
+  if (activity.status !== "success" && activity.status !== "failure") {
+    throw new InvalidTripEventError(
+      `WorkerActivity status must be "success" or "failure" (received ${JSON.stringify(activity.status)}).`,
+    );
+  }
+}
+
+/**
  * Validate and normalise a circuit-breaker trip event. Invalid input THROWS
  * (a caller bug — the guard contract was violated), so a malformed trip can
  * never be recorded or emitted as if it were real.
@@ -344,33 +377,8 @@ export class CircuitBreaker {
    * - workerMinutes addition uses Number-safe bounds to prevent overflow.
    */
   recordWorkerActivity(activity: WorkerActivity): void {
-    // Strict validation: reject malformed activity objects
-    if (!activity || typeof activity !== "object") {
-      throw new InvalidTripEventError("WorkerActivity must be a non-null object.");
-    }
-    if (typeof activity.pbiId !== "string" || activity.pbiId.length === 0) {
-      throw new InvalidTripEventError("WorkerActivity requires a non-empty string pbiId.");
-    }
-    if (activity.pbiId.length > PBI_ID_MAX_LENGTH) {
-      throw new InvalidTripEventError(
-        `pbiId exceeds maximum length of ${PBI_ID_MAX_LENGTH} characters (received ${activity.pbiId.length}).`,
-      );
-    }
-    if (!PBI_ID_PATTERN.test(activity.pbiId)) {
-      throw new InvalidTripEventError(
-        `pbiId "${activity.pbiId}" must match pattern ${PBI_ID_PATTERN.source}.`,
-      );
-    }
-    if (typeof activity.durationMs !== "number" || !Number.isFinite(activity.durationMs) || activity.durationMs < 0) {
-      throw new InvalidTripEventError(
-        `WorkerActivity.durationMs must be a finite number >= 0 (received ${JSON.stringify(activity.durationMs)}).`,
-      );
-    }
-    if (activity.status !== "success" && activity.status !== "failure") {
-      throw new InvalidTripEventError(
-        `WorkerActivity.status must be "success" or "failure" (received ${JSON.stringify(activity.status)}).`,
-      );
-    }
+    // Delegate to validator for strict input validation
+    validateWorkerActivity(activity);
 
     if (this.isTripped(activity.pbiId)) return;
 
@@ -385,23 +393,17 @@ export class CircuitBreaker {
     // 59,999ms (just under 1 minute).
     const minutes = Math.ceil(activity.durationMs / 60_000);
 
-    // Overflow protection: ensure addition won't exceed safe integer
-    const current = this.state.get(activity.pbiId);
-    if (current && current.workerMinutes > Number.MAX_SAFE_INTEGER / 2) {
-      // Would overflow on next addition; trip defensively
-      this.trip(activity.pbiId, current.workerMinutes, "worker-minutes-exceeded");
-      return;
-    }
+    // Get or create state (will fail fast on overflow later)
+    const state = this.getOrCreateState(activity.pbiId);
 
     // Guard against memory bloat — check BEFORE adding new state so we never
     // temporarily exceed maxStateEntries.
-    const state = this.getOrCreateState(activity.pbiId);
     if (this.state.size > this.config.maxStateEntries) {
       this.enforceStateLimit();
     }
 
-    state.workerMinutes += minutes;
-    state.lastActivityAt = Date.now();
+    // Overflow-safe addition with defensive trip
+    this.checkedWorkerMinutesAdd(state, minutes, activity.pbiId);
 
     if (state.workerMinutes >= this.config.maxWorkerMinutesPerPbi) {
       this.trip(activity.pbiId, state.workerMinutes, "worker-minutes-exceeded");
@@ -414,6 +416,23 @@ export class CircuitBreaker {
         this.trip(activity.pbiId, state.workerMinutes, "failed-selfcorrect-exceeded");
       }
     }
+  }
+
+  /**
+   * Overflow-safe worker minutes addition.
+   * Trips defensively if addition would exceed safe integer bounds.
+   * This prevents both integer overflow and memory exhaustion via many tiny additions.
+   */
+  private checkedWorkerMinutesAdd(state: PbiState, minutes: number, pbiId: string): void {
+    // Defensive bound check before adding: if current > MAX - minutes, adding would overflow
+    if (state.workerMinutes > Number.MAX_SAFE_INTEGER - minutes) {
+      // Would overflow — trip the breaker to prevent corruption
+      this.trip(pbiId, state.workerMinutes, "worker-minutes-exceeded");
+      return;
+    }
+
+    state.workerMinutes += minutes;
+    state.lastActivityAt = Date.now();
   }
 
   /** Has this PBI's breaker tripped? */

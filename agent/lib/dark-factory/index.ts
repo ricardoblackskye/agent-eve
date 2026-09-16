@@ -26,6 +26,7 @@ export {
   createCircuitBreaker,
   createWorkerActivityObserver,
   CircuitBreaker,
+  validateWorkerActivity,
   type WorkerActivity,
   type WorkerActivitySink,
   type TripEvent,

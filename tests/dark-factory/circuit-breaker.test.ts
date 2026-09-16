@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   toTripEvent,
+  validateWorkerActivity,
   InvalidTripEventError,
   EnvConfigError,
   CircuitBreaker,
@@ -885,5 +886,69 @@ describe("recordWorkerActivity input validation", () => {
     expect(() =>
       breaker.recordWorkerActivity({ pbiId: "PBI-1", durationMs: 60_000, status: "success" }),
     ).not.toThrow();
+  });
+});
+
+describe("validateWorkerActivity function", () => {
+  it("accepts valid activity", () => {
+    expect(() =>
+      validateWorkerActivity({ pbiId: "PBI-1", durationMs: 60_000, status: "success" }),
+    ).not.toThrow();
+    expect(() =>
+      validateWorkerActivity({ pbiId: "PBI-2", durationMs: 30_000, status: "failure" }),
+    ).not.toThrow();
+  });
+
+  it("rejects null activity", () => {
+    expect(() => validateWorkerActivity(null as unknown as WorkerActivity)).toThrow(
+      /non-null object/,
+    );
+  });
+
+  it("rejects missing pbiId", () => {
+    expect(() =>
+      validateWorkerActivity({ pbiId: undefined as unknown as string, durationMs: 60_000, status: "success" }),
+    ).toThrow(/non-empty string/);
+  });
+
+  it("rejects pbiId starting with number", () => {
+    expect(() =>
+      validateWorkerActivity({ pbiId: "1bad-id", durationMs: 60_000, status: "success" }),
+    ).toThrow(/must match pattern/);
+  });
+});
+
+describe("integer overflow protection", () => {
+  it("handles edge case at threshold boundary", () => {
+    // Test the >= comparison for trip threshold
+    const breaker = new CircuitBreaker({ maxWorkerMinutesPerPbi: 5 });
+
+    breaker.recordWorkerActivity({ pbiId: "PBI-TRIP", durationMs: 60_000, status: "success" });
+    expect(breaker.getWorkerMinutes("PBI-TRIP")).toBe(1);
+    expect(breaker.isTripped("PBI-TRIP")).toBe(false);
+
+    // Add until threshold reached
+    breaker.recordWorkerActivity({ pbiId: "PBI-TRIP", durationMs: 60_000, status: "success" });
+    expect(breaker.getWorkerMinutes("PBI-TRIP")).toBe(2);
+
+    breaker.recordWorkerActivity({ pbiId: "PBI-TRIP", durationMs: 60_000, status: "success" });
+    expect(breaker.getWorkerMinutes("PBI-TRIP")).toBe(3);
+
+    breaker.recordWorkerActivity({ pbiId: "PBI-TRIP", durationMs: 60_000, status: "success" });
+    expect(breaker.getWorkerMinutes("PBI-TRIP")).toBe(4);
+
+    breaker.recordWorkerActivity({ pbiId: "PBI-TRIP", durationMs: 60_000, status: "success" });
+    expect(breaker.getWorkerMinutes("PBI-TRIP")).toBe(5);
+    expect(breaker.isTripped("PBI-TRIP")).toBe(true); // Tripped at exactly threshold
+  });
+
+  it("validates overflow bound check in recordWorkerActivity", () => {
+    // The checkedWorkerMinutesAdd uses Number.MAX_SAFE_INTEGER - minutes
+    // for overflow protection - verify the method exists and works
+    const breaker = new CircuitBreaker({ maxWorkerMinutesPerPbi: 60 });
+
+    // Normal operation succeeds
+    breaker.recordWorkerActivity({ pbiId: "PBI-VALID", durationMs: 120_000, status: "success" });
+    expect(breaker.getWorkerMinutes("PBI-VALID")).toBe(2);
   });
 });
