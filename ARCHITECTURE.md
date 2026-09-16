@@ -283,3 +283,29 @@ Honest limits: no live container isolation is exercised in R2 (no E2B/Modal key)
 the default provider is a dry-run that never claims otherwise. The e2b/modal adapters
 plug into the same seam once credentials exist, and the credential source can be
 swapped to a GitHub App installation token without changing the broker's API.
+
+### Factory-level circuit breaker / cost guard (R3, #144)
+
+R3 adds the cross-task safety guard the recursive loop was missing: a **circuit
+breaker** that caps how much a single PBI may cost before a human is pulled in.
+
+- **`circuit-breaker.ts` (#144)** — a `CircuitBreaker` stateful guard. It tracks,
+  per `pbiId`, **cumulative worker-minutes** and **failed self-correct cycles**, and
+  trips (halts further work, emits a machine-readable `circuit-breaker-tripped`
+  event) on either of two independent thresholds:
+  - `DF_MAX_WORKER_MINUTES_PER_PBI` (default 60) — the PBI's total worker-task
+    duration crosses this budget.
+  - `DF_MAX_FAILED_SELFCORRECT` (default 3) — `N` CI-fail → re-dispatch → fail cycles
+    with no intervening success. A success resets the failure counter for that PBI.
+- The breaker is **independent of and additive to** the per-task retry/iteration
+  bounds in #138/#133: it reads the same worker-activity stream but never mutates
+  agent-internal state, and a tripped PBI stays halted so no further minutes are
+  counted or trips emitted.
+- **Wiring** — `createCircuitBreaker(env)` builds the guard from the env knobs
+  (fail-closed on malformed values, defaults 60 min / 3 failures);
+  `createWorkerActivityObserver(breaker)` adapts it into the worker-env sink so the
+  R2 handler records each run. Both thresholds, the trip-event shape, and the
+  fail-closed env contract are covered by `tests/dark-factory/circuit-breaker.test.ts`.
+
+The Developer (#133) and Tester (#136) agents plug into this seam in their own
+story branches; neither can run a worker task past a tripped PBI.

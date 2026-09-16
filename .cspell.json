@@ -98,7 +98,8 @@
     "refactorable",
     "normaliser",
     "POCRUN",
-    "evilother"
+    "evilother",
+    "Pbis"
   ],
   "ignorePaths": [
     "node_modules/**",

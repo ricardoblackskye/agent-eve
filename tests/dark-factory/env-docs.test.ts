@@ -22,9 +22,11 @@ const DARK_FACTORY_VARS = [
   "DF_WORKER_ALLOWED_REPOS",
   "DF_WORKER_RUNTIME",
   "DF_CREDENTIAL_TTL_SECONDS",
+  "DF_MAX_WORKER_MINUTES_PER_PBI",
+  "DF_MAX_FAILED_SELFCORRECT",
 ];
 
-describe(".env.example — Dark Factory R1 (#134/#138/#140)", () => {
+describe(".env.example — Dark Factory (#134/#138/#140/#135/#142/#144)", () => {
   for (const name of DARK_FACTORY_VARS) {
     it(`documents ${name}`, () => {
       expect(raw).toMatch(new RegExp(`^${name}=`, "m"));
