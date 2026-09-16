@@ -225,6 +225,12 @@ export function toTripEvent(input: {
       `Trip event requires "workerMinutes" to be a finite number >= 0 (received ${JSON.stringify(minutes)}, got ${typeof minutes}).`,
     );
   }
+  // Worker minutes are discrete; enforce integer type
+  if (!Number.isInteger(minutes)) {
+    throw new InvalidTripEventError(
+      `Trip event requires "workerMinutes" to be an integer (received ${minutes}).`,
+    );
+  }
 
   const reason = input.reason;
   if (!reason || !VALID_REASONS.includes(reason as TripReason)) {

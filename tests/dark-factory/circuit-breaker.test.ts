@@ -954,3 +954,24 @@ describe("integer overflow protection", () => {
     expect(breaker.getWorkerMinutes("PBI-VALID")).toBe(2);
   });
 });
+
+describe("toTripEvent integer validation", () => {
+  it("rejects non-integer workerMinutes", () => {
+    expect(() =>
+      toTripEvent({
+        pbiId: "PBI-DECIMAL",
+        workerMinutes: 10.5, // Float rejected
+        reason: "worker-minutes-exceeded",
+      }),
+    ).toThrow(/integer/);
+  });
+
+  it("accepts integer workerMinutes", () => {
+    const event = toTripEvent({
+      pbiId: "PBI-INT",
+      workerMinutes: 42, // Integer accepted
+      reason: "worker-minutes-exceeded",
+    });
+    expect(event.workerMinutes).toBe(42);
+  });
+});
