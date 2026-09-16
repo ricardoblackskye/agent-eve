@@ -156,9 +156,6 @@ export function toTripEvent(input: {
       `Trip event requires a non-empty "pbiId" (received ${JSON.stringify(input.pbiId)}).`,
     );
   }
-  if (!Number.isNaN(rawPbiId.length)) {
-    // Defensive: protect against edge cases
-  }
   if (rawPbiId.length > PBI_ID_MAX_LENGTH) {
     throw new InvalidTripEventError(
       `Trip event "pbiId" must be <= ${PBI_ID_MAX_LENGTH} characters (received ${rawPbiId.length}).`,
@@ -171,14 +168,9 @@ export function toTripEvent(input: {
   }
 
   const minutes = input.workerMinutes;
-  if (typeof minutes !== "number" || !Number.isFinite(minutes) || Number.isNaN(minutes)) {
+  if (typeof minutes !== "number" || !Number.isFinite(minutes) || minutes < 0) {
     throw new InvalidTripEventError(
       `Trip event requires "workerMinutes" to be a finite number >= 0 (received ${JSON.stringify(minutes)}, got ${typeof minutes}).`,
-    );
-  }
-  if (minutes < 0) {
-    throw new InvalidTripEventError(
-      `Trip event requires "workerMinutes" to be >= 0 (received ${minutes}).`,
     );
   }
 
