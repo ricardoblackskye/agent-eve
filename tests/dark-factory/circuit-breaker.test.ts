@@ -713,3 +713,66 @@ describe("maxTotalTripEvents rate limiting", () => {
     expect(breaker.getTripEvents()).toHaveLength(3); // still 3
   });
 });
+
+// --- State limit enforcement edge cases ---
+
+describe("maxStateEntries enforcement", () => {
+  it("removes oldest entries when state exceeds limit", () => {
+    const breaker = new CircuitBreaker({ maxStateEntries: 3 });
+
+    // Add 4 PBIs (each one creates state)
+    for (let i = 0; i < 4; i++) {
+      breaker.recordWorkerActivity({
+        pbiId: `PBI-STATE-${i}`,
+        durationMs: 10 * 60_000,
+        status: "success",
+      });
+    }
+
+    // State should be at or below limit
+    expect(breaker.getStateSize()).toBeLessThanOrEqual(3);
+  });
+
+  it("keeps most recently used entries when enforcing limit", () => {
+    const breaker = new CircuitBreaker({ maxStateEntries: 2, maxWorkerMinutesPerPbi: 1 });
+
+    // Create first entry (trips at 1 min)
+    breaker.recordWorkerActivity({ pbiId: "PBI-OLD", durationMs: 65 * 60_000, status: "success" });
+    // Create second entry
+    breaker.recordWorkerActivity({ pbiId: "PBI-MID", durationMs: 65 * 60_000, status: "success" });
+    // Create third entry (oldest should be removed)
+    breaker.recordWorkerActivity({ pbiId: "PBI-NEW", durationMs: 65 * 60_000, status: "success" });
+
+    // PBI-OLD should have been cleaned up
+    expect(breaker.isTripped("PBI-OLD")).toBe(false);
+    // PBI-MID and PBI-NEW should still exist
+    expect(breaker.isTripped("PBI-MID")).toBe(true);
+    expect(breaker.isTripped("PBI-NEW")).toBe(true);
+  });
+});
+
+describe("destroy() clears all state", () => {
+  it("stops timer and clears state/tripEvents", () => {
+    const breaker = new CircuitBreaker({ autoCleanupIntervalMs: 0 });
+
+    breaker.recordWorkerActivity({
+      pbiId: "PBI-DESTROY",
+      durationMs: 65 * 60_000,
+      status: "success",
+    });
+    expect(breaker.getTripEvents()).toHaveLength(1);
+    expect(breaker.getStateSize()).toBe(1);
+
+    breaker.destroy();
+
+    expect(breaker.getTripEvents()).toHaveLength(0);
+    expect(breaker.getStateSize()).toBe(0);
+    expect(breaker.isTripped("PBI-DESTROY")).toBe(false);
+  });
+
+  it("safe to call destroy multiple times", () => {
+    const breaker = new CircuitBreaker({});
+    expect(() => breaker.destroy()).not.toThrow();
+    expect(() => breaker.destroy()).not.toThrow();
+  });
+});
