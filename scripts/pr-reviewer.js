@@ -177,16 +177,26 @@ const SYSTEM_PROMPT =
   "You are a senior software engineer reviewing this code diff. Look for architectural anti-patterns, security risks, and off-by-one errors. You MUST reference the exact line numbers from the diff headers (@@ -x,y +a,b @@) in your feedback.";
 
 /**
- * Assemble the user message for one attempt from an already-sanitized diff.
- * Extracted so the retry path can reuse it with a smaller diff (#87).
+ * Assemble the user message for one attempt.
+ *
+ * `sanitizedDiff` is the ESCAPED text sent to the model; `keptLength` is the
+ * un-escaped length of the diff we actually kept. The truncation note must report
+ * the real size — escaping adds backslashes, so using `${sanitizedDiff.length}`
+ * overstates it (found in the AI review of PR #149). Extracted so the retry path
+ * reuses one prompt builder.
  */
-function buildUserMessage(sanitizedDiff, wasTruncated, omittedChars) {
+function buildUserMessage(
+  sanitizedDiff,
+  wasTruncated,
+  omittedChars,
+  keptLength,
+) {
   const excludedNote =
     removedFiles.length > 0
       ? `\n\nNote: ${removedFiles.length} documentation file(s) were excluded (${removedFiles.join(", ")}).`
       : "";
   const truncationNote = wasTruncated
-    ? `\n\nNote: this diff was truncated to ${sanitizedDiff.length} of ${codeDiff.length} characters (${omittedChars} omitted). Review what is shown; do not speculate about the omitted part.`
+    ? `\n\nNote: this diff was truncated to ${keptLength} of ${codeDiff.length} characters (${omittedChars} omitted). Review what is shown; do not speculate about the omitted part.`
     : "";
   return `Please review the following diff and provide your feedback with specific line number citations:${excludedNote}${truncationNote}\n\n\`\`\`diff\n${sanitizedDiff}\n\`\`\``;
 }
@@ -208,7 +218,12 @@ try {
           { role: "system", content: SYSTEM_PROMPT },
           {
             role: "user",
-            content: buildUserMessage(sanitizedPrDiff, truncated, omitted),
+            content: buildUserMessage(
+              sanitizedPrDiff,
+              truncated,
+              omitted,
+              reviewDiff.length,
+            ),
           },
         ],
         temperature: 0.2,
@@ -282,6 +297,7 @@ try {
                 sanitizeForPrompt(retry.diff),
                 retry.truncated,
                 retry.omitted,
+                retry.diff.length,
               ),
             },
           ],
