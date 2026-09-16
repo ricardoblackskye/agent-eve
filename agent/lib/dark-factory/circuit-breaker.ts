@@ -59,6 +59,7 @@ export type WorkerActivitySink = (activity: WorkerActivity) => void;
 
 /** Error thrown when a circuit-breaker trip event is invalid. */
 export class InvalidTripEventError extends Error {
+  readonly code = "ERR_INVALID_TRIP_EVENT";
   constructor(message: string) {
     super(message);
     this.name = "InvalidTripEventError";
@@ -67,6 +68,7 @@ export class InvalidTripEventError extends Error {
 
 /** Error thrown when environment configuration is invalid or missing. */
 export class EnvConfigError extends Error {
+  readonly code = "ERR_ENV_CONFIG";
   constructor(message: string) {
     super(message);
     this.name = "EnvConfigError";
@@ -289,12 +291,17 @@ export class CircuitBreaker {
 
   /**
    * Clear stale PBI states to prevent memory bloat.
-   * Removes entries for PBIs that have tripped and have no pending activity.
    *
-   * @param maxAgeMinutes Optional max age in minutes for non-tripped states to clear
+   * @param maxAgeMinutes For tripped states: removes if tripCount >= maxTripsPerPbi.
+   *                      For non-tripped states: removes if no activity for maxAgeMinutes.
+   *                      Default clears all fully-expended tripped states.
+   * @returns Number of state entries cleared
    */
   cleanupStaleStates(maxAgeMinutes?: number): number {
     let cleared = 0;
+    const now = Date.now();
+    const maxAgeMs = (maxAgeMinutes ?? 60) * 60_000;
+
     for (const [pbiId, s] of this.state) {
       if (s.tripped && s.tripCount >= this.config.maxTripsPerPbi) {
         this.state.delete(pbiId);
@@ -315,7 +322,10 @@ export class CircuitBreaker {
 
   private trip(pbiId: string, workerMinutes: number, reason: TripReason): void {
     const s = this.getOrCreateState(pbiId);
-    // Rate limiting: don't emit more than maxTripsPerPbi
+    // Trip count starts at 0, so s.tripCount holds the count of trips that have occurred.
+    // The check >= maxTripsPerPbi means we've already reached the limit before incrementing.
+    // Result: exactly maxTripsPerPbi trips will be emitted (1-based counting from the caller's
+    // perspective, 0-based in implementation).
     if (s.tripCount >= this.config.maxTripsPerPbi) return;
 
     s.tripped = true;
