@@ -4,6 +4,15 @@
  * A cross-task safety guard that caps cumulative worker-minutes per PBI and
  * escalates after a configured number of failed self-correct cycles. Independent
  * additive guard on top of the per-task retry/iteration bounds in #138 and #133.
+ *
+ * DESIGN DECISIONS:
+ * - State is IN-MEMORY (no persistence). Trip events are emitted for external logging;
+ *   the breaker only needs the PBI's *current* state, not historical data.
+ * - Math.ceil() for ms→min conversion ensures we NEVER under-count toward the budget
+ *   (security: better to over-caution than under-caution). Maximum over-count is 59s
+ *   per task, which is acceptable for a cost-protection mechanism.
+ * - PBI_ID_PATTERN allows alphanumeric, underscores, periods, and hyphens. These are
+ *   safe for internal use; if IDs appear in URLs, callers should URL-encode them.
  */
 
 export type TripReason = "worker-minutes-exceeded" | "failed-selfcorrect-exceeded";
@@ -29,7 +38,11 @@ export interface WorkerActivity {
   status: "success" | "failure";
 }
 
-/** Sink the worker-environment handler calls when a task finishes. */
+/**
+ * Sink function signature for worker-environment handlers.
+ * This is a simple adapter pattern — the handler calls this callback
+ * when a worker task completes, passing the activity details.
+ */
 export type WorkerActivitySink = (activity: WorkerActivity) => void;
 
 /** Error thrown when a circuit-breaker trip event is invalid. */
@@ -64,7 +77,12 @@ const VALID_REASONS: readonly TripReason[] = [
   "failed-selfcorrect-exceeded",
 ] as const;
 
-/** Pattern for valid PBI identifiers: e.g., "PBI-123", "PBI_abc", "task-xyz". */
+/**
+ * Pattern for valid PBI identifiers.
+ * Letters, numbers, underscores, periods, and hyphens are allowed.
+ * Must start with a letter (prevents numeric injection).
+ * Examples: "PBI-123", "task.v1", "feature_branch", "T-42".
+ */
 const PBI_ID_PATTERN = /^[A-Za-z][A-Za-z0-9_.-]*$/;
 
 /**
@@ -130,8 +148,16 @@ interface PbiState {
  * INDEPENDENT of the per-task retry/iteration bounds in #138/#133: it tripped on
  * its own cap and is additive, never resetting or observing those counters.
  *
- * Note: This class is NOT thread-safe. In the Eve architecture, each PBI's
- * worker execution is serialized, so concurrent modifications cannot occur.
+ * PERSISTENCE: State is in-memory only. Trip events are emitted for external
+ * logging/persistence. If the process restarts, trip state is lost — but this is
+ * acceptable because: (1) Trip events trigger human escalation, (2) New work on
+ * a restarted process starts with a clean slate, (3) External logging captures
+ * the history.
+ *
+ * THREAD SAFETY: This class is NOT thread-safe. In the Eve architecture, each
+ * PBI's worker execution is serialized by the dispatch system, so concurrent
+ * modifications cannot occur. Do not share a CircuitBreaker instance across
+ * worker processes; each process should have its own (ephemeral) instance.
  */
 export class CircuitBreaker {
   private readonly state = new Map<string, PbiState>();
@@ -149,12 +175,16 @@ export class CircuitBreaker {
    * Record one completed unit of worker activity for a PBI. May trip the
    * breaker if a budget is now exceeded. A tripped PBI is ignored thereafter,
    * so post-trip work neither counts nor re-trips (AC3).
+   *
+   * NOTE: Duration is rounded UP (Math.ceil) to prevent under-counting toward
+   * the budget. This is intentional for security — we prefer to trip slightly
+   * early rather than miss the threshold. Maximum over-count is 59 seconds per
+   * task, which is acceptable for cost-protection.
    */
   recordWorkerActivity(activity: WorkerActivity): void {
     if (this.isTripped(activity.pbiId)) return;
 
-    // Use integer math: convert ms to minutes, rounding up to ensure we don't
-    // under-count toward the threshold.
+    // Round up to ensure we don't under-count toward the threshold
     const minutes = Math.ceil(activity.durationMs / 60_000);
     const s = this.getOrCreateState(activity.pbiId);
     s.workerMinutes += minutes;
@@ -277,7 +307,7 @@ function readInt(
   if (raw === undefined || raw.trim() === "") return fallback;
 
   const trimmed = raw.trim();
-  // Reject non-numeric strings early (including "123abc", "3.14", "  ")
+  // Reject non-numeric strings (including negative, decimal, alphanumeric mix)
   if (!/^\d+$/.test(trimmed)) {
     throw new EnvConfigError(
       `${name} must be a valid positive integer (received ${JSON.stringify(raw)}).`,
