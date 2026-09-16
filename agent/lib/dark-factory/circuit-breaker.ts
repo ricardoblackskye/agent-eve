@@ -178,6 +178,13 @@ interface PbiState {
 /**
  * The factory-level circuit breaker.
  *
+ * THREAD SAFETY: This class is NOT thread-safe. In the Eve architecture, each
+ * PBI's worker execution is serialized by the dispatch system, so concurrent
+ * modifications cannot occur. Do NOT share a CircuitBreaker instance across
+ * worker processes — each process should have its own (ephemeral) instance.
+ * If you need cross-process state, persist trip events externally and check
+ * the tripped state via that mechanism.
+ *
  * @example
  * ```typescript
  * // Create with defaults
@@ -202,13 +209,6 @@ interface PbiState {
  *   console.log("PBI tripped:", breaker.getTripEvents());
  * }
  * ```
- *
- * THREAD SAFETY: This class is NOT thread-safe. In the Eve architecture, each
- * PBI's worker execution is serialized by the dispatch system, so concurrent
- * modifications cannot occur. Do NOT share a CircuitBreaker instance across
- * worker processes — each process should have its own (ephemeral) instance.
- * If you need cross-process state, persist trip events externally and check
- * the tripped state via that mechanism.
  */
 export class CircuitBreaker {
   private readonly state = new Map<string, PbiState>();

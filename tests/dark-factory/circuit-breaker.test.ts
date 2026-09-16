@@ -634,4 +634,11 @@ describe("readInt integer overflow protection", () => {
       createCircuitBreaker({ DF_MAX_FAILED_SELFCORRECT: String(Number.MAX_SAFE_INTEGER + 1) }),
     ).toThrow(/must be <= /);
   });
+
+  it("accepts value at MAX_SAFE_INTEGER boundary", () => {
+    // MAX_SAFE_INTEGER = 9007199254740991
+    expect(() =>
+      createCircuitBreaker({ DF_MAX_FAILED_SELFCORRECT: String(Number.MAX_SAFE_INTEGER) }),
+    ).not.toThrow();
+  });
 });
