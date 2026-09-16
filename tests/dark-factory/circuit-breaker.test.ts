@@ -776,3 +776,58 @@ describe("destroy() clears all state", () => {
     expect(() => breaker.destroy()).not.toThrow();
   });
 });
+
+// --- Boundary condition tests ---
+
+describe("toTripEvent NaN handling", () => {
+  it("explicitly rejects NaN workerMinutes", () => {
+    expect(() =>
+      toTripEvent({ pbiId: "PBI-NaN", workerMinutes: NaN, reason: "worker-minutes-exceeded" }),
+    ).toThrow(/finite number/);
+  });
+});
+
+describe("boundary condition tests", () => {
+  it("accepts maxWorkerMinutesPerPbi at exactly 10080", () => {
+    const breaker = new CircuitBreaker({ maxWorkerMinutesPerPbi: 10080 });
+    expect(breaker).toBeDefined();
+  });
+
+  it("rejects maxWorkerMinutesPerPbi exceeding 10080", () => {
+    expect(() => new CircuitBreaker({ maxWorkerMinutesPerPbi: 10081 })).toThrow(
+      /must be in range 1\.\.10080/,
+    );
+  });
+
+  it("accepts maxWorkerMinutesPerPbi at exactly 1", () => {
+    const breaker = new CircuitBreaker({ maxWorkerMinutesPerPbi: 1 });
+    expect(breaker).toBeDefined();
+  });
+
+  it("rejects maxWorkerMinutesPerPbi at 0", () => {
+    expect(() => new CircuitBreaker({ maxWorkerMinutesPerPbi: 0 })).toThrow(
+      /must be in range 1\.\.10080/,
+    );
+  });
+});
+
+describe("Unicode PBI ID handling", () => {
+  it("rejects PBI IDs with Unicode characters", () => {
+    expect(() =>
+      toTripEvent({
+        pbiId: "PBI-üñíçödé", // Unicode chars rejected by regex
+        workerMinutes: 10,
+        reason: "worker-minutes-exceeded",
+      }),
+    ).toThrow(/must match pattern/);
+  });
+
+  it("accepts PBI ID with underscores and numbers", () => {
+    const event = toTripEvent({
+      pbiId: "task_123_main",
+      workerMinutes: 10,
+      reason: "worker-minutes-exceeded",
+    });
+    expect(event.pbiId).toBe("task_123_main");
+  });
+});

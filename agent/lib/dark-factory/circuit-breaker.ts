@@ -31,6 +31,7 @@ export interface TripEvent {
   pbiId: string;
   workerMinutes: number;
   reason: TripReason;
+  /** ISO 8601 timestamp in UTC (format: YYYY-MM-DDTHH:mm:ss.sssZ). */
   timestamp: TripTimestamp;
 }
 
@@ -149,8 +150,10 @@ const VALID_REASONS: readonly TripReason[] = [
  * Maximum length: 128 characters (see PBI_ID_MAX_LENGTH).
  *
  * SECURITY: Periods are deliberately excluded to prevent path traversal attacks
- * if IDs are used in file paths, URLs, or database queries. **ALWAYS use
- * encodeURIComponent() or URL escaping when constructing paths/URLs from these IDs.**
+ * if IDs are used in file paths, URLs, or database queries. When embedding these
+ * IDs in SQL queries, ALWAYS use parameterized queries/prepared statements to
+ * prevent SQL injection. The regex provides basic format validation but does not
+ * replace proper escaping for database contexts.
  * Length is capped to prevent issues in downstream systems that index/log IDs.
  */
 const PBI_ID_PATTERN = /^[A-Za-z][A-Za-z0-9_-]*$/;
@@ -183,7 +186,8 @@ export function toTripEvent(input: {
   }
 
   const minutes = input.workerMinutes;
-  if (typeof minutes !== "number" || !Number.isFinite(minutes) || minutes < 0) {
+  // Explicit NaN check (isFinite also catches NaN, but being explicit is clearer)
+  if (typeof minutes !== "number" || Number.isNaN(minutes) || !Number.isFinite(minutes) || minutes < 0) {
     throw new InvalidTripEventError(
       `Trip event requires "workerMinutes" to be a finite number >= 0 (received ${JSON.stringify(minutes)}, got ${typeof minutes}).`,
     );
