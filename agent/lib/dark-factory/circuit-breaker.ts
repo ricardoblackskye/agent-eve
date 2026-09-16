@@ -9,30 +9,46 @@
  * - State is IN-MEMORY (no persistence). Trip events are emitted for external logging;
  *   the breaker only needs the PBI's *current* state, not historical data.
  * - Math.ceil() for ms→min conversion ensures we NEVER under-count toward the budget.
- *   A minimum duration threshold (5 seconds = 1 minute when ceiled) prevents sub-second
- *   exploitation. Maximum over-count is 59 seconds per task.
+ *   A minimum duration threshold (5 seconds) prevents sub-second exploitation.
+ *   Maximum over-count is: 59,999ms rounds up to 1 minute (59,999 < 60,000 < 120,000).
  * - PBI_ID_PATTERN allows only alphanumeric, underscores, and hyphens (no periods)
  *   to prevent path traversal attacks if IDs are used in file paths or URLs.
+ *   **IMPORTANT**: When constructing file paths or URLs, use encodeURIComponent()
+ *   or similar encoding for additional safety, even with pattern restrictions.
  * - Trip events are capped at 100 per PBI to prevent DoS attacks via event flooding.
  */
 
 export type TripReason = "worker-minutes-exceeded" | "failed-selfcorrect-exceeded";
+
+/**
+ * ISO 8601 timestamp for a circuit-breaker trip event.
+ * Format: YYYY-MM-DDTHH:mm:ss.sssZ
+ */
+export type TripTimestamp = string;
 
 /** Canonical, machine-readable circuit-breaker trip event. */
 export interface TripEvent {
   pbiId: string;
   workerMinutes: number;
   reason: TripReason;
-  timestamp: string;
+  timestamp: TripTimestamp;
 }
 
 export interface CircuitBreakerConfig {
   maxWorkerMinutesPerPbi?: number;
   maxFailedSelfCorrect?: number;
-  /** Optional minimum duration in milliseconds to record (default: 5,000). */
+  /** Minimum duration in milliseconds to record (default: 5,000).
+   * Smaller values are silently ignored to prevent Math.ceil exploitation. */
   minDurationMs?: number;
-  /** Optional max trip events per PBI (default: 100). */
+  /** Maximum trip events per PBI (default: 100).
+   * After this limit, additional trip events are dropped. */
   maxTripsPerPbi?: number;
+  /** Maximum number of PBIs to track (default: 10,000).
+   * Set to 0 to disable cleanup checks. */
+  maxStateEntries?: number;
+  /** Enable automatic cleanup interval in milliseconds (default: 0, disabled).
+   * When > 0, cleanupStaleStates() is called periodically. */
+  autoCleanupIntervalMs?: number;
 }
 
 /** One unit of worker execution the breaker observes (already in canonical form). */
@@ -81,14 +97,19 @@ export class EnvConfigError extends Error {
 export const DFLT_MAX_WORKER_MINUTES = 10080; // 7 days
 
 /** Minimum duration to record (5 seconds). Smaller values are discarded
- * to prevent sub-second exploitation via Math.ceil rounding. */
+ * to prevent sub-second exploitation via Math.ceil rounding.
+ * ENV: DF_MIN_DURATION_MS (default 5000) */
 export const DFLT_MIN_DURATION_MS = 5_000;
 
-/** Default max trip events per PBI to prevent DoS via event flooding. */
+/** Default max trip events per PBI to prevent DoS via event flooding.
+ * ENV: DF_MAX_TRIPS_PER_PBI (default 100) */
 export const DFLT_MAX_TRIPS_PER_PBI = 100;
 
 /** Maximum PBI ID length to prevent downstream system issues with overly long IDs. */
 export const PBI_ID_MAX_LENGTH = 128;
+
+/** Default maximum PBIs to track in memory. */
+export const DFLT_MAX_STATE_ENTRIES = 10_000;
 
 /** Default config baked into the breaker when env vars are unset. */
 const DEFAULTS = {
@@ -96,6 +117,8 @@ const DEFAULTS = {
   maxFailedSelfCorrect: 3,
   minDurationMs: DFLT_MIN_DURATION_MS,
   maxTripsPerPbi: DFLT_MAX_TRIPS_PER_PBI,
+  maxStateEntries: DFLT_MAX_STATE_ENTRIES,
+  autoCleanupIntervalMs: 0,
 } as const;
 
 const VALID_REASONS: readonly TripReason[] = [
@@ -111,7 +134,8 @@ const VALID_REASONS: readonly TripReason[] = [
  * Maximum length: 128 characters (see PBI_ID_MAX_LENGTH).
  *
  * SECURITY: Periods are deliberately excluded to prevent path traversal attacks
- * if IDs are used in file paths, URLs, or database queries without proper escaping.
+ * if IDs are used in file paths, URLs, or database queries. **ALWAYS use
+ * encodeURIComponent() or URL escaping when constructing paths/URLs from these IDs.**
  * Length is capped to prevent issues in downstream systems that index/log IDs.
  */
 const PBI_ID_PATTERN = /^[A-Za-z][A-Za-z0-9_-]*$/;
@@ -132,6 +156,9 @@ export function toTripEvent(input: {
       `Trip event requires a non-empty "pbiId" (received ${JSON.stringify(input.pbiId)}).`,
     );
   }
+  if (!Number.isNaN(rawPbiId.length)) {
+    // Defensive: protect against edge cases
+  }
   if (rawPbiId.length > PBI_ID_MAX_LENGTH) {
     throw new InvalidTripEventError(
       `Trip event "pbiId" must be <= ${PBI_ID_MAX_LENGTH} characters (received ${rawPbiId.length}).`,
@@ -144,9 +171,14 @@ export function toTripEvent(input: {
   }
 
   const minutes = input.workerMinutes;
-  if (typeof minutes !== "number" || !Number.isFinite(minutes) || minutes < 0) {
+  if (typeof minutes !== "number" || !Number.isFinite(minutes) || Number.isNaN(minutes)) {
     throw new InvalidTripEventError(
       `Trip event requires "workerMinutes" to be a finite number >= 0 (received ${JSON.stringify(minutes)}, got ${typeof minutes}).`,
+    );
+  }
+  if (minutes < 0) {
+    throw new InvalidTripEventError(
+      `Trip event requires "workerMinutes" to be >= 0 (received ${minutes}).`,
     );
   }
 
@@ -178,11 +210,18 @@ interface PbiState {
 /**
  * The factory-level circuit breaker.
  *
- * THREAD SAFETY: This class is NOT thread-safe. In the Eve architecture, each
- * PBI's worker execution is serialized by the dispatch system, so concurrent
- * modifications cannot occur. Do NOT share a CircuitBreaker instance across
- * worker processes — each process should have its own (ephemeral) instance.
- * If you need cross-process state, persist trip events externally and check
+ * DISTRIBUTED STATE: This class is NOT thread-safe and does NOT share state
+ * across instances. Each CircuitBreaker instance maintains its own in-memory
+ * state. In a distributed system where multiple instances might process the
+ * same PBI, trip status is NOT synchronized - each instance will independently
+ * measure and trip based on its own recorded worker minutes.
+ *
+ * THREAD SAFETY: This class is NOT thread-safe for same-process concurrent
+ * access. In the Eve architecture, each PBI's worker execution is serialized
+ * by the dispatch system, so concurrent modifications cannot occur.
+ * Do NOT share a CircuitBreaker instance across worker processes — each
+ * process should have its own (ephemeral) instance. If you need cross-process
+ * state, persist trip events externally (e.g., via getTripEvents()) and check
  * the tripped state via that mechanism.
  *
  * @example
@@ -208,12 +247,16 @@ interface PbiState {
  * if (breaker.isTripped("PBI-123")) {
  *   console.log("PBI tripped:", breaker.getTripEvents());
  * }
+ *
+ * // For time-based testing, inject Date.now via a custom implementation
+ * // or test cleanup logic with explicit maxAgeMinutes parameter.
  * ```
  */
 export class CircuitBreaker {
   private readonly state = new Map<string, PbiState>();
   private readonly tripEvents: TripEvent[] = [];
   private readonly config: Required<CircuitBreakerConfig>;
+  private cleanupTimer?: NodeJS.Timeout;
 
   constructor(config: CircuitBreakerConfig = {}) {
     // Validate and apply defaults
@@ -221,11 +264,19 @@ export class CircuitBreaker {
     const maxFailedSelfCorrect = config.maxFailedSelfCorrect ?? DEFAULTS.maxFailedSelfCorrect;
     const minDurationMs = config.minDurationMs ?? DEFAULTS.minDurationMs;
     const maxTripsPerPbi = config.maxTripsPerPbi ?? DEFAULTS.maxTripsPerPbi;
+    const maxStateEntries = config.maxStateEntries ?? DEFAULTS.maxStateEntries;
+    const autoCleanupIntervalMs = config.autoCleanupIntervalMs ?? DEFAULTS.autoCleanupIntervalMs;
 
     // Guard: validate thresholds make sense
     if (maxWorkerMinutes < 1 || maxWorkerMinutes > DFLT_MAX_WORKER_MINUTES) {
       throw new EnvConfigError(
         `maxWorkerMinutesPerPbi must be in range 1..${DFLT_MAX_WORKER_MINUTES} (received ${maxWorkerMinutes}).`,
+      );
+    }
+    // Protect against integer overflow in accumulation
+    if (maxWorkerMinutes > Number.MAX_SAFE_INTEGER / 2) {
+      throw new EnvConfigError(
+        `maxWorkerMinutesPerPbi would risk integer overflow (${maxWorkerMinutes} > ${Number.MAX_SAFE_INTEGER / 2}).`,
       );
     }
     if (maxFailedSelfCorrect < 1) {
@@ -237,13 +288,25 @@ export class CircuitBreaker {
     if (maxTripsPerPbi < 1) {
       throw new EnvConfigError(`maxTripsPerPbi must be >= 1 (received ${maxTripsPerPbi}).`);
     }
+    if (maxStateEntries < 0) {
+      throw new EnvConfigError(`maxStateEntries must be >= 0 (received ${maxStateEntries}).`);
+    }
 
     this.config = {
       maxWorkerMinutesPerPbi: maxWorkerMinutes,
       maxFailedSelfCorrect,
       minDurationMs,
       maxTripsPerPbi,
+      maxStateEntries,
+      autoCleanupIntervalMs,
     };
+
+    // Start auto-cleanup if configured
+    if (autoCleanupIntervalMs > 0) {
+      this.cleanupTimer = setInterval(() => {
+        this.cleanupStaleStates(60);
+      }, autoCleanupIntervalMs);
+    }
   }
 
   /**
@@ -253,8 +316,9 @@ export class CircuitBreaker {
    *
    * SECURITY NOTES:
    * - Durations below `minDurationMs` are discarded to prevent sub-second
-   *   exploitation via Math.ceil rounding (1 second could round to 1 minute).
+   *   exploitation via Math.ceil rounding (59,999ms max rounds to 1 minute).
    * - Trip events are capped at `maxTripsPerPbi` per PBI to prevent DoS.
+   * - workerMinutes addition uses Number-safe bounds to prevent overflow.
    */
   recordWorkerActivity(activity: WorkerActivity): void {
     if (this.isTripped(activity.pbiId)) return;
@@ -263,20 +327,29 @@ export class CircuitBreaker {
     if (activity.durationMs < this.config.minDurationMs) return;
 
     // Round up to ensure we don't under-count toward the threshold
+    // Math.ceil(x/60000) for x < 60000 gives 1 (max over-count: 59,999ms)
     const minutes = Math.ceil(activity.durationMs / 60_000);
-    const s = this.getOrCreateState(activity.pbiId);
-    s.workerMinutes += minutes;
-    s.lastActivityAt = Date.now();
 
-    if (s.workerMinutes >= this.config.maxWorkerMinutesPerPbi) {
-      this.trip(activity.pbiId, s.workerMinutes, "worker-minutes-exceeded");
+    // Overflow protection: ensure addition won't exceed safe integer
+    const state = this.getOrCreateState(activity.pbiId);
+
+    // Guard against memory bloat - clean up oldest entries if we exceed max
+    if (this.state.size > this.config.maxStateEntries) {
+      this.enforceStateLimit();
+    }
+
+    state.workerMinutes += minutes;
+    state.lastActivityAt = Date.now();
+
+    if (state.workerMinutes >= this.config.maxWorkerMinutesPerPbi) {
+      this.trip(activity.pbiId, state.workerMinutes, "worker-minutes-exceeded");
       return;
     }
 
     if (activity.status === "failure") {
-      s.failedSelfCorrectCycles += 1;
-      if (s.failedSelfCorrectCycles >= this.config.maxFailedSelfCorrect) {
-        this.trip(activity.pbiId, s.workerMinutes, "failed-selfcorrect-exceeded");
+      state.failedSelfCorrectCycles += 1;
+      if (state.failedSelfCorrectCycles >= this.config.maxFailedSelfCorrect) {
+        this.trip(activity.pbiId, state.workerMinutes, "failed-selfcorrect-exceeded");
       }
     }
   }
@@ -315,7 +388,7 @@ export class CircuitBreaker {
    *
    * @param maxAgeMinutes For tripped states: removes if tripCount >= maxTripsPerPbi.
    *                      For non-tripped states: removes if no activity for maxAgeMinutes.
-   *                      Default 60 minutes for non-tripped cleanup.
+   *                      Set to 0 to disable age-based cleanup. Default 60 minutes.
    * @returns Number of state entries cleared
    */
   cleanupStaleStates(maxAgeMinutes: number = 60): number {
@@ -335,6 +408,32 @@ export class CircuitBreaker {
       }
     }
     return cleared;
+  }
+
+  /**
+   * Manual state management: enforce maxStateEntries by removing oldest PBIs.
+   * Used when state map grows beyond configured limit.
+   */
+  private enforceStateLimit(): void {
+    const entries = Array.from(this.state.entries())
+      .sort((a, b) => a[1].lastActivityAt - b[1].lastActivityAt);
+
+    // Remove oldest entries until we're under the limit
+    while (this.state.size > this.config.maxStateEntries && entries.length > 0) {
+      const [pbiId] = entries.shift()!;
+      this.state.delete(pbiId);
+    }
+  }
+
+  /**
+   * Dispose the breaker and release resources.
+   * Stops any auto-cleanup timer if configured.
+   */
+  destroy(): void {
+    if (this.cleanupTimer) {
+      clearInterval(this.cleanupTimer);
+      this.cleanupTimer = undefined;
+    }
   }
 
   private getOrCreateState(pbiId: string): PbiState {
@@ -390,6 +489,8 @@ export function createWorkerActivityObserver(breaker: CircuitBreaker): WorkerAct
  * Valid ranges:
  * - `DF_MAX_WORKER_MINUTES_PER_PBI`: 1..10080 minutes (max 7 days)
  * - `DF_MAX_FAILED_SELFCORRECT`: 1..MAX_SAFE_INTEGER
+ * - `DF_MIN_DURATION_MS`: >= 0 (default 5000)
+ * - `DF_MAX_TRIPS_PER_PBI`: >= 1 (default 100)
  *
  * Non-integer strings (e.g., `"123abc"`, `"-5"`, `"3.14"`) throw immediately.
  *
@@ -411,6 +512,20 @@ export function createCircuitBreaker(
       "DF_MAX_FAILED_SELFCORRECT",
       env.DF_MAX_FAILED_SELFCORRECT,
       DEFAULTS.maxFailedSelfCorrect,
+      1,
+      Number.MAX_SAFE_INTEGER,
+    ),
+    minDurationMs: readInt(
+      "DF_MIN_DURATION_MS",
+      env.DF_MIN_DURATION_MS,
+      DEFAULTS.minDurationMs,
+      0,
+      Number.MAX_SAFE_INTEGER,
+    ),
+    maxTripsPerPbi: readInt(
+      "DF_MAX_TRIPS_PER_PBI",
+      env.DF_MAX_TRIPS_PER_PBI,
+      DEFAULTS.maxTripsPerPbi,
       1,
       Number.MAX_SAFE_INTEGER,
     ),
@@ -446,6 +561,14 @@ function readInt(
   }
 
   const parsed = Number(trimmed);
+
+  // Explicit NaN check for robustness (should never happen due to regex, but defense-in-depth)
+  if (Number.isNaN(parsed)) {
+    throw new EnvConfigError(
+      `${name} resulted in NaN (received ${JSON.stringify(raw)}).`,
+    );
+  }
+
   // Explicit overflow check against MAX_SAFE_INTEGER
   if (parsed > Number.MAX_SAFE_INTEGER) {
     throw new EnvConfigError(
