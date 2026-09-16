@@ -214,3 +214,15 @@ describe("state DB path hardening (reviewer follow-up)", () => {
     store.close?.();
   });
 });
+
+describe("index.ts is the single import surface (R2 seams, #135/#142)", () => {
+  it("re-exports the credential broker and worker factories", async () => {
+    // Parity with the R1 createMetricsStore re-export: callers should be able to
+    // import every Dark Factory factory from index.ts, not reach into the seam
+    // modules. Guards against a future refactor dropping the re-export.
+    const mod = await import("../../agent/lib/dark-factory/index");
+    expect(typeof mod.createCredentialBroker).toBe("function");
+    expect(typeof mod.createWorkerProvider).toBe("function");
+    expect(typeof mod.createWorkerHandler).toBe("function");
+  });
+});

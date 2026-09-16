@@ -166,6 +166,10 @@ be flagged **Sensitive** in Vercel (masked, not readable via `vercel env pull`);
 | `DF_DISPATCH_MAX_RETRIES`   | No       | Config | Retry budget for a failed worker dispatch (default `2`)                                                                                   |
 | `DF_DISPATCH_BASE_DELAY_MS` | No       | Config | Base backoff delay in ms, multiplied per retry (default `1000`)                                                                           |
 | `DF_METRICS_DRIVER`         | No       | Config | Dark Factory observability store; unset or `memory` = in-process (default)                                                                |
+| `DF_WORKER_PROVIDER`        | No       | Config | Where a worker sandbox runs; unset/`local` = dry-run provider that reports `isolated: false`                                              |
+| `DF_WORKER_ALLOWED_REPOS`   | No*      | Config | **Fail-closed** comma-separated `owner/repo` allow-list for worker tasks; unset = every task refused with 403 before provisioning         |
+| `DF_WORKER_RUNTIME`         | No       | Config | Runtime requested in the worker environment: `node` or `python` (default `node`)                                                          |
+| `DF_CREDENTIAL_TTL_SECONDS` | No       | Config | Per-task credential lease lifetime, 1..3600 (default `3600`); the sandbox gets a lease, never the token                                   |
 
 \* `NEXT_PUBLIC_EVE_API_KEY` and `GH_STORY_TOKEN` are required for the chat
 widget and story generation respectively; `GH_SPRINT_TOKEN` is only needed for
