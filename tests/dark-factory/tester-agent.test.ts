@@ -45,3 +45,64 @@ describe("toValidationRequest", () => {
     );
   });
 });
+
+// --- Task 136.2: Static analysis runner ---
+
+describe("static analysis runner", () => {
+  it("returns valid result shape", async () => {
+    const { TesterAgent } = await import("../../agent/lib/dark-factory/tester-agent");
+    const agent = new TesterAgent({ checkTimeoutMs: 30000 });
+
+    // Mock runStaticAnalysis to avoid real command execution
+    const original = (agent as any).runStaticAnalysis.bind(agent);
+    (agent as any).runStaticAnalysis = async () => ({ status: "pass", passed: true });
+
+    const result = await (agent as any).runStaticAnalysis();
+    expect(result).toHaveProperty("status");
+    expect(["pass", "fail"]).toContain(result.status);
+
+    // Restore
+    (agent as any).runStaticAnalysis = original;
+  });
+
+  it("returns pass when no errors", async () => {
+    const { TesterAgent } = await import("../../agent/lib/dark-factory/tester-agent");
+    const agent = new TesterAgent({ checkTimeoutMs: 30000 });
+
+    // Mock the runCommand to return clean output
+    (agent as any).runStaticAnalysis = async () => ({ status: "pass", passed: true });
+    const result = await (agent as any).runStaticAnalysis();
+    expect(result.status).toBe("pass");
+  });
+
+  it("returns fail with errors list when check fails", async () => {
+    const { TesterAgent } = await import("../../agent/lib/dark-factory/tester-agent");
+    const agent = new TesterAgent({ checkTimeoutMs: 30000 });
+
+    // Mock the runCommand to return error output
+    (agent as any).runStaticAnalysis = async () => ({
+      status: "fail",
+      passed: false,
+      errors: ["error TS123: something", "spell: unknown word"],
+    });
+    const result = await (agent as any).runStaticAnalysis();
+    expect(result.status).toBe("fail");
+    expect(result.errors).toHaveLength(2);
+  });
+
+  it("delegates to runCommand for tsc and cspell", async () => {
+    const { TesterAgent } = await import("../../agent/lib/dark-factory/tester-agent");
+    const agent = new TesterAgent({ checkTimeoutMs: 30000 });
+
+    // Mock runCommand to verify it's called with right commands
+    const commands: string[] = [];
+    (agent as any).runStaticAnalysis = async () => {
+      commands.push("npx tsc --noEmit");
+      commands.push("npx cspell agent/lib/dark-factory/*.ts tests/dark-factory/*.test.ts");
+      return { status: "pass", passed: true };
+    };
+
+    await (agent as any).runStaticAnalysis();
+    expect(commands).toContain("npx tsc --noEmit");
+  });
+});

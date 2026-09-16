@@ -10,6 +10,11 @@
  * - Metrics emission: reports pass/fail via MetricsStore for observability
  */
 
+import { exec } from "node:child_process";
+import { promisify } from "node:util";
+
+const execAsync = promisify(exec);
+
 export type PassFail = 
   | { status: "pass"; passed: true; errors?: undefined } 
   | { status: "fail"; passed: false; errors: string[] };
@@ -109,11 +114,49 @@ export function toValidationRequest(input: {
 }
 
 /**
+ * Run a shell command with a timeout and return its exit code + output.
+ */
+async function runCommand(
+  command: string,
+  timeoutMs: number,
+): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  try {
+    const { stdout, stderr } = await execAsync(command, {
+      timeout: timeoutMs,
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    return { exitCode: 0, stdout: stdout.toString(), stderr: stderr.toString() };
+  } catch (e: any) {
+    return {
+      exitCode: e.code ?? 1,
+      stdout: e.stdout?.toString() ?? "",
+      stderr: e.stderr?.toString() ?? "",
+    };
+  }
+}
+
+/**
+ * Parse command output into error lines.
+ */
+function parseErrorOutput(output: string): string[] {
+  return output
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+}
+
+/**
  * TesterAgent orchestrates validation runs before PR submission.
  * Runs static analysis, smoke tests, and optionally security scans.
  */
 export class TesterAgent {
-  constructor(private readonly config: TesterAgentConfig = {}) {}
+  private readonly timeoutMs: number;
+
+  constructor(
+    private readonly config: TesterAgentConfig = {},
+  ) {
+    this.timeoutMs = config.checkTimeoutMs ?? 60000;
+  }
 
   /**
    * Run a complete validation on a branch.
@@ -122,12 +165,10 @@ export class TesterAgent {
   async runValidation(request: ValidationRequest): Promise<ValidationReport> {
     const start = Date.now();
 
-    // Run checks (sequential for cleaner error isolation)
-    const staticAnalysis = await this.runStaticAnalysis(request);
-    const smokeTests = await this.runSmokeTests(request);
-
-    // Security scan is optional
-    const securityScan = await this.runSecurityScan(request);
+    // Run checks sequentially for cleaner error isolation
+    const staticAnalysis = await this.runStaticAnalysis();
+    const smokeTests = await this.runSmokeTests();
+    const securityScan = await this.runSecurityScan();
 
     const overall =
       staticAnalysis.passed && smokeTests.passed && securityScan.passed ? "pass" : "fail";
@@ -143,23 +184,68 @@ export class TesterAgent {
     };
   }
 
-  /** Run TypeScript compilation check. */
-  private async runStaticAnalysis(request: ValidationRequest): Promise<PassFail> {
-    // TODO: Implement actual tsc and cspell execution
-    // For now, return pass as stub
-    return { status: "pass", passed: true };
+  /**
+   * Run static analysis: TypeScript check + spell check.
+   * Returns pass/fail with extracted error messages.
+   */
+  private async runStaticAnalysis(): Promise<PassFail> {
+    const errors: string[] = [];
+
+    // Run TypeScript compiler check
+    const tsc = await runCommand("npx tsc --noEmit", this.timeoutMs);
+    if (tsc.exitCode !== 0) {
+      if (tsc.stdout) errors.push(...parseErrorOutput(tsc.stdout));
+      if (tsc.stderr) errors.push(...parseErrorOutput(tsc.stderr));
+    }
+
+    // Run cspell check
+    const cspell = await runCommand(
+      "npx cspell agent/lib/dark-factory/*.ts tests/dark-factory/*.test.ts",
+      this.timeoutMs,
+    );
+    if (cspell.exitCode !== 0) {
+      if (cspell.stdout) errors.push(...parseErrorOutput(cspell.stdout));
+      if (cspell.stderr) errors.push(...parseErrorOutput(cspell.stderr));
+    }
+
+    return errors.length > 0
+      ? { status: "fail", passed: false, errors }
+      : { status: "pass", passed: true };
   }
 
   /** Run unit/integration test suite via vitest. */
-  private async runSmokeTests(request: ValidationRequest): Promise<PassFail> {
-    // TODO: Implement actual vitest execution with timeout
+  private async runSmokeTests(): Promise<PassFail> {
+    const result = await runCommand(
+      "npx vitest run --passWithNoTests",
+      this.timeoutMs * 3,
+    );
+    if (result.exitCode !== 0) {
+      const errors = [
+        ...parseErrorOutput(result.stdout),
+        ...parseErrorOutput(result.stderr),
+      ];
+      return { status: "fail", passed: false, errors };
+    }
     return { status: "pass", passed: true };
   }
 
-  /** Run optional security scan (trivy/gitleaks). */
-  private async runSecurityScan(request: ValidationRequest): Promise<PassFail> {
-    // TODO: Implement gitleaks/trivy execution
-    // Return pass when security scanning is disabled
+  /** Run optional security scan (gitleaks). */
+  private async runSecurityScan(): Promise<PassFail> {
+    if (!this.config.enableSecurityScan) {
+      return { status: "pass", passed: true };
+    }
+
+    const result = await runCommand(
+      "npx gitleaks protect --verbose",
+      this.timeoutMs,
+    );
+    if (result.exitCode !== 0) {
+      const errors = [
+        ...parseErrorOutput(result.stdout),
+        ...parseErrorOutput(result.stderr),
+      ];
+      return { status: "fail", passed: false, errors };
+    }
     return { status: "pass", passed: true };
   }
 }
