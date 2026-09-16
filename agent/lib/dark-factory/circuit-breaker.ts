@@ -8,11 +8,12 @@
  * DESIGN DECISIONS:
  * - State is IN-MEMORY (no persistence). Trip events are emitted for external logging;
  *   the breaker only needs the PBI's *current* state, not historical data.
- * - Math.ceil() for ms→min conversion ensures we NEVER under-count toward the budget
- *   (security: better to over-caution than under-caution). Maximum over-count is 59s
- *   per task, which is acceptable for a cost-protection mechanism.
- * - PBI_ID_PATTERN allows alphanumeric, underscores, periods, and hyphens. These are
- *   safe for internal use; if IDs appear in URLs, callers should URL-encode them.
+ * - Math.ceil() for ms→min conversion ensures we NEVER under-count toward the budget.
+ *   A minimum duration threshold (5 seconds = 1 minute when ceiled) prevents sub-second
+ *   exploitation. Maximum over-count is 59 seconds per task.
+ * - PBI_ID_PATTERN allows only alphanumeric, underscores, and hyphens (no periods)
+ *   to prevent path traversal attacks if IDs are used in file paths or URLs.
+ * - Trip events are capped at 100 per PBI to prevent DoS attacks via event flooding.
  */
 
 export type TripReason = "worker-minutes-exceeded" | "failed-selfcorrect-exceeded";
@@ -28,6 +29,10 @@ export interface TripEvent {
 export interface CircuitBreakerConfig {
   maxWorkerMinutesPerPbi?: number;
   maxFailedSelfCorrect?: number;
+  /** Optional minimum duration in milliseconds to record (default: 5,000). */
+  minDurationMs?: number;
+  /** Optional max trip events per PBI (default: 100). */
+  maxTripsPerPbi?: number;
 }
 
 /** One unit of worker execution the breaker observes (already in canonical form). */
@@ -42,6 +47,13 @@ export interface WorkerActivity {
  * Sink function signature for worker-environment handlers.
  * This is a simple adapter pattern — the handler calls this callback
  * when a worker task completes, passing the activity details.
+ *
+ * @example
+ * const breaker = createCircuitBreaker({});
+ * const sink = createWorkerActivityObserver(breaker);
+ *
+ * // In worker-env.ts:
+ * sink({ pbiId: event.pbiId, durationMs: Date.now() - start, status: "success" });
  */
 export type WorkerActivitySink = (activity: WorkerActivity) => void;
 
@@ -64,12 +76,21 @@ export class EnvConfigError extends Error {
 /** Maximum reasonable worker minutes: 7 days * 24 hours * 60 minutes = 10080.
  * This prevents cost explosion from malicious env var injection while
  * still allowing legitimate long-running tasks. */
-const MAX_WORKER_MINUTES = 10080; // 7 days
+export const DFLT_MAX_WORKER_MINUTES = 10080; // 7 days
+
+/** Minimum duration to record (5 seconds). Smaller values are discarded
+ * to prevent sub-second exploitation via Math.ceil rounding. */
+export const DFLT_MIN_DURATION_MS = 5_000;
+
+/** Default max trip events per PBI to prevent DoS via event flooding. */
+export const DFLT_MAX_TRIPS_PER_PBI = 100;
 
 /** Default config baked into the breaker when env vars are unset. */
 const DEFAULTS = {
   maxWorkerMinutesPerPbi: 60,
   maxFailedSelfCorrect: 3,
+  minDurationMs: DFLT_MIN_DURATION_MS,
+  maxTripsPerPbi: DFLT_MAX_TRIPS_PER_PBI,
 } as const;
 
 const VALID_REASONS: readonly TripReason[] = [
@@ -79,11 +100,14 @@ const VALID_REASONS: readonly TripReason[] = [
 
 /**
  * Pattern for valid PBI identifiers.
- * Letters, numbers, underscores, periods, and hyphens are allowed.
+ * Alphanumeric, underscores, hyphens only (NO periods to prevent path traversal).
  * Must start with a letter (prevents numeric injection).
- * Examples: "PBI-123", "task.v1", "feature_branch", "T-42".
+ * Examples: "PBI-123", "task_v1", "feature_branch", "T-42".
+ *
+ * SECURITY: Periods are deliberately excluded to prevent path traversal attacks
+ * if IDs are used in file paths, URLs, or database queries without proper escaping.
  */
-const PBI_ID_PATTERN = /^[A-Za-z][A-Za-z0-9_.-]*$/;
+const PBI_ID_PATTERN = /^[A-Za-z][A-Za-z0-9_-]*$/;
 
 /**
  * Validate and normalise a circuit-breaker trip event. Invalid input THROWS
@@ -134,30 +158,43 @@ interface PbiState {
   workerMinutes: number;
   failedSelfCorrectCycles: number;
   tripped: boolean;
+  tripCount: number;
 }
 
 /**
- * The factory-level circuit breaker. Observes worker activity per PBI and trips
- * (halts further work + emits a `TripEvent`) when either guard is exceeded:
+ * The factory-level circuit breaker.
  *
- *  - cumulative worker-minutes >= `maxWorkerMinutesPerPbi`
- *  - failed self-correct cycles >= `maxFailedSelfCorrect`
+ * @example
+ * ```typescript
+ * // Create with defaults
+ * const breaker = new CircuitBreaker();
  *
- * A tripped PBI stays halted — the breaker records no further minutes or trips
- * for it, so no additional cost is incurred after the trip (AC3). The guard is
- * INDEPENDENT of the per-task retry/iteration bounds in #138/#133: it tripped on
- * its own cap and is additive, never resetting or observing those counters.
+ * // Or customize thresholds
+ * const breaker = new CircuitBreaker({
+ *   maxWorkerMinutesPerPbi: 120,   // 2 hours max
+ *   maxFailedSelfCorrect: 5,        // 5 failures before trip
+ *   minDurationMs: 10_000,          // ignore sub-10s tasks
+ * });
  *
- * PERSISTENCE: State is in-memory only. Trip events are emitted for external
- * logging/persistence. If the process restarts, trip state is lost — but this is
- * acceptable because: (1) Trip events trigger human escalation, (2) New work on
- * a restarted process starts with a clean slate, (3) External logging captures
- * the history.
+ * // Record worker activity
+ * breaker.recordWorkerActivity({
+ *   pbiId: "PBI-123",
+ *   durationMs: 45_000,
+ *   status: "success",
+ * });
+ *
+ * // Check if tripped
+ * if (breaker.isTripped("PBI-123")) {
+ *   console.log("PBI tripped:", breaker.getTripEvents());
+ * }
+ * ```
  *
  * THREAD SAFETY: This class is NOT thread-safe. In the Eve architecture, each
  * PBI's worker execution is serialized by the dispatch system, so concurrent
- * modifications cannot occur. Do not share a CircuitBreaker instance across
- * worker processes; each process should have its own (ephemeral) instance.
+ * modifications cannot occur. Do NOT share a CircuitBreaker instance across
+ * worker processes — each process should have its own (ephemeral) instance.
+ * If you need cross-process state, persist trip events externally and check
+ * the tripped state via that mechanism.
  */
 export class CircuitBreaker {
   private readonly state = new Map<string, PbiState>();
@@ -165,9 +202,33 @@ export class CircuitBreaker {
   private readonly config: Required<CircuitBreakerConfig>;
 
   constructor(config: CircuitBreakerConfig = {}) {
+    // Validate and apply defaults
+    const maxWorkerMinutes = config.maxWorkerMinutesPerPbi ?? DEFAULTS.maxWorkerMinutesPerPbi;
+    const maxFailedSelfCorrect = config.maxFailedSelfCorrect ?? DEFAULTS.maxFailedSelfCorrect;
+    const minDurationMs = config.minDurationMs ?? DEFAULTS.minDurationMs;
+    const maxTripsPerPbi = config.maxTripsPerPbi ?? DEFAULTS.maxTripsPerPbi;
+
+    // Guard: validate thresholds make sense
+    if (maxWorkerMinutes < 1 || maxWorkerMinutes > DFLT_MAX_WORKER_MINUTES) {
+      throw new EnvConfigError(
+        `maxWorkerMinutesPerPbi must be in range 1..${DFLT_MAX_WORKER_MINUTES} (received ${maxWorkerMinutes}).`,
+      );
+    }
+    if (maxFailedSelfCorrect < 1) {
+      throw new EnvConfigError(`maxFailedSelfCorrect must be >= 1 (received ${maxFailedSelfCorrect}).`);
+    }
+    if (minDurationMs < 0) {
+      throw new EnvConfigError(`minDurationMs must be >= 0 (received ${minDurationMs}).`);
+    }
+    if (maxTripsPerPbi < 1) {
+      throw new EnvConfigError(`maxTripsPerPbi must be >= 1 (received ${maxTripsPerPbi}).`);
+    }
+
     this.config = {
-      maxWorkerMinutesPerPbi: config.maxWorkerMinutesPerPbi ?? DEFAULTS.maxWorkerMinutesPerPbi,
-      maxFailedSelfCorrect: config.maxFailedSelfCorrect ?? DEFAULTS.maxFailedSelfCorrect,
+      maxWorkerMinutesPerPbi: maxWorkerMinutes,
+      maxFailedSelfCorrect,
+      minDurationMs,
+      maxTripsPerPbi,
     };
   }
 
@@ -176,13 +237,16 @@ export class CircuitBreaker {
    * breaker if a budget is now exceeded. A tripped PBI is ignored thereafter,
    * so post-trip work neither counts nor re-trips (AC3).
    *
-   * NOTE: Duration is rounded UP (Math.ceil) to prevent under-counting toward
-   * the budget. This is intentional for security — we prefer to trip slightly
-   * early rather than miss the threshold. Maximum over-count is 59 seconds per
-   * task, which is acceptable for cost-protection.
+   * SECURITY NOTES:
+   * - Durations below `minDurationMs` are discarded to prevent sub-second
+   *   exploitation via Math.ceil rounding (1 second could round to 1 minute).
+   * - Trip events are capped at `maxTripsPerPbi` per PBI to prevent DoS.
    */
   recordWorkerActivity(activity: WorkerActivity): void {
     if (this.isTripped(activity.pbiId)) return;
+
+    // Security: discard sub-threshold durations to prevent Math.ceil exploitation
+    if (activity.durationMs < this.config.minDurationMs) return;
 
     // Round up to ensure we don't under-count toward the threshold
     const minutes = Math.ceil(activity.durationMs / 60_000);
@@ -219,13 +283,31 @@ export class CircuitBreaker {
       s.workerMinutes = 0;
       s.failedSelfCorrectCycles = 0;
       s.tripped = false;
+      s.tripCount = 0;
     }
+  }
+
+  /**
+   * Clear stale PBI states to prevent memory bloat.
+   * Removes entries for PBIs that have tripped and have no pending activity.
+   *
+   * @param maxAgeMinutes Optional max age in minutes for non-tripped states to clear
+   */
+  cleanupStaleStates(maxAgeMinutes?: number): number {
+    let cleared = 0;
+    for (const [pbiId, s] of this.state) {
+      if (s.tripped && s.tripCount >= this.config.maxTripsPerPbi) {
+        this.state.delete(pbiId);
+        cleared++;
+      }
+    }
+    return cleared;
   }
 
   private getOrCreateState(pbiId: string): PbiState {
     let s = this.state.get(pbiId);
     if (!s) {
-      s = { workerMinutes: 0, failedSelfCorrectCycles: 0, tripped: false };
+      s = { workerMinutes: 0, failedSelfCorrectCycles: 0, tripped: false, tripCount: 0 };
       this.state.set(pbiId, s);
     }
     return s;
@@ -233,7 +315,11 @@ export class CircuitBreaker {
 
   private trip(pbiId: string, workerMinutes: number, reason: TripReason): void {
     const s = this.getOrCreateState(pbiId);
+    // Rate limiting: don't emit more than maxTripsPerPbi
+    if (s.tripCount >= this.config.maxTripsPerPbi) return;
+
     s.tripped = true;
+    s.tripCount++;
     this.tripEvents.push(toTripEvent({ pbiId, workerMinutes, reason }));
   }
 }
@@ -275,7 +361,7 @@ export function createCircuitBreaker(
       env.DF_MAX_WORKER_MINUTES_PER_PBI,
       DEFAULTS.maxWorkerMinutesPerPbi,
       1,
-      MAX_WORKER_MINUTES,
+      DFLT_MAX_WORKER_MINUTES,
     ),
     maxFailedSelfCorrect: readInt(
       "DF_MAX_FAILED_SELFCORRECT",

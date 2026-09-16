@@ -134,7 +134,10 @@ describe("CircuitBreaker worker-minute accumulation (#144 AC1)", () => {
   });
 
   it("trips at 59 minutes then additional ms round up to 60", () => {
-    const breaker = new CircuitBreaker({ maxWorkerMinutesPerPbi: 60 });
+    const breaker = new CircuitBreaker({
+      maxWorkerMinutesPerPbi: 60,
+      minDurationMs: 1000, // override to allow sub-5s for this test
+    });
 
     breaker.recordWorkerActivity({
       pbiId: "PBI-ROUND",
@@ -143,10 +146,10 @@ describe("CircuitBreaker worker-minute accumulation (#144 AC1)", () => {
     });
     expect(breaker.isTripped("PBI-ROUND")).toBe(false);
 
-    // 1 second = 1 minute after Math.ceil rounding
+    // 1 second = 1 minute after Math.ceil rounding (with minDurationMs=1000)
     breaker.recordWorkerActivity({
       pbiId: "PBI-ROUND",
-      durationMs: 1_000, // 1 second rounds up to 1 minute
+      durationMs: 1_000,
       status: "success",
     });
     expect(breaker.isTripped("PBI-ROUND")).toBe(true);
@@ -434,14 +437,24 @@ describe("CircuitBreaker.reset()", () => {
   });
 });
 
-describe("toTripEvent pbiId format validation", () => {
-  it("accepts valid PBI identifiers (letter followed by alphanumeric/underscore/dash/dot)", () => {
+describe("toTripEvent pbiId format validation (no periods for security)", () => {
+  it("accepts valid PBI identifiers (letter followed by alphanumeric/underscore/hyphen only)", () => {
     const event = toTripEvent({
-      pbiId: "task-v1.2_3",
+      pbiId: "task-v1_2_3",
       workerMinutes: 10,
       reason: "worker-minutes-exceeded",
     });
-    expect(event.pbiId).toBe("task-v1.2_3");
+    expect(event.pbiId).toBe("task-v1_2_3");
+  });
+
+  it("rejects PBI IDs with periods (path traversal prevention)", () => {
+    expect(() =>
+      toTripEvent({
+        pbiId: "task.v1",
+        workerMinutes: 10,
+        reason: "worker-minutes-exceeded",
+      }),
+    ).toThrow(/pbiId.*must match pattern/);
   });
 
   it("rejects PBI IDs starting with numbers", () => {
