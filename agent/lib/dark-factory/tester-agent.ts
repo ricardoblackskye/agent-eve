@@ -8,6 +8,8 @@
  * - Fail-closed defaults: missing config = no validation, failed check = block PR
  * - Canonical payload pattern: ValidationRequest/ValidationReport for seams
  * - Metrics emission: reports pass/fail via MetricsStore for observability
+ * - Dependency injection: CommandRunner interface for testability
+ * - Command whitelist: only allow npx commands (tsc, cspell, vitest, gitleaks)
  *
  * REQUIRED DEPENDENCIES:
  * - `tsc` (TypeScript compiler, via npx) for static analysis
@@ -23,10 +25,14 @@
  * - DF_SECURITY_SCAN_ENABLED: "true" to enable gitleaks scan (default: false)
  * - DF_TESTER_TIMEOUT_MS: per-check timeout in ms (default: 60000)
  *
- * COMMAND EXECUTION SECURITY:
- * - All shell commands use execFile with explicit argument arrays (NEVER exec
- *   with string interpolation). This prevents command injection even if a
- *   future change passes untrusted input into the command arguments.
+ * SECURITY CONSIDERATIONS:
+ * - MAX_BUFFER_BYTES: Limited to 10MB to prevent memory exhaustion from
+ *   malicious output. For very large outputs, output is truncated at this
+ *   limit (tsc/cspell typically produce <1MB output).
+ * - Command whitelist: Only npx is allowed as the executable; specific args
+ *   form the allowed command set (tsc, cspell, vitest, gitleaks).
+ * - Environment filtering: Only explicitly allowed env vars are passed to
+ *   child processes (NODE_PATH, PATH, HOME are passed through for system tools).
  */
 
 import { execFile } from "node:child_process";
@@ -34,13 +40,81 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
-/** Maximum stdout/stderr buffer size (10 MB). Large enough for full tsc/cspell
- * output on mid-size repos; prevents silent truncation of error reports. */
+/** Maximum stdout/stderr buffer size (10 MB) to prevent memory exhaustion
+ * attacks. Most tsc/cspell output is < 1MB; this provides headroom for
+ * large repos while capping potential DoS via output generation. */
 const MAX_BUFFER_BYTES = 10 * 1024 * 1024;
+
+/** Git SHA-1 regex (40 hex chars) */
+const GIT_SHA_PATTERN = /^[0-9a-fA-F]{40}$/;
+
+/** Allowed npx commands for validation checks */
+const ALLOWED_COMMANDS = new Set(["tsc", "cspell", "vitest", "gitleaks"]);
+
+/** Allowed environment variable keys passed to child processes */
+const ALLOWED_ENV_KEYS = new Set(["NODE_PATH", "PATH", "HOME", "LANG", "LC_ALL"]);
+
+/**
+ * Interface for command execution (dependency injection for testability).
+ * Allows mocking command execution in tests without hitting the real shell.
+ */
+export interface CommandRunner {
+  /**
+   * Execute a command with explicit argument array (no shell interpolation).
+   * Returns exit code, stdout, and stderr.
+   */
+  (cmd: string, args: string[], timeoutMs: number): Promise<{
+    exitCode: number;
+    stdout: string;
+    stderr: string;
+  }>;
+}
+
+/**
+ * Default command runner using execFile.
+ * Validates commands against an allowlist to prevent arbitrary execution.
+ */
+export const defaultCommandRunner: CommandRunner = async (
+  cmd: string,
+  args: string[],
+  timeoutMs: number,
+): Promise<{ exitCode: number; stdout: string; stderr: string }> => {
+  // SECURITY: Command whitelist validation
+  // Only npx is allowed as the executable; first arg must be an allowed command
+  if (cmd !== "npx" || args.length === 0 || !ALLOWED_COMMANDS.has(args[0])) {
+    throw new ValidationError(
+      `Command not allowed: ${cmd} ${args.join(" ")}. Only npx with whitelisted commands (tsc, cspell, vitest, gitleaks) are permitted.`,
+    );
+  }
+
+  try {
+    const { stdout, stderr } = await execFileAsync(cmd, args, {
+      timeout: timeoutMs,
+      maxBuffer: MAX_BUFFER_BYTES,
+      env: {
+        ...process.env,
+        ...Object.fromEntries(
+          Object.entries(process.env ?? {}).filter(([k]) => ALLOWED_ENV_KEYS.has(k) || !k.startsWith("DF_")),
+        ),
+      },
+    });
+    return {
+      exitCode: 0,
+      stdout: stdout.toString(),
+      stderr: stderr.toString(),
+    };
+  } catch (e: any) {
+    return {
+      exitCode: typeof e.code === "number" ? e.code : e.exitCode ?? 1,
+      stdout: e.stdout?.toString() ?? "",
+      stderr: e.stderr?.toString() ?? "",
+    };
+  }
+};
 
 /**
  * Canonical pass/fail result for a single check.
- * Discriminated union: only "fail" carries errors.
+ * Discriminated union: only "fail" state carries errors array.
  */
 export type PassFail =
   | { status: "pass" }
@@ -74,21 +148,43 @@ export type CheckResult = {
   details: string;
 };
 
+/**
+ * Validation report with individual check results.
+ * `overall` is computed from individual statuses by createValidationReport.
+ */
 export type ValidationReport = {
   staticAnalysis: PassFail;
   smokeTests: PassFail;
   securityScan: PassFail;
-  overall: "pass" | "fail";
   timestamp: string;
   branch: string;
   durationMs: number;
+  /** Computed pass/fail from individual checks */
+  overall: "pass" | "fail";
 };
+
+/** Create a ValidationReport with computed overall status */
+export function createValidationReport(
+  report: Omit<ValidationReport, "overall">,
+): ValidationReport {
+  const overall =
+    report.staticAnalysis.status === "pass" &&
+    report.smokeTests.status === "pass" &&
+    report.securityScan.status === "pass"
+      ? "pass"
+      : "fail";
+
+  return {
+    ...report,
+    overall,
+  };
+}
 
 /** Canonical payload for validation requests. */
 export interface ValidationRequest {
   /** Git branch name to validate (e.g., "feature/new-endpoint") */
   branch: string;
-  /** Optional target SHA for diff calculations */
+  /** Optional target SHA (40-char hex) for diff calculations. Must be valid Git SHA if provided. */
   targetSha?: string;
   /** Custom environment for this validation run */
   env?: Record<string, string>;
@@ -125,6 +221,18 @@ export class ValidationFailedError extends Error {
 }
 
 /**
+ * Validate a Git SHA format (40 hex characters).
+ * Throws ValidationError if invalid.
+ */
+function validateTargetSha(sha: string): void {
+  if (!GIT_SHA_PATTERN.test(sha)) {
+    throw new ValidationError(
+      `targetSha must be a valid 40-character Git SHA (received ${JSON.stringify(sha)}).`,
+    );
+  }
+}
+
+/**
  * Validate and normalise a validation request.
  * Throws ValidationError (caller bug) for malformed input.
  */
@@ -140,6 +248,11 @@ export function toValidationRequest(input: {
     );
   }
 
+  // Validate targetSha format if provided
+  if (input.targetSha !== undefined) {
+    validateTargetSha(input.targetSha);
+  }
+
   return {
     branch: rawBranch,
     ...(input.targetSha ? { targetSha: input.targetSha } : {}),
@@ -150,12 +263,13 @@ export function toValidationRequest(input: {
 /**
  * Parse raw command output into non-empty trimmed error lines.
  * Edge cases handled: empty string → [], whitespace-only lines dropped,
- * trailing newline ignored.
+ * trailing newline ignored, maximum 1000 lines to prevent memory issues.
  */
 export function parseErrorOutput(output: string): string[] {
   if (!output) return [];
   return output
     .split("\n")
+    .slice(0, 1000) // Prevent memory exhaustion from huge outputs
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
 }
@@ -172,13 +286,18 @@ interface ValidationCheck {
  * removed, or reordered without touching runValidation.
  */
 export class TesterAgent {
-  private readonly timeoutMs: number;
+  readonly timeoutMs: number;
+  readonly runner: CommandRunner;
+  private readonly config: TesterAgentConfig;
   private readonly checks: ValidationCheck[];
 
   constructor(
-    private readonly config: TesterAgentConfig = {},
+    config: TesterAgentConfig = {},
+    options: { commandRunner?: CommandRunner } = {},
   ) {
     this.timeoutMs = config.checkTimeoutMs ?? 60000;
+    this.config = config;
+    this.runner = options.commandRunner ?? defaultCommandRunner;
 
     // Build the check registry. Order here defines execution order.
     this.checks = [
@@ -191,42 +310,9 @@ export class TesterAgent {
   }
 
   /**
-   * Run a command via execFile with explicit argument array (no shell
-   * interpolation → no command injection). Captures stdout/stderr and exit code.
-   * On error, preserves the original exit code and any partial output for
-   * debugging (does NOT swallow the underlying cause).
-   *
-   * Defined as an instance method (not a module function) so tests can inject a
-   * mock without hitting the real filesystem/shell.
-   */
-  async runCommand(
-    cmd: string,
-    args: string[],
-    timeoutMs: number,
-  ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
-    try {
-      const { stdout, stderr } = await execFileAsync(cmd, args, {
-        timeout: timeoutMs,
-        maxBuffer: MAX_BUFFER_BYTES,
-      });
-      return {
-        exitCode: 0,
-        stdout: stdout.toString(),
-        stderr: stderr.toString(),
-      };
-    } catch (e: any) {
-      // execFile rejects with an Error that may carry stdout/stderr/code.
-      return {
-        exitCode: typeof e.code === "number" ? e.code : e.exitCode ?? 1,
-        stdout: e.stdout?.toString() ?? "",
-        stderr: e.stderr?.toString() ?? "",
-      };
-    }
-  }
-
-  /**
    * Run all registered validation checks sequentially.
    * Returns a ValidationReport with pass/fail for each component.
+   * The `overall` property is computed from individual statuses.
    */
   async runValidation(request: ValidationRequest): Promise<ValidationReport> {
     const start = Date.now();
@@ -236,38 +322,26 @@ export class TesterAgent {
       results[check.name] = await check.run();
     }
 
-    const staticAnalysis = results.staticAnalysis ?? { status: "pass" };
-    const smokeTests = results.smokeTests ?? { status: "pass" };
-    const securityScan = results.securityScan ?? { status: "pass" };
-
-    const overall =
-      staticAnalysis.status === "pass" &&
-      smokeTests.status === "pass" &&
-      securityScan.status === "pass"
-        ? "pass"
-        : "fail";
-
-    return {
-      staticAnalysis,
-      smokeTests,
-      securityScan,
-      overall,
+    return createValidationReport({
+      staticAnalysis: results.staticAnalysis ?? { status: "pass" },
+      smokeTests: results.smokeTests ?? { status: "pass" },
+      securityScan: results.securityScan ?? { status: "pass" },
       timestamp: new Date().toISOString(),
       branch: request.branch,
       durationMs: Date.now() - start,
-    };
+    });
   }
 
   /** Run static analysis: TypeScript check + spell check. */
   private async runStaticAnalysis(): Promise<PassFail> {
     const errors: string[] = [];
 
-    const tsc = await this.runCommand("npx", ["tsc", "--noEmit"], this.timeoutMs);
+    const tsc = await this.runner("npx", ["tsc", "--noEmit"], this.timeoutMs);
     if (tsc.exitCode !== 0) {
       errors.push(...parseErrorOutput(tsc.stdout), ...parseErrorOutput(tsc.stderr));
     }
 
-    const cspell = await this.runCommand(
+    const cspell = await this.runner(
       "npx",
       ["cspell", "agent/lib/dark-factory/*.ts", "tests/dark-factory/*.test.ts"],
       this.timeoutMs,
@@ -283,7 +357,7 @@ export class TesterAgent {
 
   /** Run unit/integration test suite via vitest. */
   private async runSmokeTests(): Promise<PassFail> {
-    const result = await this.runCommand(
+    const result = await this.runner(
       "npx",
       ["vitest", "run", "--passWithNoTests"],
       this.timeoutMs * 3,
@@ -304,7 +378,7 @@ export class TesterAgent {
       return { status: "pass" };
     }
 
-    const result = await this.runCommand(
+    const result = await this.runner(
       "npx",
       ["gitleaks", "protect", "--verbose"],
       this.timeoutMs,

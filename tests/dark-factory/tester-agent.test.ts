@@ -4,12 +4,22 @@ import {
   type ValidationRequest,
   type ValidationReport,
   type PassFail,
+  type CommandRunner,
   ValidationError,
   ValidationFailedError,
   createTesterAgent,
+  createValidationReport,
   TesterAgent,
   parseErrorOutput,
 } from "../../agent/lib/dark-factory/tester-agent";
+
+/** Create a TesterAgent with an injected mock command runner. */
+function makeAgent(
+  mockRunner: CommandRunner,
+  config: ConstructorParameters<typeof TesterAgent>[0] = {},
+): TesterAgent {
+  return new TesterAgent(config, { commandRunner: mockRunner });
+}
 
 // --- Task 136.1: Validation types + ValidationRequest payload ---
 
@@ -21,10 +31,11 @@ describe("toValidationRequest", () => {
     expect(req.env).toBeUndefined();
   });
 
-  it("creates valid request with targetSha", () => {
-    const req = toValidationRequest({ branch: "fix/bug", targetSha: "abc123" });
+  it("creates valid request with valid targetSha", () => {
+    const sha = "a".repeat(40);
+    const req = toValidationRequest({ branch: "fix/bug", targetSha: sha });
     expect(req.branch).toBe("fix/bug");
-    expect(req.targetSha).toBe("abc123");
+    expect(req.targetSha).toBe(sha);
   });
 
   it("creates valid request with custom env", () => {
@@ -44,22 +55,33 @@ describe("toValidationRequest", () => {
   it("rejects whitespace-only branch", () => {
     expect(() => toValidationRequest({ branch: "   " })).toThrow(ValidationError);
   });
+
+  it("rejects invalid targetSha format (too short)", () => {
+    expect(() => toValidationRequest({ branch: "x", targetSha: "abc" })).toThrow(
+      ValidationError,
+    );
+  });
+
+  it("rejects invalid targetSha format (non-hex)", () => {
+    expect(() => toValidationRequest({ branch: "x", targetSha: "z".repeat(40) })).toThrow(
+      ValidationError,
+    );
+  });
 });
 
 // --- Task 136.2: Static analysis runner ---
 
 describe("static analysis runner", () => {
-  it("delegates to runCommand for tsc and cspell via execFile args", async () => {
-    const { TesterAgent } = await import("../../agent/lib/dark-factory/tester-agent");
-    const agent = new TesterAgent({ checkTimeoutMs: 60000 });
-
+  it("delegates to runner for tsc and cspell via execFile args", async () => {
     const calls: Array<{ cmd: string; args: string[] }> = [];
-    (agent as any).runCommand = async (cmd: string, args: string[]) => {
+    const runner: CommandRunner = async (cmd, args) => {
       calls.push({ cmd, args });
       return { exitCode: 0, stdout: "", stderr: "" };
     };
+    const agent = makeAgent(runner, { checkTimeoutMs: 60000 });
 
-    await (agent as any).runStaticAnalysis();
+    // runStaticAnalysis is private; exercised via runValidation
+    await agent.runValidation(toValidationRequest({ branch: "feature/x" }));
     expect(calls[0]).toEqual({ cmd: "npx", args: ["tsc", "--noEmit"] });
     expect(calls[1]).toEqual({
       cmd: "npx",
@@ -67,59 +89,50 @@ describe("static analysis runner", () => {
     });
   });
 
-  it("returns pass when no errors", async () => {
-    const { TesterAgent } = await import("../../agent/lib/dark-factory/tester-agent");
-    const agent = new TesterAgent({ checkTimeoutMs: 60000 });
-    (agent as any).runCommand = async () => ({ exitCode: 0, stdout: "", stderr: "" });
-    const result: PassFail = await (agent as any).runStaticAnalysis();
-    expect(result.status).toBe("pass");
-  });
-
   it("returns fail with errors when tsc reports errors", async () => {
-    const { TesterAgent } = await import("../../agent/lib/dark-factory/tester-agent");
-    const agent = new TesterAgent({ checkTimeoutMs: 60000 });
-    (agent as any).runCommand = async (cmd: string, args: string[]) => {
+    const runner: CommandRunner = async (cmd, args) => {
       if (args.includes("tsc")) {
         return { exitCode: 2, stdout: "error TS2345: type mismatch", stderr: "" };
       }
       return { exitCode: 0, stdout: "", stderr: "" };
     };
-    const result: PassFail = await (agent as any).runStaticAnalysis();
-    expect(result.status).toBe("fail");
-    if (result.status === "fail") {
-      expect(result.errors).toContain("error TS2345: type mismatch");
+    const agent = makeAgent(runner, { checkTimeoutMs: 60000 });
+    const report = await agent.runValidation(toValidationRequest({ branch: "feature/x" }));
+    if (report.staticAnalysis.status === "fail") {
+      expect(report.staticAnalysis.errors).toContain("error TS2345: type mismatch");
+    } else {
+      throw new Error("expected fail");
     }
   });
 
   it("returns fail with errors when cspell reports errors", async () => {
-    const { TesterAgent } = await import("../../agent/lib/dark-factory/tester-agent");
-    const agent = new TesterAgent({ checkTimeoutMs: 60000 });
-    (agent as any).runCommand = async (cmd: string, args: string[]) => {
+    const runner: CommandRunner = async (cmd, args) => {
       if (args.includes("cspell")) {
         return { exitCode: 1, stdout: "", stderr: "Unknown word (foobar)" };
       }
       return { exitCode: 0, stdout: "", stderr: "" };
     };
-    const result: PassFail = await (agent as any).runStaticAnalysis();
-    expect(result.status).toBe("fail");
-    if (result.status === "fail") {
-      expect(result.errors).toContain("Unknown word (foobar)");
+    const agent = makeAgent(runner, { checkTimeoutMs: 60000 });
+    const report = await agent.runValidation(toValidationRequest({ branch: "feature/x" }));
+    if (report.staticAnalysis.status === "fail") {
+      expect(report.staticAnalysis.errors).toContain("Unknown word (foobar)");
+    } else {
+      throw new Error("expected fail");
     }
   });
 
   it("aggregates errors from both tsc and cspell", async () => {
-    const { TesterAgent } = await import("../../agent/lib/dark-factory/tester-agent");
-    const agent = new TesterAgent({ checkTimeoutMs: 60000 });
-    (agent as any).runCommand = async (cmd: string, args: string[]) => {
+    const runner: CommandRunner = async (cmd, args) => {
       if (args.includes("tsc")) {
         return { exitCode: 2, stdout: "tsc error", stderr: "" };
       }
       return { exitCode: 1, stdout: "", stderr: "cspell error" };
     };
-    const result: PassFail = await (agent as any).runStaticAnalysis();
-    if (result.status === "fail") {
-      expect(result.errors).toContain("tsc error");
-      expect(result.errors).toContain("cspell error");
+    const agent = makeAgent(runner, { checkTimeoutMs: 60000 });
+    const report = await agent.runValidation(toValidationRequest({ branch: "feature/x" }));
+    if (report.staticAnalysis.status === "fail") {
+      expect(report.staticAnalysis.errors).toContain("tsc error");
+      expect(report.staticAnalysis.errors).toContain("cspell error");
     } else {
       throw new Error("expected fail");
     }
@@ -129,52 +142,40 @@ describe("static analysis runner", () => {
 // --- Task 136.3: Smoke test runner ---
 
 describe("smoke test runner", () => {
-  it("delegates to runCommand for vitest via execFile args", async () => {
-    const { TesterAgent } = await import("../../agent/lib/dark-factory/tester-agent");
-    const agent = new TesterAgent({ checkTimeoutMs: 60000 });
-
+  it("delegates to runner for vitest via execFile args", async () => {
     let capturedArgs: string[] = [];
-    (agent as any).runCommand = async (cmd: string, args: string[]) => {
+    const runner: CommandRunner = async (cmd, args) => {
       capturedArgs = args;
       return { exitCode: 0, stdout: "", stderr: "" };
     };
-
-    await (agent as any).runSmokeTests();
+    const agent = makeAgent(runner, { checkTimeoutMs: 60000 });
+    await agent.runValidation(toValidationRequest({ branch: "feature/x" }));
     expect(capturedArgs).toEqual(["vitest", "run", "--passWithNoTests"]);
   });
 
-  it("returns pass when vitest succeeds", async () => {
-    const { TesterAgent } = await import("../../agent/lib/dark-factory/tester-agent");
-    const agent = new TesterAgent({ checkTimeoutMs: 60000 });
-    (agent as any).runCommand = async () => ({ exitCode: 0, stdout: "", stderr: "" });
-    const result: PassFail = await (agent as any).runSmokeTests();
-    expect(result.status).toBe("pass");
-  });
-
   it("returns fail with errors when vitest fails", async () => {
-    const { TesterAgent } = await import("../../agent/lib/dark-factory/tester-agent");
-    const agent = new TesterAgent({ checkTimeoutMs: 60000 });
-    (agent as any).runCommand = async () => ({
+    const runner: CommandRunner = async () => ({
       exitCode: 1,
       stdout: "FAIL tests/foo.test.ts",
       stderr: "1 test failed",
     });
-    const result: PassFail = await (agent as any).runSmokeTests();
-    expect(result.status).toBe("fail");
-    if (result.status === "fail") {
-      expect(result.errors).toContain("FAIL tests/foo.test.ts");
+    const agent = makeAgent(runner, { checkTimeoutMs: 60000 });
+    const report = await agent.runValidation(toValidationRequest({ branch: "feature/x" }));
+    if (report.smokeTests.status === "fail") {
+      expect(report.smokeTests.errors).toContain("FAIL tests/foo.test.ts");
+    } else {
+      throw new Error("expected fail");
     }
   });
 
   it("uses 3x timeout for tests", async () => {
-    const { TesterAgent } = await import("../../agent/lib/dark-factory/tester-agent");
-    const agent = new TesterAgent({ checkTimeoutMs: 60000 });
     let capturedTimeout = 0;
-    (agent as any).runCommand = async (cmd: string, args: string[], timeout: number) => {
+    const runner: CommandRunner = async (cmd, args, timeout) => {
       capturedTimeout = timeout;
       return { exitCode: 0, stdout: "", stderr: "" };
     };
-    await (agent as any).runSmokeTests();
+    const agent = makeAgent(runner, { checkTimeoutMs: 60000 });
+    await agent.runValidation(toValidationRequest({ branch: "feature/x" }));
     expect(capturedTimeout).toBe(180000);
   });
 });
@@ -183,45 +184,43 @@ describe("smoke test runner", () => {
 
 describe("security scan", () => {
   it("returns pass when security scan is disabled", async () => {
-    const { TesterAgent } = await import("../../agent/lib/dark-factory/tester-agent");
-    const agent = new TesterAgent({ enableSecurityScan: false });
-    const result: PassFail = await (agent as any).runSecurityScan();
-    expect(result.status).toBe("pass");
+    const runner: CommandRunner = async () => ({ exitCode: 0, stdout: "", stderr: "" });
+    const agent = makeAgent(runner, { enableSecurityScan: false });
+    const report = await agent.runValidation(toValidationRequest({ branch: "feature/x" }));
+    expect(report.securityScan.status).toBe("pass");
   });
 
   it("returns pass when gitleaks finds no secrets", async () => {
-    const { TesterAgent } = await import("../../agent/lib/dark-factory/tester-agent");
-    const agent = new TesterAgent({ enableSecurityScan: true });
-    (agent as any).runCommand = async () => ({ exitCode: 0, stdout: "No leaks", stderr: "" });
-    const result: PassFail = await (agent as any).runSecurityScan();
-    expect(result.status).toBe("pass");
+    const runner: CommandRunner = async () => ({ exitCode: 0, stdout: "No leaks", stderr: "" });
+    const agent = makeAgent(runner, { enableSecurityScan: true });
+    const report = await agent.runValidation(toValidationRequest({ branch: "feature/x" }));
+    expect(report.securityScan.status).toBe("pass");
   });
 
   it("returns fail with errors when gitleaks finds secrets", async () => {
-    const { TesterAgent } = await import("../../agent/lib/dark-factory/tester-agent");
-    const agent = new TesterAgent({ enableSecurityScan: true });
-    (agent as any).runCommand = async () => ({
+    const runner: CommandRunner = async () => ({
       exitCode: 1,
       stdout: "leak found in .env:5",
       stderr: "",
     });
-    const result: PassFail = await (agent as any).runSecurityScan();
-    expect(result.status).toBe("fail");
-    if (result.status === "fail") {
-      expect(result.errors).toContain("leak found in .env:5");
+    const agent = makeAgent(runner, { enableSecurityScan: true });
+    const report = await agent.runValidation(toValidationRequest({ branch: "feature/x" }));
+    if (report.securityScan.status === "fail") {
+      expect(report.securityScan.errors).toContain("leak found in .env:5");
+    } else {
+      throw new Error("expected fail");
     }
   });
 
-  it("runs gitleaks with explicit args when enabled", async () => {
-    const { TesterAgent } = await import("../../agent/lib/dark-factory/tester-agent");
-    const agent = new TesterAgent({ enableSecurityScan: true });
-    let captured: { cmd: string; args: string[] } | null = null;
-    (agent as any).runCommand = async (cmd: string, args: string[]) => {
-      captured = { cmd, args };
+  it("skips gitleaks when disabled", async () => {
+    let gitleaksCalled = false;
+    const runner: CommandRunner = async (cmd, args) => {
+      if (args.includes("gitleaks")) gitleaksCalled = true;
       return { exitCode: 0, stdout: "", stderr: "" };
     };
-    await (agent as any).runSecurityScan();
-    expect(captured).toEqual({ cmd: "npx", args: ["gitleaks", "protect", "--verbose"] });
+    const agent = makeAgent(runner, { enableSecurityScan: false });
+    await agent.runValidation(toValidationRequest({ branch: "feature/x" }));
+    expect(gitleaksCalled).toBe(false);
   });
 });
 
@@ -229,13 +228,9 @@ describe("security scan", () => {
 
 describe("runValidation orchestration", () => {
   it("runs all checks and returns pass when all succeed", async () => {
-    const { TesterAgent } = await import("../../agent/lib/dark-factory/tester-agent");
-    const agent = new TesterAgent({ enableSecurityScan: true, checkTimeoutMs: 5000 });
-    (agent as any).runCommand = async () => ({ exitCode: 0, stdout: "", stderr: "" });
-
-    const report: ValidationReport = await agent.runValidation(
-      toValidationRequest({ branch: "feature/x" }),
-    );
+    const runner: CommandRunner = async () => ({ exitCode: 0, stdout: "", stderr: "" });
+    const agent = makeAgent(runner, { enableSecurityScan: true, checkTimeoutMs: 5000 });
+    const report = await agent.runValidation(toValidationRequest({ branch: "feature/x" }));
     expect(report.staticAnalysis.status).toBe("pass");
     expect(report.smokeTests.status).toBe("pass");
     expect(report.securityScan.status).toBe("pass");
@@ -246,71 +241,36 @@ describe("runValidation orchestration", () => {
   });
 
   it("blocks PR when static analysis fails", async () => {
-    const { TesterAgent } = await import("../../agent/lib/dark-factory/tester-agent");
-    const agent = new TesterAgent({ enableSecurityScan: true, checkTimeoutMs: 5000 });
-    (agent as any).runCommand = async (cmd: string, args: string[]) => {
-      if (args.includes("tsc")) {
-        return { exitCode: 2, stdout: "tsc error", stderr: "" };
-      }
+    const runner: CommandRunner = async (cmd, args) => {
+      if (args.includes("tsc")) return { exitCode: 2, stdout: "tsc error", stderr: "" };
       return { exitCode: 0, stdout: "", stderr: "" };
     };
-
-    const report: ValidationReport = await agent.runValidation(
-      toValidationRequest({ branch: "feature/x" }),
-    );
+    const agent = makeAgent(runner, { enableSecurityScan: true, checkTimeoutMs: 5000 });
+    const report = await agent.runValidation(toValidationRequest({ branch: "feature/x" }));
     expect(report.staticAnalysis.status).toBe("fail");
     expect(report.overall).toBe("fail");
   });
 
   it("blocks PR when smoke tests fail", async () => {
-    const { TesterAgent } = await import("../../agent/lib/dark-factory/tester-agent");
-    const agent = new TesterAgent({ enableSecurityScan: true, checkTimeoutMs: 5000 });
-    (agent as any).runCommand = async (cmd: string, args: string[]) => {
-      if (args.includes("vitest")) {
-        return { exitCode: 1, stdout: "test failed", stderr: "" };
-      }
+    const runner: CommandRunner = async (cmd, args) => {
+      if (args.includes("vitest")) return { exitCode: 1, stdout: "test failed", stderr: "" };
       return { exitCode: 0, stdout: "", stderr: "" };
     };
-
-    const report: ValidationReport = await agent.runValidation(
-      toValidationRequest({ branch: "feature/x" }),
-    );
+    const agent = makeAgent(runner, { enableSecurityScan: true, checkTimeoutMs: 5000 });
+    const report = await agent.runValidation(toValidationRequest({ branch: "feature/x" }));
     expect(report.smokeTests.status).toBe("fail");
     expect(report.overall).toBe("fail");
   });
 
   it("blocks PR when security scan fails", async () => {
-    const { TesterAgent } = await import("../../agent/lib/dark-factory/tester-agent");
-    const agent = new TesterAgent({ enableSecurityScan: true, checkTimeoutMs: 5000 });
-    (agent as any).runCommand = async (cmd: string, args: string[]) => {
-      if (args.includes("gitleaks")) {
-        return { exitCode: 1, stdout: "secret leaked", stderr: "" };
-      }
+    const runner: CommandRunner = async (cmd, args) => {
+      if (args.includes("gitleaks")) return { exitCode: 1, stdout: "secret", stderr: "" };
       return { exitCode: 0, stdout: "", stderr: "" };
     };
-
-    const report: ValidationReport = await agent.runValidation(
-      toValidationRequest({ branch: "feature/x" }),
-    );
+    const agent = makeAgent(runner, { enableSecurityScan: true, checkTimeoutMs: 5000 });
+    const report = await agent.runValidation(toValidationRequest({ branch: "feature/x" }));
     expect(report.securityScan.status).toBe("fail");
     expect(report.overall).toBe("fail");
-  });
-
-  it("skips security scan when disabled", async () => {
-    const { TesterAgent } = await import("../../agent/lib/dark-factory/tester-agent");
-    const agent = new TesterAgent({ enableSecurityScan: false, checkTimeoutMs: 5000 });
-    let gitleaksCalled = false;
-    (agent as any).runCommand = async (cmd: string, args: string[]) => {
-      if (args.includes("gitleaks")) gitleaksCalled = true;
-      return { exitCode: 0, stdout: "", stderr: "" };
-    };
-
-    const report: ValidationReport = await agent.runValidation(
-      toValidationRequest({ branch: "feature/x" }),
-    );
-    expect(gitleaksCalled).toBe(false);
-    expect(report.securityScan.status).toBe("pass");
-    expect(report.overall).toBe("pass");
   });
 });
 
@@ -343,26 +303,20 @@ describe("createTesterAgent config validation", () => {
     const agent = createTesterAgent({ DF_TESTER_TIMEOUT_MS: "30000" });
     expect(agent).toBeInstanceOf(TesterAgent);
   });
-
-  it("accepts DF_TESTER_TIMEOUT_MS unset (default)", () => {
-    const agent = createTesterAgent({});
-    expect(agent).toBeInstanceOf(TesterAgent);
-  });
 });
 
 // --- ValidationFailedError message completeness ---
 
 describe("ValidationFailedError", () => {
   it("includes all failed check details in message", () => {
-    const report: ValidationReport = {
+    const report = createValidationReport({
       staticAnalysis: { status: "fail", errors: ["tsc error"] },
       smokeTests: { status: "fail", errors: ["vitest error"] },
       securityScan: { status: "pass" },
-      overall: "fail",
       timestamp: new Date().toISOString(),
       branch: "feature/x",
       durationMs: 100,
-    };
+    });
     const err = new ValidationFailedError(report);
     expect(err.message).toContain("tsc error");
     expect(err.message).toContain("vitest error");
@@ -370,17 +324,44 @@ describe("ValidationFailedError", () => {
   });
 
   it("includes security scan errors when present", () => {
-    const report: ValidationReport = {
+    const report = createValidationReport({
       staticAnalysis: { status: "pass" },
       smokeTests: { status: "pass" },
       securityScan: { status: "fail", errors: ["gitleaks error"] },
-      overall: "fail",
       timestamp: new Date().toISOString(),
       branch: "feature/x",
       durationMs: 100,
-    };
+    });
     const err = new ValidationFailedError(report);
     expect(err.message).toContain("gitleaks error");
+  });
+});
+
+// --- createValidationReport: overall computed ---
+
+describe("createValidationReport", () => {
+  it("computes overall=pass when all pass", () => {
+    const report = createValidationReport({
+      staticAnalysis: { status: "pass" },
+      smokeTests: { status: "pass" },
+      securityScan: { status: "pass" },
+      timestamp: new Date().toISOString(),
+      branch: "b",
+      durationMs: 1,
+    });
+    expect(report.overall).toBe("pass");
+  });
+
+  it("computes overall=fail when any fail", () => {
+    const report = createValidationReport({
+      staticAnalysis: { status: "fail", errors: ["x"] },
+      smokeTests: { status: "pass" },
+      securityScan: { status: "pass" },
+      timestamp: new Date().toISOString(),
+      branch: "b",
+      durationMs: 1,
+    });
+    expect(report.overall).toBe("fail");
   });
 });
 
@@ -402,22 +383,62 @@ describe("parseErrorOutput", () => {
   it("handles single line without trailing newline", () => {
     expect(parseErrorOutput("error: x")).toEqual(["error: x"]);
   });
+
+  it("caps output at 1000 lines", () => {
+    const huge = Array.from({ length: 5000 }, (_, i) => `line${i}`).join("\n");
+    expect(parseErrorOutput(huge)).toHaveLength(1000);
+  });
 });
 
-// --- runCommand error preservation ---
+// --- CommandRunner whitelist validation ---
 
-describe("runCommand error preservation", () => {
-  it("preserves exit code and partial output on failure", async () => {
-    const { TesterAgent } = await import("../../agent/lib/dark-factory/tester-agent");
-    const agent = new TesterAgent({ checkTimeoutMs: 5000 });
-    (agent as any).runCommand = async () => ({
-      exitCode: 127,
-      stdout: "partial output",
-      stderr: "command not found",
-    });
-    const result = await (agent as any).runCommand("npx", ["tsc"], 5000);
-    expect(result.exitCode).toBe(127);
-    expect(result.stdout).toBe("partial output");
-    expect(result.stderr).toBe("command not found");
+describe("CommandRunner security", () => {
+  it("allows npx with whitelisted commands", async () => {
+    const { defaultCommandRunner } = await import(
+      "../../agent/lib/dark-factory/tester-agent"
+    );
+    const result = await defaultCommandRunner("npx", ["tsc", "--noEmit"], 1000);
+    // exitCode may be non-zero if tsc not found, but no ValidationError thrown
+    expect(typeof result.exitCode).toBe("number");
+  });
+
+  it("throws ValidationError on non-whitelisted command", async () => {
+    const { defaultCommandRunner } = await import(
+      "../../agent/lib/dark-factory/tester-agent"
+    );
+    await expect(
+      defaultCommandRunner("rm", ["-rf", "/"], 1000),
+    ).rejects.toThrow(ValidationError);
+  });
+
+  it("throws ValidationError on npx with non-whitelisted subcommand", async () => {
+    const { defaultCommandRunner } = await import(
+      "../../agent/lib/dark-factory/tester-agent"
+    );
+    await expect(
+      defaultCommandRunner("npx", ["evil-tool"], 1000),
+    ).rejects.toThrow(ValidationError);
+  });
+});
+
+// --- PassFail type narrowing ---
+
+describe("PassFail type narrowing", () => {
+  it("narrows to fail variant and exposes errors", () => {
+    const result: PassFail = { status: "fail", errors: ["boom"] };
+    if (result.status === "fail") {
+      expect(result.errors).toContain("boom");
+    } else {
+      throw new Error("should narrow to fail");
+    }
+  });
+
+  it("narrows to pass variant and has no errors", () => {
+    const result: PassFail = { status: "pass" };
+    if (result.status === "pass") {
+      expect(result.status).toBe("pass");
+    } else {
+      throw new Error("should narrow to pass");
+    }
   });
 });

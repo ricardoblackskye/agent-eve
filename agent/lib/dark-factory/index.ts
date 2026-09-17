@@ -38,10 +38,15 @@ export {
 export {
   createTesterAgent,
   TesterAgent,
+  ValidationError,
+  ValidationFailedError,
+  createValidationReport,
   type ValidationRequest,
   type ValidationReport,
   type PassFail,
   type SecurityAlert,
+  type CommandRunner,
+  defaultCommandRunner,
 } from "./tester-agent";
 
 /**
