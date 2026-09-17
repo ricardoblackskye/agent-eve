@@ -73,6 +73,8 @@
     "serialise",
     "upserts",
     "upserted",
+    "forgeable",
+    "hoster",
     "DFLT",
     "maxTotalTripEvents",
     "maxStateEntries",
