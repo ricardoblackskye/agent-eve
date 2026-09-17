@@ -61,6 +61,8 @@ export {
   type IterationRecord,
   type DeveloperAgentConfig,
   ALLOWED_TOOLS,
+  ALLOWED_SKELETON_EXTENSIONS,
+  toTaskStatus,
   assertToolAllowed,
   ToolNotAllowedError,
   type LoopContext,

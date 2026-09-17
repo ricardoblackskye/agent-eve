@@ -8,8 +8,10 @@ import {
   applySkeletalMap,
   SkeletonMapError,
   ALLOWED_TOOLS,
+  ALLOWED_SKELETON_EXTENSIONS,
   assertToolAllowed,
   ToolNotAllowedError,
+  toTaskStatus,
   createDeveloperAgent,
 } from "../../agent/lib/dark-factory/developer-agent";
 
@@ -21,7 +23,9 @@ describe("toTaskAssignment", () => {
     description: "Add a helper that reverses strings",
     repo: "ricardoblackskye/agent-eve",
     ref: "main",
-    skeletonMap: { "src/helpers.ts": "export function reverse(s: string): string {}" },
+    skeletonMap: {
+      "src/helpers.ts": "export function reverse(s: string): string {}",
+    },
   };
 
   it("produces a valid TaskAssignment from complete input", () => {
@@ -34,27 +38,27 @@ describe("toTaskAssignment", () => {
   });
 
   it("rejects missing taskId", () => {
-    expect(() =>
-      toTaskAssignment({ ...validInput, taskId: "" }),
-    ).toThrow(InvalidTaskError);
+    expect(() => toTaskAssignment({ ...validInput, taskId: "" })).toThrow(
+      InvalidTaskError,
+    );
   });
 
   it("rejects whitespace-only taskId", () => {
-    expect(() =>
-      toTaskAssignment({ ...validInput, taskId: "   " }),
-    ).toThrow(InvalidTaskError);
+    expect(() => toTaskAssignment({ ...validInput, taskId: "   " })).toThrow(
+      InvalidTaskError,
+    );
   });
 
   it("rejects missing description", () => {
-    expect(() =>
-      toTaskAssignment({ ...validInput, description: "" }),
-    ).toThrow(InvalidTaskError);
+    expect(() => toTaskAssignment({ ...validInput, description: "" })).toThrow(
+      InvalidTaskError,
+    );
   });
 
   it("rejects missing repo", () => {
-    expect(() =>
-      toTaskAssignment({ ...validInput, repo: "" }),
-    ).toThrow(InvalidTaskError);
+    expect(() => toTaskAssignment({ ...validInput, repo: "" })).toThrow(
+      InvalidTaskError,
+    );
   });
 
   it("rejects unknown taskId format", () => {
@@ -144,6 +148,36 @@ describe("runCodingLoop", () => {
     });
     expect(seen).toEqual([1, 2, 3]);
   });
+
+  // Review of PR #153: iterations and fixCycles must not be able to drift.
+  it("derives fixCycles from the terminal state", async () => {
+    const passedSecond = await runCodingLoop({
+      maxIterations: 4,
+      worker: async (ctx) => ({ passed: ctx.iteration === 2 }),
+    });
+    expect(passedSecond).toEqual({
+      status: "success",
+      iterations: 2,
+      fixCycles: 1,
+    });
+
+    const neverPassed = await runCodingLoop({
+      maxIterations: 4,
+      worker: async () => ({ passed: false }),
+    });
+    expect(neverPassed).toEqual({
+      status: "failed",
+      iterations: 4,
+      fixCycles: 4,
+    });
+  });
+});
+
+describe("toTaskStatus (loop -> metrics vocabulary)", () => {
+  it("maps the loop's 'failed' onto the metrics 'failure'", () => {
+    expect(toTaskStatus("success")).toBe("success");
+    expect(toTaskStatus("failed")).toBe("failure");
+  });
 });
 
 // --- Task 133.3: Worker lifecycle integration (AC3) ---
@@ -185,7 +219,9 @@ describe("applySkeletalMap", () => {
       const map: SkeletonMap = {
         "../../etc/passwd": "evil",
       };
-      await expect(applySkeletalMap(dir, map)).rejects.toThrow(SkeletonMapError);
+      await expect(applySkeletalMap(dir, map)).rejects.toThrow(
+        SkeletonMapError,
+      );
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -202,10 +238,81 @@ describe("applySkeletalMap", () => {
       const map: SkeletonMap = {
         "/abs/path.ts": "code",
       };
-      await expect(applySkeletalMap(dir, map)).rejects.toThrow(SkeletonMapError);
+      await expect(applySkeletalMap(dir, map)).rejects.toThrow(
+        SkeletonMapError,
+      );
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  // Review of PR #153: parent-directory creation was never asserted — the
+  // original tests only ever used a single-level path.
+  it("creates nested parent directories for deep paths", async () => {
+    const { mkdtempSync, rmSync, existsSync, readFileSync } =
+      await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+
+    const dir = mkdtempSync(join(tmpdir(), "df-sk-"));
+    try {
+      await applySkeletalMap(dir, {
+        "src/deep/nested/mod.ts": "export const deep = true;",
+      });
+
+      expect(existsSync(join(dir, "src", "deep", "nested"))).toBe(true);
+      expect(
+        readFileSync(join(dir, "src", "deep", "nested", "mod.ts"), "utf8"),
+      ).toBe("export const deep = true;");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // Security review of PR #153: a traversal check alone still lets a worker
+  // scaffold ANY file type into the workspace, so the extension check is
+  // fail-closed.
+  it("rejects a disallowed file extension", async () => {
+    const { mkdtempSync, rmSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+
+    const dir = mkdtempSync(join(tmpdir(), "df-sk-"));
+    try {
+      await expect(
+        applySkeletalMap(dir, { "scripts/pwn.sh": "rm -rf /" }),
+      ).rejects.toThrow(SkeletonMapError);
+      await expect(applySkeletalMap(dir, { "tool.exe": "MZ" })).rejects.toThrow(
+        SkeletonMapError,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects an extensionless path such as a git hook", async () => {
+    const { mkdtempSync, rmSync, existsSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+
+    const dir = mkdtempSync(join(tmpdir(), "df-sk-"));
+    try {
+      await expect(
+        applySkeletalMap(dir, { ".git/hooks/pre-commit": "#!/bin/sh" }),
+      ).rejects.toThrow(SkeletonMapError);
+      // Nothing may be created for a rejected entry.
+      expect(existsSync(join(dir, ".git"))).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("allows the documented extensions and nothing risky", () => {
+    expect(ALLOWED_SKELETON_EXTENSIONS.has(".ts")).toBe(true);
+    expect(ALLOWED_SKELETON_EXTENSIONS.has(".json")).toBe(true);
+    expect(ALLOWED_SKELETON_EXTENSIONS.has(".sh")).toBe(false);
+    expect(ALLOWED_SKELETON_EXTENSIONS.has(".exe")).toBe(false);
+    expect(ALLOWED_SKELETON_EXTENSIONS.has("")).toBe(false);
   });
 });
 
@@ -229,6 +336,15 @@ describe("Tool confinement", () => {
     expect(() => assertToolAllowed("curl")).toThrow(ToolNotAllowedError);
   });
 
+  // Review of PR #153: the rejection must NAME the offending tool and list what
+  // IS allowed, otherwise an operator cannot tell why a worker was blocked.
+  it("names the offending tool and the allowlist in the error", () => {
+    expect(() => assertToolAllowed("curl")).toThrow(/curl/);
+    expect(() => assertToolAllowed("curl")).toThrow(/not permitted/i);
+    expect(() => assertToolAllowed("curl")).toThrow(/git_clone/);
+    expect(() => assertToolAllowed("curl")).toThrow(/run_tests/);
+  });
+
   it("does not throw for a sanctioned tool call", () => {
     expect(() => assertToolAllowed("read_file")).not.toThrow();
     expect(() => assertToolAllowed("write_code")).not.toThrow();
@@ -239,7 +355,8 @@ describe("Tool confinement", () => {
 
 describe("recordIteration (metrics)", () => {
   it("records a completed iteration to the MetricsStore", async () => {
-    const { InMemoryMetricsStore } = await import("../../agent/lib/dark-factory/metrics");
+    const { InMemoryMetricsStore } =
+      await import("../../agent/lib/dark-factory/metrics");
     const store = new InMemoryMetricsStore();
     const agent = createDeveloperAgent({ metrics: store });
 
@@ -261,7 +378,8 @@ describe("recordIteration (metrics)", () => {
   });
 
   it("tracks success rate per task type", async () => {
-    const { InMemoryMetricsStore } = await import("../../agent/lib/dark-factory/metrics");
+    const { InMemoryMetricsStore } =
+      await import("../../agent/lib/dark-factory/metrics");
     const store = new InMemoryMetricsStore();
     const agent = createDeveloperAgent({ metrics: store });
 
@@ -282,7 +400,8 @@ describe("recordIteration (metrics)", () => {
   });
 
   it("throws InvalidTaskError on invalid status value", async () => {
-    const { InMemoryMetricsStore } = await import("../../agent/lib/dark-factory/metrics");
+    const { InMemoryMetricsStore } =
+      await import("../../agent/lib/dark-factory/metrics");
     const store = new InMemoryMetricsStore();
     const agent = createDeveloperAgent({ metrics: store });
 
@@ -294,5 +413,58 @@ describe("recordIteration (metrics)", () => {
         status: "weird" as any,
       }),
     ).rejects.toThrow(InvalidTaskError);
+  });
+});
+
+// --- Config wiring (review of PR #153: DF_MAX_ITERATIONS was documented but
+// read by no code, so the documented cap had no effect) ---
+
+describe("createDeveloperAgent maxIterations (DF_MAX_ITERATIONS)", () => {
+  function withEnv(value: string | undefined, fn: () => void) {
+    const previous = process.env.DF_MAX_ITERATIONS;
+    if (value === undefined) delete process.env.DF_MAX_ITERATIONS;
+    else process.env.DF_MAX_ITERATIONS = value;
+    try {
+      fn();
+    } finally {
+      if (previous === undefined) delete process.env.DF_MAX_ITERATIONS;
+      else process.env.DF_MAX_ITERATIONS = previous;
+    }
+  }
+
+  async function makeStore() {
+    const { InMemoryMetricsStore } =
+      await import("../../agent/lib/dark-factory/metrics");
+    return new InMemoryMetricsStore();
+  }
+
+  it("defaults to 10 when DF_MAX_ITERATIONS is unset", async () => {
+    const metrics = await makeStore();
+    withEnv(undefined, () => {
+      expect(createDeveloperAgent({ metrics }).maxIterations).toBe(10);
+    });
+  });
+
+  it("reads DF_MAX_ITERATIONS when set", async () => {
+    const metrics = await makeStore();
+    withEnv("3", () => {
+      expect(createDeveloperAgent({ metrics }).maxIterations).toBe(3);
+    });
+  });
+
+  it("fails closed on a non-positive-integer DF_MAX_ITERATIONS", async () => {
+    const metrics = await makeStore();
+    withEnv("0", () => {
+      expect(() => createDeveloperAgent({ metrics })).toThrow(InvalidTaskError);
+    });
+  });
+
+  it("lets an explicit config value win over the env var", async () => {
+    const metrics = await makeStore();
+    withEnv("3", () => {
+      expect(
+        createDeveloperAgent({ metrics, maxIterations: 7 }).maxIterations,
+      ).toBe(7);
+    });
   });
 });

@@ -21,7 +21,14 @@
  */
 
 import { mkdir, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import {
+  dirname,
+  extname,
+  isAbsolute,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
 import type { MetricsStore, TaskStatus } from "./metrics";
 
 /** Thrown when a TaskAssignment fails validation. */
@@ -128,24 +135,43 @@ export interface CodingLoopOptions {
 /**
  * Drive the fail→fix→pass TDD cycle.
  *
- * Calls `worker` once per iteration, incrementing `iterations`. A non-passing
- * result counts as a fix cycle and the loop retries. Stops on first passing
- * result or when `maxIterations` is reached (whichever comes first).
+ * Calls `worker` once per iteration. A non-passing result counts as a fix cycle
+ * and the loop retries. Stops on the first passing result, or once `maxIterations`
+ * have been attempted (whichever comes first).
+ *
+ * The cap is exact, not off-by-one: `iterations` starts at 0, the guard
+ * `iterations < maxIterations` is tested before the increment, so the worker runs
+ * exactly `maxIterations` times and sees 1-based indexes 1..maxIterations.
  */
-export async function runCodingLoop(opts: CodingLoopOptions): Promise<LoopResult> {
+export async function runCodingLoop(
+  opts: CodingLoopOptions,
+): Promise<LoopResult> {
   let iterations = 0;
-  let fixCycles = 0;
+  let passed = false;
 
   while (iterations < opts.maxIterations) {
     iterations++;
-    const result = await opts.worker({ iteration: iterations });
-    if (result.passed) {
-      return { status: "success", iterations, fixCycles };
-    }
-    fixCycles++;
+    passed = (await opts.worker({ iteration: iterations })).passed;
+    if (passed) break;
   }
 
-  return { status: "failed", iterations, fixCycles };
+  // A "fix cycle" is nothing more than an iteration that did not pass, so derive
+  // it from the terminal state instead of keeping a second mutable counter: the
+  // two numbers can then never drift apart.
+  const fixCycles = passed ? iterations - 1 : iterations;
+
+  return { status: passed ? "success" : "failed", iterations, fixCycles };
+}
+
+/**
+ * Map a coding-loop outcome onto the metrics `TaskStatus` vocabulary.
+ *
+ * The loop reports `"success" | "failed"`; `MetricsStore`/`TaskStatus` reports
+ * `"success" | "failure"`. Those are different words on purpose, so translate at
+ * the boundary rather than casting — a cast would silently accept a mismatch.
+ */
+export function toTaskStatus(status: LoopResult["status"]): TaskStatus {
+  return status === "success" ? "success" : "failure";
 }
 
 // --- Task 133.3: Skeletal map application (AC3) ---
@@ -159,9 +185,35 @@ export class SkeletonMapError extends Error {
 }
 
 /**
+ * File extensions a skeleton map may create (fail-closed allowlist).
+ *
+ * A traversal check alone still lets a worker scaffold ANY file type into the
+ * workspace — `.sh`, `.exe`, or an extensionless `.git/hooks/pre-commit`.
+ * Restricting the extension set keeps the skeleton map to source, test, config
+ * and doc files.
+ */
+export const ALLOWED_SKELETON_EXTENSIONS = new Set([
+  ".ts",
+  ".tsx",
+  ".js",
+  ".jsx",
+  ".mjs",
+  ".cjs",
+  ".json",
+  ".md",
+  ".css",
+  ".scss",
+  ".html",
+  ".yml",
+  ".yaml",
+  ".txt",
+]);
+
+/**
  * Write the skeleton map into `workspace`, creating parent directories.
- * Fails closed: any entry whose resolved path escapes `workspace` (absolute
- * path, or `../` traversal) is rejected before any file is written.
+ * Fails closed: an entry is rejected BEFORE any write if its resolved path
+ * escapes `workspace` (absolute path, or `../` traversal), or if its extension is
+ * not in ALLOWED_SKELETON_EXTENSIONS.
  */
 export async function applySkeletalMap(
   workspace: string,
@@ -178,10 +230,19 @@ export async function applySkeletalMap(
     const target = resolve(root, relPath);
     const rel = relative(root, target);
     const inside =
-      rel === "" || (!isAbsolute(rel) && !rel.startsWith(".." + sep) && rel !== "..");
+      rel === "" ||
+      (!isAbsolute(rel) && !rel.startsWith(".." + sep) && rel !== "..");
     if (!inside) {
       throw new SkeletonMapError(
         `Skeleton path '${relPath}' resolves outside the workspace; write refused.`,
+      );
+    }
+    const ext = extname(relPath).toLowerCase();
+    if (!ALLOWED_SKELETON_EXTENSIONS.has(ext)) {
+      throw new SkeletonMapError(
+        `Skeleton path '${relPath}' has a disallowed extension '${
+          ext || "(none)"
+        }'; allowed: ${[...ALLOWED_SKELETON_EXTENSIONS].join(", ")}.`,
       );
     }
     await mkdir(dirname(target), { recursive: true });
@@ -202,7 +263,9 @@ export const ALLOWED_TOOLS = new Set([
 /** Thrown when a worker attempts to invoke a tool outside ALLOWED_TOOLS. */
 export class ToolNotAllowedError extends Error {
   constructor(tool: string) {
-    super(`Tool '${tool}' is not permitted. Allowed: ${[...ALLOWED_TOOLS].join(", ")}.`);
+    super(
+      `Tool '${tool}' is not permitted. Allowed: ${[...ALLOWED_TOOLS].join(", ")}.`,
+    );
     this.name = "ToolNotAllowedError";
   }
 }
@@ -231,6 +294,23 @@ export interface IterationRecord {
 }
 
 /**
+ * Default iteration cap, resolved from DF_MAX_ITERATIONS (default 10).
+ * Fail-closed: a value that is not a positive integer throws rather than
+ * silently running unbounded.
+ */
+function resolveMaxIterations(): number {
+  const raw = process.env.DF_MAX_ITERATIONS?.trim();
+  if (!raw) return 10;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new InvalidTaskError(
+      `DF_MAX_ITERATIONS must be a positive integer (received '${raw}').`,
+    );
+  }
+  return parsed;
+}
+
+/**
  * Developer Agent seam with metrics emission.
  * Wraps a MetricsStore so iteration/fix-cycle outcomes are observable.
  */
@@ -240,7 +320,7 @@ export class DeveloperAgent {
 
   constructor(config: DeveloperAgentConfig) {
     this.metrics = config.metrics;
-    this.maxIterations = config.maxIterations ?? 10;
+    this.maxIterations = config.maxIterations ?? resolveMaxIterations();
   }
 
   /** Record a completed task's iteration outcome to the metrics store. */
@@ -265,6 +345,8 @@ export class DeveloperAgent {
 }
 
 /** Create a DeveloperAgent wired to the provided metrics store. */
-export function createDeveloperAgent(config: DeveloperAgentConfig): DeveloperAgent {
+export function createDeveloperAgent(
+  config: DeveloperAgentConfig,
+): DeveloperAgent {
   return new DeveloperAgent(config);
 }
