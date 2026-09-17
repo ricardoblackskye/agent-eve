@@ -1,0 +1,38 @@
+{
+  "version": "1",
+  "gate": {
+    "minChars": 120,
+    "requiredSections": ["intent", "acceptance"],
+    "refusalMarkers": ["i cannot", "i am unable", "rate limit"]
+  },
+  "cases": [
+    {
+      "id": "case-1",
+      "taskType": "coding",
+      "iterations": 3,
+      "fixCycles": 1,
+      "output": "Intent: let the factory retry a failed webhook so transient errors never lose work. Acceptance: given a 500 response, when the delivery is retried, then the payload is preserved and the run id stays unchanged."
+    },
+    {
+      "id": "case-2",
+      "taskType": "coding",
+      "iterations": 4,
+      "fixCycles": 2,
+      "output": "Intent: give the developer agent a skeleton map it can trust. Acceptance: given a path outside the workspace, when the map is applied, then the write is refused before any directory is created or file written."
+    },
+    {
+      "id": "case-3",
+      "taskType": "coding",
+      "iterations": 5,
+      "fixCycles": 3,
+      "output": "Intent: be quick. Acceptance: pass."
+    },
+    {
+      "id": "case-4",
+      "taskType": "coding",
+      "iterations": 6,
+      "fixCycles": 4,
+      "output": "I cannot produce this story because the request is ambiguous and I would need more detail about the desired acceptance criteria and the intent before writing anything useful for the team."
+    }
+  ]
+}

@@ -67,6 +67,7 @@
     "Pbis",
     "SELFCORRECT",
     "SELFFCORRECT",
+    "SELFIMPROVE",
     "DFLT",
     "maxTotalTripEvents",
     "maxStateEntries",
