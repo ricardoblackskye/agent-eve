@@ -205,6 +205,21 @@ semantics locally and in CI, but a Vercel function filesystem is ephemeral — s
 production persistence needs a Redis/pgvector adapter in a later release. See
 [`ARCHITECTURE.md`](ARCHITECTURE.md#dark-factory-r1) for the seam design.
 
+### Dark Factory (R3) — Circuit Breaker / Cost Guard (#144)
+
+Starting in R3, a **circuit breaker** caps how much a single PBI may cost before a
+human is pulled in. It is independent of, and additive to, the per-task retry bounds
+in #138/#143.
+
+- **`circuit-breaker.ts` (#144)** — a `CircuitBreaker` stateful guard that tracks,
+  per `pbiId`, **cumulative worker-minutes** and **failed self-correct cycles**:
+  - `DF_MAX_WORKER_MINUTES_PER_PBI` (default 60) — total worker-task duration crosses threshold, or
+  - `DF_MAX_FAILED_SELFCORRECT` (default 3) — N CI-fail → re-dispatch → fail cycles with no success.
+- A tripped PBI stays **halted**: no further minutes counted, no additional trips emitted.
+- **Wiring** — `createCircuitBreaker(env)` builds from env knobs (fail-closed on bad values);
+  `createWorkerActivityObserver(breaker)` adapts it into the worker-env sink.
+- See [`ARCHITECTURE.md`](ARCHITECTURE.md#factory-level-circuit-breaker-cost-guard-r3-144) for detail.
+
 ### User Story Generation
 
 Label an issue `needs-story` (or mention `@eve-agent` in the body) and the
