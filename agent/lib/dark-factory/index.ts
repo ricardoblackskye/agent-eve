@@ -50,6 +50,28 @@ export {
   defaultCommandRunner,
 } from "./tester-agent";
 
+// R3 Developer Agent seam (#133)
+export {
+  createDeveloperAgent,
+  DeveloperAgent,
+  InvalidTaskError,
+  toTaskAssignment,
+  type TaskAssignment,
+  type SkeletonMap,
+  type IterationRecord,
+  type DeveloperAgentConfig,
+  ALLOWED_TOOLS,
+  assertToolAllowed,
+  ToolNotAllowedError,
+  type LoopContext,
+  type WorkerResult,
+  type LoopResult,
+  type CodingLoopOptions,
+  runCodingLoop,
+  applySkeletalMap,
+  SkeletonMapError,
+} from "./developer-agent";
+
 /**
  * Adapt the dispatch attempt stream into the observability store (#140 AC4).
  *
