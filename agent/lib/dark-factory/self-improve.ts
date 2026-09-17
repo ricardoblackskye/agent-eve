@@ -121,6 +121,14 @@ export interface VersionHandle<T = unknown> {
 /**
  * The first real surface: the iteration/retry bound, wrapping the existing
  * `DF_MAX_ITERATIONS` seam (#133). Held in process, so revert is trivially sound.
+ *
+ * Deliberately IN-PROCESS state — not a distributed-store abstraction. The
+ * `TunableSurface` interface is the seam: a surface backed by shared or remote
+ * state (a deployed prompt, a config service) is a different IMPLEMENTATION of
+ * the same interface and requires no change to the controller. What such an
+ * implementation must preserve is the contract proven here: stage never mutates
+ * the live value, apply/revert are the only transitions, and a superseded handle
+ * refuses to act (optimistic concurrency on the version id).
  */
 export class IterationBoundSurface implements TunableSurface<number> {
   readonly id = "iteration-bound";
@@ -147,7 +155,19 @@ export class IterationBoundSurface implements TunableSurface<number> {
     const previousVersion = `${this.id}@v${this.version}`;
     this.version += 1;
     const id = `${this.id}@v${this.version}`;
+    const handleVersion = this.version;
     let applied = false;
+    // A superseded handle must not act: applying or reverting it after a newer
+    // version was staged would silently undo that newer change. (This is not a
+    // thread-safety guard — JavaScript is single-threaded and nothing here
+    // awaits mid-update; it is an optimistic-concurrency check on the version.)
+    const assertCurrent = (): void => {
+      if (this.version !== handleVersion) {
+        throw new InvalidProposalError(
+          `Handle '${id}' was superseded by '${this.id}@v${this.version}'; refusing to act on a stale version.`,
+        );
+      }
+    };
     return {
       id,
       surfaceId: this.id,
@@ -156,12 +176,14 @@ export class IterationBoundSurface implements TunableSurface<number> {
       next,
       isApplied: () => applied,
       apply: async () => {
+        assertCurrent();
         this.bound = next;
         applied = true;
       },
       // Idempotent on purpose: a retried revert after a failure must not error,
       // and restoring `previous` twice is harmless.
       revert: async () => {
+        assertCurrent();
         this.bound = previous;
         applied = false;
       },
@@ -174,7 +196,16 @@ export class IterationBoundSurface implements TunableSurface<number> {
 export interface Proposal {
   surfaceId: string;
   next: unknown;
-  /** AC1: the hypothesis must be explicit and written, never implied. */
+  /**
+   * AC1: the hypothesis must be explicit and written, never implied. Expected
+   * form: one sentence stating the CAUSAL claim — what is being changed, from
+   * which value to which, for which task type, and on what observation — so a
+   * reader of the ledger can judge the reasoning without the diff. E.g.
+   * "Raising iteration-bound from 10 to 12 for task type 'coding' (observed
+   * success rate 0.6 over 30 samples) should lift the objective above 0.9."
+   * Recorded verbatim in the ledger entry; an empty/whitespace hypothesis is
+   * refused by `makeProposal`.
+   */
   hypothesis: string;
   /**
    * `access-widening` changes may not be accepted without the operator gate
@@ -285,11 +316,64 @@ export function loadImprovementBenchmark(path?: string): ImprovementBenchmark {
       `Improvement benchmark '${file}' requires a "gate".`,
     );
   }
+  // Validate each case's CONTENTS too, not just that it is an array: a
+  // malformed entry would otherwise reach the grader and die as a bare
+  // `TypeError` that names no fixture entry.
+  benchmark.cases.forEach((testCase, index) =>
+    assertValidBenchmarkCase(testCase, index),
+  );
   return {
     version: benchmark.version,
     gate: benchmark.gate,
     cases: benchmark.cases,
   };
+}
+
+/**
+ * Validate one benchmark case.
+ *
+ * Fails as a CONFIGURATION error naming the offending case, so a malformed
+ * fixture is diagnosable — rather than surviving to `gradeStoryQuality` where a
+ * non-string `output` throws `TypeError: text.trim is not a function`, which
+ * says nothing about which entry is broken.
+ */
+function assertValidBenchmarkCase(testCase: unknown, index: number): void {
+  const label = (candidate: unknown): string => {
+    const id = (candidate as { id?: unknown } | null)?.id;
+    return typeof id === "string" && id.trim()
+      ? `'${id}'`
+      : `at index ${index}`;
+  };
+  if (!testCase || typeof testCase !== "object") {
+    throw new SelfImprovementConfigError(
+      `Improvement benchmark case ${label(testCase)} must be an object.`,
+    );
+  }
+  const candidate = testCase as Partial<BenchmarkCase>;
+  const where = label(testCase);
+  if (typeof candidate.id !== "string" || !candidate.id.trim()) {
+    throw new SelfImprovementConfigError(
+      `Improvement benchmark case ${where} requires a non-empty "id".`,
+    );
+  }
+  if (typeof candidate.taskType !== "string" || !candidate.taskType.trim()) {
+    throw new SelfImprovementConfigError(
+      `Improvement benchmark case ${where} requires a non-empty "taskType".`,
+    );
+  }
+  if (typeof candidate.output !== "string") {
+    throw new SelfImprovementConfigError(
+      `Improvement benchmark case ${where} requires "output" to be a string (received ${JSON.stringify(candidate.output)}).`,
+    );
+  }
+  for (const field of ["iterations", "fixCycles"] as const) {
+    const value = candidate[field];
+    if (!Number.isInteger(value) || (value as number) < 0) {
+      throw new SelfImprovementConfigError(
+        `Improvement benchmark case ${where} requires "${field}" to be an integer >= 0 (received ${JSON.stringify(value)}).`,
+      );
+    }
+  }
 }
 
 /**
@@ -316,6 +400,9 @@ export function measureBenchmark(benchmark: ImprovementBenchmark): Measurement {
       `Improvement benchmark '${version}' has no cases; nothing can be measured.`,
     );
   }
+  // Re-validate here as well as at load: a benchmark assembled in code (or by a
+  // future non-JSON loader) never passed through `loadImprovementBenchmark`.
+  cases.forEach((testCase, index) => assertValidBenchmarkCase(testCase, index));
   // Objective: the fraction of the FIXED case set that still passes the #121
   // quality gate. A change that degrades output quality cannot raise this.
   const passed = cases.filter(
@@ -343,9 +430,19 @@ export interface Decision {
 }
 
 export interface DecisionConfig {
-  /** Required objective gain. 0 = strictly better. */
+  /**
+   * Required objective gain, as an absolute difference (not a ratio).
+   * Range: >= 0. Default 0, which means any strict improvement is enough while
+   * an unchanged objective is still rejected. Values parsed from the
+   * environment must be plain digits with an optional decimal part — "1e3" and
+   * "-1" are rejected at the boundary (`resolveSelfImprovementEnvConfig`).
+   */
   objectiveTolerance?: number;
-  /** Allowed guardrail regression. 0 = no regression. */
+  /**
+   * Allowed guardrail regression, as an absolute difference per guardrail key.
+   * Range: >= 0. Default 0, which means no guardrail may get worse at all.
+   * Same env-boundary validation as `objectiveTolerance`.
+   */
   guardrailTolerance?: number;
 }
 

@@ -861,3 +861,185 @@ describe("self-improvement cycle DEMO (#146)", () => {
     expect(surface.read()).toBe(12);
   });
 });
+
+// --- #154 review round 2: benchmark CONTENT validation -------------------
+//
+// The fixture's top level was validated (version/cases/gate) but individual
+// case fields were not, so a malformed case reached the grader and threw a raw
+// TypeError instead of a configuration error naming the offending case.
+
+describe("benchmark case validation (#154 review)", () => {
+  const gate = {
+    minChars: 1,
+    requiredSections: [],
+    refusalMarkers: [],
+  };
+
+  function withFixture(benchmark: unknown, fn: (path: string) => void): void {
+    const dir = mkdtempSync(join(tmpdir(), "df-bench-"));
+    const file = join(dir, "fixture.json");
+    writeFileSync(file, JSON.stringify(benchmark));
+    try {
+      fn(file);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  it("still accepts a well-formed fixture (the guard must not be over-strict)", () => {
+    withFixture(
+      {
+        version: "9",
+        gate,
+        cases: [
+          {
+            id: "ok",
+            taskType: "coding",
+            output: "x",
+            iterations: 1,
+            fixCycles: 0,
+          },
+        ],
+      },
+      (file) => {
+        const benchmark = loadImprovementBenchmark(file);
+        expect(benchmark.version).toBe("9");
+        expect(benchmark.cases).toHaveLength(1);
+        // One case, which passes the one-character gate → objective 1.
+        expect(measureBenchmark(benchmark).objective).toBe(1);
+      },
+    );
+  });
+
+  it("rejects a case whose output is not a string", () => {
+    withFixture(
+      {
+        version: "1",
+        gate,
+        cases: [
+          {
+            id: "bad",
+            taskType: "coding",
+            output: 42,
+            iterations: 1,
+            fixCycles: 0,
+          },
+        ],
+      },
+      (file) => {
+        expect(() => loadImprovementBenchmark(file)).toThrow(
+          SelfImprovementConfigError,
+        );
+      },
+    );
+  });
+
+  it("rejects a case with a negative or non-integer effort count", () => {
+    for (const bad of [
+      {
+        id: "neg",
+        taskType: "coding",
+        output: "x",
+        iterations: -1,
+        fixCycles: 0,
+      },
+      {
+        id: "frac",
+        taskType: "coding",
+        output: "x",
+        iterations: 1.5,
+        fixCycles: 0,
+      },
+      {
+        id: "nan",
+        taskType: "coding",
+        output: "x",
+        iterations: Number.NaN,
+        fixCycles: 0,
+      },
+    ]) {
+      withFixture({ version: "1", gate, cases: [bad] }, (file) => {
+        expect(() => loadImprovementBenchmark(file)).toThrow(
+          SelfImprovementConfigError,
+        );
+      });
+    }
+  });
+
+  it("names the offending case so a malformed fixture is diagnosable", () => {
+    withFixture(
+      {
+        version: "1",
+        gate,
+        cases: [
+          {
+            id: "ok",
+            taskType: "coding",
+            output: "x",
+            iterations: 1,
+            fixCycles: 0,
+          },
+          {
+            id: "broken-case",
+            taskType: "",
+            output: "x",
+            iterations: 1,
+            fixCycles: 0,
+          },
+        ],
+      },
+      (file) => {
+        expect(() => loadImprovementBenchmark(file)).toThrow(/broken-case/);
+      },
+    );
+  });
+
+  it("refuses to measure a malformed case handed in directly", () => {
+    const benchmark = loadImprovementBenchmark();
+
+    expect(() =>
+      measureBenchmark({
+        ...benchmark,
+        cases: [
+          {
+            id: "hand-built",
+            taskType: "coding",
+            output: 123 as unknown as string,
+            iterations: 1,
+            fixCycles: 0,
+          },
+        ],
+      }),
+    ).toThrow(SelfImprovementConfigError);
+  });
+});
+
+// --- #154 review round 2: a stale version handle must not clobber ---------
+//
+// Not a thread-safety issue (JavaScript is single-threaded, and stage/apply
+// contain no awaits that could interleave). The real hazard is a SUPERSEDED
+// handle acting after a newer version was staged, which would silently undo it.
+
+describe("superseded version handles (#154 review)", () => {
+  it("refuses to apply a handle that a newer stage superseded", async () => {
+    const surface = new IterationBoundSurface(10);
+    const v2 = await surface.stage(12);
+    const v3 = await surface.stage(14);
+
+    await expect(v2.apply()).rejects.toThrow(InvalidProposalError);
+    expect(surface.read()).toBe(10);
+
+    await v3.apply();
+    expect(surface.read()).toBe(14);
+  });
+
+  it("refuses to revert a superseded handle", async () => {
+    const surface = new IterationBoundSurface(10);
+    const v2 = await surface.stage(12);
+    await v2.apply();
+    const v3 = await surface.stage(14);
+
+    await expect(v2.revert()).rejects.toThrow(InvalidProposalError);
+    expect(surface.read()).toBe(12);
+  });
+});
