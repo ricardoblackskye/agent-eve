@@ -276,8 +276,38 @@ npx vitest run tests/dark-factory/self-improve.test.ts --reporter=verbose
 npx vitest run tests/dark-factory/self-improve.test.ts -t "DEMO" --reporter=verbose
 ```
 
-R4b (separate release, branch `feat/df-self-improve-cadence`) adds the
-recurrence: cadence, the objective-over-time trend report, and the operator CLI.
+### Dark Factory (R4b) — Recurrence, Trend and Operator Override (#146)
+
+R4a runs **one** cycle. R4b makes the loop recur and makes its effect provable.
+
+**Cadence is a decision, not a timer.** A Vercel serverless function cannot host
+a long-lived loop (#127), so an in-process `setInterval` would pass locally and
+silently never fire in production. Instead `isCycleDue({ lastRunAt, now,
+intervalMinutes })` answers "should a cycle run now?" from a persisted
+watermark, and the caller's scheduler (Vercel Cron, a GitHub Action, an
+operator) calls `runScheduledCycle`. The watermark advances only once a cycle has
+completed — whatever its verdict — so a scheduler firing early cannot busy-loop
+the factory.
+
+**Trend (AC6).** `objectiveTrend(ledger.entries())` reports the measured
+objective per cycle plus `first`, `last`, `delta` and accepted/rejected counts,
+so a single accepted step cannot masquerade as cumulative improvement. Filter to
+one surface with `{ surfaceId }`.
+
+**Operator override.** An out-of-band human cannot answer mid-request, so the
+gate is *pre-armed* rather than awaited: `createOperatorDecisionStore(store)`
+records an allow/deny for a (surface, kind) pair with an optional expiry, and
+`operatorGateFromStore()` supplies the `OperatorGate` that R4a consumes.
+Fail-closed throughout — nothing recorded, expired, unreadable expiry, or an
+explicit deny all refuse.
+
+Durability reuses the existing `StateStore` seam (#134): the watermark and the
+decisions live in the configured state store, and no new storage is introduced.
+
+```bash
+npx vitest run tests/dark-factory/self-improve-cadence.test.ts \
+               tests/dark-factory/self-improve-operator.test.ts --reporter=verbose
+```
 
 ### User Story Generation
 

@@ -726,6 +726,7 @@ describe("resolveSelfImprovementEnvConfig (#146)", () => {
       enabled: false,
       objectiveTolerance: 0,
       guardrailTolerance: 0,
+      intervalMinutes: 1440,
     });
   });
 
