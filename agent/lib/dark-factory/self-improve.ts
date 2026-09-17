@@ -810,12 +810,177 @@ export async function runImprovementCycle(
   };
 }
 
-// --- Environment wiring (fail-closed) ------------------------------------
+// --- R4b (#146): recurrence, trend and the operator override -------------
+
+/** Minutes between cycles when none is configured (once a day). */
+export const DEFAULT_INTERVAL_MINUTES = 1440;
+
+export interface CadenceInput {
+  /** ISO timestamp of the last completed cycle, or null if none has run. */
+  lastRunAt: string | null;
+  now: Date | string;
+  intervalMinutes: number;
+}
+
+/**
+ * Is a cycle due? Pure, so the caller's scheduler decides — deliberately NOT a
+ * `setInterval`: the factory runs out-of-band precisely because a serverless
+ * function cannot host a long-lived loop, so an in-process timer would pass
+ * locally and silently never fire in production.
+ */
+export function isCycleDue(input: CadenceInput): boolean {
+  assertValidInterval(input.intervalMinutes);
+  const now = toInstant(input.now, "now");
+  // No watermark means no cycle has run: the first one is always due.
+  if (input.lastRunAt === null) return true;
+  const last = toInstant(input.lastRunAt, "lastRunAt");
+  // `>=` on purpose: the boundary instant IS due, which is what the test
+  // asserting nextRunAt() satisfies isCycleDue() pins down.
+  return now.getTime() >= last.getTime() + input.intervalMinutes * 60_000;
+}
+
+/** The instant a cycle becomes due again, given the last run. */
+export function nextRunAt(lastRunAt: string, intervalMinutes: number): string {
+  assertValidInterval(intervalMinutes);
+  const last = toInstant(lastRunAt, "lastRunAt");
+  return new Date(last.getTime() + intervalMinutes * 60_000).toISOString();
+}
+
+function assertValidInterval(intervalMinutes: number): void {
+  if (
+    typeof intervalMinutes !== "number" ||
+    !Number.isFinite(intervalMinutes) ||
+    intervalMinutes <= 0
+  ) {
+    throw new SelfImprovementConfigError(
+      `intervalMinutes must be a finite number > 0 (received ${JSON.stringify(intervalMinutes)}).`,
+    );
+  }
+}
+
+/**
+ * Parse an instant, refusing to guess. A corrupt watermark must be loud: silently
+ * treating it as "never ran" would run a cycle on every invocation (burning the
+ * cost budget), and silently treating it as "just ran" would stop the loop
+ * forever. Neither failure is visible, so throw instead.
+ */
+function toInstant(value: Date | string, label: string): Date {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    throw new SelfImprovementConfigError(
+      `${label} is not a valid timestamp (received ${JSON.stringify(value)}); refusing to guess the cadence.`,
+    );
+  }
+  return date;
+}
+
+/** One cycle's measured objective, as recorded in the ledger. */
+export interface TrendPoint {
+  cycleId: string;
+  at: string;
+  objective: number;
+  verdict: "accept" | "reject";
+}
+
+/** AC6: the objective over time — evidence of cumulative, not single-step, change. */
+export interface ObjectiveTrend {
+  series: string;
+  points: TrendPoint[];
+  first: number | null;
+  last: number | null;
+  delta: number | null;
+  accepted: number;
+  rejected: number;
+  improving: boolean;
+}
+
+export function objectiveTrend(
+  entries: LedgerEntry[],
+  options?: { surfaceId?: string },
+): ObjectiveTrend {
+  const surfaceId = options?.surfaceId;
+  // The objective AFTER each cycle is the measured state at that point in time,
+  // so the series is directly comparable cycle to cycle.
+  const points: TrendPoint[] = entries
+    .filter((entry) => (surfaceId ? entry.surfaceId === surfaceId : true))
+    .map((entry) => ({
+      cycleId: entry.cycleId,
+      at: entry.at,
+      objective: entry.objective.after,
+      verdict: entry.verdict,
+    }));
+
+  const first = points.length > 0 ? points[0].objective : null;
+  const last = points.length > 0 ? points[points.length - 1].objective : null;
+  const delta = first === null || last === null ? null : round2(last - first);
+
+  return {
+    series: surfaceId ?? "all",
+    points,
+    first,
+    last,
+    delta,
+    accepted: points.filter((point) => point.verdict === "accept").length,
+    rejected: points.filter((point) => point.verdict === "reject").length,
+    // Cumulative, not single-step: the LAST measurement must beat the FIRST.
+    improving: delta !== null && delta > 0,
+  };
+}
+
+/** Persistence seam for the cadence watermark. */
+export interface CadenceWatermark {
+  read(): Promise<string | null>;
+  write(at: string): Promise<void>;
+}
+
+export interface ScheduledRunOptions {
+  controller: SelfImprovementController;
+  watermark: CadenceWatermark;
+  intervalMinutes: number;
+  now?: () => Date;
+}
+
+export type ScheduledRunResult =
+  | { status: "skipped"; reason: "not due" | "disabled" }
+  | { status: "ran"; result: CycleResult };
+
+/**
+ * Run one cycle IF the cadence says it is due. The watermark only advances once
+ * a cycle actually ran (even one that was rejected or NO-OPed), so a scheduler
+ * firing early cannot busy-loop the factory.
+ */
+export async function runScheduledCycle(
+  options: ScheduledRunOptions,
+): Promise<ScheduledRunResult> {
+  assertValidInterval(options.intervalMinutes);
+
+  // Disabled is checked first so an inert controller never even reads state.
+  if (!options.controller.enabled) {
+    return { status: "skipped", reason: "disabled" };
+  }
+
+  const now = options.now ? options.now() : new Date();
+  const lastRunAt = await options.watermark.read();
+  if (
+    !isCycleDue({ lastRunAt, now, intervalMinutes: options.intervalMinutes })
+  ) {
+    return { status: "skipped", reason: "not due" };
+  }
+
+  const result = await options.controller.run(`cycle-${now.toISOString()}`);
+  // Advance only AFTER the cycle completed, and for ANY outcome: a rejected or
+  // NO-OPed cycle still consumed its slot, so a scheduler firing early cannot
+  // busy-loop the factory.
+  await options.watermark.write(now.toISOString());
+  return { status: "ran", result };
+}
 
 export interface SelfImprovementEnvConfig {
   enabled: boolean;
   objectiveTolerance: number;
   guardrailTolerance: number;
+  /** Minimum minutes between cycles (cadence policy). */
+  intervalMinutes: number;
 }
 
 /** Dependencies the controller needs; the env supplies only its policy knobs. */
@@ -902,7 +1067,28 @@ export function resolveSelfImprovementEnvConfig(
       "DF_SELFIMPROVE_GUARDRAIL_TOLERANCE",
       env.DF_SELFIMPROVE_GUARDRAIL_TOLERANCE,
     ),
+    intervalMinutes: readPositiveInt(
+      "DF_SELFIMPROVE_INTERVAL_MINUTES",
+      env.DF_SELFIMPROVE_INTERVAL_MINUTES,
+      DEFAULT_INTERVAL_MINUTES,
+    ),
   };
+}
+
+/** Parse a positive integer env var in plain digits, or fall back when unset. */
+function readPositiveInt(
+  name: string,
+  raw: string | undefined,
+  fallback: number,
+): number {
+  const value = (raw ?? "").trim();
+  if (value === "") return fallback;
+  if (!/^\d+$/.test(value) || Number(value) < 1) {
+    throw new SelfImprovementConfigError(
+      `${name} must be a positive integer in plain digits (received ${JSON.stringify(raw)}).`,
+    );
+  }
+  return Number(value);
 }
 
 /**

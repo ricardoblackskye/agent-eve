@@ -120,6 +120,33 @@ export {
   type VersionHandle,
 } from "./self-improve";
 
+// R4b — recurrence, trend and operator override (#146)
+export {
+  isCycleDue,
+  nextRunAt,
+  objectiveTrend,
+  runScheduledCycle,
+  DEFAULT_INTERVAL_MINUTES,
+  type CadenceInput,
+  type CadenceWatermark,
+  type ObjectiveTrend,
+  type ScheduledRunOptions,
+  type ScheduledRunResult,
+  type TrendPoint,
+} from "./self-improve";
+
+export {
+  createOperatorDecisionStore,
+  createCadenceWatermark,
+  operatorGateFromStore,
+  SelfImprovementStateError,
+  OPERATOR_DECISIONS_KEY,
+  CADENCE_WATERMARK_KEY,
+  type OperatorDecision,
+  type OperatorDecisionStore,
+  type OperatorDecisionValue,
+} from "./self-improve-state";
+
 /**
  * Adapt the dispatch attempt stream into the observability store (#140 AC4).
  *
