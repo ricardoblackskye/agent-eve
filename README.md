@@ -235,6 +235,48 @@ The **Developer Agent** is an autonomous agent that accepts a task description, 
 
 - **Configuration:** `DF_MAX_ITERATIONS` (default 10) caps loop iterations; `DF_MAX_WORKER_MINUTES_PER_TASK` (default 15) is a complexity heuristic.
 
+### Dark Factory (R4a) — Self-Improvement Controller (#146)
+
+The Dark Factory's within-task self-correction loop (#138) fixes the defect in
+front of it; it does not improve **over time**. R4a adds the controller that
+closes that gap, in `agent/lib/dark-factory/self-improve.ts`:
+
+OBSERVE → PROPOSE → APPLY → MEASURE → DECIDE → RECORD
+
+- **OBSERVE** reads the aggregate metrics straight from the #140 store
+  (`MetricsStore.getRecords()`) — there is deliberately no parallel metric store.
+- **PROPOSE** produces a candidate change against a `TunableSurface` (R4a ships
+  `IterationBoundSurface`, wrapping the `DF_MAX_ITERATIONS` knob) together with
+  an explicit written hypothesis.
+- **APPLY** stages the change behind a versioned, reversible `VersionHandle`
+  (`iteration-bound@v2`) — never in place.
+- **MEASURE** re-runs a fixed benchmark
+  (`tests/fixtures/self-improve-benchmark.json`) through the same pure quality
+  gate the #121 model benchmarks use, so the numbers are deterministic and need
+  no API key.
+- **DECIDE** accepts **only** if the objective metric (success rate per task
+  type) improves by at least `DF_SELFIMPROVE_OBJECTIVE_TOLERANCE` and no
+  guardrail (mean iterations / mean fix cycles) regresses beyond
+  `DF_SELFIMPROVE_GUARDRAIL_TOLERANCE`.
+- **RECORD** appends an immutable ledger entry: what changed, why, the
+  baseline → after numbers, and the verdict.
+
+Fail-closed by design: a measurement that fails or is non-finite **rejects and
+reverts** rather than accepting on faith; an `access-widening` proposal with no
+operator gate is **blocked**; a tripped #144 cost guard short-circuits the cycle
+before any work happens; and an unset `DF_SELFIMPROVE_ENABLED` makes the
+controller inert.
+
+Run a cycle locally (prints the real before → after trace):
+
+```bash
+npx vitest run tests/dark-factory/self-improve.test.ts --reporter=verbose
+npx vitest run tests/dark-factory/self-improve.test.ts -t "DEMO" --reporter=verbose
+```
+
+R4b (separate release, branch `feat/df-self-improve-cadence`) adds the
+recurrence: cadence, the objective-over-time trend report, and the operator CLI.
+
 ### User Story Generation
 
 Label an issue `needs-story` (or mention `@eve-agent` in the body) and the

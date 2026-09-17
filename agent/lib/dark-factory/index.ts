@@ -10,7 +10,11 @@
  */
 
 import { isAbsolute, relative, resolve, sep } from "node:path";
-import { ConsoleStateProvider, SqliteStateAdapter, type StateStore } from "./state";
+import {
+  ConsoleStateProvider,
+  SqliteStateAdapter,
+  type StateStore,
+} from "./state";
 import { DEFAULT_RETRY_POLICY, type RetryPolicy } from "./dispatch";
 import type { DispatchObserver } from "./dispatch";
 import type { MetricsStore } from "./metrics";
@@ -74,6 +78,44 @@ export {
   SkeletonMapError,
 } from "./developer-agent";
 
+// R4a — measurable recursive self-improvement controller (#146)
+export {
+  createSelfImprovementController,
+  resolveSelfImprovementEnvConfig,
+  observeTaskType,
+  summarizeRecords,
+  proposeFromObservation,
+  makeProposal,
+  decide,
+  measureBenchmark,
+  loadImprovementBenchmark,
+  BenchmarkMeasurer,
+  IterationBoundSurface,
+  InMemoryImprovementLedger,
+  SelfImprovementConfigError,
+  InvalidProposalError,
+  type CycleResult,
+  type Decision,
+  type DecisionConfig,
+  type ImprovementBenchmark,
+  type ImprovementLedger,
+  type LedgerEntry,
+  type Measurement,
+  type Measurer,
+  type Observation,
+  type Observer,
+  type OperatorGate,
+  type Proposal,
+  type Proposer,
+  type CostGuard,
+  type SelfImprovementConfig,
+  type SelfImprovementController,
+  type SelfImprovementDeps,
+  type SelfImprovementEnvConfig,
+  type TunableSurface,
+  type VersionHandle,
+} from "./self-improve";
+
 /**
  * Adapt the dispatch attempt stream into the observability store (#140 AC4).
  *
@@ -82,7 +124,9 @@ export {
  * of fail->retry cycles that preceded the outcome, so a dispatch that succeeded
  * on the second attempt is `{iterations: 2, fixCycles: 1, status: "success"}`.
  */
-export function createDispatchObserver(recorder: MetricsStore): DispatchObserver {
+export function createDispatchObserver(
+  recorder: MetricsStore,
+): DispatchObserver {
   return async (metric) => {
     if (metric.status !== "succeeded" && metric.status !== "failed") return;
     await recorder.record("dispatch", {
@@ -119,7 +163,12 @@ export function createRetryPolicy(
 }
 
 /** Parse a non-negative integer env var, throwing on garbage (naming the var). */
-function readInt(name: string, raw: string | undefined, fallback: number, min: number): number {
+function readInt(
+  name: string,
+  raw: string | undefined,
+  fallback: number,
+  min: number,
+): number {
   if (raw === undefined || raw.trim() === "") return fallback;
   const parsed = Number(raw);
   if (!Number.isInteger(parsed) || parsed < min) {
@@ -147,7 +196,10 @@ function readInt(name: string, raw: string | undefined, fallback: number, min: n
  * points outside it is not detected — that is a filesystem/container concern
  * (R2's worker privilege boundary), not something path string math can solve.
  */
-export function resolveStateDbPath(rawPath: string, sandboxRoot?: string): string {
+export function resolveStateDbPath(
+  rawPath: string,
+  sandboxRoot?: string,
+): string {
   const resolved = resolve(rawPath);
   const root = (sandboxRoot || "").trim();
   if (root === "") return resolved;
@@ -162,7 +214,8 @@ export function resolveStateDbPath(rawPath: string, sandboxRoot?: string): strin
   // returning an absolute path.
   const rel = relative(resolvedRoot, resolved);
   const inside =
-    rel === "" || (!isAbsolute(rel) && rel !== ".." && !rel.startsWith(".." + sep));
+    rel === "" ||
+    (!isAbsolute(rel) && rel !== ".." && !rel.startsWith(".." + sep));
   if (inside) return resolved;
 
   throw new Error(
@@ -192,7 +245,9 @@ export function createStateStore(
         "DF_STATE_DRIVER=sqlite requires DF_STATE_DB_PATH (filesystem path to the SQLite database).",
       );
     }
-    return new SqliteStateAdapter(resolveStateDbPath(dbPath, env.DF_STATE_DB_DIR));
+    return new SqliteStateAdapter(
+      resolveStateDbPath(dbPath, env.DF_STATE_DB_DIR),
+    );
   }
 
   throw new Error(

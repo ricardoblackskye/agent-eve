@@ -1,7 +1,9 @@
 /**
  * Dark Factory — Observability / Self-Improvement (issues #139 / story #140).
  *
- * STUB — implementation pending (TDD RED).
+ * The sensor for the self-improvement loop: a canonical, provider-agnostic
+ * metric record per completed task, a store seam, and a no-loss retry decorator.
+ * The controller that acts on these metrics lives in `self-improve.ts` (#146).
  */
 
 export type TaskStatus = "success" | "failure";
@@ -120,7 +122,9 @@ export class InMemoryMetricsStore implements MetricsStore {
   successRateByType(type: string): number | null {
     const matching = this.records.filter((record) => record.taskType === type);
     if (matching.length === 0) return null;
-    const successes = matching.filter((record) => record.status === "success").length;
+    const successes = matching.filter(
+      (record) => record.status === "success",
+    ).length;
     return round2(successes / matching.length);
   }
 
