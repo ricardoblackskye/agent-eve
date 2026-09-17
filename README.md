@@ -220,6 +220,21 @@ in #138/#143.
   `createWorkerActivityObserver(breaker)` adapts it into the worker-env sink.
 - See [`ARCHITECTURE.md`](ARCHITECTURE.md#factory-level-circuit-breaker-cost-guard-r3-144) for detail.
 
+### Dark Factory (R3) — Developer Agent (#133)
+
+The **Developer Agent** is an autonomous agent that accepts a task description, writes code in a sandboxed worker, modifies files guided by a skeletal map, writes unit tests, and iterates the TDD cycle until tests pass.
+
+- **`developer-agent.ts` (#133)** — the Developer Agent seam with:
+  - `toTaskAssignment()` — validates and builds the task payload
+  - `runCodingLoop()` — drives the fail→fix→pass TDD cycle
+  - `applySkeletalMap()` — writes skeleton files into a workspace (fails closed on path traversal)
+  - `assertToolAllowed()` — enforces the allowed-tools allowlist
+  - `recordIteration()` — emits metrics via `MetricsStore`
+
+- **Tool confinement (AC4):** only `git_clone`, `read_file`, `write_code`, `run_tests` are permitted. Any other tool invocation throws `ToolNotAllowedError`.
+
+- **Configuration:** `DF_MAX_ITERATIONS` (default 10) caps loop iterations; `DF_MAX_WORKER_MINUTES_PER_TASK` (default 15) is a complexity heuristic.
+
 ### User Story Generation
 
 Label an issue `needs-story` (or mention `@eve-agent` in the body) and the
