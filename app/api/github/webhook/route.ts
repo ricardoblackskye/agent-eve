@@ -35,26 +35,74 @@ function getRepoConfig(repoFullName: string): RepoConfig | null {
   }
 }
 
+/** True for the strings we treat as an explicit "on". */
+function isTruthy(value: string | undefined): boolean {
+  const normalised = (value ?? "").trim().toLowerCase();
+  return normalised === "true" || normalised === "1";
+}
+
 /**
- * True when the app is running as a PRODUCTION deployment.
+ * Does THIS deployment require a webhook signature?
  *
- * Used to decide whether a missing webhook secret is a fatal
- * misconfiguration rather than a local convenience.
+ * SECURITY (#78): the gate must not be keyed on a platform-owned variable
+ * alone. `VERCEL_ENV` is set only by Vercel, so a self-hosted deployment
+ * (`npm run build && npm start`, documented in the README, where
+ * NODE_ENV=production but VERCEL_ENV is unset) was previously treated as local
+ * development — a missing secret skipped the refusal below AND
+ * `verifySignature()` returned true, silently accepting unsigned, forgeable
+ * payloads. The absence of configuration was read as permission to relax the
+ * control.
  *
- * Deliberately production-only: Preview deployments have no webhook secret
- * configured, and the preview eval suite posts unsigned webhooks at them.
- * Failing closed on Preview broke that suite without adding security — a
- * preview URL sits behind Vercel's protection bypass and holds no production
- * data. If a secret IS configured on preview, it is still enforced.
+ * The default is now DENY for any production build:
+ *  - `REQUIRE_WEBHOOK_SIGNATURE=true` opts IN on any environment, including
+ *    preview and local development.
+ *  - `ALLOW_UNSIGNED_WEBHOOKS=true` opts OUT explicitly. Documented as
+ *    dangerous; it exists so an operator who genuinely wants an open endpoint
+ *    says so on purpose instead of by omission.
+ *  - Vercel production requires a signature.
+ *  - Any OTHER production build (self-hosted/Docker) requires one too.
+ *  - Vercel Preview stays permissive: it has no secret configured and the
+ *    preview eval suite posts unsigned webhooks at it (failing closed there
+ *    broke CI once already — see 23dbd46), and a preview URL sits behind
+ *    Vercel's protection bypass with no production data.
+ *  - Local development (`NODE_ENV=development`) stays permissive.
+ *
+ * Whenever a secret IS configured, the HMAC is verified regardless of this
+ * function — that path is unchanged.
  */
-function isProductionEnvironment(): boolean {
-  return process.env.VERCEL_ENV === "production";
+function requiresSignature(): boolean {
+  if (isTruthy(process.env.REQUIRE_WEBHOOK_SIGNATURE)) return true;
+  if (isTruthy(process.env.ALLOW_UNSIGNED_WEBHOOKS)) return false;
+  if (process.env.VERCEL_ENV === "production") return true;
+  return (
+    process.env.NODE_ENV === "production" &&
+    process.env.VERCEL_ENV !== "preview"
+  );
+}
+
+let warnedPermissive = false;
+
+/**
+ * Say so, once, when unsigned payloads are accepted. A self-hosted deployment
+ * that forgot the secret used to be silent; a warning makes the permissive path
+ * observable instead.
+ */
+function warnPermissiveOnce(): void {
+  if (warnedPermissive) return;
+  warnedPermissive = true;
+  console.warn(
+    "[webhook] Signature verification is NOT enforced: no webhook secret is " +
+      `configured and this deployment is not required to verify signatures ` +
+      `(NODE_ENV=${process.env.NODE_ENV}, VERCEL_ENV=${process.env.VERCEL_ENV}). ` +
+      "Unsigned webhook payloads will be accepted. Configure the secret, or set " +
+      "REQUIRE_WEBHOOK_SIGNATURE=true, to enforce signatures.",
+  );
 }
 
 /**
  * Verify the x-hub-signature-256 against the webhook secret.
  * Returns true if the signature is valid, or if no secret is configured and
- * we are NOT in a deployed environment (local development only).
+ * this deployment is not required to verify signatures (local dev / preview).
  */
 function verifySignature(
   payload: string,
@@ -65,10 +113,11 @@ function verifySignature(
   // forged payloads on any deployment that forgot GH_WEBHOOK_SECRET.
   // In a deployed environment that is a fatal misconfiguration: fail closed.
   if (!secret) {
-    if (isProductionEnvironment()) {
+    if (requiresSignature()) {
       return false;
     }
-    return true; // Local development and preview only.
+    warnPermissiveOnce();
+    return true; // Local development and Vercel preview only.
   }
   if (!signatureHeader) return false;
 
@@ -138,11 +187,13 @@ async function handler(request: NextRequest) {
   // signature failure: surface it as a 500 with an explicit message so it is
   // distinguishable from a genuine bad signature (401) in the delivery logs.
   const webhookSecret = process.env[repoConfig.webhook_secret_env];
-  if (!webhookSecret && isProductionEnvironment()) {
+  if (!webhookSecret && requiresSignature()) {
     console.error(
-      `[webhook] ${repoConfig.webhook_secret_env} is not set in a deployed environment ` +
-        `(VERCEL_ENV=${process.env.VERCEL_ENV}). Refusing to process the webhook without ` +
-        `signature verification. Set the secret in your Vercel environment variables.`,
+      `[webhook] ${repoConfig.webhook_secret_env} is not set, and this deployment ` +
+        `requires signature verification ` +
+        `(NODE_ENV=${process.env.NODE_ENV}, VERCEL_ENV=${process.env.VERCEL_ENV}). ` +
+        `Refusing to process the webhook without signature verification. ` +
+        `Set the secret in your environment variables.`,
     );
     return NextResponse.json(
       {
