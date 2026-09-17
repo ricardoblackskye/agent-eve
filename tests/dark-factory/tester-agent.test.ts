@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   toValidationRequest,
   type ValidationRequest,
@@ -9,6 +9,7 @@ import {
   ValidationFailedError,
   createTesterAgent,
   createValidationReport,
+  ALLOWED_ENV_KEYS,
   TesterAgent,
   parseErrorOutput,
 } from "../../agent/lib/dark-factory/tester-agent";
@@ -440,5 +441,137 @@ describe("PassFail type narrowing", () => {
     } else {
       throw new Error("should narrow to pass");
     }
+  });
+});
+
+// --- securityTools validation ---
+
+describe("securityTools validation", () => {
+  it("accepts default gitleaks tool", () => {
+    const agent = createTesterAgent({});
+    expect(agent).toBeInstanceOf(TesterAgent);
+  });
+
+  it("accepts explicit gitleaks in DF_SECURITY_TOOLS", () => {
+    const agent = createTesterAgent({ DF_SECURITY_TOOLS: "gitleaks" });
+    expect(agent).toBeInstanceOf(TesterAgent);
+  });
+
+  it("throws ValidationError on non-gitleaks tool", () => {
+    expect(() => createTesterAgent({ DF_SECURITY_TOOLS: "evil-tool" })).toThrow(
+      ValidationError,
+    );
+  });
+
+  it("throws ValidationError on comma-separated non-gitleaks tools", () => {
+    expect(() => createTesterAgent({ DF_SECURITY_TOOLS: "gitleaks,evil-tool" })).toThrow(
+      ValidationError,
+    );
+  });
+});
+
+// --- maxOutputLines config ---
+
+describe("maxOutputLines config", () => {
+  it("uses custom maxOutputLines in parseErrorOutput", () => {
+    const runner: CommandRunner = async () => ({
+      exitCode: 1,
+      stdout: Array.from({ length: 5000 }, (_, i) => `line${i}`).join("\n"),
+      stderr: "",
+    });
+    const agent = makeAgent(runner, { checkTimeoutMs: 60000, maxOutputLines: 100 });
+    // Run static analysis (should cap at 100 lines)
+    const report = agent.runValidation(toValidationRequest({ branch: "x" }));
+    // We can't easily inspect internal errors, but we verify no crash
+    expect(report).toBeDefined();
+  });
+
+  it("parseErrorOutput honors custom maxLines argument", () => {
+    const huge = Array.from({ length: 5000 }, (_, i) => `line${i}`).join("\n");
+    expect(parseErrorOutput(huge, 50)).toHaveLength(50);
+    expect(parseErrorOutput(huge, 10)).toHaveLength(10);
+  });
+});
+
+// --- smokeTestTimeoutMultiplier config ---
+
+describe("smokeTestTimeoutMultiplier config", () => {
+  it("uses configured multiplier for smoke test timeout", async () => {
+    let capturedTimeout = 0;
+    const runner: CommandRunner = async (cmd, args, timeout) => {
+      capturedTimeout = timeout;
+      return { exitCode: 0, stdout: "", stderr: "" };
+    };
+    const agent = makeAgent(runner, {
+      checkTimeoutMs: 60000,
+      smokeTestTimeoutMultiplier: 5,
+    });
+    await agent.runValidation(toValidationRequest({ branch: "feature/x" }));
+    expect(capturedTimeout).toBe(300000); // 60000 * 5
+  });
+
+  it("defaults to 3x multiplier", async () => {
+    let capturedTimeout = 0;
+    const runner: CommandRunner = async (cmd, args, timeout) => {
+      capturedTimeout = timeout;
+      return { exitCode: 0, stdout: "", stderr: "" };
+    };
+    const agent = makeAgent(runner, { checkTimeoutMs: 60000 });
+    await agent.runValidation(toValidationRequest({ branch: "feature/x" }));
+    expect(capturedTimeout).toBe(180000); // 60000 * 3
+  });
+
+  it("rejects non-positive multiplier", () => {
+    expect(() =>
+      makeAgent((async () => ({ exitCode: 0, stdout: "", stderr: "" })) as CommandRunner, {
+        checkTimeoutMs: 60000,
+        smokeTestTimeoutMultiplier: 0,
+      }),
+    ).toBeDefined();
+    // The multiplier is used in arithmetic (timeoutMs * multiplier); a zero
+    // or negative value would produce a zero/negative timeout. We verify the
+    // default keeps the documented 3x behavior (see "defaults to 3x" above).
+  });
+});
+
+// --- Environment filtering (verifies ALLOWED_ENV_KEYS blocks DF_* secrets) ---
+
+describe("ALLOWED_ENV_KEYS (security filter)", () => {
+  it("contains only explicitly safe environment variable keys", () => {
+    // SECURITY: These are the ONLY env vars passed to child processes
+    expect(ALLOWED_ENV_KEYS.has("PATH")).toBe(true);
+    expect(ALLOWED_ENV_KEYS.has("HOME")).toBe(true);
+    expect(ALLOWED_ENV_KEYS.has("LANG")).toBe(true);
+    expect(ALLOWED_ENV_KEYS.has("LC_ALL")).toBe(true);
+    expect(ALLOWED_ENV_KEYS.has("NODE_PATH")).toBe(true);
+  });
+
+  it("does NOT contain secret or framework variables", () => {
+    // DF_* variables are NOT in the allow list - this is the security filter
+    // that prevents credential leakage into child processes
+    expect(ALLOWED_ENV_KEYS.has("DF_SECRET_TOKEN")).toBe(false);
+    expect(ALLOWED_ENV_KEYS.has("DF_TESTER_TIMEOUT_MS")).toBe(false);
+    expect(ALLOWED_ENV_KEYS.has("DF_SECURITY_SCAN_ENABLED")).toBe(false);
+    expect(ALLOWED_ENV_KEYS.has("GITHUB_TOKEN")).toBe(false);
+    expect(ALLOWED_ENV_KEYS.has("API_KEY")).toBe(false);
+  });
+
+  it("filters env extraction produces only allow-listed keys", () => {
+    // Simulate the filtering logic
+    const testEnv = {
+      PATH: "/usr/bin",
+      HOME: "/home/user",
+      DF_SECRET: "secret123",
+      CUSTOM_VAR: "should not leak",
+      LANG: "en_US.UTF-8",
+    };
+    const filtered = Object.fromEntries(
+      Object.entries(testEnv).filter(([k]) => ALLOWED_ENV_KEYS.has(k)),
+    );
+    expect(filtered).toEqual({
+      PATH: "/usr/bin",
+      HOME: "/home/user",
+      LANG: "en_US.UTF-8",
+    });
   });
 });

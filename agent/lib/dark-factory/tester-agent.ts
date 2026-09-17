@@ -24,6 +24,7 @@
  * ENVIRONMENT VARIABLES (read by createTesterAgent):
  * - DF_SECURITY_SCAN_ENABLED: "true" to enable gitleaks scan (default: false)
  * - DF_TESTER_TIMEOUT_MS: per-check timeout in ms (default: 60000)
+ * - DF_SECURITY_TOOLS: comma-separated security tools (default: "gitleaks", only "gitleaks" allowed)
  *
  * SECURITY CONSIDERATIONS:
  * - MAX_BUFFER_BYTES: Limited to 10MB to prevent memory exhaustion from
@@ -31,8 +32,10 @@
  *   limit (tsc/cspell typically produce <1MB output).
  * - Command whitelist: Only npx is allowed as the executable; specific args
  *   form the allowed command set (tsc, cspell, vitest, gitleaks).
- * - Environment filtering: Only explicitly allowed env vars are passed to
- *   child processes (NODE_PATH, PATH, HOME are passed through for system tools).
+ * - Environment filtering: ONLY explicitly allow-listed env vars
+ *   (NODE_PATH, PATH, HOME, LANG, LC_ALL) are passed to child processes.
+ *   All other variables (including DF_* secrets) are explicitly blocked to
+ *   prevent credential leakage into spawned subprocesses.
  */
 
 import { execFile } from "node:child_process";
@@ -52,7 +55,7 @@ const GIT_SHA_PATTERN = /^[0-9a-fA-F]{40}$/;
 const ALLOWED_COMMANDS = new Set(["tsc", "cspell", "vitest", "gitleaks"]);
 
 /** Allowed environment variable keys passed to child processes */
-const ALLOWED_ENV_KEYS = new Set(["NODE_PATH", "PATH", "HOME", "LANG", "LC_ALL"]);
+export const ALLOWED_ENV_KEYS = new Set(["NODE_PATH", "PATH", "HOME", "LANG", "LC_ALL"]);
 
 /**
  * Interface for command execution (dependency injection for testability).
@@ -91,12 +94,9 @@ export const defaultCommandRunner: CommandRunner = async (
     const { stdout, stderr } = await execFileAsync(cmd, args, {
       timeout: timeoutMs,
       maxBuffer: MAX_BUFFER_BYTES,
-      env: {
-        ...process.env,
-        ...Object.fromEntries(
-          Object.entries(process.env ?? {}).filter(([k]) => ALLOWED_ENV_KEYS.has(k) || !k.startsWith("DF_")),
-        ),
-      },
+      env: Object.fromEntries(
+        Object.entries(process.env ?? {}).filter(([k]) => ALLOWED_ENV_KEYS.has(k)),
+      ) as NodeJS.ProcessEnv,
     });
     return {
       exitCode: 0,
@@ -263,13 +263,16 @@ export function toValidationRequest(input: {
 /**
  * Parse raw command output into non-empty trimmed error lines.
  * Edge cases handled: empty string → [], whitespace-only lines dropped,
- * trailing newline ignored, maximum 1000 lines to prevent memory issues.
+ * trailing newline ignored. Maximum output lines capped to prevent memory
+ * exhaustion from maliciously large outputs.
+ * @param output Raw output string
+ * @param maxLines Maximum lines to return (default: 1000, from config)
  */
-export function parseErrorOutput(output: string): string[] {
+export function parseErrorOutput(output: string, maxLines: number = 1000): string[] {
   if (!output) return [];
   return output
     .split("\n")
-    .slice(0, 1000) // Prevent memory exhaustion from huge outputs
+    .slice(0, maxLines) // Prevent memory exhaustion from huge outputs
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
 }
@@ -288,6 +291,8 @@ interface ValidationCheck {
 export class TesterAgent {
   readonly timeoutMs: number;
   readonly runner: CommandRunner;
+  readonly maxOutputLines: number;
+  readonly smokeTestTimeoutMultiplier: number;
   private readonly config: TesterAgentConfig;
   private readonly checks: ValidationCheck[];
 
@@ -296,6 +301,8 @@ export class TesterAgent {
     options: { commandRunner?: CommandRunner } = {},
   ) {
     this.timeoutMs = config.checkTimeoutMs ?? 60000;
+    this.maxOutputLines = config.maxOutputLines ?? 1000;
+    this.smokeTestTimeoutMultiplier = config.smokeTestTimeoutMultiplier ?? 3;
     this.config = config;
     this.runner = options.commandRunner ?? defaultCommandRunner;
 
@@ -338,7 +345,7 @@ export class TesterAgent {
 
     const tsc = await this.runner("npx", ["tsc", "--noEmit"], this.timeoutMs);
     if (tsc.exitCode !== 0) {
-      errors.push(...parseErrorOutput(tsc.stdout), ...parseErrorOutput(tsc.stderr));
+      errors.push(...parseErrorOutput(tsc.stdout, this.maxOutputLines), ...parseErrorOutput(tsc.stderr, this.maxOutputLines));
     }
 
     const cspell = await this.runner(
@@ -347,7 +354,7 @@ export class TesterAgent {
       this.timeoutMs,
     );
     if (cspell.exitCode !== 0) {
-      errors.push(...parseErrorOutput(cspell.stdout), ...parseErrorOutput(cspell.stderr));
+      errors.push(...parseErrorOutput(cspell.stdout, this.maxOutputLines), ...parseErrorOutput(cspell.stderr, this.maxOutputLines));
     }
 
     return errors.length > 0
@@ -360,12 +367,12 @@ export class TesterAgent {
     const result = await this.runner(
       "npx",
       ["vitest", "run", "--passWithNoTests"],
-      this.timeoutMs * 3,
+      this.timeoutMs * this.smokeTestTimeoutMultiplier,
     );
     if (result.exitCode !== 0) {
       const errors = [
-        ...parseErrorOutput(result.stdout),
-        ...parseErrorOutput(result.stderr),
+        ...parseErrorOutput(result.stdout, this.maxOutputLines),
+        ...parseErrorOutput(result.stderr, this.maxOutputLines),
       ];
       return { status: "fail", errors };
     }
@@ -385,8 +392,8 @@ export class TesterAgent {
     );
     if (result.exitCode !== 0) {
       const errors = [
-        ...parseErrorOutput(result.stdout),
-        ...parseErrorOutput(result.stderr),
+        ...parseErrorOutput(result.stdout, this.maxOutputLines),
+        ...parseErrorOutput(result.stderr, this.maxOutputLines),
       ];
       return { status: "fail", errors };
     }
@@ -402,6 +409,10 @@ export interface TesterAgentConfig {
   checkTimeoutMs?: number;
   /** List of security tools to run (default: ["gitleaks"]) */
   securityTools?: string[];
+  /** Maximum number of error output lines to capture (default: 1000) */
+  maxOutputLines?: number;
+  /** Multiplier for smoke test timeout vs per-check timeout (default: 3) */
+  smokeTestTimeoutMultiplier?: number;
 }
 
 /**
@@ -424,8 +435,22 @@ export function createTesterAgent(
     checkTimeoutMs = parsed;
   }
 
+  // Validate securityTools: only allow gitleaks to prevent arbitrary tool execution
+  const securityTools = (env.DF_SECURITY_TOOLS ?? "gitleaks")
+    .split(",")
+    .map((t) => t.trim())
+    .filter((t) => t.length > 0);
+  for (const tool of securityTools) {
+    if (tool !== "gitleaks") {
+      throw new ValidationError(
+        `DF_SECURITY_TOOLS contains unsupported tool "${tool}". Only "gitleaks" is allowed.`,
+      );
+    }
+  }
+
   return new TesterAgent({
     enableSecurityScan: env.DF_SECURITY_SCAN_ENABLED === "true",
     checkTimeoutMs,
+    securityTools,
   });
 }

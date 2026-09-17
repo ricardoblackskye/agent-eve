@@ -41,6 +41,7 @@ export {
   ValidationError,
   ValidationFailedError,
   createValidationReport,
+  ALLOWED_ENV_KEYS,
   type ValidationRequest,
   type ValidationReport,
   type PassFail,
