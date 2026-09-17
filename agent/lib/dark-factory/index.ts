@@ -34,6 +34,22 @@ export {
   type CircuitBreakerConfig,
 } from "./circuit-breaker";
 
+// R3 Tester Agent seam (#136)
+export {
+  createTesterAgent,
+  TesterAgent,
+  ValidationError,
+  ValidationFailedError,
+  createValidationReport,
+  ALLOWED_ENV_KEYS,
+  type ValidationRequest,
+  type ValidationReport,
+  type PassFail,
+  type SecurityAlert,
+  type CommandRunner,
+  defaultCommandRunner,
+} from "./tester-agent";
+
 /**
  * Adapt the dispatch attempt stream into the observability store (#140 AC4).
  *
