@@ -515,6 +515,21 @@ npm run build
 npm run start
 ```
 
+**The webhook secret is REQUIRED.** Signature enforcement defaults to deny on any
+production build, so a self-hosted deployment without the secret refuses
+deliveries with `500` (rather than silently accepting unsigned, forgeable
+payloads, which is what it used to do — see #78). Configure the per-repo secret
+from `release-manager.config.json`:
+
+```bash
+# e.g. GH_WEBHOOK_SECRET for ricardoblackskye/agent-eve
+export GH_WEBHOOK_SECRET=your-secret
+```
+
+If your runtime does not set `NODE_ENV=production`, force enforcement explicitly
+with `REQUIRE_WEBHOOK_SIGNATURE=true`. `ALLOW_UNSIGNED_WEBHOOKS=true` opts out
+(dangerous; a warning is logged whenever the permissive path is taken).
+
 ## Adding Tools
 
 Create a TypeScript file in `agent/tools/`:

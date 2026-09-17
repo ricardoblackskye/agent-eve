@@ -21,6 +21,7 @@ const ROOT = process.cwd();
 const WHITELIST = new Set<string>([
   "BASE_URL", // Playwright config only
   "CI", // set by CI
+  "NODE_ENV", // set by Next.js / Vitest, never by the operator
   "PLAYWRIGHT_EXECUTABLE_PATH", // Playwright config only
   "VERCEL_ENV", // Vercel auto-provided
   "VERCEL_GIT_REPO_OWNER", // Vercel auto-provided
