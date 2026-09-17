@@ -309,10 +309,67 @@ describe("applySkeletalMap", () => {
 
   it("allows the documented extensions and nothing risky", () => {
     expect(ALLOWED_SKELETON_EXTENSIONS.has(".ts")).toBe(true);
+    expect(ALLOWED_SKELETON_EXTENSIONS.has(".tsx")).toBe(true);
     expect(ALLOWED_SKELETON_EXTENSIONS.has(".json")).toBe(true);
+    expect(ALLOWED_SKELETON_EXTENSIONS.has(".md")).toBe(true);
+    // Executable / markup types stay OUT of the allowlist (review of PR #153).
+    for (const risky of [".js", ".jsx", ".mjs", ".cjs", ".html", ".scss"]) {
+      expect(ALLOWED_SKELETON_EXTENSIONS.has(risky)).toBe(false);
+    }
     expect(ALLOWED_SKELETON_EXTENSIONS.has(".sh")).toBe(false);
     expect(ALLOWED_SKELETON_EXTENSIONS.has(".exe")).toBe(false);
     expect(ALLOWED_SKELETON_EXTENSIONS.has("")).toBe(false);
+  });
+
+  // Review of PR #153: containment maths is only meaningful for shapes Node's
+  // `path` helpers actually understand, so drive-relative / UNC / NUL paths are
+  // refused outright rather than normalised.
+  it("rejects tricky traversal and platform-specific path forms", async () => {
+    const { mkdtempSync, rmSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+
+    const dir = mkdtempSync(join(tmpdir(), "df-sk-"));
+    try {
+      for (const bad of [
+        "./../evil.ts",
+        "a/../../evil.ts",
+        "src/./../../evil.ts",
+        "C:evil.ts",
+        "\\\\server\\share\\evil.ts",
+        "bad\0name.ts",
+      ]) {
+        await expect(
+          applySkeletalMap(dir, { [bad]: "x" }),
+        ).rejects.toThrow(SkeletonMapError);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // Review of PR #153: a symlink INSIDE the workspace pointing outside it defeats
+  // a purely lexical containment check, so the real resolved parent is verified.
+  it("refuses to write through a symlink that escapes the workspace", async () => {
+    const { mkdtempSync, rmSync, existsSync, symlinkSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+
+    const outside = mkdtempSync(join(tmpdir(), "df-out-"));
+    const dir = mkdtempSync(join(tmpdir(), "df-sk-"));
+    try {
+      const linkType = process.platform === "win32" ? "junction" : "dir";
+      symlinkSync(outside, join(dir, "link"), linkType);
+
+      await expect(
+        applySkeletalMap(dir, { "link/evil.ts": "pwned" }),
+      ).rejects.toThrow(SkeletonMapError);
+      // Nothing may be written on the far side of the symlink.
+      expect(existsSync(join(outside, "evil.ts"))).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
   });
 });
 
@@ -457,6 +514,20 @@ describe("createDeveloperAgent maxIterations (DF_MAX_ITERATIONS)", () => {
     withEnv("0", () => {
       expect(() => createDeveloperAgent({ metrics })).toThrow(InvalidTaskError);
     });
+  });
+
+  // Review of PR #153: "digits only" must mean digits only — Number() alone
+  // accepts "1e3" (1000) and "0x10" (16).
+  it("rejects exponent and hex forms of DF_MAX_ITERATIONS", async () => {
+    const metrics = await makeStore();
+    for (const bad of ["1e3", "0x10", "10px", "٣"]) {
+      withEnv(bad, () => {
+        expect(
+          () => createDeveloperAgent({ metrics }),
+          `expected '${bad}' to be rejected`,
+        ).toThrow(InvalidTaskError);
+      });
+    }
   });
 
   it("lets an explicit config value win over the env var", async () => {

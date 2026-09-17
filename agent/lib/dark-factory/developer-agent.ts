@@ -20,7 +20,7 @@
  * - AC5: stops when tests pass and reports completed task
  */
 
-import { mkdir, writeFile } from "node:fs/promises";
+import { lstat, mkdir, realpath, writeFile } from "node:fs/promises";
 import {
   dirname,
   extname,
@@ -139,9 +139,9 @@ export interface CodingLoopOptions {
  * and the loop retries. Stops on the first passing result, or once `maxIterations`
  * have been attempted (whichever comes first).
  *
- * The cap is exact, not off-by-one: `iterations` starts at 0, the guard
- * `iterations < maxIterations` is tested before the increment, so the worker runs
- * exactly `maxIterations` times and sees 1-based indexes 1..maxIterations.
+ * The bound is inclusive and `attempt` is 1-based to match `LoopContext.iteration`,
+ * so the worker is called exactly `maxIterations` times with indexes
+ * 1..maxIterations — there is no off-by-one to reason about.
  */
 export async function runCodingLoop(
   opts: CodingLoopOptions,
@@ -149,9 +149,9 @@ export async function runCodingLoop(
   let iterations = 0;
   let passed = false;
 
-  while (iterations < opts.maxIterations) {
-    iterations++;
-    passed = (await opts.worker({ iteration: iterations })).passed;
+  for (let attempt = 1; attempt <= opts.maxIterations; attempt++) {
+    iterations = attempt;
+    passed = (await opts.worker({ iteration: attempt })).passed;
     if (passed) break;
   }
 
@@ -189,37 +189,58 @@ export class SkeletonMapError extends Error {
  *
  * A traversal check alone still lets a worker scaffold ANY file type into the
  * workspace — `.sh`, `.exe`, or an extensionless `.git/hooks/pre-commit`.
- * Restricting the extension set keeps the skeleton map to source, test, config
- * and doc files.
+ * The set is deliberately NARROW: this is a TypeScript project, so a skeleton map
+ * only needs source, config and doc files. Executable/markup types (.js, .mjs,
+ * .cjs, .jsx, .html) and style preprocessors (.scss) are excluded to keep the
+ * attack surface small — widen this list only when a task genuinely needs them.
  */
 export const ALLOWED_SKELETON_EXTENSIONS = new Set([
   ".ts",
   ".tsx",
-  ".js",
-  ".jsx",
-  ".mjs",
-  ".cjs",
   ".json",
   ".md",
   ".css",
-  ".scss",
-  ".html",
   ".yml",
   ".yaml",
   ".txt",
 ]);
 
 /**
+ * Reject path shapes that lexical containment maths cannot be trusted with.
+ *
+ * Node's `path` helpers are platform-specific: on POSIX a Windows drive-relative
+ * ("C:foo") or UNC ("\\\\server\\share\\foo") string is just a normal-looking
+ * relative name, so `resolve`/`relative` containment says nothing useful about
+ * it. Refuse those forms outright instead of trying to normalise them.
+ */
+function assertSafeRelativePath(relPath: string): void {
+  const reject = (why: string): never => {
+    throw new SkeletonMapError(`Skeleton path '${relPath}' is rejected: ${why}.`);
+  };
+  if (relPath.includes("\0")) reject("contains a null byte");
+  if (/^[A-Za-z]:/.test(relPath)) reject("looks like a Windows drive path");
+  if (relPath.startsWith("//") || relPath.startsWith("\\\\")) {
+    reject("looks like a UNC path");
+  }
+}
+
+/**
  * Write the skeleton map into `workspace`, creating parent directories.
- * Fails closed: an entry is rejected BEFORE any write if its resolved path
- * escapes `workspace` (absolute path, or `../` traversal), or if its extension is
- * not in ALLOWED_SKELETON_EXTENSIONS.
+ *
+ * Fails closed (BEFORE any write) if an entry's path is absolute, uses a
+ * drive/UNC form, contains a null byte, resolves outside `workspace`, escapes it
+ * through a symlink, is itself an existing symlink, or has an extension outside
+ * ALLOWED_SKELETON_EXTENSIONS.
  */
 export async function applySkeletalMap(
   workspace: string,
   map: SkeletonMap,
 ): Promise<void> {
   const root = resolve(workspace);
+  await mkdir(root, { recursive: true });
+  // Judge containment against the REAL directory: if the workspace itself is
+  // reached through a symlink, `root`'s lexical form would not match its target.
+  const realRoot = await realpath(root);
 
   for (const [relPath, content] of Object.entries(map)) {
     if (isAbsolute(relPath)) {
@@ -227,6 +248,8 @@ export async function applySkeletalMap(
         `Skeleton path '${relPath}' must be relative to the workspace.`,
       );
     }
+    assertSafeRelativePath(relPath);
+
     const target = resolve(root, relPath);
     const rel = relative(root, target);
     const inside =
@@ -245,7 +268,31 @@ export async function applySkeletalMap(
         }'; allowed: ${[...ALLOWED_SKELETON_EXTENSIONS].join(", ")}.`,
       );
     }
+
     await mkdir(dirname(target), { recursive: true });
+
+    // Symlink defence: lexical containment cannot see a symlink placed INSIDE the
+    // workspace that points outside it, so re-verify containment on the REAL
+    // resolved parent now that it exists.
+    const realParent = await realpath(dirname(target));
+    const parentRel = relative(realRoot, realParent);
+    const parentInside =
+      parentRel === "" ||
+      (!isAbsolute(parentRel) &&
+        !parentRel.startsWith(".." + sep) &&
+        parentRel !== "..");
+    if (!parentInside) {
+      throw new SkeletonMapError(
+        `Skeleton path '${relPath}' escapes the workspace through a symlink; write refused.`,
+      );
+    }
+    const existing = await lstat(target).catch(() => null);
+    if (existing?.isSymbolicLink()) {
+      throw new SkeletonMapError(
+        `Skeleton path '${relPath}' is an existing symlink; write refused.`,
+      );
+    }
+
     await writeFile(target, content, "utf8");
   }
 }
@@ -301,13 +348,14 @@ export interface IterationRecord {
 function resolveMaxIterations(): number {
   const raw = process.env.DF_MAX_ITERATIONS?.trim();
   if (!raw) return 10;
-  const parsed = Number(raw);
-  if (!Number.isInteger(parsed) || parsed < 1) {
+  // Digits only. `Number()` alone would happily accept "1e3" (1000) and
+  // "0x10" (16), which are not what "positive integer, digits" means.
+  if (!/^\d+$/.test(raw) || Number(raw) < 1) {
     throw new InvalidTaskError(
-      `DF_MAX_ITERATIONS must be a positive integer (received '${raw}').`,
+      `DF_MAX_ITERATIONS must be a positive integer (digits only, received '${raw}').`,
     );
   }
-  return parsed;
+  return Number(raw);
 }
 
 /**
