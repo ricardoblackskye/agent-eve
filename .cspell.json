@@ -68,6 +68,7 @@
     "SELFCORRECT",
     "SELFFCORRECT",
     "SELFIMPROVE",
+    "unparseable",
     "DFLT",
     "maxTotalTripEvents",
     "maxStateEntries",
