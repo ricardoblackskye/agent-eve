@@ -12,6 +12,7 @@ import {
   decide,
   InMemoryImprovementLedger,
   SelfImprovementConfigError,
+  SupersededVersionError,
   runImprovementCycle,
   resolveSelfImprovementEnvConfig,
   createSelfImprovementController,
@@ -1062,6 +1063,130 @@ describe("benchmark case validation (#154 review)", () => {
       );
     }
   });
+
+  it("rejects a gate whose section list is not an array of strings", () => {
+    for (const badGate of [
+      { minChars: 1, requiredSections: "intent", refusalMarkers: [] },
+      { minChars: 1, requiredSections: ["intent"], refusalMarkers: "nope" },
+      { minChars: 1, requiredSections: [7], refusalMarkers: [] },
+    ]) {
+      withFixture(
+        {
+          version: "1",
+          gate: badGate,
+          cases: [
+            {
+              id: "ok",
+              taskType: "coding",
+              output: "x",
+              iterations: 1,
+              fixCycles: 0,
+            },
+          ],
+        },
+        (file) => {
+          expect(() => loadImprovementBenchmark(file)).toThrow(
+            SelfImprovementConfigError,
+          );
+        },
+      );
+    }
+  });
+
+  it("rejects a gate with a negative or non-integer minChars", () => {
+    for (const minChars of [-1, 1.5, Number.NaN, "200"]) {
+      withFixture(
+        {
+          version: "1",
+          gate: { minChars, requiredSections: [], refusalMarkers: [] },
+          cases: [
+            {
+              id: "ok",
+              taskType: "coding",
+              output: "x",
+              iterations: 1,
+              fixCycles: 0,
+            },
+          ],
+        },
+        (file) => {
+          expect(() => loadImprovementBenchmark(file)).toThrow(
+            SelfImprovementConfigError,
+          );
+        },
+      );
+    }
+  });
+
+  it("accepts a well-formed gate", () => {
+    withFixture(
+      {
+        version: "1",
+        gate: { minChars: 0, requiredSections: ["intent"], refusalMarkers: [] },
+        cases: [
+          {
+            id: "ok",
+            taskType: "coding",
+            output: "Intent: fine.",
+            iterations: 1,
+            fixCycles: 0,
+          },
+        ],
+      },
+      (file) => {
+        expect(loadImprovementBenchmark(file).version).toBe("1");
+      },
+    );
+  });
+});
+
+// --- #154 review round 5: sandboxed benchmark reads -----------------------
+//
+// Mirrors `resolveStateDbPath`'s optional sandbox root in index.ts, so a caller
+// that DOES make the benchmark path configurable can bound where it may read.
+
+describe("benchmark path sandbox (#154 review)", () => {
+  const gate = { minChars: 1, requiredSections: [], refusalMarkers: [] };
+  const cases = [
+    { id: "ok", taskType: "coding", output: "x", iterations: 1, fixCycles: 0 },
+  ];
+
+  it("refuses a benchmark path outside the configured sandbox root", () => {
+    const inside = mkdtempSync(join(tmpdir(), "df-bench-in-"));
+    const outside = mkdtempSync(join(tmpdir(), "df-bench-out-"));
+    const outsideFile = join(outside, "fixture.json");
+    writeFileSync(outsideFile, JSON.stringify({ version: "1", gate, cases }));
+    try {
+      expect(() => loadImprovementBenchmark(outsideFile, inside)).toThrow(
+        SelfImprovementConfigError,
+      );
+    } finally {
+      rmSync(inside, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("still reads a benchmark inside the sandbox root", () => {
+    const dir = mkdtempSync(join(tmpdir(), "df-bench-in-"));
+    const file = join(dir, "fixture.json");
+    writeFileSync(file, JSON.stringify({ version: "7", gate, cases }));
+    try {
+      expect(loadImprovementBenchmark(file, dir).version).toBe("7");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("leaves path handling unconstrained when no sandbox root is configured", () => {
+    const dir = mkdtempSync(join(tmpdir(), "df-bench-free-"));
+    const file = join(dir, "fixture.json");
+    writeFileSync(file, JSON.stringify({ version: "3", gate, cases }));
+    try {
+      expect(loadImprovementBenchmark(file).version).toBe("3");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 // --- #154 review round 4: config validation, atomicity, seam guard --------
@@ -1145,7 +1270,7 @@ describe("superseded version handles (#154 review)", () => {
     const v2 = await surface.stage(12);
     const v3 = await surface.stage(14);
 
-    await expect(v2.apply()).rejects.toThrow(InvalidProposalError);
+    await expect(v2.apply()).rejects.toThrow(SupersededVersionError);
     expect(surface.read()).toBe(10);
 
     await v3.apply();
@@ -1158,7 +1283,7 @@ describe("superseded version handles (#154 review)", () => {
     await v2.apply();
     const v3 = await surface.stage(14);
 
-    await expect(v2.revert()).rejects.toThrow(InvalidProposalError);
+    await expect(v2.revert()).rejects.toThrow(SupersededVersionError);
     expect(surface.read()).toBe(12);
   });
 });

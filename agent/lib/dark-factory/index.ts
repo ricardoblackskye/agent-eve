@@ -97,6 +97,7 @@ export {
   DEFAULT_ITERATION_STEP,
   SelfImprovementConfigError,
   InvalidProposalError,
+  SupersededVersionError,
   type CycleResult,
   type Decision,
   type DecisionConfig,

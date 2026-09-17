@@ -20,7 +20,7 @@
  */
 
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { round2, type MetricsStore, type TaskMetric } from "./metrics";
 import { gradeStoryQuality, type QualityGate } from "../quality-gate";
 
@@ -39,6 +39,20 @@ export class InvalidProposalError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "InvalidProposalError";
+  }
+}
+
+/**
+ * A version handle that a newer `stage()` superseded tried to act.
+ *
+ * Deliberately its own type rather than an `InvalidProposalError`: the remedy
+ * differs. A bad proposal must be regenerated; a superseded handle just needs to
+ * be re-staged, and a caller may legitimately want to retry rather than fail.
+ */
+export class SupersededVersionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SupersededVersionError";
   }
 }
 
@@ -163,7 +177,7 @@ export class IterationBoundSurface implements TunableSurface<number> {
     // awaits mid-update; it is an optimistic-concurrency check on the version.)
     const assertCurrent = (): void => {
       if (this.version !== handleVersion) {
-        throw new InvalidProposalError(
+        throw new SupersededVersionError(
           `Handle '${id}' was superseded by '${this.id}@v${this.version}'; refusing to act on a stale version.`,
         );
       }
@@ -292,10 +306,34 @@ export interface ImprovementBenchmark {
   cases: BenchmarkCase[];
 }
 
-export function loadImprovementBenchmark(path?: string): ImprovementBenchmark {
+export function loadImprovementBenchmark(
+  path?: string,
+  sandboxRoot?: string,
+): ImprovementBenchmark {
   const file =
     path ??
     join(process.cwd(), "tests", "fixtures", "self-improve-benchmark.json");
+
+  // Optional sandbox: mirrors `resolveStateDbPath` in index.ts. The default
+  // trusts the caller (this is code-supplied configuration, not request input),
+  // but a deployment that makes the benchmark path settable can bound where it
+  // may be read. Containment is decided by `path.relative`, never a
+  // `startsWith(root + sep)` compare — see the note on `resolveStateDbPath`.
+  const root = (sandboxRoot ?? "").trim();
+  if (root !== "") {
+    const resolvedRoot = resolve(root);
+    const resolvedFile = resolve(file);
+    const rel = relative(resolvedRoot, resolvedFile);
+    const inside =
+      rel === "" ||
+      (!isAbsolute(rel) && rel !== ".." && !rel.startsWith(".." + sep));
+    if (!inside) {
+      throw new SelfImprovementConfigError(
+        `Improvement benchmark '${resolvedFile}' resolves outside the configured sandbox root '${resolvedRoot}'; refusing to read it.`,
+      );
+    }
+  }
+
   let parsed: unknown;
   try {
     parsed = JSON.parse(readFileSync(file, "utf8"));
@@ -322,6 +360,7 @@ export function loadImprovementBenchmark(path?: string): ImprovementBenchmark {
       `Improvement benchmark '${file}' requires a "gate".`,
     );
   }
+  assertValidQualityGate(benchmark.gate, file);
   // Validate each case's CONTENTS too, not just that it is an array: a
   // malformed entry would otherwise reach the grader and die as a bare
   // `TypeError` that names no fixture entry.
@@ -352,6 +391,44 @@ export function loadImprovementBenchmark(path?: string): ImprovementBenchmark {
  * (cases x this) far below `Number.MAX_SAFE_INTEGER`.
  */
 export const MAX_BENCHMARK_EFFORT = 1_000_000;
+
+/**
+ * Validate the quality gate's SHAPE, not just its presence.
+ *
+ * An asserted-but-unchecked gate changes grading semantics silently rather than
+ * failing: `requiredSections: "intent"` would be iterated character by
+ * character, and `minChars: "200"` would compare as a coerced number. Refuse
+ * the shape at load time instead.
+ */
+function assertValidQualityGate(gate: unknown, file: string): void {
+  if (!gate || typeof gate !== "object") {
+    throw new SelfImprovementConfigError(
+      `Improvement benchmark '${file}' requires "gate" to be an object.`,
+    );
+  }
+  const candidate = gate as Partial<QualityGate>;
+  if (
+    !Number.isInteger(candidate.minChars) ||
+    (candidate.minChars as number) < 0
+  ) {
+    throw new SelfImprovementConfigError(
+      `Improvement benchmark '${file}' requires "gate.minChars" to be an integer >= 0 (received ${JSON.stringify(candidate.minChars)}).`,
+    );
+  }
+  for (const field of ["requiredSections", "refusalMarkers"] as const) {
+    const value = candidate[field];
+    const wellFormed =
+      Array.isArray(value) &&
+      value.every(
+        (marker) => typeof marker === "string" && marker.trim() !== "",
+      );
+    if (!wellFormed) {
+      throw new SelfImprovementConfigError(
+        `Improvement benchmark '${file}' requires "gate.${field}" to be an array of non-empty strings.`,
+      );
+    }
+  }
+}
 
 /**
  * Validate one benchmark case.

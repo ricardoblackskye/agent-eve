@@ -253,7 +253,9 @@ OBSERVE → PROPOSE → APPLY → MEASURE → DECIDE → RECORD
 - **MEASURE** re-runs a fixed benchmark
   (`tests/fixtures/self-improve-benchmark.json`) through the same pure quality
   gate the #121 model benchmarks use, so the numbers are deterministic and need
-  no API key.
+  no API key. The loader (`loadImprovementBenchmark`) validates the fixture's
+  version, gate shape and every case, and accepts an optional `sandboxRoot` so a
+  deployment that makes the path settable can bound where it may be read.
 - **DECIDE** accepts **only** if the objective metric (success rate per task
   type) improves by at least `DF_SELFIMPROVE_OBJECTIVE_TOLERANCE` and no
   guardrail (mean iterations / mean fix cycles) regresses beyond
