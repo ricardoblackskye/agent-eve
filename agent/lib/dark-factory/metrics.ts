@@ -1,9 +1,11 @@
 /**
  * Dark Factory — Observability / Self-Improvement (issues #139 / story #140).
  *
- * The sensor for the self-improvement loop: a canonical, provider-agnostic
- * metric record per completed task, a store seam, and a no-loss retry decorator.
- * The controller that acts on these metrics lives in `self-improve.ts` (#146).
+ * The sensor: a canonical, provider-agnostic metric record per completed task,
+ * a store seam, and a no-loss retry decorator.
+ *
+ * This module is a pure PRODUCER of metrics. It imports no consumer and must
+ * not: naming or depending on a reader here would invert the dependency.
  */
 
 export type TaskStatus = "success" | "failure";
