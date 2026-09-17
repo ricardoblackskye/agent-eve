@@ -1012,6 +1012,125 @@ describe("benchmark case validation (#154 review)", () => {
       }),
     ).toThrow(SelfImprovementConfigError);
   });
+
+  it("rejects duplicate case ids, so a failure maps to exactly one case", () => {
+    const duplicate = {
+      taskType: "coding",
+      output: "x",
+      iterations: 1,
+      fixCycles: 0,
+    };
+    withFixture(
+      {
+        version: "1",
+        gate,
+        cases: [
+          { id: "same", ...duplicate },
+          { id: "same", ...duplicate },
+        ],
+      },
+      (file) => {
+        expect(() => loadImprovementBenchmark(file)).toThrow(
+          SelfImprovementConfigError,
+        );
+        expect(() => loadImprovementBenchmark(file)).toThrow(/same/);
+      },
+    );
+  });
+
+  it("rejects an absurd effort count, keeping aggregation far from overflow", () => {
+    for (const huge of [Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER + 1]) {
+      withFixture(
+        {
+          version: "1",
+          gate,
+          cases: [
+            {
+              id: "huge",
+              taskType: "coding",
+              output: "x",
+              iterations: huge,
+              fixCycles: 0,
+            },
+          ],
+        },
+        (file) => {
+          expect(() => loadImprovementBenchmark(file)).toThrow(
+            SelfImprovementConfigError,
+          );
+        },
+      );
+    }
+  });
+});
+
+// --- #154 review round 4: config validation, atomicity, seam guard --------
+
+describe("tolerance validation on the direct config path (#154 review)", () => {
+  it("refuses a negative or non-finite tolerance instead of deciding with it", async () => {
+    for (const bad of [-0.1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      const { config, surface, ledger } = await makeConfig({
+        objectiveTolerance: bad,
+      });
+
+      await expect(runImprovementCycle(config)).rejects.toThrow(
+        SelfImprovementConfigError,
+      );
+      // Fail-closed: nothing was staged, applied, measured or recorded.
+      expect(surface.read()).toBe(10);
+      expect(ledger.entries()).toHaveLength(0);
+    }
+  });
+
+  it("refuses a negative guardrail tolerance too", async () => {
+    const { config } = await makeConfig({ guardrailTolerance: -1 });
+
+    await expect(runImprovementCycle(config)).rejects.toThrow(
+      SelfImprovementConfigError,
+    );
+  });
+});
+
+describe("version-handle atomicity (#154 review)", () => {
+  it("never loses a version when stages are issued concurrently", async () => {
+    const surface = new IterationBoundSurface(10);
+
+    const handles = await Promise.all([surface.stage(12), surface.stage(14)]);
+
+    expect(handles.map((handle) => handle.id)).toEqual([
+      "iteration-bound@v2",
+      "iteration-bound@v3",
+    ]);
+    expect(new Set(handles.map((h) => h.id)).size).toBe(2);
+  });
+
+  it("settles concurrent applies deterministically — only the current handle wins", async () => {
+    const surface = new IterationBoundSurface(10);
+    const v2 = await surface.stage(12);
+    const v3 = await surface.stage(14);
+
+    const settled = await Promise.allSettled([v2.apply(), v3.apply()]);
+
+    expect(settled[0].status).toBe("rejected");
+    expect(settled[1].status).toBe("fulfilled");
+    expect(surface.read()).toBe(14);
+  });
+});
+
+describe("proposal seam guard (#154 review)", () => {
+  it("refuses a proposal whose next value is not a usable bound", async () => {
+    const surface = new IterationBoundSurface(10);
+
+    await expect(surface.stage("twelve" as unknown as number)).rejects.toThrow(
+      InvalidProposalError,
+    );
+    await expect(surface.stage(undefined as unknown as number)).rejects.toThrow(
+      InvalidProposalError,
+    );
+    await expect(surface.stage(Number.NaN)).rejects.toThrow(
+      InvalidProposalError,
+    );
+  });
 });
 
 // --- #154 review round 2: a stale version handle must not clobber ---------

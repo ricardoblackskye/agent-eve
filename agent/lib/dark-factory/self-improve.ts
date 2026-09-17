@@ -234,13 +234,19 @@ export interface ProposeOptions {
   step?: number;
 }
 
+/** Default success rate at or above which nothing is worth changing. */
+export const DEFAULT_TARGET_SUCCESS_RATE = 0.9;
+/** Default amount by which a proposal raises the iteration bound. */
+export const DEFAULT_ITERATION_STEP = 2;
+
 export function proposeFromObservation(
   observation: Observation,
   surface: TunableSurface<number>,
   options?: ProposeOptions,
 ): Proposal | null {
-  const targetSuccessRate = options?.targetSuccessRate ?? 0.9;
-  const step = options?.step ?? 2;
+  const targetSuccessRate =
+    options?.targetSuccessRate ?? DEFAULT_TARGET_SUCCESS_RATE;
+  const step = options?.step ?? DEFAULT_ITERATION_STEP;
   // Nothing worth changing: proposing a change with no rationale would push an
   // unverified edit through the loop for no reason.
   if (observation.successRate >= targetSuccessRate) return null;
@@ -322,6 +328,17 @@ export function loadImprovementBenchmark(path?: string): ImprovementBenchmark {
   benchmark.cases.forEach((testCase, index) =>
     assertValidBenchmarkCase(testCase, index),
   );
+  // Unique ids: a duplicate would make a measurement (and any error message)
+  // ambiguous about which case it refers to.
+  const seenIds = new Set<string>();
+  for (const testCase of benchmark.cases) {
+    if (seenIds.has(testCase.id)) {
+      throw new SelfImprovementConfigError(
+        `Improvement benchmark '${file}' has duplicate case id '${testCase.id}'; ids must be unique.`,
+      );
+    }
+    seenIds.add(testCase.id);
+  }
   return {
     version: benchmark.version,
     gate: benchmark.gate,
@@ -330,7 +347,21 @@ export function loadImprovementBenchmark(path?: string): ImprovementBenchmark {
 }
 
 /**
+ * Upper bound for a benchmark case's effort counts. A case needing more than a
+ * million iterations is nonsense, and the bound keeps the aggregate sums
+ * (cases x this) far below `Number.MAX_SAFE_INTEGER`.
+ */
+export const MAX_BENCHMARK_EFFORT = 1_000_000;
+
+/**
  * Validate one benchmark case.
+ *
+ * Requirements for a valid case:
+ * - `id` — non-empty string, UNIQUE within the fixture (so a measurement maps
+ *   to exactly one case).
+ * - `taskType` — non-empty string.
+ * - `output` — string (the text the quality gate grades).
+ * - `iterations` / `fixCycles` — integers in `0..MAX_BENCHMARK_EFFORT`.
  *
  * Fails as a CONFIGURATION error naming the offending case, so a malformed
  * fixture is diagnosable — rather than surviving to `gradeStoryQuality` where a
@@ -371,6 +402,11 @@ function assertValidBenchmarkCase(testCase: unknown, index: number): void {
     if (!Number.isInteger(value) || (value as number) < 0) {
       throw new SelfImprovementConfigError(
         `Improvement benchmark case ${where} requires "${field}" to be an integer >= 0 (received ${JSON.stringify(value)}).`,
+      );
+    }
+    if ((value as number) > MAX_BENCHMARK_EFFORT) {
+      throw new SelfImprovementConfigError(
+        `Improvement benchmark case ${where} requires "${field}" to be <= ${MAX_BENCHMARK_EFFORT} (received ${JSON.stringify(value)}).`,
       );
     }
   }
@@ -610,6 +646,13 @@ export async function runImprovementCycle(
 ): Promise<CycleResult> {
   const startedAt = Date.now();
 
+  // Config errors fail fast, before the cost guard is consulted and before
+  // anything is staged: a bad tolerance must never influence a decision. The
+  // environment path already enforces this (`readTolerance` rejects "-1"/"1e3"),
+  // but a caller can pass tolerances programmatically.
+  assertValidTolerance("objectiveTolerance", config.objectiveTolerance);
+  assertValidTolerance("guardrailTolerance", config.guardrailTolerance);
+
   // The cost guard is consulted FIRST: a tripped PBI must not spend anything,
   // so no observation, proposal, apply or measurement happens at all.
   if (config.costGuard?.isTripped(config.pbiId)) {
@@ -799,4 +842,18 @@ function readTolerance(name: string, raw: string | undefined): number {
     );
   }
   return Number(value);
+}
+
+/**
+ * Validate a decision tolerance supplied PROGRAMMATICALLY. A negative tolerance
+ * would silently change what "the objective improved" means, so refuse it at the
+ * boundary rather than deciding with it.
+ */
+function assertValidTolerance(name: string, value: number | undefined): void {
+  if (value === undefined) return;
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    throw new SelfImprovementConfigError(
+      `${name} must be a finite number >= 0 (received ${JSON.stringify(value)}).`,
+    );
+  }
 }
