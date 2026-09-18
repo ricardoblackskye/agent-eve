@@ -91,6 +91,13 @@ type CommandName = (typeof COMMANDS)[number];
  */
 const SURFACE_ID_PATTERN = /^[A-Za-z0-9._:-]+$/;
 
+/**
+ * `--by` is a human name, so it accepts anything printable (spaces, apostrophes,
+ * hyphens) but NOT control characters: the name is persisted and printed, and a
+ * newline or NUL could forge a record or a log line.
+ */
+const CONTROL_CHARS = /[\u0000-\u001F\u007F]/;
+
 function isCommandName(value: string): value is CommandName {
   return (COMMANDS as readonly string[]).includes(value);
 }
@@ -126,6 +133,11 @@ export function parseOperatorArgs(argv: string[]): OperatorCliCommand {
         }
         proposalKind = value as ProposalKind;
       } else if (arg === "--by") {
+        if (value.trim() === "" || CONTROL_CHARS.test(value)) {
+          throw new OperatorCliUsageError(
+            `Invalid --by ${JSON.stringify(value)}: use a printable name, without control characters.`,
+          );
+        }
         by = value;
       } else if (arg === "--expires") {
         // 'never' is an EXPLICIT null; anything else stays unresolved so a typo
@@ -292,6 +304,21 @@ export async function runOperatorCli(
       return { lines: [error.message], exitCode: 1 };
     }
     throw error;
+  }
+
+  // An expiry that is not in the future makes the grant inert the instant it is
+  // recorded: it would look like a successful grant while silently refusing.
+  // A past (or zero) time is therefore REFUSED, and `deny` is the explicit way
+  // to refuse — the same reasoning as refusing a malformed expiry.
+  if (expiresAt !== null && Date.parse(expiresAt) <= now().getTime()) {
+    return {
+      lines: [
+        `Refusing to arm: --expires '${command.expiresAt}' is not in the future, so the ` +
+          "decision would already be expired. Use 'deny' to refuse it explicitly, or " +
+          "'never' for no expiry. Nothing was recorded.",
+      ],
+      exitCode: 1,
+    };
   }
 
   const decision: OperatorDecision = {

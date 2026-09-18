@@ -294,6 +294,52 @@ describe("operator CLI — review round on PR #166", () => {
   });
 });
 
+describe("operator CLI — review round 2 on PR #166", () => {
+  it("refuses a --by carrying control characters, which could forge a log line", async () => {
+    for (const value of ["", "   ", "Rich\nard", "a\u0000b", "tab\there"]) {
+      const { deps: d, store } = deps();
+      const result = await runOperatorCli(["allow", "s", "--by", value], d);
+      expect(
+        result.exitCode,
+        `--by ${JSON.stringify(value)} must be refused`,
+      ).toBe(2);
+      expect(
+        await store.list(),
+        `${JSON.stringify(value)} must record nothing`,
+      ).toEqual([]);
+    }
+  });
+
+  it("accepts the name shapes an operator would actually type", async () => {
+    for (const value of [
+      "Richard Lloyd",
+      "Ricardo",
+      "Anne-Marie O'Neill",
+      "J. R. R. Tolkien",
+    ]) {
+      const { deps: d, store } = deps();
+      const result = await runOperatorCli(["allow", "s", "--by", value], d);
+      expect(result.exitCode, `--by ${value} must be accepted`).toBe(0);
+      expect((await store.list())[0].decidedBy).toBe(value);
+    }
+  });
+
+  it("refuses an expiry that is not in the future, pointing at deny", async () => {
+    // An already-expired grant is inert: recording it would silently do nothing
+    // while looking like a successful grant. 'deny' is the explicit way to refuse.
+    for (const past of ["2020-01-01T00:00:00Z", "+0d"]) {
+      const { deps: d, store } = deps();
+      const result = await runOperatorCli(
+        ["allow", "s", "--by", "me", "--expires", past],
+        d,
+      );
+      expect(result.exitCode, `--expires ${past} must be refused`).toBe(1);
+      expect(result.lines.join("\n")).toMatch(/expired|deny/i);
+      expect(await store.list()).toEqual([]);
+    }
+  });
+});
+
 describe("runOperatorCli: list and refusal paths (#159)", () => {
   it("lists live and expired decisions, marking the expired ones", async () => {
     const { deps: d } = deps([
