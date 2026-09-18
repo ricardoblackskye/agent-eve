@@ -13,7 +13,8 @@
     "test:e2e": "playwright test",
     "test": "vitest run",
     "eve:build": "eve build",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "operator": "tsx scripts/self-improve-operator.ts"
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.45",
@@ -35,6 +36,7 @@
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.5",
+    "tsx": "^4.23.13",
     "typescript": "7.0.2",
     "vitest": "^4.1.11"
   },
