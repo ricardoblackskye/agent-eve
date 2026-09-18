@@ -24,6 +24,7 @@ import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   MAX_METRIC_COST_USD,
   MAX_METRIC_LATENCY_MS,
+  meanOfMeasured,
   round2,
   type MetricsStore,
   type TaskMetric,
@@ -132,16 +133,9 @@ export function summarizeRecords(records: TaskMetric[]): {
   // sample without a value is skipped rather than counted as 0, and if no sample
   // measured the metric the key stays ABSENT. "Not measured" is not "measured
   // zero", and a fabricated zero would drag the mean toward a number nobody saw.
-  const measuredMean = (pick: (r: TaskMetric) => number | undefined): number | undefined => {
-    const measured = records
-      .map(pick)
-      .filter((value): value is number => typeof value === "number");
-    if (measured.length === 0) return undefined;
-    return round2(measured.reduce((total, value) => total + value, 0) / measured.length);
-  };
-  const latency = measuredMean((r) => r.latencyMs);
+  const latency = meanOfMeasured(records, (r) => r.latencyMs);
   if (latency !== undefined) summary.meanLatencyMs = latency;
-  const cost = measuredMean((r) => r.costUsd);
+  const cost = meanOfMeasured(records, (r) => r.costUsd);
   if (cost !== undefined) summary.meanCostUsd = cost;
   return summary;
 }
@@ -590,18 +584,9 @@ export function measureBenchmark(benchmark: ImprovementBenchmark): Measurement {
   // would be a number nobody observed, and DECIDE compares guardrails directly.
   // Making them present is what lets the existing tolerance logic reject a change
   // that "improves" the objective by spending more.
-  const measuredMean = (
-    pick: (testCase: BenchmarkCase) => number | undefined,
-  ): number | undefined => {
-    const measured = cases
-      .map(pick)
-      .filter((value): value is number => typeof value === "number");
-    if (measured.length === 0) return undefined;
-    return round2(measured.reduce((total, value) => total + value, 0) / measured.length);
-  };
-  const latency = measuredMean((c) => c.latencyMs);
+  const latency = meanOfMeasured(cases, (c) => c.latencyMs);
   if (latency !== undefined) guardrails.meanLatencyMs = latency;
-  const cost = measuredMean((c) => c.costUsd);
+  const cost = meanOfMeasured(cases, (c) => c.costUsd);
   if (cost !== undefined) guardrails.meanCostUsd = cost;
   return {
     fixtureVersion: version,

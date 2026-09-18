@@ -99,6 +99,27 @@ export function round2(value: number): number {
 }
 
 /**
+ * Mean over the values that were actually MEASURED, or `undefined` when none were
+ * (#158).
+ *
+ * Shared on purpose by the store path (per-record means) and the benchmark path
+ * (per-case guardrails), because both must apply the same rule: a sample with no
+ * value is SKIPPED rather than counted as 0, and when nothing was measured the
+ * caller omits the key entirely. Two copies of that rule would be two chances for
+ * them to drift apart — the same reasoning that produced `TaskMetricInput`.
+ */
+export function meanOfMeasured<T>(
+  items: T[],
+  pick: (item: T) => number | undefined,
+): number | undefined {
+  const measured = items
+    .map(pick)
+    .filter((value): value is number => typeof value === "number");
+  if (measured.length === 0) return undefined;
+  return round2(measured.reduce((total, value) => total + value, 0) / measured.length);
+}
+
+/**
  * Validate and normalise an incoming metric. Invalid input THROWS (a caller
  * bug — the ingestion contract was violated), whereas a store that cannot
  * persist returns `ok: false` (an operational failure the caller must not

@@ -20,6 +20,7 @@ import {
   type MetricsStore,
   type MetricsWriteResult,
   type TaskMetric,
+  type TaskMetricInput,
 } from "../../agent/lib/dark-factory/metrics";
 import {
   measureBenchmark,
@@ -38,16 +39,7 @@ class FlakyStore implements MetricsStore {
   attempts = 0;
   readonly seen: TaskMetric[] = [];
   constructor(private readonly failures: number) {}
-  async record(
-    taskType: string,
-    data: {
-      iterations: number;
-      fixCycles: number;
-      status: "success" | "failure";
-      latencyMs?: number;
-      costUsd?: number;
-    },
-  ): Promise<MetricsWriteResult> {
+  async record(taskType: string, data: TaskMetricInput): Promise<MetricsWriteResult> {
     this.attempts += 1;
     if (this.attempts <= this.failures) {
       return { ok: false, mode: "blocked", providerId: this.id, error: "backend down" };
