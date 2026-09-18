@@ -50,6 +50,41 @@ export interface GitHubIssueWriterOptions {
   fetchImpl?: IssueWriterFetch;
 }
 
+/**
+ * Adapt the GitHub primitives to the `LabelWriter` seam the entry point needs (#163),
+ * so the trigger can move lifecycle labels without knowing what a GitHub is.
+ */
+export function createGitHubLabelWriter(writer?: GitHubIssueWriter): {
+  add(
+    repo: string,
+    issue: number,
+    label: string,
+  ): Promise<{ ok: boolean; error?: string }>;
+  remove(
+    repo: string,
+    issue: number,
+    label: string,
+  ): Promise<{ ok: boolean; error?: string }>;
+} {
+  const github = writer ?? new GitHubIssueWriter();
+  const split = (repo: string): [string, string] => {
+    const [owner, name] = repo.split("/");
+    return [owner ?? "", name ?? ""];
+  };
+  return {
+    async add(repo, issue, label) {
+      const [owner, name] = split(repo);
+      const res = await github.addLabel(owner, name, issue, label);
+      return { ok: res.ok, error: res.error };
+    },
+    async remove(repo, issue, label) {
+      const [owner, name] = split(repo);
+      const res = await github.removeLabel(owner, name, issue, label);
+      return { ok: res.ok, error: res.error };
+    },
+  };
+}
+
 export class GitHubIssueWriter {
   private readonly token?: string;
   private readonly fetchImpl: IssueWriterFetch;

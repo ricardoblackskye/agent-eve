@@ -176,6 +176,38 @@ export {
 // The handler-side signal that a run is parked on a human (#162, decision A).
 export { ParkedRunError } from "./dispatch";
 
+// R5 — the kick-off trigger and entry point (#163). The trigger is a pure decision
+// (testable offline); the entry point records the dispatch and hands off, and never
+// runs the loop inside a request.
+export {
+  decideDarkFactoryTrigger,
+  resolveTriggerLabel,
+  resolveTriggerAllowedUsers,
+  TRIGGER_DEFAULTS,
+  TRIGGER_LABELS,
+  MAX_BRIEF_BODY_CHARS,
+  MAX_BRIEF_TITLE_CHARS,
+  MAX_REASON_CHARS,
+  type DarkFactoryTriggerDecision,
+  type DarkFactoryTriggerKind,
+  type DarkFactoryTriggerPayload,
+} from "./trigger";
+export {
+  buildIntent,
+  renderHandoffMessage,
+  resolveRunnerMode,
+  runDarkFactoryDispatch,
+  sanitizeIdentifier,
+  toRunId,
+  type DispatchIntent,
+  type EntryDeps,
+  type EntryResult,
+  type EntryStatus,
+  type LabelWriter,
+  type RunnerDecision,
+  type RunnerMode,
+} from "./entry";
+
 /**
  * The skill seams (#157). `SKILLS` is the catalogue of capability grants; the
  * surface is what the self-improvement controller tunes, and its grants reach the

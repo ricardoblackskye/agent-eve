@@ -4,6 +4,10 @@ import fs from "fs";
 import path from "path";
 import { isStoryTrigger } from "../../../../agent/lib/story-trigger";
 import { isSprintReportTrigger } from "../../../../agent/lib/sprint-trigger";
+import { decideDarkFactoryTrigger } from "../../../../agent/lib/dark-factory/trigger";
+import { runDarkFactoryDispatch } from "../../../../agent/lib/dark-factory/entry";
+import { createGitHubLabelWriter } from "../../../../agent/lib/dark-factory/issue-writer";
+import { createStateStore } from "../../../../agent/lib/dark-factory";
 
 interface RepoConfig {
   webhook_secret_env: string;
@@ -426,6 +430,45 @@ async function handler(request: NextRequest) {
         ok: true,
         message: `Issue #${sprintIssueNumber} ${action} triggered sprint report`,
       });
+    }
+
+    // ---- Dark Factory kick-off (#163) ------------------------------------
+    //
+    // A label requests autonomous work. This branch RECORDS the dispatch and hands it
+    // off through the session API below — the factory loop NEVER runs inside this
+    // request (a serverless request cannot host it), and the worker handler is not
+    // invoked anywhere on this path. Both gates (repo allow-list, actor allow-list) are
+    // fail-closed inside the decision, so an unconfigured deployment dispatches nothing.
+    const dfDecision = decideDarkFactoryTrigger({
+      action,
+      issue: {
+        number: issue?.number,
+        title: issue?.title,
+        body: issue?.body || "",
+        labels: (issue?.labels || []).map((l: any) => ({ name: l.name })),
+      },
+      label: data.label ? { name: data.label.name } : undefined,
+      sender: data.sender ? { login: data.sender.login } : undefined,
+      repository: { full_name: repoFullName },
+    });
+    if (dfDecision.kind !== "not-a-trigger") {
+      const result = await runDarkFactoryDispatch(dfDecision, {
+        store: createStateStore(),
+        labels: createGitHubLabelWriter(),
+        apiKey: process.env.EVE_API_KEY,
+        origin: request.nextUrl.origin,
+      });
+      // A refusal is OUR gate doing its job, not a transient failure: answering 4xx
+      // would invite GitHub to redeliver a decision that will not change. The body
+      // carries the explicit error instead (the #78 lesson: refusal must be visible).
+      return NextResponse.json(
+        {
+          ok: result.ok,
+          message: `dark-factory trigger: ${result.status}`,
+          ...(result.ok ? {} : { error: result.reason }),
+        },
+        { status: result.ok ? 202 : 200 },
+      );
     }
 
     // Detect the trigger (mention in body, or the trigger label) using the
