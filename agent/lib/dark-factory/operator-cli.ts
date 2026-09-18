@@ -100,6 +100,8 @@ const SURFACE_ID_PATTERN = /^[A-Za-z0-9._-]+$/;
  */
 const CONTROL_CHARS = /[\u0000-\u001F\u007F]/;
 const MAX_BY_LENGTH = 64;
+/** Surface ids are short slugs (`iteration-bound`); this only bounds record size. */
+const MAX_SURFACE_ID_LENGTH = 64;
 
 /**
  * Furthest an expiry may be from now, for the relative AND the ISO form
@@ -131,9 +133,17 @@ export function parseOperatorArgs(argv: string[]): OperatorCliCommand {
   let by: string | null = null;
   let expiresAt: string | null = null;
 
+  const seen = new Set<string>();
   for (let i = 1; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg.startsWith("--")) {
+      if (seen.has(arg)) {
+        throw new OperatorCliUsageError(
+          `Duplicate option '${arg}': it was given more than once, and silently letting the ` +
+            "last value win would hide a mistake. Give it once. Nothing was recorded.",
+        );
+      }
+      seen.add(arg);
       const value = argv[i + 1];
       if (value === undefined || value.startsWith("--")) {
         throw new OperatorCliUsageError(`Option '${arg}' needs a value.`);
@@ -170,9 +180,10 @@ export function parseOperatorArgs(argv: string[]): OperatorCliCommand {
     if (surfaceId !== null) {
       throw new OperatorCliUsageError(`Unexpected extra argument '${arg}'.`);
     }
-    if (!SURFACE_ID_PATTERN.test(arg)) {
+    if (!SURFACE_ID_PATTERN.test(arg) || arg.length > MAX_SURFACE_ID_LENGTH) {
       throw new OperatorCliUsageError(
-        `Invalid surfaceId ${JSON.stringify(arg)}: use letters, digits and . _ : - only.`,
+        `Invalid surfaceId ${JSON.stringify(arg.slice(0, 32))}: use letters, digits and ` +
+          `. _ - only, at most ${MAX_SURFACE_ID_LENGTH} characters.`,
       );
     }
     surfaceId = arg;

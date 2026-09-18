@@ -414,6 +414,46 @@ describe("operator CLI — review round 4 on PR #166", () => {
   });
 });
 
+describe("operator CLI — review round 5 on PR #166", () => {
+  it("refuses a duplicated flag instead of silently letting the last one win", async () => {
+    const cases = [
+      ["allow", "s", "--by", "first", "--by", "second"],
+      ["allow", "s", "--kind", "bounded-tuning", "--kind", "access-widening"],
+      ["allow", "s", "--by", "me", "--expires", "+7d", "--expires", "never"],
+    ];
+    for (const argv of cases) {
+      const { deps: d, store } = deps();
+      const result = await runOperatorCli(argv, d);
+      expect(result.exitCode, `${argv.join(" ")} must be refused`).toBe(2);
+      expect(result.lines.join("\n")).toMatch(/duplicate/i);
+      expect(
+        await store.list(),
+        `${argv.join(" ")} must record nothing`,
+      ).toEqual([]);
+    }
+  });
+
+  it("refuses a surfaceId beyond the maximum length", async () => {
+    const { deps: d, store } = deps();
+    const result = await runOperatorCli(
+      ["allow", "s".repeat(200), "--by", "me"],
+      d,
+    );
+
+    expect(result.exitCode).toBe(2);
+    expect(await store.list()).toEqual([]);
+  });
+
+  it("still accepts an id at a plausible length", async () => {
+    const { deps: d, store } = deps();
+    const id = "skill-set-for-the-dark-factory-self-improvement-controller";
+    const result = await runOperatorCli(["allow", id, "--by", "me"], d);
+
+    expect(result.exitCode).toBe(0);
+    expect((await store.list())[0].surfaceId).toBe(id);
+  });
+});
+
 describe("runOperatorCli: list and refusal paths (#159)", () => {
   it("lists live and expired decisions, marking the expired ones", async () => {
     const { deps: d } = deps([
