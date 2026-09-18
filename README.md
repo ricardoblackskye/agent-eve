@@ -169,6 +169,7 @@ be flagged **Sensitive** in Vercel (masked, not readable via `vercel env pull`);
 | `DF_WORKER_PROVIDER`        | No       | Config | Where a worker sandbox runs; unset/`local` = dry-run provider that reports `isolated: false`                                              |
 | `DF_WORKER_ALLOWED_REPOS`   | No*      | Config | **Fail-closed** comma-separated `owner/repo` allow-list for worker tasks; unset = every task refused with 403 before provisioning         |
 | `DF_WORKER_RUNTIME`         | No       | Config | Runtime requested in the worker environment: `node` or `python` (default `node`)                                                          |
+| `DF_REPORTER_PROVIDER`     | No       | Config | Where worker progress/completion/questions go: unset/`console` = **dry-run, writes nothing**; `github` posts issue comments gated by `DF_WORKER_ALLOWED_REPOS` |
 | `DF_CREDENTIAL_TTL_SECONDS` | No       | Config | Per-task credential lease lifetime, 1..3600 (default `3600`); the sandbox gets a lease, never the token                                   |
 
 \* `NEXT_PUBLIC_EVE_API_KEY` and `GH_STORY_TOKEN` are required for the chat
@@ -409,6 +410,33 @@ Markdown and PDF, and posts a linking comment on the issue. Requires a token wit
 `read:project` scope (`GH_SPRINT_TOKEN`); the board defaults to user project
 `ricardoblackskye` #3, overridable via `SPRINT_PROJECT_OWNER` /
 `SPRINT_PROJECT_NUMBER`.
+
+## Dark Factory (R5) — worker reporting on the ticket (#162)
+
+An autonomous run used to be **silent on the ticket it was working on**: progress reached only
+`DispatchObserver` -> `MetricsStore` (#140), which is a sensor, not a human-facing channel. Now a worker's
+progress, completion and questions are posted to the issue.
+
+**The worker never posts.** The reporter runs trusted-side in Eve's process and the sandbox environment is
+scrubbed by `ALLOWED_ENV_KEYS`, so the token never enters a `WorkerTask`: the worker emits, Eve posts, and every
+comment is attributed to **Eve** rather than the sandboxed worker. "The sandbox holds no credential" is true by
+construction, not by care.
+
+**One rolling comment per run**, idempotent by `(runId, kind)`: the posted comment ids persist in the
+`StateStore` under `reporter:${runId}` (mirroring `dispatchKey`), so a retried or re-delivered emission EDITS the
+recorded comment. A 10-iteration task cannot spam a ticket.
+
+**Fail-closed by default.** No provider configured means console/dry-run and nothing written. A repo outside
+`DF_WORKER_ALLOWED_REPOS` — the *same* list that governs which repos a worker may touch — is refused before any
+call, so there is no state in which a worker works on a repo Eve refuses to comment on.
+
+A question **parks** the run: `blocked` is a first-class `DispatchStatus` (distinct from `retrying`, because
+waiting on a human is not work), the issue gains `needs-answer`, no retries or backoff are consumed while the
+question is read, and the next delivery after the reply resumes the run.
+
+```bash
+npx tsx scripts/worker-reporter-demo.local.ts   # console + recording provider + cross-process durability
+```
 
 ## Dark Factory (R4b) — latency and cost in the loop (#158)
 

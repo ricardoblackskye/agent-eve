@@ -20,6 +20,20 @@ export class InvalidDispatchEventError extends Error {
   }
 }
 
+/**
+ * The handler has PARKED the run on a human decision — a worker question (#162).
+ *
+ * Deliberately not an ordinary failure: parking must not consume the retry
+ * budget or burn backoff sleeps, and the run resumes when a human replies. A
+ * genuine error still throws its own error and retries as before.
+ */
+export class ParkedRunError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ParkedRunError";
+  }
+}
+
 export function toDispatchEvent(input: Partial<DispatchEvent>): DispatchEvent {
   const runId = typeof input.runId === "string" ? input.runId.trim() : "";
   if (!runId) {
@@ -85,7 +99,15 @@ export type DispatchStatus =
   | "dispatched"
   | "retrying"
   | "succeeded"
-  | "failed";
+  | "failed"
+  /**
+   * Parked on a HUMAN decision (#162). Deliberately distinct from "retrying": a
+   * parked run is not failing and must not consume retries or backoff, because
+   * waiting for an answer is not work. It is a real status rather than a shadow
+   * record so anything reading dispatch state can tell the two apart without a
+   * second lookup.
+   */
+  | "blocked";
 
 export interface DispatchRecord {
   event: DispatchEvent;
@@ -246,9 +268,14 @@ export class Dispatcher {
         error: `Cannot read dispatch state for run '${event.runId}': ${existing.error ?? "unknown error"}`,
       };
     }
-    if (existing.value) {
+    if (existing.value && existing.value.status !== "blocked") {
       // At-most-once: anything already recorded for this run (in flight or
       // finished) is a duplicate delivery, never a second dispatch.
+      //
+      // A BLOCKED run is the one exception, and it is not really an exception:
+      // at-most-once exists to stop duplicate WORK, and a parked run has no work
+      // in flight. So a fresh delivery after the human replied is the resume
+      // signal, not a duplicate (#162).
       //
       // `ok` here means "this call was handled with no error" — NOT "the run
       // succeeded". A duplicate of a previously FAILED run is still a
@@ -298,6 +325,36 @@ export class Dispatcher {
           `handler for run '${event.runId}' (attempt ${attempt})`,
         );
       } catch (err) {
+        // Parked on a human: record it truthfully and STOP. No retry, no backoff
+        // sleep - a human reading a question must not burn worker-minutes (#162).
+        if (err instanceof ParkedRunError) {
+          const parkError = err.message;
+          const parkedPersistError = await this.persist({
+            ...base,
+            status: "blocked",
+            attempts: attempt,
+            updatedAt: new Date().toISOString(),
+            error: parkError,
+          });
+          if (parkedPersistError) {
+            return {
+              ok: false,
+              status: "failed",
+              attempts: attempt,
+              worker,
+              error: parkedPersistError,
+            };
+          }
+          await this.observer({
+            type: "dispatch.attempt",
+            runId: event.runId,
+            attempt,
+            status: "blocked",
+            worker,
+          });
+          return { ok: true, status: "blocked", attempts: attempt, worker };
+        }
+
         lastError = err instanceof Error ? err.message : String(err);
         const schedule = nextRetry(this.policy, attempt);
         if (!schedule) break;
