@@ -309,6 +309,42 @@ npx vitest run tests/dark-factory/self-improve-cadence.test.ts \
                tests/dark-factory/self-improve-operator.test.ts --reporter=verbose
 ```
 
+### Dark Factory (R4b) — Operator CLI (#159)
+
+`createOperatorDecisionStore` had **no caller in the application**, so every
+`access-widening` proposal was permanently blocked with `operator gate missing`:
+there was no way to arm a decision outside a test. This CLI is that caller.
+
+```bash
+npm run operator -- list                                  # what is armed today?
+npm run operator -- allow skill-surface --by "Your Name" --expires +7d
+npm run operator -- deny  skill-surface --by "Your Name"
+npm run operator -- clear skill-surface                   # revoke
+```
+
+`--kind` is `access-widening` (the default) or `bounded-tuning`. `--expires`
+accepts an ISO-8601 timestamp **with an offset** (`2030-01-02T03:04:05Z`), a
+relative `+7d` / `+12h` / `+30m`, or `never`.
+
+Fail-closed rules, each locked by a test:
+
+- an `access-widening` **allow without `--by` is refused** — the record is the
+  audit trail for granting capability, and `decidedBy` is audit-only, not
+  authenticated, so the CLI will not invent an author;
+- a **malformed `--expires` is refused** rather than written as `null`, because a
+  typo would silently mean "never expires";
+- arming against a store that **cannot persist is refused** (an unset
+  `DF_STATE_DRIVER` yields the fail-closed console provider), so success is never
+  reported for a decision that was not recorded;
+- the output **names the store and resolved path** it wrote to, so an ephemeral
+  local file cannot be mistaken for the store production reads.
+
+Exit codes: `0` success · `1` refusal · `2` usage error.
+
+```bash
+npx vitest run tests/dark-factory/operator-cli.test.ts --reporter=verbose
+```
+
 ### User Story Generation
 
 Label an issue `needs-story` (or mention `@eve-agent` in the body) and the
