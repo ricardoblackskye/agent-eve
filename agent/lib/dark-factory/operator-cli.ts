@@ -95,10 +95,12 @@ const SURFACE_ID_PATTERN = /^[A-Za-z0-9._-]+$/;
 
 /**
  * `--by` is a human name, so it accepts anything printable (spaces, apostrophes,
- * hyphens) but NOT control characters: the name is persisted and printed, and a
- * newline or NUL could forge a record or a log line.
+ * hyphens, accents, emoji) but NOT the Unicode "Other" category (Cc, Cf, Cs, Co,
+ * Cn). The name is persisted and printed, and format characters matter for the
+ * same reason newlines do: a bidi override (U+202E) or a zero-width space can make
+ * a stored or printed name read as something else.
  */
-const CONTROL_CHARS = /[\u0000-\u001F\u007F]/;
+const NON_PRINTABLE = /\p{C}/u;
 const MAX_BY_LENGTH = 64;
 /** Surface ids are short slugs (`iteration-bound`); this only bounds record size. */
 const MAX_SURFACE_ID_LENGTH = 64;
@@ -134,7 +136,8 @@ export function parseOperatorArgs(argv: string[]): OperatorCliCommand {
   let expiresAt: string | null = null;
 
   const seen = new Set<string>();
-  for (let i = 1; i < argv.length; i += 1) {
+  let i = 1;
+  while (i < argv.length) {
     const arg = argv[i];
     if (arg.startsWith("--")) {
       if (seen.has(arg)) {
@@ -148,7 +151,9 @@ export function parseOperatorArgs(argv: string[]): OperatorCliCommand {
       if (value === undefined || value.startsWith("--")) {
         throw new OperatorCliUsageError(`Option '${arg}' needs a value.`);
       }
-      i += 1;
+      // Consume the flag AND its value in one step, so the loop can never advance
+      // past a value without having read it.
+      i += 2;
       if (arg === "--kind") {
         if (!KINDS.includes(value as ProposalKind)) {
           throw new OperatorCliUsageError(
@@ -159,7 +164,7 @@ export function parseOperatorArgs(argv: string[]): OperatorCliCommand {
       } else if (arg === "--by") {
         if (
           value.trim() === "" ||
-          CONTROL_CHARS.test(value) ||
+          NON_PRINTABLE.test(value) ||
           value.length > MAX_BY_LENGTH
         ) {
           throw new OperatorCliUsageError(
@@ -187,6 +192,7 @@ export function parseOperatorArgs(argv: string[]): OperatorCliCommand {
       );
     }
     surfaceId = arg;
+    i += 1;
   }
 
   if (command === "list") {

@@ -454,6 +454,43 @@ describe("operator CLI — review round 5 on PR #166", () => {
   });
 });
 
+describe("operator CLI — review round 6 on PR #166", () => {
+  it("refuses a --by carrying Unicode control or format characters", async () => {
+    // C0/DEL was covered; the wider Other category matters for the SAME reason the
+    // rule exists. A bidi override (U+202E) can make a printed name read as
+    // something else, which is exactly the log-forging this guards against.
+    const bad = [
+      "a\u0085b",
+      "Richard\u202eLloyd",
+      "zero\u200bwidth",
+      "bom\ufeffhere",
+      "nul\u0000",
+    ];
+
+    for (const value of bad) {
+      const { deps: d, store } = deps();
+      const result = await runOperatorCli(["allow", "s", "--by", value], d);
+      expect(
+        result.exitCode,
+        `--by ${JSON.stringify(value)} must be refused`,
+      ).toBe(2);
+      expect(
+        await store.list(),
+        `${JSON.stringify(value)} must record nothing`,
+      ).toEqual([]);
+    }
+  });
+
+  it("still accepts accents and emoji in a name", async () => {
+    for (const value of ["José Álvarez", "Ricardo 🙂", "Zoë O'Brien-Smith"]) {
+      const { deps: d, store } = deps();
+      const result = await runOperatorCli(["allow", "s", "--by", value], d);
+      expect(result.exitCode, `--by ${value} must be accepted`).toBe(0);
+      expect((await store.list())[0].decidedBy).toBe(value);
+    }
+  });
+});
+
 describe("runOperatorCli: list and refusal paths (#159)", () => {
   it("lists live and expired decisions, marking the expired ones", async () => {
     const { deps: d } = deps([
