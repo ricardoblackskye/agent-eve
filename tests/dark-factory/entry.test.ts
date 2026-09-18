@@ -12,6 +12,7 @@ import { describe, it, expect } from "vitest";
 import {
   buildIntent,
   renderHandoffMessage,
+  resolveApiOrigin,
   resolveRunnerMode,
   runDarkFactoryDispatch,
   toRunId,
@@ -101,7 +102,15 @@ function deps(over: Partial<EntryDeps> = {}) {
     store,
     calls,
     ops,
-    deps: { store, postSession: impl, labels: writer, ...over } as EntryDeps,
+    // localhost is a trusted handoff origin (resolveApiOrigin only trusts the request
+    // origin when it is loopback/local), so the recorded POST still happens in tests.
+    deps: {
+      store,
+      postSession: impl,
+      labels: writer,
+      origin: "http://localhost:3000",
+      ...over,
+    } as EntryDeps,
   };
 }
 
@@ -277,5 +286,70 @@ describe("#163 cycle 19: the brief reaches the factory as DATA, not instructions
     expect(intent.runId).toMatch(/^[A-Za-z0-9_.\-/]+#\d+$/);
     expect(message).not.toMatch(/;rm/);
     expect(message).not.toMatch(/\$\(/);
+  });
+});
+
+describe("#163 security: the session handoff origin is never taken from the request (SSRF)", () => {
+  it("prefers an explicitly configured DF_API_BASE_URL", () => {
+    const r = resolveApiOrigin({ DF_API_BASE_URL: "http://example.test/eve" });
+    expect(r.origin).toBe("http://example.test");
+    expect(r.reason).toMatch(/DF_API_BASE_URL/);
+  });
+
+  it("falls back to VERCEL_URL on Vercel", () => {
+    const r = resolveApiOrigin({ VERCEL_URL: "my-app.vercel.app" });
+    expect(r.origin).toBe("https://my-app.vercel.app");
+  });
+
+  it("trusts the request origin only when it is loopback/local", () => {
+    expect(resolveApiOrigin({}, "http://localhost:3000").origin).toBe(
+      "http://localhost:3000",
+    );
+    expect(resolveApiOrigin({}, "http://127.0.0.1:8080").origin).toBe(
+      "http://127.0.0.1:8080",
+    );
+    expect(resolveApiOrigin({}, "http://dev.local").origin).toBe(
+      "http://dev.local",
+    );
+  });
+
+  it("REFUSES an external request origin when nothing is configured (fail closed)", () => {
+    const r = resolveApiOrigin({}, "https://attacker.test");
+    expect(r.origin).toBeNull();
+    expect(r.reason).toMatch(/no trusted origin/i);
+  });
+
+  it("does not fall back to an external request origin even when DF_API_BASE_URL is unparseable", () => {
+    expect(
+      resolveApiOrigin(
+        { DF_API_BASE_URL: "not a url" },
+        "https://attacker.test",
+      ).origin,
+    ).toBeNull();
+  });
+
+  it("a trusted local origin lets the handoff proceed; an untrusted one is skipped", async () => {
+    const store = new MemoryStore();
+    const ok = recordingPost();
+    // localhost origin -> handoff happens
+    const local = await runDarkFactoryDispatch(triggerDecision(), {
+      store,
+      postSession: ok.impl,
+      labels: recordingLabels().writer,
+      origin: "http://localhost:3000",
+    } as never);
+    expect(ok.calls).toHaveLength(1);
+    // external origin + no config -> handoff skipped (fail closed)
+    store.data.clear();
+    const ext = recordingPost();
+    const skipped = await runDarkFactoryDispatch(triggerDecision(), {
+      store,
+      postSession: ext.impl,
+      labels: recordingLabels().writer,
+      origin: "https://attacker.test",
+    } as never);
+    expect(ext.calls).toHaveLength(0);
+    expect(skipped.ok).toBe(false);
+    expect(skipped.reason).toMatch(/skipped/i);
   });
 });

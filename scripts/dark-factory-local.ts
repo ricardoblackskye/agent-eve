@@ -92,6 +92,7 @@ async function main(): Promise<void> {
   const outcome = await runDarkFactoryDispatch(decision, {
     store,
     postSession: impl,
+    origin: "http://localhost:3000",
     labels: {
       add: async (_r, _i, label) => {
         labelOps.push(`+${label}`);
@@ -152,6 +153,7 @@ async function main(): Promise<void> {
     {
       store,
       postSession: impl,
+      origin: "http://localhost:3000",
       labels: {
         add: async () => ({ ok: true }),
         remove: async () => ({ ok: true }),

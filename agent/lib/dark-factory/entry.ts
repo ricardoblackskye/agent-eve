@@ -58,6 +58,8 @@ export interface EntryDeps {
   postSession?: typeof fetch;
   labels?: LabelWriter;
   apiKey?: string;
+  /** Env used to resolve a trusted handoff origin; defaults to process.env. */
+  env?: Record<string, string | undefined>;
   origin?: string;
   now?: () => string;
   /**
@@ -204,6 +206,43 @@ export function resolveRunnerMode(
     };
   }
   return { mode: "local", requestedLocal: true };
+}
+
+/**
+ * Resolve the base origin for the Eve session handoff.
+ *
+ * SECURITY (SSRF): the webhook request's own `origin` is derived from the Host header and
+ * is therefore attacker-influenceable — anyone who can POST to the endpoint can set
+ * `Host` and, if we trusted it, aim this handoff (and its Bearer token) at an attacker
+ * host. So the origin is taken from configuration first; the request origin is only
+ * trusted when it is a loopback/local address (the dev and offline-replay case).
+ * Anything else is refused: we fail closed rather than hand the token to an untrusted URL.
+ */
+export function resolveApiOrigin(
+  env: Record<string, string | undefined> = process.env,
+  requestOrigin?: string,
+): { origin: string | null; reason: string } {
+  const configured = (env.DF_API_BASE_URL ?? "").trim();
+  if (configured) {
+    try {
+      const u = new URL(configured);
+      if (u.protocol === "http:" || u.protocol === "https:") {
+        return { origin: u.origin, reason: "configured DF_API_BASE_URL" };
+      }
+    } catch {
+      /* not a parseable URL; fall through to the next source */
+    }
+  }
+  const vercel = (env.VERCEL_URL ?? "").trim();
+  if (vercel) {
+    const host = vercel.replace(/^https?:\/\//, "");
+    return { origin: `https://${host}`, reason: "VERCEL_URL" };
+  }
+  const ro = (requestOrigin ?? "").trim();
+  if (/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\]|[\w-]+\.local)(:\d+)?$/i.test(ro)) {
+    return { origin: ro, reason: "local/dev request origin" };
+  }
+  return { origin: null, reason: "no trusted origin configured (set DF_API_BASE_URL)" };
 }
 
 const RUNNING: DispatchStatus = "dispatched";
@@ -409,9 +448,14 @@ async function postHandoff(
   deps: EntryDeps,
   intent: DispatchIntent,
 ): Promise<{ ok: boolean; reason: string }> {
+  // The handoff URL is resolved through configuration, never straight from the request
+  // origin (SSRF: an attacker-controlled Host header must not aim this POST+token elsewhere).
+  const resolved = resolveApiOrigin(deps.env ?? process.env, deps.origin);
+  if (!resolved.origin) {
+    return { ok: false, reason: `handoff skipped: ${resolved.reason}` };
+  }
   const post = deps.postSession ?? fetch;
-  const origin = deps.origin ?? "";
-  const url = `${origin}/eve/v1/session`;
+  const url = `${resolved.origin}/eve/v1/session`;
   try {
     const headers: Record<string, string> = {
       "content-type": "application/json",

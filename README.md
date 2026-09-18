@@ -173,6 +173,7 @@ be flagged **Sensitive** in Vercel (masked, not readable via `vercel env pull`);
 | `DF_TRIGGER_LABEL`         | No       | Config | The issue label that requests Dark Factory work (default `dark-factory`); removing it aborts the run |
 | `DF_TRIGGER_ALLOWED_USERS` | No*      | Config | **Fail-closed** comma-separated GitHub logins allowed to trigger work; unset = every trigger REFUSED |
 | `DF_RUNNER`                | No       | Config | Where a triggered run executes: unset/`session` = the deployed path; `local` = in-process, and **refused in any production build** |
+| `DF_API_BASE_URL`         | No       | Config | Canonical base URL for the Eve session handoff; required for self-hosted deployments so the origin is never taken from the request Host header (SSRF) |
 | `DF_CREDENTIAL_TTL_SECONDS` | No       | Config | Per-task credential lease lifetime, 1..3600 (default `3600`); the sandbox gets a lease, never the token                                   |
 
 \* `NEXT_PUBLIC_EVE_API_KEY` and `GH_STORY_TOKEN` are required for the chat

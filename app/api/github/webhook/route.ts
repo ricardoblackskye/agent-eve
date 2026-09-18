@@ -5,7 +5,10 @@ import path from "path";
 import { isStoryTrigger } from "../../../../agent/lib/story-trigger";
 import { isSprintReportTrigger } from "../../../../agent/lib/sprint-trigger";
 import { decideDarkFactoryTrigger } from "../../../../agent/lib/dark-factory/trigger";
-import { runDarkFactoryDispatch } from "../../../../agent/lib/dark-factory/entry";
+import {
+  resolveApiOrigin,
+  runDarkFactoryDispatch,
+} from "../../../../agent/lib/dark-factory/entry";
 import { createGitHubLabelWriter } from "../../../../agent/lib/dark-factory/issue-writer";
 import { createStateStore } from "../../../../agent/lib/dark-factory";
 
@@ -270,7 +273,21 @@ async function handler(request: NextRequest) {
     const apiKey = process.env.EVE_API_KEY;
 
     try {
-      const targetUrl = `${request.nextUrl.origin}/eve/v1/session`;
+      const handoffOrigin = resolveApiOrigin(
+        process.env,
+        request.nextUrl.origin,
+      ).origin;
+      if (!handoffOrigin) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error:
+              "Eve API handoff origin could not be resolved from configuration; refusing the handoff.",
+          },
+          { status: 502 },
+        );
+      }
+      const targetUrl = `${handoffOrigin}/eve/v1/session`;
       const apiHeaders: Record<string, string> = {
         "content-type": "application/json",
       };
@@ -379,7 +396,21 @@ async function handler(request: NextRequest) {
 
       const apiKey = process.env.EVE_API_KEY;
       try {
-        const targetUrl = `${request.nextUrl.origin}/eve/v1/session`;
+        const handoffOrigin = resolveApiOrigin(
+          process.env,
+          request.nextUrl.origin,
+        ).origin;
+        if (!handoffOrigin) {
+          return NextResponse.json(
+            {
+              ok: false,
+              error:
+                "Eve API handoff origin could not be resolved from configuration; refusing the handoff.",
+            },
+            { status: 502 },
+          );
+        }
+        const targetUrl = `${handoffOrigin}/eve/v1/session`;
         const apiHeaders: Record<string, string> = {
           "content-type": "application/json",
         };
@@ -456,6 +487,7 @@ async function handler(request: NextRequest) {
         store: createStateStore(),
         labels: createGitHubLabelWriter(),
         apiKey: process.env.EVE_API_KEY,
+        env: process.env,
         origin: request.nextUrl.origin,
       });
       // A refusal is OUR gate doing its job, not a transient failure: answering 4xx
@@ -544,7 +576,21 @@ ${body}`
     const apiKey = process.env.EVE_API_KEY;
 
     try {
-      const targetUrl = `${request.nextUrl.origin}/eve/v1/session`;
+      const handoffOrigin = resolveApiOrigin(
+        process.env,
+        request.nextUrl.origin,
+      ).origin;
+      if (!handoffOrigin) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error:
+              "Eve API handoff origin could not be resolved from configuration; refusing the handoff.",
+          },
+          { status: 502 },
+        );
+      }
+      const targetUrl = `${handoffOrigin}/eve/v1/session`;
       const apiHeaders: Record<string, string> = {
         "content-type": "application/json",
       };
