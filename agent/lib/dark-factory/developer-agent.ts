@@ -30,6 +30,7 @@ import {
   sep,
 } from "node:path";
 import type { MetricsStore, TaskStatus } from "./metrics";
+import type { Capabilities } from "./skills";
 
 /** Thrown when a TaskAssignment fails validation. */
 export class InvalidTaskError extends Error {
@@ -215,7 +216,9 @@ export const ALLOWED_SKELETON_EXTENSIONS = new Set([
  */
 function assertSafeRelativePath(relPath: string): void {
   const reject = (why: string): never => {
-    throw new SkeletonMapError(`Skeleton path '${relPath}' is rejected: ${why}.`);
+    throw new SkeletonMapError(
+      `Skeleton path '${relPath}' is rejected: ${why}.`,
+    );
   };
   if (relPath.includes("\0")) reject("contains a null byte");
   if (/^[A-Za-z]:/.test(relPath)) reject("looks like a Windows drive path");
@@ -235,7 +238,12 @@ function assertSafeRelativePath(relPath: string): void {
 export async function applySkeletalMap(
   workspace: string,
   map: SkeletonMap,
+  capabilities?: Capabilities,
 ): Promise<void> {
+  // Capability set resolved from the skill surface (#157). Absent means the
+  // fail-closed defaults, so every existing caller behaves exactly as before.
+  const allowedExtensions =
+    capabilities?.extensions ?? ALLOWED_SKELETON_EXTENSIONS;
   const root = resolve(workspace);
   await mkdir(root, { recursive: true });
   // Judge containment against the REAL directory: if the workspace itself is
@@ -261,11 +269,11 @@ export async function applySkeletalMap(
       );
     }
     const ext = extname(relPath).toLowerCase();
-    if (!ALLOWED_SKELETON_EXTENSIONS.has(ext)) {
+    if (!allowedExtensions.has(ext)) {
       throw new SkeletonMapError(
         `Skeleton path '${relPath}' has a disallowed extension '${
           ext || "(none)"
-        }'; allowed: ${[...ALLOWED_SKELETON_EXTENSIONS].join(", ")}.`,
+        }'; allowed: ${[...allowedExtensions].join(", ")}.`,
       );
     }
 
@@ -318,8 +326,14 @@ export class ToolNotAllowedError extends Error {
 }
 
 /** Throw ToolNotAllowedError unless `tool` is in the allowlist. */
-export function assertToolAllowed(tool: string): void {
-  if (!ALLOWED_TOOLS.has(tool)) {
+export function assertToolAllowed(
+  tool: string,
+  capabilities?: Capabilities,
+): void {
+  // Missing capabilities means the fail-closed defaults, so an existing caller
+  // keeps exactly the confinement it had before this seam existed.
+  const allowedTools = capabilities?.tools ?? ALLOWED_TOOLS;
+  if (!allowedTools.has(tool)) {
     throw new ToolNotAllowedError(tool);
   }
 }
