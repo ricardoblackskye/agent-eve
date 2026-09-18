@@ -9,7 +9,8 @@
  * honest dry-run that never claims isolation.
  */
 
-import { isAbsolute, relative, resolve, sep } from "node:path";
+import { realpathSync } from "node:fs";
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import {
   ConsoleStateProvider,
   SqliteStateAdapter,
@@ -182,32 +183,100 @@ export function createRetryPolicy(
       env.DF_DISPATCH_MAX_RETRIES,
       DEFAULT_RETRY_POLICY.maxRetries,
       0,
+      MAX_DISPATCH_RETRIES,
     ),
     baseDelayMs: readInt(
       "DF_DISPATCH_BASE_DELAY_MS",
       env.DF_DISPATCH_BASE_DELAY_MS,
       DEFAULT_RETRY_POLICY.baseDelayMs,
       0,
+      MAX_DISPATCH_BASE_DELAY_MS,
     ),
     backoffMultiplier: DEFAULT_RETRY_POLICY.backoffMultiplier,
   };
 }
 
-/** Parse a non-negative integer env var, throwing on garbage (naming the var). */
+/**
+ * Documented upper bounds for the dispatch integers (see `.env.example`).
+ *
+ * Without a maximum, `Number.isInteger(Number.MAX_SAFE_INTEGER)` is accepted for
+ * a retry count, so a typo becomes an effectively unbounded loop.
+ */
+const MAX_DISPATCH_RETRIES = 100;
+const MAX_DISPATCH_BASE_DELAY_MS = 3_600_000; // one hour
+
+/**
+ * Parse a non-negative integer env var, throwing on garbage (naming the var).
+ *
+ * Digits only: `Number("1e3")` is 1000 and `Number("0x5")` is 5, and
+ * `Number.isInteger` accepts both, so a coercion-based check silently admits
+ * scientific notation and hex — the same class of bug fixed for
+ * `DF_MAX_ITERATIONS` in #133. The value is therefore tested as a plain run of
+ * digits BEFORE any numeric coercion, and bounded at both ends.
+ */
 function readInt(
   name: string,
   raw: string | undefined,
   fallback: number,
   min: number,
+  max: number,
 ): number {
   if (raw === undefined || raw.trim() === "") return fallback;
-  const parsed = Number(raw);
-  if (!Number.isInteger(parsed) || parsed < min) {
+  if (!/^\d+$/.test(raw)) {
     throw new Error(
-      `${name} must be an integer >= ${min} (received ${JSON.stringify(raw)}).`,
+      `${name} must be an integer in range ${min}..${max} (received ` +
+        `${JSON.stringify(raw)}); plain digits only — scientific notation, hex ` +
+        "and surrounding whitespace are refused.",
+    );
+  }
+  const parsed = Number(raw);
+  if (parsed < min || parsed > max) {
+    throw new Error(
+      `${name} must be an integer in range ${min}..${max} ` +
+        `(received ${JSON.stringify(raw)}).`,
     );
   }
   return parsed;
+}
+
+/**
+ * Decide containment with the platform's own path comparison.
+ *
+ * `path.relative` is used rather than `startsWith(root + sep)` because
+ * relative() follows the host's case sensitivity (Node's win32 implementation
+ * compares case-insensitively, matching a case-insensitive filesystem, while
+ * POSIX stays case-sensitive). A raw prefix compare false-rejected a legitimate
+ * path whose drive letter differed in case ('c:\x' vs 'C:\x').
+ */
+function isInside(root: string, target: string): boolean {
+  const rel = relative(root, target);
+  return (
+    rel === "" ||
+    (!isAbsolute(rel) && rel !== ".." && !rel.startsWith(".." + sep))
+  );
+}
+
+/**
+ * REAL path of the deepest ancestor of `target` that exists on disk, or `null`
+ * when nothing along the chain exists.
+ *
+ * A state store file usually does not exist yet on first boot, so its own real
+ * path cannot be resolved — walking up to the nearest existing directory is what
+ * makes a link in the chain visible to `realpath`, which follows symlinks and
+ * Windows junctions.
+ */
+function realpathOfDeepestExistingAncestor(target: string): string | null {
+  let current = target;
+  for (;;) {
+    try {
+      return realpathSync(current);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    const parent = dirname(current);
+    if (parent === current) return null;
+    current = parent;
+  }
 }
 
 /**
@@ -223,9 +292,11 @@ function readInt(
  * REFUSED rather than silently used. Canonicalising also means an error message
  * names the real target, not a `../..`-laden string.
  *
- * Note: this is lexical (like `path.resolve`). A symlink inside the sandbox that
- * points outside it is not detected — that is a filesystem/container concern
- * (R2's worker privilege boundary), not something path string math can solve.
+ * Containment is decided lexically first and then re-checked against the REAL
+ * path of the deepest existing ancestor, so a symlink or junction inside the
+ * sandbox that points outside it is REFUSED rather than opened. The second check
+ * exists because path string maths cannot see a link: `path.resolve` is lexical,
+ * and this function previously admitted such a path (see #160).
  */
 export function resolveStateDbPath(
   rawPath: string,
@@ -236,23 +307,33 @@ export function resolveStateDbPath(
   if (root === "") return resolved;
 
   const resolvedRoot = resolve(root);
-  // Containment is decided by path.relative, NOT startsWith(resolvedRoot + sep):
-  // relative() follows the PLATFORM's case sensitivity (Node's win32
-  // implementation compares case-insensitively, matching a case-insensitive
-  // filesystem, while POSIX stays case-sensitive), whereas a raw prefix compare
-  // false-rejected a legitimate path whose drive letter differed in case
-  // ('c:\x' vs 'C:\x'). It also handles a different drive/root correctly by
-  // returning an absolute path.
-  const rel = relative(resolvedRoot, resolved);
-  const inside =
-    rel === "" ||
-    (!isAbsolute(rel) && rel !== ".." && !rel.startsWith(".." + sep));
-  if (inside) return resolved;
+  if (!isInside(resolvedRoot, resolved)) {
+    throw new Error(
+      `DF_STATE_DB_PATH '${resolved}' resolves outside DF_STATE_DB_DIR '${resolvedRoot}'. ` +
+        "Refusing to open a state store outside the configured sandbox root.",
+    );
+  }
 
-  throw new Error(
-    `DF_STATE_DB_PATH '${resolved}' resolves outside DF_STATE_DB_DIR '${resolvedRoot}'. ` +
-      "Refusing to open a state store outside the configured sandbox root.",
-  );
+  // The lexical check above cannot see a link, so re-check where the path
+  // actually LANDS. The store file usually does not exist yet, so the deepest
+  // existing ancestor is what is resolved — any link in that chain is followed
+  // by realpath. When nothing along the chain exists there can be no link
+  // either, and the lexical decision stands.
+  const realRoot = realpathOfDeepestExistingAncestor(resolvedRoot);
+  const realTarget = realpathOfDeepestExistingAncestor(resolved);
+  if (
+    realRoot !== null &&
+    realTarget !== null &&
+    !isInside(realRoot, realTarget)
+  ) {
+    throw new Error(
+      `DF_STATE_DB_PATH '${resolved}' resolves outside DF_STATE_DB_DIR '${resolvedRoot}' ` +
+        `via a link to '${realTarget}'. Refusing to open a state store outside the ` +
+        "configured sandbox root.",
+    );
+  }
+
+  return resolved;
 }
 
 /**
