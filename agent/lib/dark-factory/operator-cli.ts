@@ -86,10 +86,12 @@ type CommandName = (typeof COMMANDS)[number];
  *
  * A surface id is an opaque key that is both PERSISTED and PRINTED, so a value
  * carrying control characters or format metacharacters could forge a stored
- * record or a log line. This set accepts every id this repo's surfaces use
- * (`iteration-bounds`, `skill-set`) while refusing whitespace, NUL and newlines.
+ * record or a log line. This set covers every id the repo's surfaces use (the only
+ * one today is `iteration-bound`) while refusing whitespace, NUL, newlines and
+ * `:` — which no surface id has ever needed, so it is dropped rather than carried
+ * as an unused character.
  */
-const SURFACE_ID_PATTERN = /^[A-Za-z0-9._:-]+$/;
+const SURFACE_ID_PATTERN = /^[A-Za-z0-9._-]+$/;
 
 /**
  * `--by` is a human name, so it accepts anything printable (spaces, apostrophes,
@@ -97,16 +99,18 @@ const SURFACE_ID_PATTERN = /^[A-Za-z0-9._:-]+$/;
  * newline or NUL could forge a record or a log line.
  */
 const CONTROL_CHARS = /[\u0000-\u001F\u007F]/;
+const MAX_BY_LENGTH = 64;
 
 /**
- * Longest relative expiry accepted anywhere in the relative form (10 years).
+ * Furthest an expiry may be from now, for the relative AND the ISO form
+ * (10 years).
  *
- * A typo such as `+7777d` is the same failure mode as a malformed value: it
- * silently becomes "effectively never". An operator who genuinely wants no expiry
- * can say `never`, which costs nothing — so bounding the relative form turns a
- * typo into a refusal without removing any real capability.
+ * A typo such as `+7777d` or `9999-12-31T…` is the same failure mode as a
+ * malformed value: it silently becomes "effectively never". An operator who
+ * genuinely wants no expiry can say `never`, which costs nothing — so the bound
+ * turns a typo into a refusal without removing any real capability.
  */
-const MAX_RELATIVE_EXPIRY_MS = 3650 * 86_400_000;
+const MAX_EXPIRY_HORIZON_MS = 3650 * 86_400_000;
 
 function isCommandName(value: string): value is CommandName {
   return (COMMANDS as readonly string[]).includes(value);
@@ -143,9 +147,14 @@ export function parseOperatorArgs(argv: string[]): OperatorCliCommand {
         }
         proposalKind = value as ProposalKind;
       } else if (arg === "--by") {
-        if (value.trim() === "" || CONTROL_CHARS.test(value)) {
+        if (
+          value.trim() === "" ||
+          CONTROL_CHARS.test(value) ||
+          value.length > MAX_BY_LENGTH
+        ) {
           throw new OperatorCliUsageError(
-            `Invalid --by ${JSON.stringify(value)}: use a printable name, without control characters.`,
+            `Invalid --by ${JSON.stringify(value.slice(0, 32))}: use a printable name of at most ` +
+              `${MAX_BY_LENGTH} characters, without control characters.`,
           );
         }
         by = value;
@@ -212,13 +221,6 @@ function resolveExpiry(raw: string | null, now: () => Date): string | null {
       throw new OperatorCliUsageError(
         `--expires '${raw.slice(0, 24)}' overflows the supported date range. ` +
           "Refusing to arm: nothing was recorded.",
-      );
-    }
-    if (amount * ms > MAX_RELATIVE_EXPIRY_MS) {
-      throw new OperatorCliUsageError(
-        `--expires '${raw.slice(0, 24)}' is longer than the ` +
-          `${MAX_RELATIVE_EXPIRY_MS / 86_400_000} day maximum. Use 'never' if the grant ` +
-          "should not expire. Nothing was recorded.",
       );
     }
     return when.toISOString();
@@ -323,19 +325,35 @@ export async function runOperatorCli(
     throw error;
   }
 
-  // An expiry that is not in the future makes the grant inert the instant it is
-  // recorded: it would look like a successful grant while silently refusing.
-  // A past (or zero) time is therefore REFUSED, and `deny` is the explicit way
-  // to refuse — the same reasoning as refusing a malformed expiry.
-  if (expiresAt !== null && Date.parse(expiresAt) <= now().getTime()) {
-    return {
-      lines: [
-        `Refusing to arm: --expires '${command.expiresAt}' is not in the future, so the ` +
-          "decision would already be expired. Use 'deny' to refuse it explicitly, or " +
-          "'never' for no expiry. Nothing was recorded.",
-      ],
-      exitCode: 1,
-    };
+  // Two bounds on a resolved expiry, applied to BOTH the relative and the ISO
+  // form:
+  //  - not in the future: the grant would be inert the instant it was recorded,
+  //    looking like a success while silently refusing. `deny` says that explicitly.
+  //  - beyond the horizon: a typo (`+7777d`, `9999-12-31T…`) silently means
+  //    "effectively never". `never` says that explicitly.
+  if (expiresAt !== null) {
+    const at = Date.parse(expiresAt);
+    const from = now().getTime();
+    if (at <= from) {
+      return {
+        lines: [
+          `Refusing to arm: --expires '${command.expiresAt}' is not in the future, so the ` +
+            "decision would already be expired. Use 'deny' to refuse it explicitly, or " +
+            "'never' for no expiry. Nothing was recorded.",
+        ],
+        exitCode: 1,
+      };
+    }
+    if (at - from > MAX_EXPIRY_HORIZON_MS) {
+      return {
+        lines: [
+          `Refusing to arm: --expires '${command.expiresAt}' is more than ` +
+            `${MAX_EXPIRY_HORIZON_MS / 86_400_000} days away, which would mean 'never' in ` +
+            "practice. Use 'never' if the grant should not expire. Nothing was recorded.",
+        ],
+        exitCode: 1,
+      };
+    }
   }
 
   const decision: OperatorDecision = {

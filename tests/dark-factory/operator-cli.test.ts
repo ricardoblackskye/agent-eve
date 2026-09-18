@@ -245,6 +245,7 @@ describe("operator CLI — review round on PR #166", () => {
       "tab\there",
       "nul\u0000byte",
       "semi;colon",
+      "colon:id",
       "--looks-like-a-flag",
     ];
     for (const value of bad) {
@@ -263,11 +264,11 @@ describe("operator CLI — review round on PR #166", () => {
 
   it("accepts every surfaceId shape the repo's surfaces actually use", async () => {
     for (const value of [
-      "iteration-bounds",
+      "iteration-bound",
       "skill-set",
       "skill.set",
       "skill_set",
-      "Surface:1",
+      "surface-2",
     ]) {
       const { deps: d, store } = deps();
       const result = await runOperatorCli(["allow", value, "--by", "me"], d);
@@ -364,6 +365,52 @@ describe("operator CLI — review round 3 on PR #166", () => {
     );
     expect(result.exitCode).toBe(0);
     expect((await store.list())[0].expiresAt).toBe("2027-09-18T12:00:00.000Z");
+  });
+});
+
+describe("operator CLI — review round 4 on PR #166", () => {
+  it("refuses an absurdly long --by, which would bloat the stored record", async () => {
+    const { deps: d, store } = deps();
+    const result = await runOperatorCli(
+      ["allow", "s", "--by", "a".repeat(200)],
+      d,
+    );
+
+    expect(result.exitCode).toBe(2);
+    expect(result.lines.join("\n")).toMatch(/--by/);
+    expect(await store.list()).toEqual([]);
+  });
+
+  it("still accepts a long but plausible name", async () => {
+    const { deps: d, store } = deps();
+    const plausible = "Richard Lloyd, Dark Factory operator";
+    const result = await runOperatorCli(["allow", "s", "--by", plausible], d);
+
+    expect(result.exitCode).toBe(0);
+    expect((await store.list())[0].decidedBy).toBe(plausible);
+  });
+
+  it("refuses an ISO expiry beyond the horizon, not only a relative one", async () => {
+    const { deps: d, store } = deps();
+    for (const far of ["9999-12-31T00:00:00Z", "2200-01-01T00:00:00Z"]) {
+      const result = await runOperatorCli(
+        ["allow", "s", "--by", "me", "--expires", far],
+        d,
+      );
+      expect(result.exitCode, `--expires ${far} must be refused`).toBe(1);
+      expect(result.lines.join("\n")).toMatch(/never/i);
+      expect(await store.list(), `${far} must record nothing`).toEqual([]);
+    }
+  });
+
+  it("still accepts a plausible ISO expiry", async () => {
+    const { deps: d, store } = deps();
+    const result = await runOperatorCli(
+      ["allow", "s", "--by", "me", "--expires", "2027-01-01T00:00:00Z"],
+      d,
+    );
+    expect(result.exitCode).toBe(0);
+    expect((await store.list())[0].expiresAt).toBe("2027-01-01T00:00:00.000Z");
   });
 });
 
