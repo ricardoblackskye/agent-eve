@@ -18,7 +18,7 @@
 `ALLOWED_TOOLS` is the **only** tool vocabulary in the codebase — a grep for tool-like names across
 `agent/lib/dark-factory/` returns exactly its four members and nothing else:
 
-```
+```text
 developer-agent.ts:304-307   "git_clone"  "read_file"  "write_code"  "run_tests"
 ```
 
@@ -28,7 +28,7 @@ inventing capability that does not exist** — so this surface does not offer th
 
 What genuinely widens capability today is the **file-extension allow-list**:
 
-```
+```text
 ALLOWED_SKELETON_EXTENSIONS = new Set([".ts", ".tsx", ".json", ".md", ".css", ".yml", ".yaml", ".txt"])
 ```
 
