@@ -1,0 +1,12 @@
+{
+  "action": "labeled",
+  "label": { "name": "dark-factory" },
+  "sender": { "login": "ricardoblackskye" },
+  "repository": { "full_name": "ricardoblackskye/agent-eve" },
+  "issue": {
+    "number": 163,
+    "title": "Dark Factory R5: kick-off trigger + entry point",
+    "body": "Intent: let an operator start autonomous work with a label. Acceptance: given an allow-listed repo and actor, when the label is applied, then a dispatch is recorded and handed off out of band.",
+    "labels": [{ "name": "dark-factory" }]
+  }
+}

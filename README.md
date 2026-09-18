@@ -170,6 +170,10 @@ be flagged **Sensitive** in Vercel (masked, not readable via `vercel env pull`);
 | `DF_WORKER_ALLOWED_REPOS`   | No*      | Config | **Fail-closed** comma-separated `owner/repo` allow-list for worker tasks; unset = every task refused with 403 before provisioning         |
 | `DF_WORKER_RUNTIME`         | No       | Config | Runtime requested in the worker environment: `node` or `python` (default `node`)                                                          |
 | `DF_REPORTER_PROVIDER`     | No       | Config | Where worker progress/completion/questions go: unset/`console` = **dry-run, writes nothing**; `github` posts issue comments gated by `DF_WORKER_ALLOWED_REPOS` |
+| `DF_TRIGGER_LABEL`         | No       | Config | The issue label that requests Dark Factory work (default `dark-factory`); removing it aborts the run |
+| `DF_TRIGGER_ALLOWED_USERS` | No*      | Config | **Fail-closed** comma-separated GitHub logins allowed to trigger work; unset = every trigger REFUSED |
+| `DF_RUNNER`                | No       | Config | Where a triggered run executes: unset/`session` = the deployed path; `local` = in-process, and **refused in any production build** |
+| `DF_API_BASE_URL`         | No       | Config | Canonical base URL for the Eve session handoff; required for self-hosted deployments so the origin is never taken from the request Host header (SSRF) |
 | `DF_CREDENTIAL_TTL_SECONDS` | No       | Config | Per-task credential lease lifetime, 1..3600 (default `3600`); the sandbox gets a lease, never the token                                   |
 
 \* `NEXT_PUBLIC_EVE_API_KEY` and `GH_STORY_TOKEN` are required for the chat
@@ -410,6 +414,33 @@ Markdown and PDF, and posts a linking comment on the issue. Requires a token wit
 `read:project` scope (`GH_SPRINT_TOKEN`); the board defaults to user project
 `ricardoblackskye` #3, overridable via `SPRINT_PROJECT_OWNER` /
 `SPRINT_PROJECT_NUMBER`.
+
+## Dark Factory (R5) — kick-off trigger + entry point (#163)
+
+The factory was **unreachable by a human**: `Dispatcher` was never constructed by the running app, and no Dark
+Factory trigger existed. Now a **label requests work**: apply `dark-factory` (or `DF_TRIGGER_LABEL`) to an issue
+and the run is recorded and handed off.
+
+**Two fail-closed gates.** The repo must be in `DF_WORKER_ALLOWED_REPOS` **and** the actor in
+`DF_TRIGGER_ALLOWED_USERS` — a public repo lets anyone apply a label, so without the actor gate the trigger is
+forgeable. Either list unset means **everything is refused**, never allow-everything.
+
+**The webhook records; it never runs the loop.** There is no queue or cron in this repo, so the handoff reuses
+the mechanism both existing triggers already use — a POST to Eve's own session API. The worker handler is not
+invoked anywhere on that path, and a test asserts that with a handler that would count its own calls.
+
+**Removing labels means two different things**, and they are deliberately distinguished: removing the trigger
+label **aborts** the run; clearing the question label after a human reply **resumes** it with the explicit resume
+signal #162 introduced.
+
+**Local mode is opt-in and cannot be a production bypass.** `DF_RUNNER=local` routes work to the in-process
+runner, and is refused whenever this looks like a production build — Vercel's or a self-hosted one — following
+the rule the webhook's signature gate already records: *the absence of configuration must never be read as
+permission to relax the control*.
+
+```bash
+npx tsx scripts/dark-factory-local.ts   # replay a recorded webhook payload offline: 0 network calls
+```
 
 ## Dark Factory (R5) — worker reporting on the ticket (#162)
 
