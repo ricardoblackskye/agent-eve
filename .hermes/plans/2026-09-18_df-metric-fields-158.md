@@ -15,9 +15,11 @@ regression it exists to prevent.
 
 ## REVIEW findings (from the code)
 
-- `MetricsStore.record(taskType, data)` takes an inline shape; `toTaskMetric(taskType, data)` validates every
-  field and throws `InvalidMetricsError`. Validating the new fields **there** keeps the ingestion contract in
-  one place instead of duplicated across stores.
+- `MetricsStore.record(taskType, data)` takes an inline shape that is **duplicated verbatim in both stores**
+  (`InMemoryMetricsStore` and `BufferedMetricsRecorder`), so this PR extracts a shared `TaskMetricInput` type —
+  that is what makes "one contract point" literal rather than aspirational. `toTaskMetric(taskType, data)`
+  validates every field and throws `InvalidMetricsError`, so validating the new fields **there** keeps the
+  ingestion contract in one place.
 - **`Observation { taskType, samples, successRate, meanIterations, meanFixCycles }`** is built by a single
   function, `observeTaskType(store, taskType, minSamples)`, from `store.getRecords()`. Extending *that* is what
   makes latency and cost observable.
@@ -33,6 +35,12 @@ regression it exists to prevent.
   changing the ledger shape.
 - The **objective** comes from the #121 quality gate (success rate), not from the metrics store — which is what
   makes the "latency as the *objective*" half a different, larger change (see the decision below).
+
+- **The guardrails themselves are built from the BENCHMARK's cases, not from the store** (`guardrails: { meanIterations: mean((c) => c.iterations), meanFixCycles: ... }`). So the reject-and-revert AC needs `BenchmarkCase` to carry the optional fields too — the store path alone would never reach DECIDE;
+- **`BufferedMetricsRecorder` re-sends an explicit shape** in both `record()` and `flush()`. If only the interface signatures change, the #140 no-loss decorator silently **drops** the new fields on every buffered record — the new fields must be carried through those two re-sends, which is exactly the kind of loss that decorator exists to prevent;
+- **The #140 baseline this must not disturb** is `tests/dark-factory/metrics.test.ts` — five suites (fix-cycle
+  exactness, ingestion, success rate per task type, the no-loss guarantee, env wiring). AC4 is satisfied by those
+  passing unchanged.
 
 ## Design
 
@@ -51,34 +59,32 @@ regression it exists to prevent.
 6. **The guardrail series** is exposed via `objectiveTrend`'s sibling so the trend report can show latency and
    cost over cycles, not just as a single guardrail number.
 
-## The one decision worth confirming
+## Decision — RESOLVED at GATE 1: guardrails now
 
-The issue's scope sketch also says *"allow them as objective **or** guardrail candidates"*. **Guardrails are
-fully in scope here** — the ACs are all guardrail-based and the seam is already keyed. Making latency an
-*objective* is different work: the objective is produced by the MEASURE step from the #121 quality gate, so
-selecting latency as the objective means changing what MEASURE produces rather than adding a key.
-
-**My recommendation: guardrails now (ACs 1–4, fully tested), objective selection as its own issue.** The
-alternative is a `objectiveMetric?: "quality-gate" | "meanLatencyMs" | "meanCostUsd"` selector inside this PR,
-which changes the MEASURE/DECIDE boundary and would make this diff considerably harder to review. Tell me which
-you want and I'll scope accordingly.
+**Resolved (approved): guardrails now — ACs 1–4, fully tested. Objective selection is deferred to its own
+issue**, because it would mean changing what MEASURE produces (the objective comes from the #121 quality gate),
+not adding a key. Doing it here would move the MEASURE/DECIDE boundary inside a diff that is about metrics —
+which is precisely what makes a change hard to review.
 
 ## Tasks (RED → GREEN, one behaviour per cycle)
 
-| #  | RED (failing test first)                                                                          | GREEN                                |
-|----|---------------------------------------------------------------------------------------------------|--------------------------------------|
-| 1  | a record with no latency/cost is unchanged (`getRecords()` has neither key)                       | optional fields, no defaulting       |
-| 2  | finite `latencyMs`/`costUsd` values are stored and read back                                      | pass-through in both stores          |
-| 3  | `latencyMs: -1`, `NaN`, `Infinity`, `"120"` each throw `InvalidMetricsError`, naming the field    | validation in `toTaskMetric`         |
-| 4  | `costUsd: -0.01` throws; `costUsd: 0` is **accepted** (zero is a measurement)                     | `>= 0`, not `> 0`                    |
-| 5  | `observeTaskType` reports `meanLatencyMs` / `meanCostUsd` when samples carry them                 | means over measured samples          |
-| 6  | when **no** sample carries a value, the key is **absent** from the observation (not `0`)          | omit, never fake a zero              |
-| 7  | a mix (half the samples measured) means over the **measured** ones only                           | filter, then mean                    |
-| 8  | the measurement's guardrails include the observed latency/cost keys                               | additive guardrail keys              |
-| 9  | **end-to-end**: a change that regresses latency beyond tolerance is rejected **and reverted**     | existing DECIDE logic, no new branch |
-| 10 | **end-to-end**: a regression *within* tolerance is accepted (the guardrail is not a hair-trigger) | tolerance is respected               |
-| 11 | the guardrail series reports latency/cost per cycle                                               | trend extension                      |
-| 12 | the existing #140 ingestion tests still pass **unchanged**                                        | backward compatibility (AC4)         |
+| #  | RED (failing test first)                                                                                       | GREEN                                                                    |
+|----|----------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------|
+| 1  | a record with no latency/cost is unchanged (`getRecords()` has neither key)                                    | optional fields, no defaulting                                           |
+| 2  | finite `latencyMs`/`costUsd` values are stored and read back                                                   | pass-through in both stores                                              |
+| 3  | `latencyMs: -1`, `NaN`, `Infinity`, `"120"` each throw `InvalidMetricsError`, naming the field                 | validation in `toTaskMetric`                                             |
+| 4  | `costUsd: -0.01` throws; `costUsd: 0` is **accepted** (zero is a measurement)                                  | `>= 0`, not `> 0`                                                        |
+| 5  | `observeTaskType` reports `meanLatencyMs` / `meanCostUsd` when samples carry them                              | means over measured samples                                              |
+| 6  | when **no** sample carries a value, the key is **absent** from the observation (not `0`)                       | omit, never fake a zero                                                  |
+| 7  | a mix (half the samples measured) means over the **measured** ones only                                        | filter, then mean                                                        |
+| 8  | the measurement's guardrails include the observed latency/cost keys                                            | additive guardrail keys                                                  |
+| 9  | **end-to-end**: a change that regresses latency beyond tolerance is rejected **and reverted**                  | existing DECIDE logic, no new branch                                     |
+| 10 | **end-to-end**: a regression *within* tolerance is accepted (the guardrail is not a hair-trigger)              | tolerance is respected                                                   |
+| 11 | the guardrail series reports latency/cost per cycle                                                            | trend extension                                                          |
+| 12 | the existing #140 ingestion tests still pass **unchanged**                                                     | backward compatibility (AC4)                                             |
+| 13 | a record with latency/cost survives a **failing backend** and is delivered by `flush()` with the fields intact | the decorator's two explicit re-sends carry them (the drop hazard above) |
+| 14 | a `BenchmarkCase` carrying latency/cost puts `meanLatencyMs`/`meanCostUsd` into the measurement's guardrails   | `BenchmarkCase` + the guardrail record                                   |
+| 15 | when **no** benchmark case carries them, those guardrail keys are **absent** from the measurement              | same absent-not-zero rule, at the MEASURE seam                           |
 
 ## Acceptance criteria (from the issue, made concrete)
 
@@ -108,6 +114,6 @@ this laptop showing a real cycle **rejected on a latency regression** and **reve
 
 ## Status
 
-**GATE 1 — awaiting approval of this plan and the decision above** (guardrails now, or guardrails + objective
-selection in the same PR). No source has been written on this branch beyond this document.
+**GATE 1 approved — guardrails scope** (objective selection deferred). Implementation is TDD: a RED test per row
+above, then the smallest change that turns it GREEN, verified on this laptop before any push.
 
