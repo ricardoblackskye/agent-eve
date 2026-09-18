@@ -112,6 +112,24 @@ which is precisely what makes a change hard to review.
 this laptop showing a real cycle **rejected on a latency regression** and **reverted**, with the numbers printed
 — the same standard as #159 and #157, where the evidence was a run rather than an assertion.
 
+## Added at review — the #167 flake, fixed in this branch (approach A)
+
+`Unit Tests` was red on CI for a reason unrelated to this diff: the wall-clock p95 state NFR assertion failed at
+561ms in `tests/dark-factory/state.test.ts` — a file this change does not touch. It is the flake already filed
+as #167, and because it reds a required gate on **every** PR it is fixed here rather than left as a follow-up.
+
+**Approach A — the budget becomes environment-aware; the NFR does not move.** `resolveP95Ceiling(env)` returns
+**100ms** by default (the NFR, enforced wherever the number is meaningful), **1500ms** when `CI` is set, and an
+explicit `DF_STATE_NFR_P95_MS` wins over both so a self-hosted runner can be tuned without editing code.
+
+A nonsense override (`""`, `"abc"`, `"-5"`, `"0"`) is **ignored, never honoured**: `0` would assert `p95 < 0` and
+`NaN` would make every comparison false — either way a **silently disabled gate that still reports green**,
+which is the worst outcome for a safety check.
+
+Measured evidence: local p95 **8.4ms** (12x inside the NFR), CI **561ms**. Control case: forcing
+`DF_STATE_NFR_P95_MS=1` fails the assertion with `p95 8.4ms over a 1ms ceiling (NFR 100ms)`, proving the gate is
+still live rather than newly toothless.
+
 ## Status
 
 **GATE 1 approved — guardrails scope** (objective selection deferred). Implementation is TDD: a RED test per row
