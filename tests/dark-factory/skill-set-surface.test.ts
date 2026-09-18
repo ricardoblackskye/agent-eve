@@ -1,4 +1,7 @@
 import { describe, it, expect } from "vitest";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   createSkillSetSurface,
   proposeSkillAddition,
@@ -7,6 +10,12 @@ import {
 import { SupersededVersionError } from "../../agent/lib/dark-factory/self-improve";
 import { SelfImprovementStateError } from "../../agent/lib/dark-factory/self-improve-state";
 import { SkillCatalogueError } from "../../agent/lib/dark-factory/skills";
+import {
+  createOperatorDecisionStore,
+  operatorGateFromStore,
+} from "../../agent/lib/dark-factory/self-improve-state";
+import { resolveCapabilities } from "../../agent/lib/dark-factory/skills";
+import { applySkeletalMap } from "../../agent/lib/dark-factory/developer-agent";
 import type { StateStore } from "../../agent/lib/dark-factory/state";
 
 /**
@@ -187,5 +196,76 @@ describe("proposeSkillAddition (#157)", () => {
         samples: 20,
       }),
     ).toThrow(SkillCatalogueError);
+  });
+});
+
+describe("#157 end to end, with the components that really run", () => {
+  it("blocks a skill grant with no decision, then applies it once armed", async () => {
+    const { store } = memoryStore();
+    const surface = await createSkillSetSurface(store);
+    // The same decision store #159's CLI writes through.
+    const decisions = createOperatorDecisionStore(store);
+    const gate = operatorGateFromStore(decisions);
+    const dir = mkdtempSync(join(tmpdir(), "df-skill-e2e-"));
+
+    try {
+      const proposal = proposeSkillAddition(surface, "database-migration", {
+        taskType: "coding",
+        observedSuccessRate: 0.6,
+        samples: 30,
+      });
+
+      // 1. Nothing armed: the gate refuses, so the cycle would report
+      //    "operator gate declined" and never reach apply().
+      await expect(gate.approve(proposal)).resolves.toBe(false);
+
+      // 2. An allow for the WRONG kind must not satisfy a widening.
+      await decisions.record({
+        surfaceId: "skill-set",
+        kind: "bounded-tuning",
+        decision: "allow",
+        decidedBy: "test",
+        decidedAt: "2026-09-18T12:00:00.000Z",
+        expiresAt: null,
+      });
+      await expect(gate.approve(proposal)).resolves.toBe(false);
+
+      // 3. Arm it the way the #159 CLI does.
+      await decisions.record({
+        surfaceId: "skill-set",
+        kind: "access-widening",
+        decision: "allow",
+        decidedBy: "Richard Lloyd",
+        decidedAt: "2026-09-18T12:00:00.000Z",
+        expiresAt: null,
+      });
+      await expect(gate.approve(proposal)).resolves.toBe(true);
+
+      // 4. Until it is applied, the capability is NOT real: .sql is still refused.
+      await expect(
+        applySkeletalMap(
+          dir,
+          { "db/migration.sql": "select 1;" },
+          resolveCapabilities(surface.read()),
+        ),
+      ).rejects.toThrow(/disallowed extension/);
+
+      const handle = await surface.stage(proposal.next as SkillSet);
+      await handle.apply();
+
+      // 5. Persisted, re-read by a fresh surface, and now enforceable.
+      const reopened = await createSkillSetSurface(store);
+      expect(reopened.read()).toEqual(["database-migration"]);
+      await expect(
+        applySkeletalMap(
+          dir,
+          { "db/migration.sql": "select 1;" },
+          resolveCapabilities(reopened.read()),
+        ),
+      ).resolves.toBeUndefined();
+      expect(existsSync(join(dir, "db", "migration.sql"))).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

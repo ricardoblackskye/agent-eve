@@ -345,6 +345,47 @@ Exit codes: `0` success · `1` refusal · `2` usage error.
 npx vitest run tests/dark-factory/operator-cli.test.ts --reporter=verbose
 ```
 
+### Dark Factory (R4b) — Skill Set Surface (#157)
+
+A **skill is a capability grant**: a named capability defined by the permission delta it grants. It is the
+one tunable surface that changes *what the agents can do*, rather than tuning a numeric bound — and it is
+`access-widening`, so the controller may only **propose** it: an operator must arm the gate first.
+
+```bash
+npm run operator -- allow skill-set --by "Your Name" --expires +7d   # arm the widening
+npm run operator -- list                                             # confirm it is armed
+```
+
+**What a grant may contain, and what it may not.** `ALLOWED_TOOLS` is the only tool vocabulary in this
+repository — the worker protocol takes a free-form command string — so there is no registry a skill could
+add a tool to. A skill that claimed to grant a new tool would be inventing capability, so the catalogue
+grants **file extensions**, where `.sql`, `.sh`, `.graphql` and `.prisma` are refused by `applySkeletalMap`
+today:
+
+| Skill | Grants |
+| --- | --- |
+| `database-migration` | `.sql` |
+| `shell-automation` | `.sh` |
+| `api-schema` | `.graphql`, `.prisma` |
+
+Fail-closed rules, each locked by a test:
+
+- a grant must **widen** — restating a default extension is refused when the catalogue loads;
+- a grant naming a tool this repo cannot honour is **refused at load**, so `tools` stays in the shape for
+  the day a registry exists rather than pretending it exists now;
+- `resolveCapabilities` returns the defaults **union** the grants, never a replacement, so a skill cannot
+  remove a capability the factory needs;
+- a stored skill the catalogue no longer knows is **dropped and rewritten**, never honoured;
+- an unknown skill name is refused at every entry point, naming it;
+- enabling a skill is only real once it is **applied and persisted** — until then the extension stays
+  refused.
+
+```bash
+npx vitest run tests/dark-factory/skills.test.ts \
+               tests/dark-factory/skill-set-surface.test.ts \
+               tests/dark-factory/skills-enforcement.test.ts --reporter=verbose
+```
+
 ### User Story Generation
 
 Label an issue `needs-story` (or mention `@eve-agent` in the body) and the

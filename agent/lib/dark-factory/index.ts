@@ -149,6 +149,33 @@ export {
 } from "./self-improve-state";
 
 /**
+ * The skill seams (#157). `SKILLS` is the catalogue of capability grants; the
+ * surface is what the self-improvement controller tunes, and its grants reach the
+ * developer agent's enforcement points through `resolveCapabilities`.
+ */
+export {
+  SKILLS,
+  SKILL_NAMES,
+  SkillCatalogueError,
+  parseSkillName,
+  canonicaliseSkills,
+  resolveCapabilities,
+  validateCatalogue,
+  type Capabilities,
+  type SkillDefinition,
+  type SkillGrant,
+  type SkillName,
+} from "./skills";
+
+export {
+  createSkillSetSurface,
+  proposeSkillAddition,
+  type SkillSet,
+  type SkillSetSurface,
+  type SkillEvidence,
+} from "./skill-set-surface";
+
+/**
  * Adapt the dispatch attempt stream into the observability store (#140 AC4).
  *
  * Only TERMINAL events are recorded, because a `TaskMetric` describes a
