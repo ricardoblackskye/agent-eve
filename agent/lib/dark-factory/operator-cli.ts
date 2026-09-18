@@ -98,6 +98,16 @@ const SURFACE_ID_PATTERN = /^[A-Za-z0-9._:-]+$/;
  */
 const CONTROL_CHARS = /[\u0000-\u001F\u007F]/;
 
+/**
+ * Longest relative expiry accepted anywhere in the relative form (10 years).
+ *
+ * A typo such as `+7777d` is the same failure mode as a malformed value: it
+ * silently becomes "effectively never". An operator who genuinely wants no expiry
+ * can say `never`, which costs nothing — so bounding the relative form turns a
+ * typo into a refusal without removing any real capability.
+ */
+const MAX_RELATIVE_EXPIRY_MS = 3650 * 86_400_000;
+
 function isCommandName(value: string): value is CommandName {
   return (COMMANDS as readonly string[]).includes(value);
 }
@@ -202,6 +212,13 @@ function resolveExpiry(raw: string | null, now: () => Date): string | null {
       throw new OperatorCliUsageError(
         `--expires '${raw.slice(0, 24)}' overflows the supported date range. ` +
           "Refusing to arm: nothing was recorded.",
+      );
+    }
+    if (amount * ms > MAX_RELATIVE_EXPIRY_MS) {
+      throw new OperatorCliUsageError(
+        `--expires '${raw.slice(0, 24)}' is longer than the ` +
+          `${MAX_RELATIVE_EXPIRY_MS / 86_400_000} day maximum. Use 'never' if the grant ` +
+          "should not expire. Nothing was recorded.",
       );
     }
     return when.toISOString();

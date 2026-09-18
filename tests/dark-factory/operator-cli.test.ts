@@ -340,6 +340,33 @@ describe("operator CLI — review round 2 on PR #166", () => {
   });
 });
 
+describe("operator CLI — review round 3 on PR #166", () => {
+  it("refuses a relative expiry beyond the documented maximum, pointing at never", async () => {
+    // A typo like '+7777d' is the same failure mode as a malformed value: it
+    // silently becomes 'effectively never'. Saying 'never' explicitly is free.
+    for (const far of ["+7777d", "+99999d", "+999999h"]) {
+      const { deps: d, store } = deps();
+      const result = await runOperatorCli(
+        ["allow", "s", "--by", "me", "--expires", far],
+        d,
+      );
+      expect(result.exitCode, `--expires ${far} must be refused`).toBe(1);
+      expect(result.lines.join("\n")).toMatch(/never/i);
+      expect(await store.list(), `${far} must record nothing`).toEqual([]);
+    }
+  });
+
+  it("still accepts a long-but-sane relative expiry", async () => {
+    const { deps: d, store } = deps();
+    const result = await runOperatorCli(
+      ["allow", "s", "--by", "me", "--expires", "+365d"],
+      d,
+    );
+    expect(result.exitCode).toBe(0);
+    expect((await store.list())[0].expiresAt).toBe("2027-09-18T12:00:00.000Z");
+  });
+});
+
 describe("runOperatorCli: list and refusal paths (#159)", () => {
   it("lists live and expired decisions, marking the expired ones", async () => {
     const { deps: d } = deps([
