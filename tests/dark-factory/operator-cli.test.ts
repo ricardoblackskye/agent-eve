@@ -221,6 +221,79 @@ describe("runOperatorCli: --expires is never silently null (#159)", () => {
   });
 });
 
+describe("operator CLI — review round on PR #166", () => {
+  it("refuses a flag with no value at the END of argv, rather than reading past it", async () => {
+    // The reviewer read `argv[i + 1]` as a potential off-by-one. JS returns
+    // `undefined` (no crash), and that is refused — locked here so the handling
+    // is a fact rather than an argument.
+    const { deps: d, store } = deps();
+    const result = await runOperatorCli(["allow", "s", "--by"], d);
+
+    expect(result.exitCode).toBe(2);
+    expect(result.lines.join("\n")).toMatch(/--by/);
+    expect(await store.list()).toEqual([]);
+    expect(() => parseOperatorArgs(["allow", "s", "--by"])).toThrow(
+      OperatorCliUsageError,
+    );
+  });
+
+  it("refuses a surfaceId that could forge a stored record or a log line", async () => {
+    const bad = [
+      "",
+      "   ",
+      "with\nnewline",
+      "tab\there",
+      "nul\u0000byte",
+      "semi;colon",
+      "--looks-like-a-flag",
+    ];
+    for (const value of bad) {
+      const { deps: d, store } = deps();
+      const result = await runOperatorCli(["allow", value, "--by", "me"], d);
+      expect(
+        result.exitCode,
+        `surfaceId ${JSON.stringify(value)} must be refused`,
+      ).toBe(2);
+      expect(
+        await store.list(),
+        `${JSON.stringify(value)} must record nothing`,
+      ).toEqual([]);
+    }
+  });
+
+  it("accepts every surfaceId shape the repo's surfaces actually use", async () => {
+    for (const value of [
+      "iteration-bounds",
+      "skill-set",
+      "skill.set",
+      "skill_set",
+      "Surface:1",
+    ]) {
+      const { deps: d, store } = deps();
+      const result = await runOperatorCli(["allow", value, "--by", "me"], d);
+      expect(result.exitCode, `surfaceId ${value} must be accepted`).toBe(0);
+      expect((await store.list())[0].surfaceId).toBe(value);
+    }
+  });
+
+  it("refuses an expiry that overflows the date range, instead of throwing a RangeError", async () => {
+    const huge = ["+999999999d", "+" + "9".repeat(400) + "h"];
+    for (const value of huge) {
+      const { deps: d, store } = deps();
+      const result = await runOperatorCli(
+        ["allow", "s", "--by", "me", "--expires", value],
+        d,
+      );
+      expect(
+        result.exitCode,
+        `--expires ${value.slice(0, 24)}... must be refused`,
+      ).toBe(1);
+      expect(result.lines.join("\n")).toMatch(/overflows/i);
+      expect(await store.list()).toEqual([]);
+    }
+  });
+});
+
 describe("runOperatorCli: list and refusal paths (#159)", () => {
   it("lists live and expired decisions, marking the expired ones", async () => {
     const { deps: d } = deps([

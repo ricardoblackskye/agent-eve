@@ -64,9 +64,32 @@ export interface OperatorCliResult {
   exitCode: number;
 }
 
-const KINDS: ProposalKind[] = ["bounded-tuning", "access-widening"];
+/**
+ * The proposal kinds this CLI can set, derived from a `Record` so the CLI's
+ * vocabulary CANNOT drift from the controller's: adding a member to
+ * `ProposalKind` without listing it here is a compile error rather than a
+ * silently missing option. (The runtime list must exist for argv parsing, so it
+ * is derived FROM the exhaustive map rather than written beside it.)
+ */
+const KIND_HELP: Record<ProposalKind, string> = {
+  "access-widening": "grants capability; requires the operator gate",
+  "bounded-tuning": "numerical bounds only; the controller may apply it itself",
+};
+const KINDS = Object.keys(KIND_HELP) as ProposalKind[];
+const DEFAULT_KIND: ProposalKind = "access-widening";
+
 const COMMANDS = ["list", "allow", "deny", "clear"] as const;
 type CommandName = (typeof COMMANDS)[number];
+
+/**
+ * Charset for a surface id.
+ *
+ * A surface id is an opaque key that is both PERSISTED and PRINTED, so a value
+ * carrying control characters or format metacharacters could forge a stored
+ * record or a log line. This set accepts every id this repo's surfaces use
+ * (`iteration-bounds`, `skill-set`) while refusing whitespace, NUL and newlines.
+ */
+const SURFACE_ID_PATTERN = /^[A-Za-z0-9._:-]+$/;
 
 function isCommandName(value: string): value is CommandName {
   return (COMMANDS as readonly string[]).includes(value);
@@ -83,7 +106,7 @@ export function parseOperatorArgs(argv: string[]): OperatorCliCommand {
   }
 
   let surfaceId: string | null = null;
-  let proposalKind: ProposalKind = "access-widening";
+  let proposalKind: ProposalKind = DEFAULT_KIND;
   let by: string | null = null;
   let expiresAt: string | null = null;
 
@@ -115,6 +138,11 @@ export function parseOperatorArgs(argv: string[]): OperatorCliCommand {
     }
     if (surfaceId !== null) {
       throw new OperatorCliUsageError(`Unexpected extra argument '${arg}'.`);
+    }
+    if (!SURFACE_ID_PATTERN.test(arg)) {
+      throw new OperatorCliUsageError(
+        `Invalid surfaceId ${JSON.stringify(arg)}: use letters, digits and . _ : - only.`,
+      );
     }
     surfaceId = arg;
   }
@@ -154,7 +182,17 @@ function resolveExpiry(raw: string | null, now: () => Date): string | null {
     const amount = Number(relative[1]);
     const unit = relative[2];
     const ms = unit === "d" ? 86_400_000 : unit === "h" ? 3_600_000 : 60_000;
-    return new Date(now().getTime() + amount * ms).toISOString();
+    // A relative amount can exceed the representable date range (or parse to
+    // Infinity), which made `toISOString()` throw a RangeError straight out of
+    // the command layer. Refuse it as a refusal, like any other bad expiry.
+    const when = new Date(now().getTime() + amount * ms);
+    if (Number.isNaN(when.getTime())) {
+      throw new OperatorCliUsageError(
+        `--expires '${raw.slice(0, 24)}' overflows the supported date range. ` +
+          "Refusing to arm: nothing was recorded.",
+      );
+    }
+    return when.toISOString();
   }
 
   const isoTimestamp =
