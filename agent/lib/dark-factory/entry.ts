@@ -217,6 +217,11 @@ export function resolveRunnerMode(
  * host. So the origin is taken from configuration first; the request origin is only
  * trusted when it is a loopback/local address (the dev and offline-replay case).
  * Anything else is refused: we fail closed rather than hand the token to an untrusted URL.
+ *
+ * The request origin is only trusted when it is a loopback address (localhost / 127.0.0.1 /
+ * ::1). `.local` is deliberately NOT trusted: on mDNS-based networks an attacker can set the
+ * Host header to `<anything>.local` and have it resolve to their own host, so trusting it
+ * would reopen the exact SSRF this function exists to close.
  */
 export function resolveApiOrigin(
   env: Record<string, string | undefined> = process.env,
@@ -239,10 +244,13 @@ export function resolveApiOrigin(
     return { origin: `https://${host}`, reason: "VERCEL_URL" };
   }
   const ro = (requestOrigin ?? "").trim();
-  if (/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\]|[\w-]+\.local)(:\d+)?$/i.test(ro)) {
+  if (/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(ro)) {
     return { origin: ro, reason: "local/dev request origin" };
   }
-  return { origin: null, reason: "no trusted origin configured (set DF_API_BASE_URL)" };
+  return {
+    origin: null,
+    reason: "no trusted origin configured (set DF_API_BASE_URL)",
+  };
 }
 
 const RUNNING: DispatchStatus = "dispatched";
@@ -478,9 +486,9 @@ async function postHandoff(
     }
     return { ok: true, reason: "handed off" };
   } catch (error) {
-    return {
-      ok: false,
-      reason: `the session handoff failed: ${(error as Error).message}`,
-    };
+    // Surface a generic failure to the caller; log the detail server-side so we do not
+    // leak internal error text (DNS/connection) out of the webhook response.
+    console.error("[dark-factory] session handoff failed:", error);
+    return { ok: false, reason: "the session handoff failed" };
   }
 }

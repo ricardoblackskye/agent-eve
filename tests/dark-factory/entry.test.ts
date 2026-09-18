@@ -308,9 +308,11 @@ describe("#163 security: the session handoff origin is never taken from the requ
     expect(resolveApiOrigin({}, "http://127.0.0.1:8080").origin).toBe(
       "http://127.0.0.1:8080",
     );
-    expect(resolveApiOrigin({}, "http://dev.local").origin).toBe(
-      "http://dev.local",
-    );
+    expect(resolveApiOrigin({}, "http://[::1]").origin).toBe("http://[::1]");
+    // `.local` is NOT trusted: an attacker can set Host to <anything>.local and have it
+    // resolve to their host on mDNS networks - trusting it would reopen the SSRF.
+    expect(resolveApiOrigin({}, "http://dev.local").origin).toBeNull();
+    expect(resolveApiOrigin({}, "https://attacker.local").origin).toBeNull();
   });
 
   it("REFUSES an external request origin when nothing is configured (fail closed)", () => {
