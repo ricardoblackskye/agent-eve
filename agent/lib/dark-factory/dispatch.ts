@@ -20,6 +20,20 @@ export class InvalidDispatchEventError extends Error {
   }
 }
 
+/**
+ * The handler has PARKED the run on a human decision — a worker question (#162).
+ *
+ * Deliberately not an ordinary failure: parking must not consume the retry
+ * budget or burn backoff sleeps, and the run resumes when a human replies. A
+ * genuine error still throws its own error and retries as before.
+ */
+export class ParkedRunError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ParkedRunError";
+  }
+}
+
 export function toDispatchEvent(input: Partial<DispatchEvent>): DispatchEvent {
   const runId = typeof input.runId === "string" ? input.runId.trim() : "";
   if (!runId) {
@@ -85,7 +99,15 @@ export type DispatchStatus =
   | "dispatched"
   | "retrying"
   | "succeeded"
-  | "failed";
+  | "failed"
+  /**
+   * Parked on a HUMAN decision (#162). Deliberately distinct from "retrying": a
+   * parked run is not failing and must not consume retries or backoff, because
+   * waiting for an answer is not work. It is a real status rather than a shadow
+   * record so anything reading dispatch state can tell the two apart without a
+   * second lookup.
+   */
+  | "blocked";
 
 export interface DispatchRecord {
   event: DispatchEvent;
@@ -225,7 +247,18 @@ export class Dispatcher {
     }
   }
 
-  async dispatch(event: DispatchEvent): Promise<DispatchOutcome> {
+  /**
+   * Deliver one event.
+   *
+   * `resume` is the explicit "the human replied, continue" signal (#162). It is
+   * required to continue a `blocked` run, and deliberately NOT implied by a fresh
+   * delivery: webhook deliveries are at-least-once, so resuming on any delivery
+   * would let a re-delivery consume the very wait the park exists to protect.
+   */
+  async dispatch(
+    event: DispatchEvent,
+    options: { resume?: boolean } = {},
+  ): Promise<DispatchOutcome> {
     let existing: StateReadResult<DispatchRecord>;
     try {
       existing = await this.store.get<DispatchRecord>(dispatchKey(event.runId));
@@ -246,9 +279,15 @@ export class Dispatcher {
         error: `Cannot read dispatch state for run '${event.runId}': ${existing.error ?? "unknown error"}`,
       };
     }
-    if (existing.value) {
+    const resuming = existing.value?.status === "blocked" && options.resume === true;
+    if (existing.value && !resuming) {
       // At-most-once: anything already recorded for this run (in flight or
       // finished) is a duplicate delivery, never a second dispatch.
+      //
+      // A BLOCKED run is held here too unless the caller asks to resume: it is
+      // still at-most-once, because at-most-once exists to stop duplicate WORK
+      // and resuming without an answer would consume the wait. An explicit
+      // `resume` (the human replied) is what continues it (#162).
       //
       // `ok` here means "this call was handled with no error" — NOT "the run
       // succeeded". A duplicate of a previously FAILED run is still a
@@ -298,6 +337,36 @@ export class Dispatcher {
           `handler for run '${event.runId}' (attempt ${attempt})`,
         );
       } catch (err) {
+        // Parked on a human: record it truthfully and STOP. No retry, no backoff
+        // sleep - a human reading a question must not burn worker-minutes (#162).
+        if (err instanceof ParkedRunError) {
+          const parkError = err.message;
+          const parkedPersistError = await this.persist({
+            ...base,
+            status: "blocked",
+            attempts: attempt,
+            updatedAt: new Date().toISOString(),
+            error: parkError,
+          });
+          if (parkedPersistError) {
+            return {
+              ok: false,
+              status: "failed",
+              attempts: attempt,
+              worker,
+              error: parkedPersistError,
+            };
+          }
+          await this.observer({
+            type: "dispatch.attempt",
+            runId: event.runId,
+            attempt,
+            status: "blocked",
+            worker,
+          });
+          return { ok: true, status: "blocked", attempts: attempt, worker };
+        }
+
         lastError = err instanceof Error ? err.message : String(err);
         const schedule = nextRetry(this.policy, attempt);
         if (!schedule) break;

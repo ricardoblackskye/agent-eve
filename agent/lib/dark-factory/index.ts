@@ -148,6 +148,34 @@ export {
   type OperatorDecisionValue,
 } from "./self-improve-state";
 
+// R5 — worker reporting on the ticket (#162). The reporter is TRUSTED-SIDE: the
+// worker emits, Eve posts, and the token never enters a WorkerTask.
+export {
+  createWorkerReporter,
+  toWorkerMessage,
+  renderMessage,
+  reporterKey,
+  ConsoleReporter,
+  GitHubCommentReporter,
+  InvalidWorkerMessageError,
+  MAX_ATTEMPT,
+  MAX_QUESTION_CHARS,
+  MAX_TEST_EVIDENCE_LINES,
+  MAX_TEST_EVIDENCE_CHARS,
+  type ReportResult,
+  type WorkerMessage,
+  type WorkerMessageKind,
+  type WorkerReporter,
+} from "./worker-reporter";
+export {
+  GitHubIssueWriter,
+  resolveIssueToken,
+  type IssueWriterFetch,
+  type WriteResult,
+} from "./issue-writer";
+// The handler-side signal that a run is parked on a human (#162, decision A).
+export { ParkedRunError } from "./dispatch";
+
 /**
  * The skill seams (#157). `SKILLS` is the catalogue of capability grants; the
  * surface is what the self-improvement controller tunes, and its grants reach the
