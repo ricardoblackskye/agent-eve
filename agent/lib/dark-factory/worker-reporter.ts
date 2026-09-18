@@ -265,7 +265,6 @@ export interface GitHubCommentReporterOptions {
    */
   allowedRepos?: string[];
   fetchImpl?: IssueWriterFetch;
-  apiBase?: string;
 }
 
 /**
@@ -289,7 +288,6 @@ export class GitHubCommentReporter implements WorkerReporter {
     this.writer = new GitHubIssueWriter({
       token: options.token,
       fetchImpl: options.fetchImpl,
-      apiBase: options.apiBase,
     });
   }
 
@@ -396,7 +394,6 @@ export function createWorkerReporter(
   deps: {
     store?: StateStore;
     fetchImpl?: IssueWriterFetch;
-    apiBase?: string;
   } = {},
 ): WorkerReporter {
   const driver = (env.DF_REPORTER_PROVIDER ?? "").trim().toLowerCase();
@@ -406,7 +403,6 @@ export function createWorkerReporter(
       token: resolveIssueToken(env),
       allowedRepos: resolveWorkerAllowedRepos(env),
       fetchImpl: deps.fetchImpl,
-      apiBase: deps.apiBase,
     });
   }
   return new ConsoleReporter();

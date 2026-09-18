@@ -41,20 +41,23 @@ export function resolveIssueToken(
 
 export interface GitHubIssueWriterOptions {
   token?: string;
+  /**
+   * Injected transport (tests supply a fake). Deliberately the ONLY way to
+   * redirect calls: an overridable API base is a hazard with no production
+   * caller — point it at another host and the token is sent there — so it does
+   * not exist. A test that needs a different host supplies its own `fetchImpl`.
+   */
   fetchImpl?: IssueWriterFetch;
-  /** Overridable for tests; never point this at a non-GitHub host in production. */
-  apiBase?: string;
 }
 
 export class GitHubIssueWriter {
   private readonly token?: string;
   private readonly fetchImpl: IssueWriterFetch;
-  private readonly apiBase: string;
+  private readonly apiBase = "https://api.github.com";
 
   constructor(options: GitHubIssueWriterOptions = {}) {
     this.token = options.token ?? resolveIssueToken();
     this.fetchImpl = options.fetchImpl ?? fetch;
-    this.apiBase = options.apiBase ?? "https://api.github.com";
   }
 
   get configured(): boolean {

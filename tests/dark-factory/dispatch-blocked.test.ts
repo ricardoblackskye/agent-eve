@@ -40,9 +40,17 @@ class MemoryStore implements StateStore {
 }
 
 const event = (): DispatchEvent =>
-  toDispatchEvent({ runId: "run-162", repo: "ricardoblackskye/agent-eve", ref: "main", status: "success" });
+  toDispatchEvent({
+    runId: "run-162",
+    repo: "ricardoblackskye/agent-eve",
+    ref: "main",
+    status: "success",
+  });
 
-const recordOf = async (store: StateStore, runId: string): Promise<DispatchRecord | null> => {
+const recordOf = async (
+  store: StateStore,
+  runId: string,
+): Promise<DispatchRecord | null> => {
   const read = await store.get<DispatchRecord>(dispatchKey(runId));
   return read.value;
 };

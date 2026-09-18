@@ -48,13 +48,22 @@ class MemoryStore implements StateStore {
 
 /** Records every HTTP call, so POST-vs-PATCH counts are assertable. */
 function fakeFetch() {
-  const calls: { method: string; url: string; body: Record<string, unknown> | undefined }[] = [];
-  const impl = (async (url: unknown, init: { method?: string; body?: string } = {}) => {
+  const calls: {
+    method: string;
+    url: string;
+    body: Record<string, unknown> | undefined;
+  }[] = [];
+  const impl = (async (
+    url: unknown,
+    init: { method?: string; body?: string } = {},
+  ) => {
     const method = init.method ?? "GET";
     calls.push({
       method,
       url: String(url),
-      body: init.body ? (JSON.parse(init.body) as Record<string, unknown>) : undefined,
+      body: init.body
+        ? (JSON.parse(init.body) as Record<string, unknown>)
+        : undefined,
     });
     return {
       ok: true,
@@ -78,7 +87,9 @@ const msg = (over: Partial<WorkerMessage> = {}): WorkerMessage => ({
   ...over,
 });
 
-function makeReporter(over: { store?: MemoryStore; allowed?: string[]; token?: string } = {}) {
+function makeReporter(
+  over: { store?: MemoryStore; allowed?: string[]; token?: string } = {},
+) {
   const store = over.store ?? new MemoryStore();
   const { impl, calls } = fakeFetch();
   const subject = new GitHubCommentReporter({
@@ -98,37 +109,78 @@ describe("#162 cycle 1-2: the payload is canonical and validated", () => {
   });
 
   it.each([
-    ["an unknown kind", { kind: "chatter" as unknown as WorkerMessage["kind"] }],
+    [
+      "an unknown kind",
+      { kind: "chatter" as unknown as WorkerMessage["kind"] },
+    ],
     ["a missing runId", { runId: "" }],
     ["a missing repo", { repo: "" }],
     ["a repo that is not owner/repo", { repo: "just-a-name" }],
     ["a non-positive issue", { issue: 0 }],
   ])("refuses %s", (_label, over) => {
-    expect(() => toWorkerMessage({ ...msg(), ...over })).toThrow(InvalidWorkerMessageError);
+    expect(() => toWorkerMessage({ ...msg(), ...over })).toThrow(
+      InvalidWorkerMessageError,
+    );
   });
 
   it("refuses a question kind with no question text", () => {
-    expect(() => toWorkerMessage(msg({ kind: "question" }))).toThrow(/question/);
+    expect(() => toWorkerMessage(msg({ kind: "question" }))).toThrow(
+      /question/,
+    );
   });
 
   it("refuses an absurd or negative attempt (bounded, like every other number)", () => {
-    expect(() => toWorkerMessage(msg({ attempt: -1 }))).toThrow(InvalidWorkerMessageError);
-    expect(() => toWorkerMessage(msg({ attempt: 1e9 }))).toThrow(InvalidWorkerMessageError);
-    expect(() => toWorkerMessage(msg({ attempt: 2, maxAttempts: 1 }))).toThrow(/maxAttempts/);
+    expect(() => toWorkerMessage(msg({ attempt: -1 }))).toThrow(
+      InvalidWorkerMessageError,
+    );
+    expect(() => toWorkerMessage(msg({ attempt: 1e9 }))).toThrow(
+      InvalidWorkerMessageError,
+    );
+    expect(() => toWorkerMessage(msg({ attempt: 2, maxAttempts: 1 }))).toThrow(
+      /maxAttempts/,
+    );
+  });
+
+  it("accepts exactly MAX evidence lines and refuses one more (length is a count, not an index)", () => {
+    const atBound = Array.from({ length: 20 }, (_, i) => `t${i}.test.ts:1`);
+    expect(
+      toWorkerMessage(
+        msg({ kind: "completed", outcome: "fail", failures: atBound }),
+      ).failures,
+    ).toHaveLength(20);
+    expect(() =>
+      toWorkerMessage(
+        msg({
+          kind: "completed",
+          outcome: "fail",
+          failures: [...atBound, "one-more.test.ts:1"],
+        }),
+      ),
+    ).toThrow(InvalidWorkerMessageError);
   });
 
   it("accepts the bound ITSELF — the range is inclusive, not off by one", () => {
-    const atBound = toWorkerMessage(msg({ attempt: MAX_ATTEMPT, maxAttempts: MAX_ATTEMPT }));
-    expect(atBound.attempt).toBe(MAX_ATTEMPT);
-    expect(() => toWorkerMessage(msg({ attempt: MAX_ATTEMPT + 1, maxAttempts: MAX_ATTEMPT }))).toThrow(
-      InvalidWorkerMessageError,
+    const atBound = toWorkerMessage(
+      msg({ attempt: MAX_ATTEMPT, maxAttempts: MAX_ATTEMPT }),
     );
+    expect(atBound.attempt).toBe(MAX_ATTEMPT);
+    expect(() =>
+      toWorkerMessage(
+        msg({ attempt: MAX_ATTEMPT + 1, maxAttempts: MAX_ATTEMPT }),
+      ),
+    ).toThrow(InvalidWorkerMessageError);
   });
 
   it("renders a completed report with its outcome, attempts and evidence", () => {
     const body = renderMessage(
       toWorkerMessage(
-        msg({ kind: "completed", outcome: "fail", attempt: 4, maxAttempts: 4, failures: ["a.test.ts:1 boom"] }),
+        msg({
+          kind: "completed",
+          outcome: "fail",
+          attempt: 4,
+          maxAttempts: 4,
+          failures: ["a.test.ts:1 boom"],
+        }),
       ),
     );
     expect(body).toMatch(/terminal failure/i);
@@ -137,9 +189,9 @@ describe("#162 cycle 1-2: the payload is canonical and validated", () => {
   });
 
   it("refuses over-long text rather than posting it", () => {
-    expect(() => toWorkerMessage(msg({ kind: "question", question: "x".repeat(5000) }))).toThrow(
-      InvalidWorkerMessageError,
-    );
+    expect(() =>
+      toWorkerMessage(msg({ kind: "question", question: "x".repeat(5000) })),
+    ).toThrow(InvalidWorkerMessageError);
   });
 });
 
@@ -184,11 +236,12 @@ describe("#162 cycle 5-6: the allow-list gate reuses the worker policy", () => {
   });
 
   it("agrees with resolveWorkerAllowedRepos: unset means refuse", async () => {
-    const { resolveWorkerAllowedRepos } = await import(
-      "../../agent/lib/dark-factory/credentials"
-    );
+    const { resolveWorkerAllowedRepos } =
+      await import("../../agent/lib/dark-factory/credentials");
     expect(resolveWorkerAllowedRepos({})).toEqual([]);
-    const { subject } = makeReporter({ allowed: resolveWorkerAllowedRepos({}) });
+    const { subject } = makeReporter({
+      allowed: resolveWorkerAllowedRepos({}),
+    });
     expect((await subject.report(msg())).ok).toBe(false);
   });
 });
@@ -225,10 +278,14 @@ describe("#162 cycle 7-10: idempotent by (runId, kind) — edit, never duplicate
   it("gives each kind its own comment, each independently idempotent", async () => {
     const { subject, calls } = makeReporter();
     await subject.report(msg());
-    await subject.report(msg({ kind: "completed", outcome: "pass", failures: [] }));
+    await subject.report(
+      msg({ kind: "completed", outcome: "pass", failures: [] }),
+    );
     await subject.report(msg({ kind: "question", question: "Which branch?" }));
     expect(calls.filter((c) => c.method === "POST")).toHaveLength(3);
-    await subject.report(msg({ kind: "completed", outcome: "fail", failures: ["x.test.ts:1"] }));
+    await subject.report(
+      msg({ kind: "completed", outcome: "fail", failures: ["x.test.ts:1"] }),
+    );
     expect(calls.filter((c) => c.method === "POST")).toHaveLength(3);
     expect(calls.filter((c) => c.method === "PATCH")).toHaveLength(1);
   });
@@ -258,7 +315,9 @@ describe("#162 cycle 14-15: attribution and the credential boundary", () => {
     const { subject, calls } = makeReporter();
     await subject.report(msg());
     expect(JSON.stringify(calls)).not.toContain(TOKEN);
-    const refused = await makeReporter({ allowed: ["other/repo"] }).subject.report(msg());
+    const refused = await makeReporter({
+      allowed: ["other/repo"],
+    }).subject.report(msg());
     expect(String(refused.error)).not.toContain(TOKEN);
   });
 
