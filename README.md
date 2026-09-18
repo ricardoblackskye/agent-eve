@@ -410,6 +410,39 @@ Markdown and PDF, and posts a linking comment on the issue. Requires a token wit
 `ricardoblackskye` #3, overridable via `SPRINT_PROJECT_OWNER` /
 `SPRINT_PROJECT_NUMBER`.
 
+## Dark Factory (R4b) — latency and cost in the loop (#158)
+
+#146 names latency and cost as self-improvement inputs, but #140's `TaskMetric` carried neither, so the
+controller could only define **objective = success rate** and **guardrails = mean iterations / mean
+fix-cycles**. Cost is what the #144 circuit breaker exists to bound: a loop that cannot see it can "improve"
+success rate by spending unboundedly.
+
+```ts
+await store.record("coding", {
+  iterations: 4,
+  fixCycles: 2,
+  status: "success",
+  latencyMs: 12_500, // optional — omit it when the task was not measured
+  costUsd: 0.42, // optional
+});
+```
+
+**An unmeasured metric is ABSENT, never `0`.** "Not measured" and "measured zero" are different facts, and a
+fabricated zero would drag every mean toward a number nobody observed — so the fields stay optional end to end
+(`TaskMetric` → `Observation` → the MEASURE guardrails), a mean is taken over the samples that measured the
+metric, and the key is omitted entirely when none did.
+
+Both are bounded when present (`latencyMs` <= 24h, `costUsd` <= $1000 per task) and refused otherwise, so a
+nonsense number cannot be averaged into a guardrail that DECIDE then trusts.
+
+Because `Measurement.guardrails` is already a keyed record and DECIDE compares each key against
+`guardrailTolerance`, adding a guardrail is **additive by construction**: no new comparison logic decides
+whether a change that buys success rate with latency or money is rejected.
+
+```bash
+npx tsx scripts/latency-cost-demo.local.ts   # a real cycle: reverted on latency, accepted within tolerance
+```
+
 ## Scripts
 
 | Command             | Description                            |
