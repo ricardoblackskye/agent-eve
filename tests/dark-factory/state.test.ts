@@ -12,6 +12,44 @@ import {
   loadContext,
 } from "../../agent/lib/dark-factory/state";
 
+/** The strict, steady-state per-operation ceiling the state NFR describes. */
+export const NFR_P95_MS = 100;
+/**
+ * The ceiling used on a shared CI runner (#167).
+ *
+ * 15x the NFR: enough that contention cannot fail it, while a real regression —
+ * the failure that surfaced the flake was a 10s p95 — still trips it.
+ */
+export const CI_NFR_P95_MS = 1500;
+
+/**
+ * Choose the p95 ceiling for the NFR assertion (#167).
+ *
+ * Why this exists rather than one constant: the NFR is a WALL-CLOCK,
+ * steady-state per-operation latency budget, and a shared CI runner cannot honour
+ * 100ms under contention — this assertion measured 561ms on CI (and ~170ms
+ * before the warm-up pass existed) while the adapter itself was healthy. A gate
+ * that fails for reasons unrelated to the change teaches people to re-run it
+ * rather than read it, which is worse than no gate at all. So the budget is
+ * stated per environment instead: strict where the number is meaningful,
+ * generous where it cannot be, and well below a genuine regression.
+ *
+ * Precedence: an explicit DF_STATE_NFR_P95_MS wins (a self-hosted runner can be
+ * tuned without editing code), then the CI budget, then the NFR itself. A
+ * nonsense override is IGNORED, never honoured: `0` would assert `p95 < 0` and
+ * `NaN` would make every comparison false — either way a silently disabled gate
+ * that still reports green.
+ */
+export function resolveP95Ceiling(
+  env: Record<string, string | undefined> = process.env,
+): number {
+  const raw = (env.DF_STATE_NFR_P95_MS ?? "").trim();
+  const explicit = raw === "" ? Number.NaN : Number(raw);
+  if (Number.isFinite(explicit) && explicit > 0) return explicit;
+  const ci = (env.CI ?? "").trim().toLowerCase();
+  return ci === "true" || ci === "1" ? CI_NFR_P95_MS : NFR_P95_MS;
+}
+
 describe("ExecutionContext canonical shape (#134)", () => {
   it("round-trips the four canonical execution-memory fields", () => {
     const ctx = toExecutionContext({
@@ -182,7 +220,7 @@ describe("SqliteStateAdapter — real external state (#134 AC1-AC3)", () => {
     expect(read.error).toMatch(/unreachable/i);
   });
 
-  it("stays within the 100ms p95 state NFR on a modest loop", async () => {
+  it("stays within the state p95 NFR on a modest loop (100ms local, CI budget on a shared runner)", async () => {
     const store = new SqliteStateAdapter(makePath());
 
     // Warm up first. The initial operations pay cold-start costs (opening the
@@ -207,9 +245,48 @@ describe("SqliteStateAdapter — real external state (#134 AC1-AC3)", () => {
 
     samples.sort((a, b) => a - b);
     const p95 = samples[Math.floor(samples.length * 0.95)];
-    // The NFR ceiling is 100ms; a constrained/shared runner may raise it via
-    // DF_STATE_NFR_P95_MS without weakening the default.
-    const ceiling = Number(process.env.DF_STATE_NFR_P95_MS) || 100;
-    expect(p95).toBeLessThan(ceiling);
+    // The ceiling is environment-aware (#167): 100ms is the NFR and applies
+    // wherever the number is meaningful, while a shared CI runner gets a budget
+    // it can honour. See `resolveP95Ceiling` below for the reasoning, and for how
+    // an explicit DF_STATE_NFR_P95_MS still wins over both.
+    const ceiling = resolveP95Ceiling();
+    expect(
+      p95,
+      `p95 ${p95.toFixed(1)}ms over a ${ceiling}ms ceiling (NFR ${NFR_P95_MS}ms)`,
+    ).toBeLessThan(ceiling);
+  });
+});
+
+/**
+ * #167 — the p95 ceiling is environment-aware rather than flaky.
+ *
+ * A flaky gate teaches people to re-run it instead of reading it, which is the
+ * opposite of what a safety check is for. These cases pin the precedence and,
+ * importantly, the refusal to honour a nonsense override.
+ */
+describe("#167 — p95 ceiling resolution", () => {
+  it("enforces the strict NFR wherever the number is meaningful", () => {
+    expect(resolveP95Ceiling({})).toBe(100);
+    expect(resolveP95Ceiling({ CI: "false" })).toBe(100);
+  });
+
+  it("raises the ceiling on a shared runner instead of flaking", () => {
+    expect(resolveP95Ceiling({ CI: "true" })).toBe(1500);
+    expect(resolveP95Ceiling({ CI: "1" })).toBe(1500);
+  });
+
+  it("lets an explicit override win, so a self-hosted runner can be tuned", () => {
+    expect(resolveP95Ceiling({ CI: "true", DF_STATE_NFR_P95_MS: "2500" })).toBe(2500);
+    expect(resolveP95Ceiling({ DF_STATE_NFR_P95_MS: "150" })).toBe(150);
+  });
+
+  it("ignores a nonsense override rather than silently disabling the gate", () => {
+    // Number("") is 0 and Number("abc") is NaN. Honouring either would make the
+    // assertion `p95 < 0` (always false) or compare against NaN (also always
+    // false) — a disabled gate that still reports as passing.
+    expect(resolveP95Ceiling({ DF_STATE_NFR_P95_MS: "" })).toBe(100);
+    expect(resolveP95Ceiling({ DF_STATE_NFR_P95_MS: "abc", CI: "true" })).toBe(1500);
+    expect(resolveP95Ceiling({ DF_STATE_NFR_P95_MS: "-5" })).toBe(100);
+    expect(resolveP95Ceiling({ DF_STATE_NFR_P95_MS: "0" })).toBe(100);
   });
 });

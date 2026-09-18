@@ -21,7 +21,14 @@
 
 import { readFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
-import { round2, type MetricsStore, type TaskMetric } from "./metrics";
+import {
+  MAX_METRIC_COST_USD,
+  MAX_METRIC_LATENCY_MS,
+  meanOfMeasured,
+  round2,
+  type MetricsStore,
+  type TaskMetric,
+} from "./metrics";
 import { gradeStoryQuality, type QualityGate } from "../quality-gate";
 
 // --- Errors ---------------------------------------------------------------
@@ -68,6 +75,13 @@ export interface Observation {
   meanIterations: number;
   /** Guardrail: mean fail→fix cycles per completed task. */
   meanFixCycles: number;
+  /**
+   * Guardrail: mean latency over the tasks that MEASURED it (#158). Absent when
+   * no sample carried a latency — an unmeasured metric is absent, never 0.
+   */
+  meanLatencyMs?: number;
+  /** Guardrail: mean cost in USD over the tasks that measured it (#158). */
+  meanCostUsd?: number;
 }
 
 /** Returns null when there is not enough data to observe honestly. */
@@ -90,6 +104,8 @@ export function summarizeRecords(records: TaskMetric[]): {
   successRate: number;
   meanIterations: number;
   meanFixCycles: number;
+  meanLatencyMs?: number;
+  meanCostUsd?: number;
 } {
   const samples = records.length;
   // An empty set is reported as zeroed aggregates, never NaN — a NaN objective
@@ -100,12 +116,28 @@ export function summarizeRecords(records: TaskMetric[]): {
   const successes = records.filter((r) => r.status === "success").length;
   const sum = (pick: (r: TaskMetric) => number): number =>
     records.reduce((total, r) => total + pick(r), 0);
-  return {
+  const summary: {
+    samples: number;
+    successRate: number;
+    meanIterations: number;
+    meanFixCycles: number;
+    meanLatencyMs?: number;
+    meanCostUsd?: number;
+  } = {
     samples,
     successRate: round2(successes / samples),
     meanIterations: round2(sum((r) => r.iterations) / samples),
     meanFixCycles: round2(sum((r) => r.fixCycles) / samples),
   };
+  // Latency and cost are averaged over the samples that MEASURED them (#158): a
+  // sample without a value is skipped rather than counted as 0, and if no sample
+  // measured the metric the key stays ABSENT. "Not measured" is not "measured
+  // zero", and a fabricated zero would drag the mean toward a number nobody saw.
+  const latency = meanOfMeasured(records, (r) => r.latencyMs);
+  if (latency !== undefined) summary.meanLatencyMs = latency;
+  const cost = meanOfMeasured(records, (r) => r.costUsd);
+  if (cost !== undefined) summary.meanCostUsd = cost;
+  return summary;
 }
 
 // --- Step 2/3: tunable surface + versioned reversible handle -------------
@@ -298,6 +330,10 @@ export interface BenchmarkCase {
   output: string;
   iterations: number;
   fixCycles: number;
+  /** Optional measured latency for this case (#158): absent = not measured. */
+  latencyMs?: number;
+  /** Optional measured cost for this case (#158): absent = not measured. */
+  costUsd?: number;
 }
 
 export interface ImprovementBenchmark {
@@ -487,6 +523,22 @@ function assertValidBenchmarkCase(testCase: unknown, index: number): void {
       );
     }
   }
+  // Latency and cost are optional (#158) and bounded like every other number this
+  // module accepts: a nonsense value must be refused at the boundary rather than
+  // averaged into a guardrail that DECIDE then trusts.
+  for (const [field, max] of [
+    ["latencyMs", MAX_METRIC_LATENCY_MS],
+    ["costUsd", MAX_METRIC_COST_USD],
+  ] as const) {
+    const value = candidate[field];
+    if (value === undefined) continue;
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > max) {
+      throw new SelfImprovementConfigError(
+        `Improvement benchmark case ${where} requires "${field}" to be a finite number in [0, ${max}] ` +
+          `when present (received ${JSON.stringify(value)}).`,
+      );
+    }
+  }
 }
 
 /**
@@ -523,13 +575,23 @@ export function measureBenchmark(benchmark: ImprovementBenchmark): Measurement {
   ).length;
   const mean = (pick: (testCase: BenchmarkCase) => number): number =>
     round2(cases.reduce((total, c) => total + pick(c), 0) / cases.length);
+  const guardrails: Record<string, number> = {
+    meanIterations: mean((c) => c.iterations),
+    meanFixCycles: mean((c) => c.fixCycles),
+  };
+  // Latency and cost join the guardrails ONLY when the benchmark measured them
+  // (#158), for the same reason the store omits an unmeasured mean: a 0 here
+  // would be a number nobody observed, and DECIDE compares guardrails directly.
+  // Making them present is what lets the existing tolerance logic reject a change
+  // that "improves" the objective by spending more.
+  const latency = meanOfMeasured(cases, (c) => c.latencyMs);
+  if (latency !== undefined) guardrails.meanLatencyMs = latency;
+  const cost = meanOfMeasured(cases, (c) => c.costUsd);
+  if (cost !== undefined) guardrails.meanCostUsd = cost;
   return {
     fixtureVersion: version,
     objective: round2(passed / cases.length),
-    guardrails: {
-      meanIterations: mean((c) => c.iterations),
-      meanFixCycles: mean((c) => c.fixCycles),
-    },
+    guardrails,
   };
 }
 
