@@ -31,15 +31,35 @@ worker-minutes — so "the dispatch is marked `blocked`" means **adding a member
 resume transition from it. That is the substantive change in this issue, and the piece most likely to be
 under-designed. See the decision below.
 
-### 3. A fail-closed repo allow-list already exists, with a tested policy
+### 3. A fail-closed repo allow-list exists **and is wired** — reuse it directly
 
-`DF_WORKER_ALLOWED_REPOS` is already the factory's "which repos may be touched" list, enforced in
-`credentials.ts` as *"defence in depth, so the allow-list is a property of the credential boundary and not only
-of the worker handler. Fail-closed: an empty list refuses every grant."* The reporter must reuse this policy
-rather than invent a third list — a second allow-list is a second thing to forget to set, which is exactly the
-failure mode #119/#124 hardened against.
+`resolveWorkerAllowedRepos(env)` (`credentials.ts:389`) reads `DF_WORKER_ALLOWED_REPOS`, normalises to lowercase
+`owner/repo`, rejects a malformed entry, and is **fail-closed**: an unset/blank list yields `[]`, which makes
+*both* `withWorker` (worker-env) and `LocalCredentialBroker.issue` refuse every task. `createCredentialBroker`
+passes it into the broker as *"defence in depth, so the allow-list is a property of the credential boundary and
+not only of the worker handler."*
 
-### 4. Where the agents actually run (this decides the security story)
+**So the reporter calls this function — no new list, no extraction.** One list then governs both what a worker
+may touch and where Eve may comment, which is the property that matters: there is no state in which a worker can
+work on a repo that the reporter refuses to write to. (An earlier draft of this plan claimed nothing read the
+variable; that was wrong, and worse, it would have produced a third allow-list.)
+
+### 4. The comment/label plumbing exists — but *inside* the story provider, so reuse needs one small shared module
+
+`agent/lib/backlog-provider.ts`'s `GitHubProvider` already posts cross-reference comments and adds/removes labels
+(`POST /labels`, `DELETE /labels/{label}`), and it carries two lessons worth copying rather than rediscovering:
+the gate is *"CLOSED by default"* with a refusal message naming the env var, and finalisation is **lenient about
+a repeat** — *"deleting an already-absent label (404) is treated as success rather than a warning, so a retry
+never piles up duplicate comments or spurious errors."*
+
+But `BacklogProvider`'s interface exposes only `publish(payload)` — the comment/label calls are private to the
+GitHub implementation. Refactoring merged, fail-closed story-publish code is **not** this issue's business, so
+the plan adds a small `issue-writer.ts` holding the four primitives (post comment, edit comment, add label,
+remove label) plus token resolution, and the reporter uses that. `backlog-provider` can adopt it later; #162 does
+not destabilise it now.
+
+
+### 5. Where the agents actually run (this decides the security story)
 
 `createTesterAgent(env)` returns a **trusted-side** object built in Eve's process; the `ALLOWED_ENV_KEYS`
 scrubbing at `tester-agent.ts:58` governs the **child process environment**, and the isolated compute sits behind
@@ -58,8 +78,8 @@ holds no repository credential" stays true by construction rather than by care.
    `DispatchObserver`'s no-loss discipline so a sink can never lose a message to a floating promise.
 3. **Providers**, selected from the environment with a **console/dry-run default**:
    - `ConsoleReporter` (default) — renders to stdout, `mode: "dry-run"`, performs **no** write;
-   - `GitHubCommentReporter` — the real write via `POST/PATCH /issues/{n}/comments`, gated fail-closed by the
-     existing `DF_WORKER_ALLOWED_REPOS` policy; an off-list repo is **refused with an explicit error**.
+   - `GitHubCommentReporter` — the real write through the four `issue-writer.ts` primitives, gated fail-closed by
+     `resolveWorkerAllowedRepos()`; an off-list repo is **refused with an explicit error** and nothing is written;
 4. **Idempotence by `(runId, kind)`** — comment ids persist in the `StateStore` under `reporter:${runId}`,
    mirroring `dispatchKey(runId)` = `dispatch:${runId}`. A re-emit **edits** the recorded comment (PATCH) and a
    first emit posts; the store is the source of truth, not a content scan.
@@ -68,7 +88,7 @@ holds no repository credential" stays true by construction rather than by care.
 6. **Park and wait** — `question` posts, adds the `needs-answer` label, marks the dispatch `blocked`, and stops
    consuming iterations; a human reply clears the label and the run resumes from `blocked`.
 
-## The decision to confirm
+## Decision — RESOLVED at GATE 1: (A) `blocked` is a first-class dispatch state
 
 The WAIT step needs a state to park in, and there are two honest ways to model it:
 
@@ -80,8 +100,11 @@ The WAIT step needs a state to park in, and there are two honest ways to model i
   but the dispatch record then reports a parked run as `pending`/`retrying`, i.e. it lies — and the cost guard
   would treat a parked run as eligible to retry.
 
-I recommend **(A)**: a run that is waiting on a human is a first-class state, and inventing a shadow record to
-avoid touching the authoritative one is how two sources of truth begin.
+**Resolved (approved): (A) — add `blocked` to `DispatchStatus`.** A run waiting on a human is a first-class
+state: the dispatch record tells the truth, the resume transition is explicit, and anything reading dispatch
+state (metrics, the operator, #163's trigger) can tell "waiting on a human" from "retrying" without a second
+lookup. The cost is a state change to a merged, tested module — which is exactly why it was worth agreeing
+explicitly rather than smuggling the state into a shadow record.
 
 ## Non-goals (from the issue, kept explicit)
 
@@ -130,6 +153,7 @@ self-correction (#137/#138); not interactive chat (a question is answered out of
 ## Files
 
 `agent/lib/dark-factory/worker-reporter.ts` (new: the payload, the seam, both providers, the env selector) ·
+`agent/lib/dark-factory/issue-writer.ts` (new: post/edit comment, add/remove label, token resolution) ·
 `agent/lib/dark-factory/dispatch.ts` (`blocked` + the resume transition, if decision A) ·
 `agent/lib/dark-factory/index.ts` (exports + wiring) ·
 `tests/dark-factory/worker-reporter.test.ts` (new) ·
@@ -146,6 +170,7 @@ same evidence standard as #159/#157/#158: a run, not an assertion.
 
 ## Status
 
-**GATE 1 — awaiting approval of this plan and the decision above** (how to model the parked state, A or B).
-No source has been written on this branch beyond this document.
+**GATE 1 approved — decision A.** `blocked` becomes a first-class `DispatchStatus`, the parked run consumes no
+further attempts, and the resume transition is explicit. Implementation is TDD: a RED test per row above, then
+the smallest change that turns it GREEN, verified on this laptop before any push.
 
