@@ -23,6 +23,7 @@
     "authorisation",
     "Authorisation",
     "Neutralise",
+    "parseable",
     "sanitised",
     "yamllint",
     "markdownlint",
