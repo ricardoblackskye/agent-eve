@@ -256,6 +256,9 @@ function isInside(root: string, target: string): boolean {
   );
 }
 
+/** Real-path resolver, injectable so the failure branch is testable off-filesystem. */
+type RealpathFn = (path: string) => string;
+
 /**
  * REAL path of the deepest ancestor of `target` that exists on disk, or `null`
  * when nothing along the chain exists.
@@ -264,14 +267,29 @@ function isInside(root: string, target: string): boolean {
  * path cannot be resolved — walking up to the nearest existing directory is what
  * makes a link in the chain visible to `realpath`, which follows symlinks and
  * Windows junctions.
+ *
+ * Any failure OTHER than "does not exist" (EACCES, ELOOP, ENAMETOOLONG) means
+ * containment cannot be verified at all. That REFUSES, naming the offending path
+ * and the original cause: returning `null` and walking on would silently skip the
+ * very check this function exists to perform.
  */
-function realpathOfDeepestExistingAncestor(target: string): string | null {
+function realpathOfDeepestExistingAncestor(
+  target: string,
+  realpath: RealpathFn = realpathSync,
+): string | null {
   let current = target;
   for (;;) {
     try {
-      return realpathSync(current);
+      return realpath(current);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== "ENOENT") {
+        throw new Error(
+          `Path '${target}' could not be resolved for a containment check ` +
+            `(${code ?? "unknown"}: ${(error as Error).message}). Refusing to open a ` +
+            "state store whose real path cannot be verified.",
+        );
+      }
     }
     const parent = dirname(current);
     if (parent === current) return null;
@@ -301,6 +319,7 @@ function realpathOfDeepestExistingAncestor(target: string): string | null {
 export function resolveStateDbPath(
   rawPath: string,
   sandboxRoot?: string,
+  realpath: RealpathFn = realpathSync,
 ): string {
   const resolved = resolve(rawPath);
   const root = (sandboxRoot || "").trim();
@@ -319,8 +338,8 @@ export function resolveStateDbPath(
   // existing ancestor is what is resolved — any link in that chain is followed
   // by realpath. When nothing along the chain exists there can be no link
   // either, and the lexical decision stands.
-  const realRoot = realpathOfDeepestExistingAncestor(resolvedRoot);
-  const realTarget = realpathOfDeepestExistingAncestor(resolved);
+  const realRoot = realpathOfDeepestExistingAncestor(resolvedRoot, realpath);
+  const realTarget = realpathOfDeepestExistingAncestor(resolved, realpath);
   if (
     realRoot !== null &&
     realTarget !== null &&

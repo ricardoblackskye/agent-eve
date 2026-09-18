@@ -111,6 +111,36 @@ describe("resolveStateDbPath sandbox containment (#160)", () => {
       join(root, "state.sqlite"),
     );
   });
+
+  it("refuses WITH CONTEXT when the filesystem check itself fails", () => {
+    const root = mk();
+    // A real non-ENOENT failure (EACCES/ELOOP) means containment cannot be
+    // verified. That must REFUSE — never be swallowed into a pass, which would
+    // silently skip the check — and the message must name what failed.
+    const failing = () => {
+      const error = new Error(
+        "EACCES: permission denied, lstat",
+      ) as NodeJS.ErrnoException;
+      error.code = "EACCES";
+      throw error;
+    };
+
+    expect(() =>
+      resolveStateDbPath(join(root, "state.sqlite"), root, failing),
+    ).toThrow(/could not be resolved for a containment check/);
+    // The original cause must survive, so an operator can act on it.
+    expect(() =>
+      resolveStateDbPath(join(root, "state.sqlite"), root, failing),
+    ).toThrow(/EACCES/);
+  });
+
+  it("still refuses a non-existent leaf when the realpath check is injected", () => {
+    const root = mk();
+    // Injected default behaviour must match the built-in one.
+    expect(resolveStateDbPath(join(root, "state.sqlite"), root)).toBe(
+      join(root, "state.sqlite"),
+    );
+  });
 });
 
 describe("dispatch integer validation (#160)", () => {
