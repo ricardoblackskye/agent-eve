@@ -113,13 +113,15 @@ describe("#162 cycle 12: a parked run consumes nothing", () => {
   });
 });
 
-describe("#162 cycle 13: a human reply resumes the run", () => {
-  it("re-runs the handler and clears the blocked state", async () => {
+describe("#162 cycle 13: a human reply resumes the run — and only that", () => {
+  it("re-runs the handler on an EXPLICIT resume and clears the blocked state", async () => {
     const store = new MemoryStore();
     let parked = true;
+    let calls = 0;
     const dispatcher = new Dispatcher({
       store,
       handler: async () => {
+        calls += 1;
         if (parked) throw new ParkedRunError("blocked on a human decision");
       },
       sleep: async () => {},
@@ -127,11 +129,21 @@ describe("#162 cycle 13: a human reply resumes the run", () => {
 
     const first = await dispatcher.dispatch(event());
     expect(first.status).toBe("blocked");
+    expect(calls).toBe(1);
 
-    parked = false; // the human replied
-    const second = await dispatcher.dispatch(event());
+    // A plain RE-DELIVERY while parked is HELD, not resumed: webhook deliveries
+    // are at-least-once, and resuming on one would consume the wait the park
+    // exists to protect.
+    const held = await dispatcher.dispatch(event());
+    expect(held.status).toBe("blocked");
+    expect(held.duplicate).toBe(true);
+    expect(calls).toBe(1);
 
-    expect(second.status).toBe("succeeded");
+    parked = false; // the human replied and the label was cleared
+    const resumed = await dispatcher.dispatch(event(), { resume: true });
+
+    expect(resumed.status).toBe("succeeded");
+    expect(calls).toBe(2);
     expect((await recordOf(store, "run-162"))?.status).toBe("succeeded");
   });
 });

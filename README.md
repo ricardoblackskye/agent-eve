@@ -432,7 +432,8 @@ call, so there is no state in which a worker works on a repo Eve refuses to comm
 
 A question **parks** the run: `blocked` is a first-class `DispatchStatus` (distinct from `retrying`, because
 waiting on a human is not work), the issue gains `needs-answer`, no retries or backoff are consumed while the
-question is read, and the next delivery after the reply resumes the run.
+question is read, and an **explicit resume** after the reply continues the run. A plain re-delivery while
+parked is held as a duplicate, so a webhook retry cannot consume the wait either.
 
 ```bash
 npx tsx scripts/worker-reporter-demo.local.ts   # console + recording provider + cross-process durability

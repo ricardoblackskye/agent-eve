@@ -14,6 +14,8 @@ import {
   ConsoleReporter,
   GitHubCommentReporter,
   createWorkerReporter,
+  renderMessage,
+  MAX_ATTEMPT,
   type WorkerMessage,
 } from "../../agent/lib/dark-factory/worker-reporter";
 import { ALLOWED_ENV_KEYS } from "../../agent/lib/dark-factory/tester-agent";
@@ -113,6 +115,25 @@ describe("#162 cycle 1-2: the payload is canonical and validated", () => {
     expect(() => toWorkerMessage(msg({ attempt: -1 }))).toThrow(InvalidWorkerMessageError);
     expect(() => toWorkerMessage(msg({ attempt: 1e9 }))).toThrow(InvalidWorkerMessageError);
     expect(() => toWorkerMessage(msg({ attempt: 2, maxAttempts: 1 }))).toThrow(/maxAttempts/);
+  });
+
+  it("accepts the bound ITSELF — the range is inclusive, not off by one", () => {
+    const atBound = toWorkerMessage(msg({ attempt: MAX_ATTEMPT, maxAttempts: MAX_ATTEMPT }));
+    expect(atBound.attempt).toBe(MAX_ATTEMPT);
+    expect(() => toWorkerMessage(msg({ attempt: MAX_ATTEMPT + 1, maxAttempts: MAX_ATTEMPT }))).toThrow(
+      InvalidWorkerMessageError,
+    );
+  });
+
+  it("renders a completed report with its outcome, attempts and evidence", () => {
+    const body = renderMessage(
+      toWorkerMessage(
+        msg({ kind: "completed", outcome: "fail", attempt: 4, maxAttempts: 4, failures: ["a.test.ts:1 boom"] }),
+      ),
+    );
+    expect(body).toMatch(/terminal failure/i);
+    expect(body).toMatch(/Attempts used: \*\*4\*\*/);
+    expect(body).toMatch(/a\.test\.ts:1 boom/);
   });
 
   it("refuses over-long text rather than posting it", () => {

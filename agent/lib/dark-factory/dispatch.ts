@@ -247,7 +247,18 @@ export class Dispatcher {
     }
   }
 
-  async dispatch(event: DispatchEvent): Promise<DispatchOutcome> {
+  /**
+   * Deliver one event.
+   *
+   * `resume` is the explicit "the human replied, continue" signal (#162). It is
+   * required to continue a `blocked` run, and deliberately NOT implied by a fresh
+   * delivery: webhook deliveries are at-least-once, so resuming on any delivery
+   * would let a re-delivery consume the very wait the park exists to protect.
+   */
+  async dispatch(
+    event: DispatchEvent,
+    options: { resume?: boolean } = {},
+  ): Promise<DispatchOutcome> {
     let existing: StateReadResult<DispatchRecord>;
     try {
       existing = await this.store.get<DispatchRecord>(dispatchKey(event.runId));
@@ -268,14 +279,15 @@ export class Dispatcher {
         error: `Cannot read dispatch state for run '${event.runId}': ${existing.error ?? "unknown error"}`,
       };
     }
-    if (existing.value && existing.value.status !== "blocked") {
+    const resuming = existing.value?.status === "blocked" && options.resume === true;
+    if (existing.value && !resuming) {
       // At-most-once: anything already recorded for this run (in flight or
       // finished) is a duplicate delivery, never a second dispatch.
       //
-      // A BLOCKED run is the one exception, and it is not really an exception:
-      // at-most-once exists to stop duplicate WORK, and a parked run has no work
-      // in flight. So a fresh delivery after the human replied is the resume
-      // signal, not a duplicate (#162).
+      // A BLOCKED run is held here too unless the caller asks to resume: it is
+      // still at-most-once, because at-most-once exists to stop duplicate WORK
+      // and resuming without an answer would consume the wait. An explicit
+      // `resume` (the human replied) is what continues it (#162).
       //
       // `ok` here means "this call was handled with no error" — NOT "the run
       // succeeded". A duplicate of a previously FAILED run is still a
