@@ -12,6 +12,7 @@
  */
 import { describe, it, expect, vi } from "vitest";
 import {
+  DEFAULT_MAX_REVIEW_ROUNDS,
   InvalidConfigurationError,
   resolveMaxReviewRounds,
   runDefinitionOfDone,
@@ -26,6 +27,10 @@ import {
 import { GitHubPrWriter } from "../../agent/lib/dark-factory/pr-writer";
 
 describe("#164 cycle 1: resolveMaxReviewRounds — digits-only, fail-closed configuration", () => {
+  it("exports DEFAULT_MAX_REVIEW_ROUNDS constant as 3", () => {
+    expect(DEFAULT_MAX_REVIEW_ROUNDS).toBe(3);
+  });
+
   it("defaults to 3 when DF_MAX_REVIEW_ROUNDS is unset or empty", () => {
     expect(resolveMaxReviewRounds({})).toBe(3);
     expect(resolveMaxReviewRounds({ DF_MAX_REVIEW_ROUNDS: "" })).toBe(3);
@@ -172,6 +177,49 @@ describe("#164 cycle 2: createPullRequest — opened on task branch, linked to i
     expect(noTokenRes.ok).toBe(false);
     expect(noTokenRes.error).toMatch(/token/i);
     expect(fakeFetch).not.toHaveBeenCalled();
+  });
+
+  it("validates repository owner and name format (rejecting injection attempts)", async () => {
+    const fakeFetch = vi.fn();
+    const writer = new GitHubPrWriter({
+      token: "gh_test_token",
+      fetchImpl: fakeFetch as any,
+      env: allowedEnv,
+    });
+
+    const badOwner = await writer.createPullRequest(
+      "bad/owner/traversal",
+      "agent-eve",
+      { title: "t", head: "h", body: "b", issue: 1 },
+    );
+    expect(badOwner.ok).toBe(false);
+    expect(badOwner.error).toMatch(/Invalid repository owner.*or name/i);
+
+    const badRepo = await writer.createPullRequest(
+      "ricardoblackskye",
+      "agent;drop table",
+      { title: "t", head: "h", body: "b", issue: 1 },
+    );
+    expect(badRepo.ok).toBe(false);
+    expect(badRepo.error).toMatch(/Invalid repository owner.*or name/i);
+    expect(fakeFetch).not.toHaveBeenCalled();
+  });
+
+  it("handles non-Error thrown objects safely during fetch", async () => {
+    const fakeFetch = () => Promise.reject("raw network failure string");
+    const writer = new GitHubPrWriter({
+      token: "gh_test_token",
+      fetchImpl: fakeFetch as any,
+      env: allowedEnv,
+    });
+
+    const res = await writer.createPullRequest(
+      "ricardoblackskye",
+      "agent-eve",
+      { title: "t", head: "h", body: "b", issue: 1 },
+    );
+    expect(res.ok).toBe(false);
+    expect(res.error).toBe("raw network failure string");
   });
 });
 

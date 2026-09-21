@@ -211,6 +211,7 @@ export {
 // R5 — definition of DONE (#164). Opening a PR is the terminal automated action;
 // the loop bounds review fixes and halts at blocked; the factory never merges.
 export {
+  DEFAULT_MAX_REVIEW_ROUNDS,
   InvalidConfigurationError,
   resolveMaxReviewRounds,
   runDefinitionOfDone,

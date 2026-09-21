@@ -78,6 +78,14 @@ export class GitHubPrWriter {
     repo: string,
     options: CreatePullRequestOptions,
   ): Promise<CreatePullRequestResult> {
+    const validNamePattern = /^[a-zA-Z0-9_.-]+$/;
+    if (!validNamePattern.test(owner) || !validNamePattern.test(repo)) {
+      return {
+        ok: false,
+        error: `Invalid repository owner '${owner}' or name '${repo}'. Allowed characters are alphanumeric, hyphen, underscore, and dot.`,
+      };
+    }
+
     const fullRepo = `${owner}/${repo}`.toLowerCase();
     const allowedRepos = resolveWorkerAllowedRepos(this.env);
 
@@ -148,7 +156,8 @@ export class GitHubPrWriter {
         },
       };
     } catch (error) {
-      return { ok: false, error: (error as Error).message };
+      const message = error instanceof Error ? error.message : String(error);
+      return { ok: false, error: message };
     }
   }
 }

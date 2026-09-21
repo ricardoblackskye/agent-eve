@@ -24,6 +24,8 @@ export class InvalidConfigurationError extends Error {
   }
 }
 
+export const DEFAULT_MAX_REVIEW_ROUNDS = 3;
+
 /**
  * Resolve the maximum review rounds allowed.
  * Enforces digits-only validation (matching DF_MAX_ITERATIONS).
@@ -33,7 +35,7 @@ export function resolveMaxReviewRounds(
   env: Record<string, string | undefined> = process.env,
 ): number {
   const raw = env.DF_MAX_REVIEW_ROUNDS?.trim();
-  if (!raw) return 3;
+  if (!raw) return DEFAULT_MAX_REVIEW_ROUNDS;
   if (!/^\d+$/.test(raw) || Number(raw) < 1) {
     throw new InvalidConfigurationError(
       `DF_MAX_REVIEW_ROUNDS must be a positive integer (digits only, received '${raw}').`,
@@ -152,12 +154,108 @@ export function renderAcceptedFindingComment(
   ].join("\n");
 }
 
+function buildSuccessResult(
+  pr: PullRequestDetails,
+  roundsExecuted: number,
+  totalDistinctFindings: number,
+  acceptedCount: number,
+): DefinitionOfDoneResult {
+  return {
+    ok: true,
+    status: "done",
+    pr,
+    roundsExecuted,
+    totalFindings: totalDistinctFindings,
+    resolvedCount: totalDistinctFindings - acceptedCount,
+    acceptedCount,
+    remainingFindings: [],
+    reason: "All automated review findings resolved or accepted.",
+  };
+}
+
+function buildBudgetExhaustedResult(
+  pr: PullRequestDetails,
+  maxRounds: number,
+  roundsExecuted: number,
+  totalDistinctFindings: number,
+  acceptedCount: number,
+  remaining: ReviewFinding[],
+): DefinitionOfDoneResult {
+  return {
+    ok: false,
+    status: "blocked",
+    pr,
+    roundsExecuted,
+    totalFindings: totalDistinctFindings,
+    resolvedCount: totalDistinctFindings - acceptedCount - remaining.length,
+    acceptedCount,
+    remainingFindings: remaining,
+    reason: `Review budget exhausted (${maxRounds} rounds) with ${remaining.length} unresolved finding(s).`,
+  };
+}
+
+interface DispositionOutcome {
+  blockedResult?: DefinitionOfDoneResult;
+}
+
+async function applyAcceptedDispositions(
+  deps: DefinitionOfDoneDeps,
+  task: DefinitionOfDoneTask,
+  owner: string,
+  repoName: string,
+  pr: PullRequestDetails,
+  unacceptedFindings: ReviewFinding[],
+  dispositions: FindingDisposition[],
+  acceptedIds: Set<string>,
+  state: {
+    roundsExecuted: number;
+    totalDistinctFindings: number;
+  },
+): Promise<DispositionOutcome> {
+  for (const disp of dispositions) {
+    if (disp.status === "accepted") {
+      const explanation = (disp.explanation ?? "").trim();
+      if (!explanation) {
+        if (deps.labelWriter) {
+          await deps.labelWriter.add(task.repo, task.issue, "needs-answer");
+        }
+        return {
+          blockedResult: {
+            ok: false,
+            status: "blocked",
+            pr,
+            roundsExecuted: state.roundsExecuted,
+            totalFindings: state.totalDistinctFindings,
+            resolvedCount: state.totalDistinctFindings - acceptedIds.size,
+            acceptedCount: acceptedIds.size,
+            remainingFindings: unacceptedFindings,
+            reason: `Finding '${disp.findingId}' was marked accepted but requires a non-empty explanation.`,
+          },
+        };
+      }
+
+      const finding = unacceptedFindings.find((f) => f.id === disp.findingId);
+      if (finding) {
+        await deps.commentWriter.postComment(
+          owner,
+          repoName,
+          pr.number,
+          renderAcceptedFindingComment(finding, explanation),
+        );
+        acceptedIds.add(disp.findingId);
+      }
+    }
+  }
+
+  return {};
+}
+
 /**
  * Run the Definition of DONE loop.
  *
  * Coordinates:
  * 1. Opening the PR linked to the issue (`Closes #<issue>`).
- * 2. Iterating review checks up to DF_MAX_REVIEW_ROUNDS.
+ * 2. Iterating review checks up to DF_MAX_REVIEW_ROUNDS (1-indexed inclusive: [1..maxRounds]).
  * 3. Handling recurring findings (count against budget without reset).
  * 4. Dispositioning findings (resolved vs. accepted with durable PR comment).
  * 5. Halting on exhaustion with `df:blocked` / `needs-answer`.
@@ -197,10 +295,11 @@ export async function runDefinitionOfDone(
   const recurrenceMap = new Map<string, number>();
   const acceptedIds = new Set<string>();
   let totalDistinctFindings = 0;
-  let resolvedCount = 0;
   let roundsExecuted = 0;
 
-  // 2. Review and fix loop
+  // 2. Review and fix loop.
+  // Iterates round from 1 to maxRounds inclusive [1..maxRounds], executing
+  // exactly maxRounds iterations (e.g. 1, 2, 3 for maxRounds = 3).
   for (let round = 1; round <= maxRounds; round++) {
     roundsExecuted = round;
     const findings = await deps.runChecks(round);
@@ -219,58 +318,32 @@ export async function runDefinitionOfDone(
 
     // If no active findings remain, the task is DONE!
     if (unacceptedFindings.length === 0) {
-      resolvedCount = totalDistinctFindings - acceptedIds.size;
-      return {
-        ok: true,
-        status: "done",
+      return buildSuccessResult(
         pr,
         roundsExecuted,
-        totalFindings: totalDistinctFindings,
-        resolvedCount,
-        acceptedCount: acceptedIds.size,
-        remainingFindings: [],
-        reason: "All automated review findings resolved or accepted.",
-      };
+        totalDistinctFindings,
+        acceptedIds.size,
+      );
     }
 
     // Attempt fixes or acceptance dispositions
     if (deps.attemptFixes) {
       const dispositions = await deps.attemptFixes(unacceptedFindings);
 
-      for (const disp of dispositions) {
-        if (disp.status === "accepted") {
-          const explanation = (disp.explanation ?? "").trim();
-          if (!explanation) {
-            if (deps.labelWriter) {
-              await deps.labelWriter.add(task.repo, task.issue, "needs-answer");
-            }
-            return {
-              ok: false,
-              status: "blocked",
-              pr,
-              roundsExecuted,
-              totalFindings: totalDistinctFindings,
-              resolvedCount,
-              acceptedCount: acceptedIds.size,
-              remainingFindings: unacceptedFindings,
-              reason: `Finding '${disp.findingId}' was marked accepted but requires a non-empty explanation.`,
-            };
-          }
+      const outcome = await applyAcceptedDispositions(
+        deps,
+        task,
+        owner,
+        repoName,
+        pr,
+        unacceptedFindings,
+        dispositions,
+        acceptedIds,
+        { roundsExecuted, totalDistinctFindings },
+      );
 
-          const finding = unacceptedFindings.find(
-            (f) => f.id === disp.findingId,
-          );
-          if (finding) {
-            // Post durable rationale comment on the PR
-            await deps.commentWriter.postComment(
-              owner,
-              repoName,
-              pr.number,
-              renderAcceptedFindingComment(finding, explanation),
-            );
-            acceptedIds.add(disp.findingId);
-          }
-        }
+      if (outcome.blockedResult) {
+        return outcome.blockedResult;
       }
 
       // Check if all findings are now accepted
@@ -278,18 +351,12 @@ export async function runDefinitionOfDone(
         (f) => !acceptedIds.has(f.id),
       );
       if (remainingAfterDispositions.length === 0) {
-        resolvedCount = totalDistinctFindings - acceptedIds.size;
-        return {
-          ok: true,
-          status: "done",
+        return buildSuccessResult(
           pr,
           roundsExecuted,
-          totalFindings: totalDistinctFindings,
-          resolvedCount,
-          acceptedCount: acceptedIds.size,
-          remainingFindings: [],
-          reason: "All automated review findings resolved or accepted.",
-        };
+          totalDistinctFindings,
+          acceptedIds.size,
+        );
       }
     }
 
@@ -301,18 +368,14 @@ export async function runDefinitionOfDone(
       if (deps.labelWriter) {
         await deps.labelWriter.add(task.repo, task.issue, "needs-answer");
       }
-      return {
-        ok: false,
-        status: "blocked",
+      return buildBudgetExhaustedResult(
         pr,
+        maxRounds,
         roundsExecuted,
-        totalFindings: totalDistinctFindings,
-        resolvedCount:
-          totalDistinctFindings - acceptedIds.size - remaining.length,
-        acceptedCount: acceptedIds.size,
-        remainingFindings: remaining,
-        reason: `Review budget exhausted (${maxRounds} rounds) with ${remaining.length} unresolved finding(s).`,
-      };
+        totalDistinctFindings,
+        acceptedIds.size,
+        remaining,
+      );
     }
   }
 
@@ -322,7 +385,7 @@ export async function runDefinitionOfDone(
     pr,
     roundsExecuted,
     totalFindings: totalDistinctFindings,
-    resolvedCount,
+    resolvedCount: totalDistinctFindings - acceptedIds.size,
     acceptedCount: acceptedIds.size,
     remainingFindings: [],
     reason: "Review loop terminated unexpectedly.",
