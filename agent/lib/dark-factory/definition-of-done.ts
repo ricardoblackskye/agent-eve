@@ -212,9 +212,9 @@ async function applyAcceptedDispositions(
     totalDistinctFindings: number;
   },
 ): Promise<DispositionOutcome> {
-  for (const disp of dispositions) {
-    if (disp.status === "accepted") {
-      const explanation = (disp.explanation ?? "").trim();
+  for (const disposition of dispositions) {
+    if (disposition.status === "accepted") {
+      const explanation = (disposition.explanation ?? "").trim();
       if (!explanation) {
         if (deps.labelWriter) {
           await deps.labelWriter.add(task.repo, task.issue, "needs-answer");
@@ -229,12 +229,14 @@ async function applyAcceptedDispositions(
             resolvedCount: state.totalDistinctFindings - acceptedIds.size,
             acceptedCount: acceptedIds.size,
             remainingFindings: unacceptedFindings,
-            reason: `Finding '${disp.findingId}' was marked accepted but requires a non-empty explanation.`,
+            reason: `Finding '${disposition.findingId}' was marked accepted but requires a non-empty explanation.`,
           },
         };
       }
 
-      const finding = unacceptedFindings.find((f) => f.id === disp.findingId);
+      const finding = unacceptedFindings.find(
+        (f) => f.id === disposition.findingId,
+      );
       if (finding) {
         await deps.commentWriter.postComment(
           owner,
@@ -242,7 +244,7 @@ async function applyAcceptedDispositions(
           pr.number,
           renderAcceptedFindingComment(finding, explanation),
         );
-        acceptedIds.add(disp.findingId);
+        acceptedIds.add(disposition.findingId);
       }
     }
   }
