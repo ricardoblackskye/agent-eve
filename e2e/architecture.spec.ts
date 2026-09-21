@@ -11,11 +11,53 @@ test.describe("Architecture page", () => {
     expect(page.url()).toContain("/architecture");
   });
 
-  test("renders Mermaid diagrams on the page", async ({ page }) => {
+  test("renders all 6 Mermaid diagrams as SVG elements", async ({ page }) => {
     await page.goto("/architecture");
 
-    // Mermaid diagrams should render as SVG elements
-    await expect(page.locator("svg")).toBeVisible({ timeout: 15_000 });
+    // All 6 Mermaid diagrams in ARCHITECTURE.md should render as SVG elements inside .mermaid-wrapper
+    await expect(page.locator(".mermaid-wrapper svg")).toHaveCount(6, {
+      timeout: 15_000,
+    });
+  });
+
+  test("renders Mermaid diagrams inline under each section heading", async ({
+    page,
+  }) => {
+    await page.goto("/architecture");
+
+    const sections = [
+      "System Overview",
+      "Request Flow",
+      "Authentication Flow",
+      "Deployment Architecture",
+      "Project Structure",
+      "Data Flow: Chat Session",
+    ];
+
+    for (const section of sections) {
+      const heading = page.getByRole("heading", {
+        name: section,
+        exact: true,
+      });
+      await expect(heading).toBeVisible();
+
+      // Each section heading must be immediately followed by its own rendered diagram SVG
+      const sectionDiagram = page.locator(
+        `h2:has-text("${section}") + .mermaid-wrapper svg`,
+      );
+      await expect(sectionDiagram).toBeVisible({ timeout: 10_000 });
+    }
+  });
+
+  test("does not display raw unrendered Mermaid syntax as plain text", async ({
+    page,
+  }) => {
+    await page.goto("/architecture");
+
+    // Ensure raw diagram source code is not left behind as unrendered text
+    await expect(page.locator("pre.mermaid")).toHaveCount(0, {
+      timeout: 15_000,
+    });
   });
 
   test("contains system overview content", async ({ page }) => {
