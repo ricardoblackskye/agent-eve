@@ -208,6 +208,31 @@ export {
   type RunnerMode,
 } from "./entry";
 
+// R5 — definition of DONE (#164). Opening a PR is the terminal automated action;
+// the loop bounds review fixes and halts at blocked; the factory never merges.
+export {
+  DEFAULT_MAX_REVIEW_ROUNDS,
+  InvalidConfigurationError,
+  resolveMaxReviewRounds,
+  runDefinitionOfDone,
+  renderAcceptedFindingComment,
+  type FindingDisposition,
+  type FindingDispositionStatus,
+  type FindingSource,
+  type ReviewFinding,
+  type DefinitionOfDoneTask,
+  type DefinitionOfDoneDeps,
+  type DefinitionOfDoneResult,
+  type DoneStatus,
+} from "./definition-of-done";
+export {
+  GitHubPrWriter,
+  type CreatePullRequestOptions,
+  type CreatePullRequestResult,
+  type GitHubPrWriterOptions,
+  type PullRequestDetails,
+} from "./pr-writer";
+
 /**
  * The skill seams (#157). `SKILLS` is the catalogue of capability grants; the
  * surface is what the self-improvement controller tunes, and its grants reach the

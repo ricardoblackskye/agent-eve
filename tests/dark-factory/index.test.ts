@@ -2,9 +2,22 @@ import { describe, it, expect, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createStateStore, createRetryPolicy, createDispatchObserver } from "../../agent/lib/dark-factory/index";
-import { toExecutionContext, saveContext, loadContext, SqliteStateAdapter } from "../../agent/lib/dark-factory/state";
-import { DEFAULT_RETRY_POLICY, Dispatcher, toDispatchEvent } from "../../agent/lib/dark-factory/dispatch";
+import {
+  createStateStore,
+  createRetryPolicy,
+  createDispatchObserver,
+} from "../../agent/lib/dark-factory/index";
+import {
+  toExecutionContext,
+  saveContext,
+  loadContext,
+  SqliteStateAdapter,
+} from "../../agent/lib/dark-factory/state";
+import {
+  DEFAULT_RETRY_POLICY,
+  Dispatcher,
+  toDispatchEvent,
+} from "../../agent/lib/dark-factory/dispatch";
 import { InMemoryMetricsStore } from "../../agent/lib/dark-factory/metrics";
 
 const ctx = toExecutionContext({
@@ -22,12 +35,16 @@ describe("createStateStore env wiring (#134)", () => {
     return join(dir, "state.sqlite");
   };
   afterEach(() => {
-    while (dirs.length) rmSync(dirs.pop() as string, { recursive: true, force: true });
+    while (dirs.length)
+      rmSync(dirs.pop() as string, { recursive: true, force: true });
   });
 
   it("returns the sqlite adapter when DF_STATE_DRIVER=sqlite", async () => {
     const path = makePath();
-    const store = createStateStore({ DF_STATE_DRIVER: "sqlite", DF_STATE_DB_PATH: path });
+    const store = createStateStore({
+      DF_STATE_DRIVER: "sqlite",
+      DF_STATE_DB_PATH: path,
+    });
 
     expect(store.id).toBe("sqlite");
     expect((await saveContext(store, ctx)).mode).toBe("live");
@@ -48,11 +65,15 @@ describe("createStateStore env wiring (#134)", () => {
   });
 
   it("refuses an unknown driver instead of silently degrading", () => {
-    expect(() => createStateStore({ DF_STATE_DRIVER: "redis" })).toThrow(/redis/);
+    expect(() => createStateStore({ DF_STATE_DRIVER: "redis" })).toThrow(
+      /redis/,
+    );
   });
 
   it("requires a database path for the sqlite driver", () => {
-    expect(() => createStateStore({ DF_STATE_DRIVER: "sqlite" })).toThrow(/DF_STATE_DB_PATH/);
+    expect(() => createStateStore({ DF_STATE_DRIVER: "sqlite" })).toThrow(
+      /DF_STATE_DB_PATH/,
+    );
   });
 });
 
@@ -63,25 +84,33 @@ describe("createRetryPolicy env wiring (#138)", () => {
 
   it("reads the retry limit and base delay from the environment", () => {
     expect(
-      createRetryPolicy({ DF_DISPATCH_MAX_RETRIES: "5", DF_DISPATCH_BASE_DELAY_MS: "50" }),
+      createRetryPolicy({
+        DF_DISPATCH_MAX_RETRIES: "5",
+        DF_DISPATCH_BASE_DELAY_MS: "50",
+      }),
     ).toEqual({ maxRetries: 5, baseDelayMs: 50, backoffMultiplier: 3 });
   });
 
   it("rejects a non-numeric retry limit instead of silently ignoring it", () => {
-    expect(() => createRetryPolicy({ DF_DISPATCH_MAX_RETRIES: "many" })).toThrow(
-      /DF_DISPATCH_MAX_RETRIES/,
-    );
+    expect(() =>
+      createRetryPolicy({ DF_DISPATCH_MAX_RETRIES: "many" }),
+    ).toThrow(/DF_DISPATCH_MAX_RETRIES/);
   });
 
   it("rejects a negative base delay", () => {
-    expect(() => createRetryPolicy({ DF_DISPATCH_BASE_DELAY_MS: "-5" })).toThrow(
-      /DF_DISPATCH_BASE_DELAY_MS/,
-    );
+    expect(() =>
+      createRetryPolicy({ DF_DISPATCH_BASE_DELAY_MS: "-5" }),
+    ).toThrow(/DF_DISPATCH_BASE_DELAY_MS/);
   });
 });
 
 describe("dispatch -> metrics wiring (#140 AC4)", () => {
-  const ciEvent = { runId: "run-1", repo: "o/r", ref: "main", status: "failure" as const };
+  const ciEvent = {
+    runId: "run-1",
+    repo: "o/r",
+    ref: "main",
+    status: "failure" as const,
+  };
 
   it("awaits the observer so the metric is recorded before dispatch resolves", async () => {
     const metrics = new InMemoryMetricsStore();
@@ -154,7 +183,8 @@ describe("state DB path hardening (reviewer follow-up)", () => {
     return root;
   };
   afterEach(() => {
-    while (dirs.length) rmSync(dirs.pop() as string, { recursive: true, force: true });
+    while (dirs.length)
+      rmSync(dirs.pop() as string, { recursive: true, force: true });
   });
 
   it("refuses a path that escapes the configured DF_STATE_DB_DIR sandbox", () => {
@@ -224,5 +254,15 @@ describe("index.ts is the single import surface (R2 seams, #135/#142)", () => {
     expect(typeof mod.createCredentialBroker).toBe("function");
     expect(typeof mod.createWorkerProvider).toBe("function");
     expect(typeof mod.createWorkerHandler).toBe("function");
+  });
+
+  it("re-exports the R5 definition of DONE and PR writer seams (#164)", async () => {
+    const mod = await import("../../agent/lib/dark-factory/index");
+    expect(mod.DEFAULT_MAX_REVIEW_ROUNDS).toBe(3);
+    expect(typeof mod.runDefinitionOfDone).toBe("function");
+    expect(typeof mod.resolveMaxReviewRounds).toBe("function");
+    expect(typeof mod.renderAcceptedFindingComment).toBe("function");
+    expect(typeof mod.GitHubPrWriter).toBe("function");
+    expect(typeof mod.InvalidConfigurationError).toBe("function");
   });
 });
