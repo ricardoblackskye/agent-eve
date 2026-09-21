@@ -116,7 +116,9 @@
     "unconfigured",
     "baselining",
     "ttft",
-    "üñíçödé"
+    "üñíçödé",
+    "dispositioned",
+    "dispositioning"
   ],
   "ignorePaths": [
     "node_modules/**",
