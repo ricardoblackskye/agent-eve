@@ -135,10 +135,17 @@ export class GitHubPrWriter {
       );
 
       if (!res.ok) {
+        const errJson = (await res.json().catch(() => ({}))) as {
+          message?: string;
+          errors?: { message?: string }[];
+        };
+        const detail = errJson.errors?.[0]?.message || errJson.message;
         return {
           ok: false,
           status: res.status,
-          error: `GitHub responded ${res.status}`,
+          error: detail
+            ? `GitHub responded ${res.status}: ${detail}`
+            : `GitHub responded ${res.status}`,
         };
       }
 
