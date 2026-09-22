@@ -378,10 +378,11 @@ A user must authenticate via Google OAuth before accessing the Eve Chat UI.
     const result = await agent.planStory(sampleStory);
     expect(result.ok).toBe(false);
     expect(result.cause).toBe(originalError);
+    expect(result.lastError).toBe(originalError);
     expect(result.error).toContain("TypeError: Custom LLM network breakdown");
   });
 
-  it("respects custom maxContextFiles boundary", async () => {
+  it("respects custom maxContextFiles boundary using Math.min without off-by-one exclusion", async () => {
     let capturedPrompt = "";
     const agent = new ArchitectAgent({
       listFiles: vi.fn().mockResolvedValue([
@@ -395,14 +396,15 @@ A user must authenticate via Google OAuth before accessing the Eve Chat UI.
         capturedPrompt = prompt;
         return JSON.stringify(validPlan);
       }),
-      maxContextFiles: 2,
+      maxContextFiles: 5,
     });
 
     await agent.planStory(sampleStory);
     const listedFiles = capturedPrompt
       .split("\n")
       .filter((line) => line.startsWith("- app/"));
-    expect(listedFiles.length).toBe(2);
+    // Exactly all 5 files included
+    expect(listedFiles.length).toBe(5);
   });
 });
 

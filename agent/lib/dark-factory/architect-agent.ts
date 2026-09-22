@@ -95,6 +95,7 @@ export interface ArchitectResult {
   retries: number;
   error?: string;
   cause?: unknown;
+  lastError?: Error | unknown;
 }
 
 export interface StoryInput {
@@ -220,7 +221,8 @@ export class ArchitectAgent {
   }
 
   /**
-   * Invokes LLM generation with a race-condition-safe timeout guard to prevent hanging interactions.
+   * Invokes LLM generation with an atomic settlement flag and timeout guard to prevent hanging interactions.
+   * Guarantees no race condition between timer callback and generation resolution.
    * Uses ProcessTimerRegistry for process-level safety.
    */
   private async executeGenerate(prompt: string): Promise<string> {
@@ -229,11 +231,24 @@ export class ArchitectAgent {
     const controller =
       typeof AbortController !== "undefined" ? new AbortController() : undefined;
 
-    const timeoutPromise = new Promise<never>((_, reject) => {
+    const tryAcquireSettlement = (): boolean => {
+      if (settled) return false;
+      settled = true;
+      return true;
+    };
+
+    const cleanupTimer = (): void => {
+      if (timer) {
+        this.timerRegistry.clearTimeout(timer);
+        timer = undefined;
+      }
+    };
+
+    return await new Promise<string>((resolve, reject) => {
       timer = this.timerRegistry.createTimeout(() => {
-        if (!settled) {
-          settled = true;
+        if (tryAcquireSettlement()) {
           controller?.abort();
+          cleanupTimer();
           reject(
             new Error(
               `ArchitectAgent LLM interaction timed out after ${this.timeoutMs}ms.`,
@@ -241,24 +256,22 @@ export class ArchitectAgent {
           );
         }
       }, this.timeoutMs);
-    });
 
-    const generatePromise = (async () => {
-      try {
-        const result = await this.deps.generateText(prompt, {
-          signal: controller?.signal,
+      this.deps
+        .generateText(prompt, { signal: controller?.signal })
+        .then((result) => {
+          if (tryAcquireSettlement()) {
+            cleanupTimer();
+            resolve(result);
+          }
+        })
+        .catch((err) => {
+          if (tryAcquireSettlement()) {
+            cleanupTimer();
+            reject(err);
+          }
         });
-        settled = true;
-        return result;
-      } finally {
-        if (timer) {
-          this.timerRegistry.clearTimeout(timer);
-          timer = undefined;
-        }
-      }
-    })();
-
-    return await Promise.race([generatePromise, timeoutPromise]);
+    });
   }
 
   /**
@@ -267,7 +280,8 @@ export class ArchitectAgent {
    */
   private buildInitialPrompt(story: StoryInput, repoFiles: string[]): string {
     const sortedFiles = sortFilesByRelevance(repoFiles);
-    const safeFiles = sortedFiles.slice(0, this.maxContextFiles);
+    const limit = Math.min(sortedFiles.length, this.maxContextFiles);
+    const safeFiles = sortedFiles.slice(0, limit);
     const sanitizedTitle = story.title.replace(/[\r\n]+/g, " ").trim();
 
     return [
@@ -384,15 +398,15 @@ export class ArchitectAgent {
     let retries = 0;
     let lastOutput = "";
     let lastErrors: string[] = [];
-    let lastCause: unknown;
+    let lastError: Error | unknown;
 
     let currentPrompt = this.buildInitialPrompt(story, repoFiles);
 
     while (true) {
       try {
         lastOutput = await this.executeGenerate(currentPrompt);
-      } catch (err: any) {
-        lastCause = err;
+      } catch (err: unknown) {
+        lastError = err;
         const errMsg =
           err instanceof Error
             ? (err.stack ? `${err.name}: ${err.message}\n${err.stack}` : `${err.name}: ${err.message}`)
@@ -440,7 +454,8 @@ export class ArchitectAgent {
       ok: false,
       retries,
       error: `ArchitectAgent max retries exceeded (${this.maxPlanRetries}). Errors: ${lastErrors.join("; ")}`,
-      cause: lastCause,
+      cause: lastError,
+      lastError,
     };
   }
 }
