@@ -69,7 +69,7 @@ A user must authenticate via Google OAuth before accessing the Eve Chat UI.
   });
 
   it("self-corrects and retries when initial plan fails domain validation", async () => {
-    // First attempt omits app/ touchpoints (invalid for UI story)
+    // First attempt omits app/ target files (invalid for UI story)
     const invalidPlan: ExecutionPlan = {
       ...validPlan,
       targetFiles: [

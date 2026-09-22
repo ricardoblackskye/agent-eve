@@ -131,14 +131,14 @@ export function validateExecutionPlan(
   // 3. Domain relevance check: UI/Chat stories must touch app/ or components/
   const isUiStory = UI_SIGNALS.some((pattern) => pattern.test(storyText));
   if (isUiStory) {
-    const hasUiTouchpoint = plan.targetFiles.some(
+    const hasUiTarget = plan.targetFiles.some(
       (f) =>
         f.path.startsWith("app/") ||
         f.path.startsWith("components/") ||
         f.path.startsWith("src/app/") ||
         f.path.startsWith("src/components/"),
     );
-    if (!hasUiTouchpoint) {
+    if (!hasUiTarget) {
       errors.push(
         "UI/Chat story must modify or create files under app/ or components/ (e.g. app/page.tsx or app/chat.tsx).",
       );
