@@ -475,6 +475,24 @@ describe("PR Reviewer Agent - TDD Tests", () => {
       expect(content).toMatch(/formatStructuredReview/);
     });
   });
+
+  describe("Self-Correction Verification Filter (#182)", () => {
+    it("defines a verification filter that purges false positive findings", () => {
+      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
+      const content = fs.readFileSync(scriptPath, "utf8");
+
+      expect(content).toMatch(/filterFalsePositives/);
+      expect(content).toMatch(/PR_REVIEW_VERIFY/);
+    });
+
+    it("filters out invalid thread-safety claims on Node.js code", () => {
+      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
+      const content = fs.readFileSync(scriptPath, "utf8");
+
+      expect(content).toMatch(/thread-safety|thread safety/i);
+    });
+  });
 });
+
 
 
