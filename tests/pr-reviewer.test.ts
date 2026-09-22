@@ -432,4 +432,31 @@ describe("PR Reviewer Agent - TDD Tests", () => {
       expect(meaningfulAssertions.length).toBeGreaterThan(1);
     });
   });
+
+  describe("PR Reviewer Grounding and Anti-Hallucination Rules (#182)", () => {
+    it("includes Node.js runtime grounding and single-threaded awareness in the system prompt", () => {
+      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
+      const content = fs.readFileSync(scriptPath, "utf8");
+
+      expect(content).toMatch(/single-threaded/i);
+      expect(content).toMatch(/thread safety/i);
+    });
+
+    it("instructs the reviewer to output LGTM when code is clean and defect-free", () => {
+      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
+      const content = fs.readFileSync(scriptPath, "utf8");
+
+      expect(content).toMatch(/LGTM/i);
+      expect(content).toMatch(/HIGH PRECISION OVER HIGH RECALL|do not fabricate/i);
+    });
+
+    it("forbids subjective architectural nitpicks and bikeshedding in guidelines", () => {
+      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
+      const content = fs.readFileSync(scriptPath, "utf8");
+
+      expect(content).toMatch(/VERIFY BEFORE ASSERTING/i);
+      expect(content).toMatch(/DO NOT NITPICK OR DICTATE TASTE/i);
+    });
+  });
 });
+

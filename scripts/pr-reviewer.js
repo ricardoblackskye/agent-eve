@@ -187,8 +187,42 @@ function sanitizeForPrompt(text) {
 // Sanitize PR diff to prevent prompt injection (escape backslashes, then backticks)
 const sanitizedPrDiff = sanitizeForPrompt(reviewDiff);
 
-const SYSTEM_PROMPT =
-  "You are a senior software engineer reviewing this code diff. Look for architectural anti-patterns, security risks, and off-by-one errors. You MUST reference the exact line numbers from the diff headers (@@ -x,y +a,b @@) in your feedback.";
+/**
+ * Detect runtime environment from diff filenames to provide targeted runtime context.
+ */
+function detectRuntimeEnvironment(diff) {
+  const isNode = /\.(ts|js|mjs|cjs|jsx|tsx|json)($|\b)/.test(diff);
+  const isDotNet = /\.(cs|csproj|sln)($|\b)/.test(diff);
+  const isPython = /\.(py|pyi)($|\b)/.test(diff);
+
+  if (isNode) {
+    return "Node.js / TypeScript / JavaScript (single-threaded event loop runtime)";
+  }
+  if (isDotNet) {
+    return ".NET / C# (multi-threaded runtime)";
+  }
+  if (isPython) {
+    return "Python runtime";
+  }
+  return "General software project";
+}
+
+function buildSystemPrompt(runtimeContext) {
+  return [
+    `You are a pragmatic principal software engineer reviewing this code diff.`,
+    `Target Runtime Environment: ${runtimeContext}`,
+    ``,
+    `CRITICAL REVIEW GUIDELINES:`,
+    `1. HIGH PRECISION OVER HIGH RECALL: Only report concrete, demonstrable bugs, actual security vulnerabilities, or severe logic defects. If the diff is clean, sound, and defect-free, explicitly output "LGTM" and do NOT fabricate minor or subjective feedback.`,
+    `2. RUNTIME ACCURACY: For Node.js/JavaScript, the runtime executes on a single-threaded event loop. Do NOT flag "thread safety" or concurrent memory corruption on standard in-memory JavaScript data structures (Set, Map, Array, Object).`,
+    `3. VERIFY BEFORE ASSERTING: Check if a capability is already provided. For example, if constructor options or parameter objects allow injecting dependencies or options, do NOT claim Dependency Injection or configurability is missing.`,
+    `4. DO NOT NITPICK OR DICTATE TASTE: Do not flag subjective architectural preferences (e.g. debating Singleton vs Factory vs Registry) unless it causes an actual memory leak or unhandled exception. Avoid bike-shedding on patterns that provide reasonable encapsulation for the scope of the PR.`,
+    `5. EXACT CITATIONS: You MUST reference the exact line numbers from the diff headers (@@ -x,y +a,b @@) for any reported defect.`,
+  ].join("\n");
+}
+
+const RUNTIME_CONTEXT = detectRuntimeEnvironment(reviewDiff);
+const SYSTEM_PROMPT = buildSystemPrompt(RUNTIME_CONTEXT);
 
 /**
  * Assemble the user message for one attempt.
