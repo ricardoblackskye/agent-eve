@@ -16,32 +16,33 @@ import {
 } from "./plan-validator";
 
 /**
- * Dedicated process-level timer registry following SRP.
- * Guarantees timer cleanup even during unexpected process termination.
+ * Dedicated process-level timer registry following SRP and the Singleton pattern.
+ * Guarantees timer cleanup even during unexpected process termination without memory leaks.
  */
 export class ProcessTimerRegistry {
-  private static allRegistries = new Set<ProcessTimerRegistry>();
-  private static handlersRegistered = false;
-
+  private static instance: ProcessTimerRegistry | undefined;
   private activeTimers = new Set<NodeJS.Timeout>();
 
-  constructor() {
-    ProcessTimerRegistry.allRegistries.add(this);
-    if (
-      !ProcessTimerRegistry.handlersRegistered &&
-      typeof process !== "undefined" &&
-      typeof process.once === "function"
-    ) {
-      ProcessTimerRegistry.handlersRegistered = true;
-      const cleanup = () => {
-        for (const reg of ProcessTimerRegistry.allRegistries) {
-          reg.clearAll();
-        }
-        ProcessTimerRegistry.allRegistries.clear();
-      };
+  private constructor() {
+    if (typeof process !== "undefined" && typeof process.once === "function") {
+      const cleanup = () => this.clearAll();
       process.once("beforeExit", cleanup);
       process.once("SIGTERM", cleanup);
       process.once("SIGINT", cleanup);
+    }
+  }
+
+  static getInstance(): ProcessTimerRegistry {
+    if (!ProcessTimerRegistry.instance) {
+      ProcessTimerRegistry.instance = new ProcessTimerRegistry();
+    }
+    return ProcessTimerRegistry.instance;
+  }
+
+  static resetInstanceForTesting(): void {
+    if (ProcessTimerRegistry.instance) {
+      ProcessTimerRegistry.instance.clearAll();
+      ProcessTimerRegistry.instance = undefined;
     }
   }
 
@@ -70,16 +71,13 @@ export class ProcessTimerRegistry {
     }
     this.activeTimers.clear();
   }
-
-  dispose(): void {
-    this.clearAll();
-    ProcessTimerRegistry.allRegistries.delete(this);
-  }
 }
 
-
 export interface ArchitectDeps {
-  generateText: (prompt: string) => Promise<string>;
+  generateText: (
+    prompt: string,
+    options?: { signal?: AbortSignal },
+  ) => Promise<string>;
   listFiles: (dir: string) => Promise<string[]>;
   readFile?: (path: string) => Promise<string>;
   planParser?: PlanParser;
@@ -88,6 +86,7 @@ export interface ArchitectDeps {
   timeoutMs?: number;
   backoffBaseMs?: number;
   sleepFn?: (ms: number) => Promise<void>;
+  maxContextFiles?: number;
 }
 
 export interface ArchitectResult {
@@ -95,6 +94,7 @@ export interface ArchitectResult {
   plan?: ExecutionPlan;
   retries: number;
   error?: string;
+  cause?: unknown;
 }
 
 export interface StoryInput {
@@ -103,48 +103,99 @@ export interface StoryInput {
   body: string;
 }
 
+export const MAX_STORY_TITLE_LENGTH = 200;
+export const MAX_STORY_BODY_LENGTH = 10000;
+export const DEFAULT_LOWEST_PRIORITY_SCORE = 999;
+export const DEFAULT_MAX_CONTEXT_FILES = 100;
+
+const WINDOWS_RESERVED_NAMES = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;
+
 /**
- * Sorts repository files by architectural relevance so critical config and
- * UI entry points are prioritized when the context window is bounded.
- * Sanitizes input file paths against path traversal or drive/UNC vectors.
+ * Sanitizes and validates a relative file path against Unicode normalization exploits,
+ * unprintable characters, Windows reserved device names, and traversal vectors.
  */
-function sortFilesByRelevance(files: string[]): string[] {
-  if (!Array.isArray(files)) return [];
-  const safeFiles = files.filter((f) => {
-    if (typeof f !== "string") return false;
-    const trimmed = f.trim();
-    if (!trimmed || trimmed.includes("\0")) return false;
-    if (
-      isAbsolute(trimmed) ||
-      /^[A-Za-z]:/.test(trimmed) ||
-      trimmed.startsWith("//") ||
-      trimmed.startsWith("\\\\")
-    ) {
-      return false;
+export function sanitizeRelativePath(rawPath: string): string | null {
+  if (typeof rawPath !== "string") return null;
+  // 1. Unicode NFKC normalization
+  const normalizedUnicode = rawPath.normalize("NFKC").trim();
+  if (!normalizedUnicode) return null;
+
+  // 2. Reject control/unprintable characters and null bytes
+  if (/[\x00-\x1f\x7f]/.test(normalizedUnicode)) return null;
+
+  // 3. Reject Windows drive paths, UNC forms, alternate data streams (::), and reserved device names
+  if (
+    isAbsolute(normalizedUnicode) ||
+    /^[A-Za-z]:/.test(normalizedUnicode) ||
+    normalizedUnicode.startsWith("//") ||
+    normalizedUnicode.startsWith("\\\\") ||
+    normalizedUnicode.includes("::$")
+  ) {
+    return null;
+  }
+
+  // 4. Normalize separators and resolve traversal
+  const normalizedSep = normalize(normalizedUnicode).replace(/\\/g, "/");
+  if (
+    normalizedSep === ".." ||
+    normalizedSep.startsWith("../") ||
+    normalizedSep.includes("/../")
+  ) {
+    return null;
+  }
+
+  // 5. Check segments for Windows reserved device names
+  const segments = normalizedSep.split("/");
+  for (const segment of segments) {
+    if (WINDOWS_RESERVED_NAMES.test(segment)) {
+      return null;
     }
-    const norm = normalize(trimmed).replace(/\\/g, "/");
-    return norm !== ".." && !norm.startsWith("../") && !norm.includes("/../");
-  });
+  }
 
-  const priorityPatterns = [
-    /^package\.json$/i,
-    /^tsconfig.*\.json$/i,
-    /^(?:app|src\/app)\//i,
-    /^(?:components|src\/components)\//i,
-    /^agent\//i,
-    /^(?:lib|src\/lib)\//i,
-  ];
+  return normalizedSep;
+}
 
-  return safeFiles.sort((a, b) => {
-    const aPriority = priorityPatterns.findIndex((re) => re.test(a));
-    const bPriority = priorityPatterns.findIndex((re) => re.test(b));
-    const aScore = aPriority === -1 ? 999 : aPriority;
-    const bScore = bPriority === -1 ? 999 : bPriority;
-    if (aScore !== bScore) {
-      return aScore - bScore;
+const PRIORITY_PATTERNS: readonly RegExp[] = [
+  /^package\.json$/i,
+  /^tsconfig.*\.json$/i,
+  /^(?:app|src\/app)\//i,
+  /^(?:components|src\/components)\//i,
+  /^agent\//i,
+  /^(?:lib|src\/lib)\//i,
+];
+
+function computeFilePriority(filePath: string): number {
+  const idx = PRIORITY_PATTERNS.findIndex((re) => re.test(filePath));
+  return idx === -1 ? DEFAULT_LOWEST_PRIORITY_SCORE : idx;
+}
+
+/**
+ * Sorts sanitized repository files by architectural relevance so critical config and
+ * UI entry points are prioritized when the context window is bounded.
+ */
+export function sortFilesByRelevance(files: string[]): string[] {
+  if (!Array.isArray(files)) return [];
+  const sanitizedFiles = files
+    .map(sanitizeRelativePath)
+    .filter((f): f is string => f !== null);
+
+  return sanitizedFiles.sort((a, b) => {
+    const aPriority = computeFilePriority(a);
+    const bPriority = computeFilePriority(b);
+    if (aPriority !== bPriority) {
+      return aPriority - bPriority;
     }
     return a.localeCompare(b);
   });
+}
+
+function escapeXmlContent(unsafe: string): string {
+  return unsafe
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
 }
 
 export class ArchitectAgent {
@@ -153,50 +204,70 @@ export class ArchitectAgent {
   private maxPlanRetries: number;
   private timeoutMs: number;
   private backoffBaseMs: number;
+  private maxContextFiles: number;
   private sleepFn: (ms: number) => Promise<void>;
 
   constructor(private deps: ArchitectDeps) {
     this.maxPlanRetries = deps.maxPlanRetries ?? 2;
     this.parser = deps.planParser ?? new DefaultPlanParser();
-    this.timerRegistry = deps.timerRegistry ?? new ProcessTimerRegistry();
+    this.timerRegistry = deps.timerRegistry ?? ProcessTimerRegistry.getInstance();
     this.timeoutMs = deps.timeoutMs ?? 60000;
     this.backoffBaseMs = deps.backoffBaseMs ?? (process.env.NODE_ENV === "test" ? 0 : 500);
+    this.maxContextFiles = deps.maxContextFiles ?? DEFAULT_MAX_CONTEXT_FILES;
     this.sleepFn =
       deps.sleepFn ??
       ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
   }
 
   /**
-   * Invokes LLM generation with a timeout guard to prevent hanging interactions.
+   * Invokes LLM generation with a race-condition-safe timeout guard to prevent hanging interactions.
    * Uses ProcessTimerRegistry for process-level safety.
    */
   private async executeGenerate(prompt: string): Promise<string> {
-    const generatePromise = this.deps.generateText(prompt);
+    let settled = false;
     let timer: NodeJS.Timeout | undefined;
+    const controller =
+      typeof AbortController !== "undefined" ? new AbortController() : undefined;
+
     const timeoutPromise = new Promise<never>((_, reject) => {
       timer = this.timerRegistry.createTimeout(() => {
-        reject(
-          new Error(
-            `ArchitectAgent LLM interaction timed out after ${this.timeoutMs}ms.`,
-          ),
-        );
+        if (!settled) {
+          settled = true;
+          controller?.abort();
+          reject(
+            new Error(
+              `ArchitectAgent LLM interaction timed out after ${this.timeoutMs}ms.`,
+            ),
+          );
+        }
       }, this.timeoutMs);
     });
 
-    try {
-      return await Promise.race([generatePromise, timeoutPromise]);
-    } finally {
-      this.timerRegistry.clearTimeout(timer);
-    }
+    const generatePromise = (async () => {
+      try {
+        const result = await this.deps.generateText(prompt, {
+          signal: controller?.signal,
+        });
+        settled = true;
+        return result;
+      } finally {
+        if (timer) {
+          this.timerRegistry.clearTimeout(timer);
+          timer = undefined;
+        }
+      }
+    })();
+
+    return await Promise.race([generatePromise, timeoutPromise]);
   }
 
   /**
    * Constructs the initial planning prompt for the LLM.
-   * Isolate user inputs inside strict XML/markdown containment to mitigate prompt injection.
+   * Isolates user inputs inside strict XML/markdown containment to mitigate prompt injection.
    */
   private buildInitialPrompt(story: StoryInput, repoFiles: string[]): string {
     const sortedFiles = sortFilesByRelevance(repoFiles);
-    const safeFiles = sortedFiles.slice(0, 100);
+    const safeFiles = sortedFiles.slice(0, this.maxContextFiles);
     const sanitizedTitle = story.title.replace(/[\r\n]+/g, " ").trim();
 
     return [
@@ -208,9 +279,9 @@ export class ArchitectAgent {
       ``,
       `<user_story>`,
       `<story_id>${story.number}</story_id>`,
-      `<story_title>${sanitizedTitle}</story_title>`,
+      `<story_title>${escapeXmlContent(sanitizedTitle)}</story_title>`,
       `<story_body>`,
-      story.body.trim(),
+      escapeXmlContent(story.body.trim()),
       `</story_body>`,
       `</user_story>`,
       ``,
@@ -233,6 +304,7 @@ export class ArchitectAgent {
       `- Return ONLY raw JSON. No conversational text or markdown code fences.`,
     ].join("\n");
   }
+
 
 
   /**
@@ -286,6 +358,13 @@ export class ArchitectAgent {
         error: "StoryInput title must be a non-empty string.",
       };
     }
+    if (story.title.length > MAX_STORY_TITLE_LENGTH) {
+      return {
+        ok: false,
+        retries: 0,
+        error: `StoryInput title exceeds maximum length of ${MAX_STORY_TITLE_LENGTH} characters.`,
+      };
+    }
     if (!story.body || typeof story.body !== "string" || !story.body.trim()) {
       return {
         ok: false,
@@ -293,11 +372,19 @@ export class ArchitectAgent {
         error: "StoryInput body must be a non-empty string.",
       };
     }
+    if (story.body.length > MAX_STORY_BODY_LENGTH) {
+      return {
+        ok: false,
+        retries: 0,
+        error: `StoryInput body exceeds maximum length of ${MAX_STORY_BODY_LENGTH} characters.`,
+      };
+    }
 
     const repoFiles = await this.deps.listFiles(".");
     let retries = 0;
     let lastOutput = "";
     let lastErrors: string[] = [];
+    let lastCause: unknown;
 
     let currentPrompt = this.buildInitialPrompt(story, repoFiles);
 
@@ -305,7 +392,12 @@ export class ArchitectAgent {
       try {
         lastOutput = await this.executeGenerate(currentPrompt);
       } catch (err: any) {
-        lastErrors = [err.message];
+        lastCause = err;
+        const errMsg =
+          err instanceof Error
+            ? (err.stack ? `${err.name}: ${err.message}\n${err.stack}` : `${err.name}: ${err.message}`)
+            : String(err);
+        lastErrors = [errMsg];
         lastOutput = "";
       }
 
@@ -348,6 +440,7 @@ export class ArchitectAgent {
       ok: false,
       retries,
       error: `ArchitectAgent max retries exceeded (${this.maxPlanRetries}). Errors: ${lastErrors.join("; ")}`,
+      cause: lastCause,
     };
   }
 }
