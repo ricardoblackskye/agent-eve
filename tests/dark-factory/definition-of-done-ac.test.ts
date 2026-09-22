@@ -174,6 +174,35 @@ describe("Definition of Done — Acceptance Criteria Traceability & Anti-Rubber-
     expect(result.reason).toContain("cannot accept findings with severity 'error'");
   });
 
+  it("collects all error severity findings across dispositions before blocking", async () => {
+    const { deps } = createMockDeps();
+    deps.runChecks = vi.fn().mockResolvedValue([
+      { id: "ERR-1", source: "linter", message: "Error one", severity: "error" },
+      { id: "ERR-2", source: "security", message: "Error two", severity: "error" },
+    ]);
+
+    deps.attemptFixes = vi.fn().mockResolvedValue([
+      { findingId: "ERR-1", status: "accepted", explanation: "Explain 1" },
+      { findingId: "ERR-2", status: "accepted", explanation: "Explain 2" },
+    ]);
+
+    const task: DefinitionOfDoneTask = {
+      runId: "run-multi-err",
+      repo: "org/repo",
+      issue: 179,
+      head: "task-branch",
+      title: "Add Google Auth",
+      body: "Closes #179",
+    };
+
+    const result = await runDefinitionOfDone(deps, task);
+    expect(result.ok).toBe(false);
+    expect(result.status).toBe("blocked");
+    expect(result.reason).toContain("ERR-1: Error one");
+    expect(result.reason).toContain("ERR-2: Error two");
+  });
+
+
   it("evaluates AC traceability as a pure component (SRP)", async () => {
     const { evaluateAcTraceability } = await import(
       "../../agent/lib/dark-factory/definition-of-done"

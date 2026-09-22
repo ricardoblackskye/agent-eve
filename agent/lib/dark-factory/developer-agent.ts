@@ -24,6 +24,7 @@ import { lstat, mkdir, readFile, readdir, realpath, writeFile } from "node:fs/pr
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import {
+  basename,
   dirname,
   extname,
   isAbsolute,
@@ -459,11 +460,15 @@ export function createWorkspaceTools(
   allowedExtensions?: ReadonlySet<string>,
 ): WorkspaceTools {
   const root = resolve(workspaceDir);
+  const MAX_PATH_CACHE_SIZE = 1000;
   const resolvedPathCache = new Map<string, string>();
 
   const resolveContainedPath = async (relPath: string): Promise<string> => {
     const cached = resolvedPathCache.get(relPath);
     if (cached) {
+      // Refresh LRU order
+      resolvedPathCache.delete(relPath);
+      resolvedPathCache.set(relPath, cached);
       return cached;
     }
 
@@ -532,6 +537,12 @@ export function createWorkspaceTools(
       ancestor = parent;
     }
 
+    if (resolvedPathCache.size >= MAX_PATH_CACHE_SIZE) {
+      const oldestKey = resolvedPathCache.keys().next().value;
+      if (oldestKey !== undefined) {
+        resolvedPathCache.delete(oldestKey);
+      }
+    }
     resolvedPathCache.set(relPath, target);
     return target;
   };
@@ -543,6 +554,18 @@ export function createWorkspaceTools(
     },
 
     async writeFile(relPath: string, content: string): Promise<void> {
+      if (isAbsolute(relPath)) {
+        throw new InvalidTaskError(
+          `Path '${relPath}' must be relative to workspace; absolute path rejected.`,
+        );
+      }
+      assertSafeRelativePath(relPath);
+      const baseName = basename(relPath).toLowerCase();
+      if (baseName === ".env" || baseName.startsWith(".env.")) {
+        throw new InvalidTaskError(
+          `File '${relPath}' is a protected configuration/secret file; write rejected.`,
+        );
+      }
       const ext = extname(relPath).toLowerCase();
       const permittedExtensions =
         allowedExtensions ?? ALLOWED_WORKSPACE_EXTENSIONS;
@@ -580,13 +603,6 @@ export function createWorkspaceTools(
 
     async runTests(cmd?: string): Promise<{ passed: boolean; output: string }> {
       const testCmd = (cmd ?? "npx vitest run").trim();
-      if (commandRunner) {
-        const res = await commandRunner(testCmd);
-        return {
-          passed: res.exitCode === 0,
-          output: res.stdout || res.stderr,
-        };
-      }
 
       // Security: Disallow all shell metacharacters, subshells, substitutions, and redirections
       if (/[;&|`$><()\\!#*?{}[\]^~"'\r\n]/.test(testCmd)) {
@@ -620,6 +636,14 @@ export function createWorkspaceTools(
         throw new InvalidTaskError(
           `Command '${testCmd}' is not allowed. Only test commands starting with [${ALLOWED_TEST_PREFIXES.join(", ")}] are permitted.`,
         );
+      }
+
+      if (commandRunner) {
+        const res = await commandRunner(testCmd);
+        return {
+          passed: res.exitCode === 0,
+          output: res.stdout || res.stderr,
+        };
       }
 
       try {

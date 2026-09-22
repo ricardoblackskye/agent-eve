@@ -251,6 +251,9 @@ async function applyAcceptedDispositions(
     totalDistinctFindings: number;
   },
 ): Promise<DispositionOutcome> {
+  const errorFindings: ReviewFinding[] = [];
+  const validDispositions: { finding: ReviewFinding; explanation: string }[] = [];
+
   for (const disposition of dispositions) {
     if (disposition.status === "accepted") {
       const explanation = (disposition.explanation ?? "").trim();
@@ -280,28 +283,40 @@ async function applyAcceptedDispositions(
         continue;
       }
       if (finding.severity === "error") {
-        return {
-          blockedResult: {
-            ok: false,
-            status: "blocked",
-            pr,
-            roundsExecuted: state.roundsExecuted,
-            totalFindings: state.totalDistinctFindings,
-            resolvedCount: state.totalDistinctFindings - acceptedIds.size,
-            acceptedCount: acceptedIds.size,
-            remainingFindings: unacceptedFindings,
-            reason: `Definition of Done cannot accept findings with severity 'error' (${finding.id}: ${finding.message}).`,
-          },
-        };
+        errorFindings.push(finding);
+      } else {
+        validDispositions.push({ finding, explanation });
       }
-      await deps.commentWriter.postComment(
-        owner,
-        repoName,
-        pr.number,
-        renderAcceptedFindingComment(finding, explanation),
-      );
-      acceptedIds.add(disposition.findingId);
     }
+  }
+
+  if (errorFindings.length > 0) {
+    const errSummary = errorFindings
+      .map((f) => `${f.id}: ${f.message}`)
+      .join("; ");
+    return {
+      blockedResult: {
+        ok: false,
+        status: "blocked",
+        pr,
+        roundsExecuted: state.roundsExecuted,
+        totalFindings: state.totalDistinctFindings,
+        resolvedCount: state.totalDistinctFindings - acceptedIds.size,
+        acceptedCount: acceptedIds.size,
+        remainingFindings: unacceptedFindings,
+        reason: `Definition of Done cannot accept findings with severity 'error' (${errSummary}).`,
+      },
+    };
+  }
+
+  for (const { finding, explanation } of validDispositions) {
+    await deps.commentWriter.postComment(
+      owner,
+      repoName,
+      pr.number,
+      renderAcceptedFindingComment(finding, explanation),
+    );
+    acceptedIds.add(finding.id);
   }
 
   return {};

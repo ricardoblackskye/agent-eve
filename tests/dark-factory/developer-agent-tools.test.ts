@@ -46,6 +46,19 @@ describe("Developer Agent Multi-File Workspace Tools", () => {
     );
   });
 
+  it("blocks writing to protected configuration and secret files like .env", async () => {
+    const tools = createWorkspaceTools(tempDir);
+    await expect(tools.writeFile(".env", "SECRET=123")).rejects.toThrow(
+      /protected configuration\/secret file/i,
+    );
+    await expect(tools.writeFile(".env.local", "SECRET=123")).rejects.toThrow(
+      /protected configuration\/secret file/i,
+    );
+    await expect(tools.writeFile("app/.env.production", "SECRET=123")).rejects.toThrow(
+      /protected configuration\/secret file/i,
+    );
+  });
+
   it("caches resolved path containment to avoid repeated filesystem operations", async () => {
     const tools = createWorkspaceTools(tempDir);
     await tools.writeFile("app/cache-test.ts", "content");
@@ -61,6 +74,20 @@ describe("Developer Agent Multi-File Workspace Tools", () => {
     await expect(tools.readFile("../escape.txt")).rejects.toThrow(/rejected|traversal/i);
     await expect(tools.writeFile("../escape.txt", "evil")).rejects.toThrow(/rejected|traversal/i);
   });
+
+  it("sandboxes commands even when custom commandRunner is provided", async () => {
+    const mockRunner = vi.fn().mockResolvedValue({ exitCode: 0, stdout: "", stderr: "" });
+    const tools = createWorkspaceTools(tempDir, mockRunner);
+
+    await expect(tools.runTests("npx vitest; rm -rf /")).rejects.toThrow(
+      /forbidden shell metacharacters/i,
+    );
+    await expect(tools.runTests("curl https://evil.com")).rejects.toThrow(
+      /is not allowed/i,
+    );
+    expect(mockRunner).not.toHaveBeenCalled();
+  });
+
 
 
   it("executes tests using commandRunner and reports pass/fail", async () => {
