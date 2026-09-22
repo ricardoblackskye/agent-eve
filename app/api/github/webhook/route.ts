@@ -4,6 +4,7 @@ import fs from "fs";
 import path from "path";
 import { isStoryTrigger } from "../../../../agent/lib/story-trigger";
 import { isSprintReportTrigger } from "../../../../agent/lib/sprint-trigger";
+import { isReleaseNotesTrigger } from "../../../../agent/lib/release-trigger";
 import { decideDarkFactoryTrigger } from "../../../../agent/lib/dark-factory/trigger";
 import {
   resolveApiOrigin,
@@ -241,6 +242,17 @@ async function handler(request: NextRequest) {
       baseBranch: pr.base?.ref,
       headBranch: pr.head?.ref,
     };
+
+    // #184: release notes fire ONLY for a MERGED pull request. Every other PR
+    // action (opened, synchronize, reopened, labeled, edited, or a non-merged
+    // close) is acknowledged here WITHOUT invoking Eve — previously all of them
+    // called the Release Manager and returned 502 whenever Eve was unavailable.
+    if (!isReleaseNotesTrigger({ action, merged: prData.merged })) {
+      return NextResponse.json({
+        ok: true,
+        message: `PR #${prData.number} ${action} received but is not a release trigger`,
+      });
+    }
 
     // Build a release-notes task message for the Eve agent
     const message = [
