@@ -21,6 +21,8 @@ export interface ArchitectDeps {
   planParser?: PlanParser;
   maxPlanRetries?: number;
   timeoutMs?: number;
+  backoffBaseMs?: number;
+  sleepFn?: (ms: number) => Promise<void>;
 }
 
 export interface ArchitectResult {
@@ -34,6 +36,23 @@ export interface StoryInput {
   number: number;
   title: string;
   body: string;
+}
+
+/**
+ * Process-level timer registry to ensure timers are cleared even on abrupt exit.
+ */
+const activeTimers = new Set<NodeJS.Timeout>();
+
+if (typeof process !== "undefined" && typeof process.once === "function") {
+  const cleanupActiveTimers = () => {
+    for (const timer of activeTimers) {
+      clearTimeout(timer);
+    }
+    activeTimers.clear();
+  };
+  process.once("beforeExit", cleanupActiveTimers);
+  process.once("SIGTERM", cleanupActiveTimers);
+  process.once("SIGINT", cleanupActiveTimers);
 }
 
 /**
@@ -67,19 +86,26 @@ export class ArchitectAgent {
   private parser: PlanParser;
   private maxPlanRetries: number;
   private timeoutMs: number;
+  private backoffBaseMs: number;
+  private sleepFn: (ms: number) => Promise<void>;
 
   constructor(private deps: ArchitectDeps) {
     this.maxPlanRetries = deps.maxPlanRetries ?? 2;
     this.parser = deps.planParser ?? new DefaultPlanParser();
     this.timeoutMs = deps.timeoutMs ?? 60000;
+    this.backoffBaseMs = deps.backoffBaseMs ?? (process.env.NODE_ENV === "test" ? 0 : 500);
+    this.sleepFn =
+      deps.sleepFn ??
+      ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
   }
 
   /**
    * Invokes LLM generation with a timeout guard to prevent hanging interactions.
+   * Registers timers in activeTimers for process-level safety.
    */
   private async executeGenerate(prompt: string): Promise<string> {
     const generatePromise = this.deps.generateText(prompt);
-    let timer: ReturnType<typeof setTimeout> | undefined;
+    let timer: NodeJS.Timeout | undefined;
     const timeoutPromise = new Promise<never>((_, reject) => {
       timer = setTimeout(() => {
         reject(
@@ -91,14 +117,19 @@ export class ArchitectAgent {
       if (typeof timer.unref === "function") {
         timer.unref();
       }
+      activeTimers.add(timer);
     });
 
     try {
       return await Promise.race([generatePromise, timeoutPromise]);
     } finally {
-      if (timer) clearTimeout(timer);
+      if (timer) {
+        clearTimeout(timer);
+        activeTimers.delete(timer);
+      }
     }
   }
+
 
   /**
    * Constructs the initial planning prompt for the LLM.
@@ -229,6 +260,10 @@ export class ArchitectAgent {
       // Allow up to maxPlanRetries self-correction loops (< condition)
       if (retries < this.maxPlanRetries) {
         retries++;
+        if (this.backoffBaseMs > 0) {
+          const delay = this.backoffBaseMs * Math.pow(2, retries - 1);
+          await this.sleepFn(delay);
+        }
         currentPrompt = this.buildRepairPrompt(story, lastOutput, {
           valid: false,
           errors: lastErrors,

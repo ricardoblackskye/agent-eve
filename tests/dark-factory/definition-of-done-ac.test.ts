@@ -214,5 +214,20 @@ describe("Definition of Done — Acceptance Criteria Traceability & Anti-Rubber-
     expect(result.ok).toBe(true);
     expect(result.status).toBe("done");
   });
+
+  it("exports table rendering and comment formatting from dedicated dod-presentation module", async () => {
+    const presentation = await import("../../agent/lib/dark-factory/dod-presentation");
+    expect(typeof presentation.renderAcTraceabilityTable).toBe("function");
+    expect(typeof presentation.renderAcceptedFindingComment).toBe("function");
+
+    const comment = presentation.renderAcceptedFindingComment(
+      { id: "TEST-1", source: "linter", severity: "warning", message: "formatting warning", file: "app.ts", line: 10 },
+      "Style choice",
+    );
+    expect(comment).toContain("TEST-1");
+    expect(comment).toContain("app.ts#10");
+    expect(comment).toContain("Style choice");
+  });
 });
+
 

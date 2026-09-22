@@ -431,17 +431,42 @@ export type CommandRunnerFn = (
   cmd: string,
 ) => Promise<{ exitCode: number; stdout: string; stderr: string }>;
 
+export const ALLOWED_WORKSPACE_EXTENSIONS: ReadonlySet<string> = new Set([
+  ".ts",
+  ".tsx",
+  ".js",
+  ".jsx",
+  ".mjs",
+  ".cjs",
+  ".json",
+  ".md",
+  ".css",
+  ".yml",
+  ".yaml",
+  ".txt",
+  ".html",
+  ".svg",
+]);
+
 /**
  * Creates sandboxed workspace tools confined to `workspaceDir`.
- * Fails closed on any path traversal attempt.
+ * Fails closed on any path traversal attempt, validates file extensions,
+ * and caches verified path resolutions to optimize filesystem operations.
  */
 export function createWorkspaceTools(
   workspaceDir: string,
   commandRunner?: CommandRunnerFn,
+  allowedExtensions?: ReadonlySet<string>,
 ): WorkspaceTools {
   const root = resolve(workspaceDir);
+  const resolvedPathCache = new Map<string, string>();
 
   const resolveContainedPath = async (relPath: string): Promise<string> => {
+    const cached = resolvedPathCache.get(relPath);
+    if (cached) {
+      return cached;
+    }
+
     if (isAbsolute(relPath)) {
       throw new InvalidTaskError(
         `Path '${relPath}' must be relative to workspace; absolute path rejected.`,
@@ -507,6 +532,7 @@ export function createWorkspaceTools(
       ancestor = parent;
     }
 
+    resolvedPathCache.set(relPath, target);
     return target;
   };
 
@@ -517,6 +543,16 @@ export function createWorkspaceTools(
     },
 
     async writeFile(relPath: string, content: string): Promise<void> {
+      const ext = extname(relPath).toLowerCase();
+      const permittedExtensions =
+        allowedExtensions ?? ALLOWED_WORKSPACE_EXTENSIONS;
+      if (!permittedExtensions.has(ext)) {
+        throw new InvalidTaskError(
+          `File '${relPath}' has disallowed extension '${
+            ext || "(none)"
+          }'. Permitted extensions: ${[...permittedExtensions].join(", ")}`,
+        );
+      }
       const target = await resolveContainedPath(relPath);
       await mkdir(dirname(target), { recursive: true });
       await writeFile(target, content, "utf8");

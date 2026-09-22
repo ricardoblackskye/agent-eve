@@ -26,11 +26,42 @@ describe("Developer Agent Multi-File Workspace Tools", () => {
     expect(content).toBe("export const x = 42;");
   });
 
+  it("restricts file writing by allowed extensions", async () => {
+    const tools = createWorkspaceTools(tempDir);
+    await expect(tools.writeFile("evil.sh", "echo evil")).rejects.toThrow(
+      /disallowed extension '\.sh'/i,
+    );
+    await expect(tools.writeFile("payload.exe", "binary")).rejects.toThrow(
+      /disallowed extension '\.exe'/i,
+    );
+    await expect(tools.writeFile("script.bat", "calc")).rejects.toThrow(
+      /disallowed extension '\.bat'/i,
+    );
+
+    // Custom allowed extensions set
+    const customTools = createWorkspaceTools(tempDir, undefined, new Set([".custom"]));
+    await customTools.writeFile("data.custom", "ok");
+    await expect(customTools.writeFile("app/test.ts", "ok")).rejects.toThrow(
+      /disallowed extension '\.ts'/i,
+    );
+  });
+
+  it("caches resolved path containment to avoid repeated filesystem operations", async () => {
+    const tools = createWorkspaceTools(tempDir);
+    await tools.writeFile("app/cache-test.ts", "content");
+    // Reading multiple times hits the containment cache
+    const first = await tools.readFile("app/cache-test.ts");
+    const second = await tools.readFile("app/cache-test.ts");
+    expect(first).toBe("content");
+    expect(second).toBe("content");
+  });
+
   it("throws error and blocks path traversal attempts", async () => {
     const tools = createWorkspaceTools(tempDir);
     await expect(tools.readFile("../escape.txt")).rejects.toThrow(/rejected|traversal/i);
     await expect(tools.writeFile("../escape.txt", "evil")).rejects.toThrow(/rejected|traversal/i);
   });
+
 
   it("executes tests using commandRunner and reports pass/fail", async () => {
     const mockRunner = vi.fn().mockResolvedValue({

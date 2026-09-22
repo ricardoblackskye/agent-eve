@@ -211,5 +211,31 @@ A user must authenticate via Google OAuth before accessing the Eve Chat UI.
     expect(result.ok).toBe(false);
     expect(result.error).toContain("timed out after 50ms");
   });
+
+  it("applies exponential backoff delay before self-correction retries", async () => {
+    const sleepDelays: number[] = [];
+    const mockSleep = vi.fn().mockImplementation(async (ms: number) => {
+      sleepDelays.push(ms);
+    });
+
+    const agent = new ArchitectAgent({
+      listFiles: vi.fn().mockResolvedValue(["app/chat.tsx"]),
+      generateText: vi
+        .fn()
+        .mockResolvedValueOnce("invalid 1")
+        .mockResolvedValueOnce("invalid 2")
+        .mockResolvedValueOnce(JSON.stringify(validPlan)),
+      maxPlanRetries: 2,
+      backoffBaseMs: 100,
+      sleepFn: mockSleep,
+    });
+
+    const result = await agent.planStory(sampleStory);
+    expect(result.ok).toBe(true);
+    expect(result.retries).toBe(2);
+    // retry 1: 100 * 2^0 = 100; retry 2: 100 * 2^1 = 200
+    expect(sleepDelays).toEqual([100, 200]);
+  });
 });
+
 
