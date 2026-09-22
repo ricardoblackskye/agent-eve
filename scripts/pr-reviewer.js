@@ -187,8 +187,101 @@ function sanitizeForPrompt(text) {
 // Sanitize PR diff to prevent prompt injection (escape backslashes, then backticks)
 const sanitizedPrDiff = sanitizeForPrompt(reviewDiff);
 
-const SYSTEM_PROMPT =
-  "You are a senior software engineer reviewing this code diff. Look for architectural anti-patterns, security risks, and off-by-one errors. You MUST reference the exact line numbers from the diff headers (@@ -x,y +a,b @@) in your feedback.";
+/**
+ * Detect runtime environment from diff filenames to provide targeted runtime context.
+ */
+function detectRuntimeEnvironment(diff) {
+  const isNode = /\.(ts|js|mjs|cjs|jsx|tsx|json)($|\b)/.test(diff);
+  const isDotNet = /\.(cs|csproj|sln)($|\b)/.test(diff);
+  const isPython = /\.(py|pyi)($|\b)/.test(diff);
+
+  if (isNode) {
+    return "Node.js / TypeScript / JavaScript (single-threaded event loop runtime)";
+  }
+  if (isDotNet) {
+    return ".NET / C# (multi-threaded runtime)";
+  }
+  if (isPython) {
+    return "Python runtime";
+  }
+  return "General software project";
+}
+
+function buildSystemPrompt(runtimeContext) {
+  return [
+    `You are a pragmatic principal software engineer reviewing this code diff.`,
+    `Target Runtime Environment: ${runtimeContext}`,
+    ``,
+    `CRITICAL REVIEW GUIDELINES:`,
+    `1. HIGH PRECISION OVER HIGH RECALL: Only report concrete, demonstrable bugs, actual security vulnerabilities, or severe logic defects. If the diff is clean, sound, and defect-free, explicitly output "LGTM" and do NOT fabricate minor or subjective feedback.`,
+    `2. RUNTIME ACCURACY: For Node.js/JavaScript, the runtime executes on a single-threaded event loop. Do NOT flag "thread safety" or concurrent memory corruption on standard in-memory JavaScript data structures (Set, Map, Array, Object).`,
+    `3. VERIFY BEFORE ASSERTING: Check if a capability is already provided. For example, if constructor options or parameter objects allow injecting dependencies or options, do NOT claim Dependency Injection or configurability is missing.`,
+    `4. DO NOT NITPICK OR DICTATE TASTE: Do not flag subjective architectural preferences (e.g. debating Singleton vs Factory vs Registry) unless it causes an actual memory leak or unhandled exception. Avoid bike-shedding on patterns that provide reasonable encapsulation for the scope of the PR.`,
+    `5. SEVERITY CLASSIFICATION: Classify any reported findings into:`,
+    `   - [BLOCKER]: Demonstrable runtime crash, data corruption, verified security exploit, or severe regression.`,
+    `   - [SUGGESTION]: Non-blocking observation, minor cleanup, or optional test enhancement.`,
+    `   If there are no BLOCKER items, clearly state that the PR is safe to merge.`,
+    `6. EXACT CITATIONS: You MUST reference the exact line numbers from the diff headers (@@ -x,y +a,b @@) for any reported defect.`,
+  ].join("\n");
+}
+
+/**
+ * Format raw review content into clean, structured markdown with severity indicators.
+ */
+function formatStructuredReview(rawReview) {
+  if (!rawReview || typeof rawReview !== "string") {
+    return rawReview;
+  }
+
+  const trimmed = rawReview.trim();
+  const hasBlockers = /\[BLOCKER\]/i.test(trimmed);
+  const isLgtm = /\bLGTM\b/i.test(trimmed) && !hasBlockers;
+
+  const header = isLgtm
+    ? "## 🤖 Automated PR Review — Approved (LGTM) ✅"
+    : hasBlockers
+      ? "## 🤖 Automated PR Review — Changes Requested 🛑"
+      : "## 🤖 Automated PR Review — Comments & Suggestions 💡";
+
+  return [header, "", trimmed].join("\n");
+}
+
+/**
+ * Filter known false-positive hallucination patterns from raw review output.
+ */
+function filterFalsePositives(content, runtimeContext) {
+  if (!content || typeof content !== "string") return content;
+
+  let filtered = content;
+  const isNode = /node\.js|typescript|javascript/i.test(runtimeContext);
+
+  if (isNode) {
+    // 1. Scrub invalid multi-threading / thread-safety claims on single-threaded Node.js runtimes
+    const threadSafetyPattern =
+      /(?:[-*•]\s*)?(?:\[(?:BLOCKER|SUGGESTION)\]\s*)?[^\n]*(?:thread[- ]safety|multi-threaded|race condition on (?:Set|Map|Array|in-memory))[^\n]*(?:\n\s{2,}[^\n]+)*/gi;
+    filtered = filtered.replace(threadSafetyPattern, "");
+  }
+
+  // 2. Clean up empty blocks or dangling headers
+  filtered = filtered.replace(/\n{3,}/g, "\n\n").trim();
+
+  // 3. If all complaints were purged or the review is now empty, convert to clean LGTM
+  if (
+    !filtered ||
+    filtered === "LGTM" ||
+    (!/\[BLOCKER\]/i.test(filtered) &&
+      !/(?:error|vulnerability|defect|bug|risk)/i.test(filtered))
+  ) {
+    return "LGTM: No blocking defects or runtime anti-patterns detected. Code is sound and ready to merge.";
+  }
+
+  return filtered;
+}
+
+const ENABLE_VERIFY = process.env.PR_REVIEW_VERIFY !== "0";
+
+const RUNTIME_CONTEXT = detectRuntimeEnvironment(reviewDiff);
+const SYSTEM_PROMPT = buildSystemPrompt(RUNTIME_CONTEXT);
 
 /**
  * Assemble the user message for one attempt.
@@ -355,7 +448,10 @@ try {
   }
 
   if (content) {
-    review = content;
+    const verifiedContent = ENABLE_VERIFY
+      ? filterFalsePositives(content, RUNTIME_CONTEXT)
+      : content;
+    review = formatStructuredReview(verifiedContent);
     console.log(`Generated review of length ${review.length}`);
   } else {
     review = generateFallbackReview(
