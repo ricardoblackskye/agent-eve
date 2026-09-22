@@ -118,7 +118,13 @@
     "ttft",
     "üñíçödé",
     "dispositioned",
-    "dispositioning"
+    "dispositioning",
+    "apos",
+    "subshell",
+    "subshells",
+    "redirections",
+    "touchpoint",
+    "touchpoints"
   ],
   "ignorePaths": [
     "node_modules/**",

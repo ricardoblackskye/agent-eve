@@ -20,8 +20,11 @@
  * - AC5: stops when tests pass and reports completed task
  */
 
-import { lstat, mkdir, realpath, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, readdir, realpath, writeFile } from "node:fs/promises";
+import { exec } from "node:child_process";
+import { promisify } from "node:util";
 import {
+  basename,
   dirname,
   extname,
   isAbsolute,
@@ -31,6 +34,9 @@ import {
 } from "node:path";
 import type { MetricsStore, TaskStatus } from "./metrics";
 import type { Capabilities } from "./skills";
+import type { ExecutionPlan } from "./plan-validator";
+
+const execAsync = promisify(exec);
 
 /** Thrown when a TaskAssignment fails validation. */
 export class InvalidTaskError extends Error {
@@ -412,3 +418,282 @@ export function createDeveloperAgent(
 ): DeveloperAgent {
   return new DeveloperAgent(config);
 }
+
+// --- Task 179: Multi-file workspace tools and bounded execution loop ---
+
+export interface WorkspaceTools {
+  readFile(relPath: string): Promise<string>;
+  writeFile(relPath: string, content: string): Promise<void>;
+  listFiles(pattern?: string): Promise<string[]>;
+  runTests(cmd?: string): Promise<{ passed: boolean; output: string }>;
+}
+
+export type CommandRunnerFn = (
+  cmd: string,
+) => Promise<{ exitCode: number; stdout: string; stderr: string }>;
+
+export const ALLOWED_WORKSPACE_EXTENSIONS: ReadonlySet<string> = new Set([
+  ".ts",
+  ".tsx",
+  ".js",
+  ".jsx",
+  ".mjs",
+  ".cjs",
+  ".json",
+  ".md",
+  ".css",
+  ".yml",
+  ".yaml",
+  ".txt",
+  ".html",
+  ".svg",
+]);
+
+/**
+ * Creates sandboxed workspace tools confined to `workspaceDir`.
+ * Fails closed on any path traversal attempt, validates file extensions,
+ * and caches verified path resolutions to optimize filesystem operations.
+ */
+export function createWorkspaceTools(
+  workspaceDir: string,
+  commandRunner?: CommandRunnerFn,
+  allowedExtensions?: ReadonlySet<string>,
+): WorkspaceTools {
+  const root = resolve(workspaceDir);
+  const MAX_PATH_CACHE_SIZE = 1000;
+  const resolvedPathCache = new Map<string, string>();
+
+  const resolveContainedPath = async (relPath: string): Promise<string> => {
+    const cached = resolvedPathCache.get(relPath);
+    if (cached) {
+      // Refresh LRU order
+      resolvedPathCache.delete(relPath);
+      resolvedPathCache.set(relPath, cached);
+      return cached;
+    }
+
+    if (isAbsolute(relPath)) {
+      throw new InvalidTaskError(
+        `Path '${relPath}' must be relative to workspace; absolute path rejected.`,
+      );
+    }
+    assertSafeRelativePath(relPath);
+    const target = resolve(root, relPath);
+    const rel = relative(root, target);
+    const inside =
+      rel === "" ||
+      (!isAbsolute(rel) && !rel.startsWith(".." + sep) && rel !== "..");
+    if (!inside) {
+      throw new InvalidTaskError(
+        `Path '${relPath}' resolves outside workspace; path traversal rejected.`,
+      );
+    }
+
+    // Symlink defence: re-verify containment against real filesystem paths
+    const realRoot = await realpath(root).catch(() => root);
+
+    // If target exists, ensure it is not an escaping symlink
+    const targetStat = await lstat(target).catch(() => null);
+    if (targetStat?.isSymbolicLink()) {
+      const realTarget = await realpath(target).catch(() => null);
+      if (realTarget) {
+        const symRel = relative(realRoot, realTarget);
+        const symInside =
+          symRel === "" ||
+          (!isAbsolute(symRel) &&
+            !symRel.startsWith(".." + sep) &&
+            symRel !== "..");
+        if (!symInside) {
+          throw new InvalidTaskError(
+            `Path '${relPath}' is a symlink resolving outside workspace; symlink traversal rejected.`,
+          );
+        }
+      }
+    }
+
+    // Re-verify existing ancestor directories do not resolve outside workspace
+    let ancestor = dirname(target);
+    while (ancestor.length >= root.length) {
+      const ancestorStat = await lstat(ancestor).catch(() => null);
+      if (ancestorStat) {
+        const realAncestor = await realpath(ancestor).catch(() => null);
+        if (realAncestor) {
+          const ancRel = relative(realRoot, realAncestor);
+          const ancInside =
+            ancRel === "" ||
+            (!isAbsolute(ancRel) &&
+              !ancRel.startsWith(".." + sep) &&
+              ancRel !== "..");
+          if (!ancInside) {
+            throw new InvalidTaskError(
+              `Path '${relPath}' escapes workspace via directory symlink; symlink traversal rejected.`,
+            );
+          }
+        }
+        break;
+      }
+      const parent = dirname(ancestor);
+      if (parent === ancestor) break;
+      ancestor = parent;
+    }
+
+    if (resolvedPathCache.size >= MAX_PATH_CACHE_SIZE) {
+      const oldestKey = resolvedPathCache.keys().next().value;
+      if (oldestKey !== undefined) {
+        resolvedPathCache.delete(oldestKey);
+      }
+    }
+    resolvedPathCache.set(relPath, target);
+    return target;
+  };
+
+  return {
+    async readFile(relPath: string): Promise<string> {
+      const target = await resolveContainedPath(relPath);
+      return await readFile(target, "utf8");
+    },
+
+    async writeFile(relPath: string, content: string): Promise<void> {
+      if (isAbsolute(relPath)) {
+        throw new InvalidTaskError(
+          `Path '${relPath}' must be relative to workspace; absolute path rejected.`,
+        );
+      }
+      assertSafeRelativePath(relPath);
+      const baseName = basename(relPath).toLowerCase();
+      if (baseName === ".env" || baseName.startsWith(".env.")) {
+        throw new InvalidTaskError(
+          `File '${relPath}' is a protected configuration/secret file; write rejected.`,
+        );
+      }
+      const ext = extname(relPath).toLowerCase();
+      const permittedExtensions =
+        allowedExtensions ?? ALLOWED_WORKSPACE_EXTENSIONS;
+      if (!permittedExtensions.has(ext)) {
+        throw new InvalidTaskError(
+          `File '${relPath}' has disallowed extension '${
+            ext || "(none)"
+          }'. Permitted extensions: ${[...permittedExtensions].join(", ")}`,
+        );
+      }
+      const target = await resolveContainedPath(relPath);
+      await mkdir(dirname(target), { recursive: true });
+      await writeFile(target, content, "utf8");
+    },
+
+    async listFiles(): Promise<string[]> {
+      const results: string[] = [];
+      const scan = async (dir: string) => {
+        const entries = await readdir(dir, { withFileTypes: true });
+        for (const entry of entries) {
+          const full = resolve(dir, entry.name);
+          const rel = relative(root, full).replace(/\\/g, "/");
+          if (entry.isDirectory()) {
+            if (entry.name !== "node_modules" && entry.name !== ".git") {
+              await scan(full);
+            }
+          } else {
+            results.push(rel);
+          }
+        }
+      };
+      await scan(root);
+      return results;
+    },
+
+    async runTests(cmd?: string): Promise<{ passed: boolean; output: string }> {
+      const testCmd = (cmd ?? "npx vitest run").trim();
+
+      // Security: Disallow all shell metacharacters, subshells, substitutions, and redirections
+      if (/[;&|`$><()\\!#*?{}[\]^~"'\r\n]/.test(testCmd)) {
+        throw new InvalidTaskError(
+          `Command '${testCmd}' contains forbidden shell metacharacters or subshell syntax; command execution rejected.`,
+        );
+      }
+
+      // Tokenize and parse command arguments
+      const tokens = testCmd.split(/\s+/).filter(Boolean);
+      if (tokens.length === 0) {
+        throw new InvalidTaskError("Test command cannot be empty.");
+      }
+
+      // Validate each token contains only safe path, identifier, or flag characters
+      const SAFE_TOKEN_PATTERN = /^[a-zA-Z0-9_.\/@:=-]+$/;
+      for (const token of tokens) {
+        if (!SAFE_TOKEN_PATTERN.test(token)) {
+          throw new InvalidTaskError(
+            `Command token '${token}' contains invalid characters; command execution rejected.`,
+          );
+        }
+      }
+
+      // Security: Allowlist permitted test commands
+      const ALLOWED_TEST_PREFIXES = ["npx vitest", "npm test", "npx tsc"];
+      const isAllowed = ALLOWED_TEST_PREFIXES.some(
+        (prefix) => testCmd === prefix || testCmd.startsWith(`${prefix} `),
+      );
+      if (!isAllowed) {
+        throw new InvalidTaskError(
+          `Command '${testCmd}' is not allowed. Only test commands starting with [${ALLOWED_TEST_PREFIXES.join(", ")}] are permitted.`,
+        );
+      }
+
+      if (commandRunner) {
+        const res = await commandRunner(testCmd);
+        return {
+          passed: res.exitCode === 0,
+          output: res.stdout || res.stderr,
+        };
+      }
+
+      try {
+        const { stdout, stderr } = await execAsync(testCmd, {
+          cwd: root,
+          maxBuffer: 10 * 1024 * 1024,
+        });
+        return { passed: true, output: stdout || stderr };
+      } catch (err: any) {
+        return {
+          passed: false,
+          output: err.stdout || err.stderr || err.message,
+        };
+      }
+    },
+  };
+}
+
+export interface MultiFileCodingLoopOptions {
+  plan: ExecutionPlan;
+  tools: WorkspaceTools;
+  worker: (
+    ctx: LoopContext & { plan: ExecutionPlan; tools: WorkspaceTools },
+  ) => Promise<WorkerResult>;
+  maxIterations: number;
+}
+
+/**
+ * Drive the multi-file coding loop guided by the ExecutionPlan.
+ */
+export async function runMultiFileCodingLoop(
+  opts: MultiFileCodingLoopOptions,
+): Promise<LoopResult> {
+  let iterations = 0;
+  let passed = false;
+
+  for (let i = 0; i < opts.maxIterations; i++) {
+    const iteration = i + 1;
+    iterations = iteration;
+    const res = await opts.worker({
+      iteration,
+      plan: opts.plan,
+      tools: opts.tools,
+    });
+    passed = res.passed;
+    if (passed) break;
+  }
+
+  const fixCycles = passed ? iterations - 1 : iterations;
+  return { status: passed ? "success" : "failed", iterations, fixCycles };
+}
+
+

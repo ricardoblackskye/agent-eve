@@ -16,6 +16,7 @@ import type {
   CreatePullRequestResult,
   PullRequestDetails,
 } from "./pr-writer";
+import type { ExecutionPlan } from "./plan-validator";
 
 export class InvalidConfigurationError extends Error {
   constructor(message: string) {
@@ -70,6 +71,8 @@ export interface DefinitionOfDoneTask {
   base?: string; // default "main"
   title: string;
   body: string;
+  plan?: ExecutionPlan;
+  testResults?: { testFile: string; testCaseName: string; passed: boolean }[];
 }
 
 export interface PrCommentWriter {
@@ -111,6 +114,18 @@ export interface DefinitionOfDoneDeps {
   attemptFixes?: (findings: ReviewFinding[]) => Promise<FindingDisposition[]>;
 }
 
+import {
+  renderAcTraceabilityTable,
+  renderAcceptedFindingComment,
+  type AcTraceabilityItem,
+} from "./dod-presentation";
+
+export {
+  renderAcTraceabilityTable,
+  renderAcceptedFindingComment,
+  type AcTraceabilityItem,
+} from "./dod-presentation";
+
 export type DoneStatus = "done" | "blocked" | "refused";
 
 export interface DefinitionOfDoneResult {
@@ -123,42 +138,64 @@ export interface DefinitionOfDoneResult {
   acceptedCount: number;
   remainingFindings: ReviewFinding[];
   reason: string;
+  acMatrix?: AcTraceabilityItem[];
+  traceabilityTable?: string;
+}
+
+export interface AcTestResult {
+  testFile: string;
+  testCaseName: string;
+  passed: boolean;
+}
+
+export interface AcVerificationResult {
+  matrix: AcTraceabilityItem[];
+  allPassed: boolean;
+  failingAcs: AcTraceabilityItem[];
 }
 
 /**
- * Render a structured, durable PR comment for an accepted finding.
- * Attributed to Eve (orchestrator), preserving reasoning for the human reviewer.
+ * Validates test results against the Acceptance Criteria mappings in an ExecutionPlan.
+ * Pure evaluation component separated from markdown rendering (SRP).
  */
-export function renderAcceptedFindingComment(
-  finding: ReviewFinding,
-  explanation: string,
-): string {
-  const location =
-    finding.file && finding.line
-      ? ` (\`${finding.file}#${finding.line}\`)`
-      : finding.file
-        ? ` (\`${finding.file}\`)`
-        : "";
+export function evaluateAcTraceability(
+  plan: ExecutionPlan,
+  testResults: AcTestResult[] = [],
+): AcVerificationResult {
+  const mappings = plan.acceptanceCriteriaMap ?? [];
+  const matrix: AcTraceabilityItem[] = mappings.map((ac) => {
+    const match = testResults.find(
+      (tr) =>
+        tr.testFile === ac.testFile &&
+        (tr.testCaseName === ac.testCaseName ||
+          tr.testCaseName.includes(ac.testCaseName) ||
+          ac.testCaseName.includes(tr.testCaseName)),
+    );
+    return {
+      acId: ac.acId,
+      description: ac.description,
+      testFile: ac.testFile,
+      testCaseName: ac.testCaseName,
+      passed: match ? match.passed : false,
+    };
+  });
 
-  return [
-    "🤖 **Eve** (Dark Factory) — Finding Accepted",
-    "",
-    `- **Finding ID**: \`${finding.id}\``,
-    `- **Source**: \`${finding.source}\`${location}`,
-    `- **Finding**: ${finding.message}`,
-    `- **Disposition**: Accepted by Developer Agent`,
-    `- **Rationale**:`,
-    `  > ${explanation.trim()}`,
-    "",
-    "_Note: The human reviewer retains final call at merge time._",
-  ].join("\n");
+  const failingAcs = matrix.filter((item) => !item.passed);
+  return {
+    matrix,
+    allPassed: failingAcs.length === 0,
+    failingAcs,
+  };
 }
+
 
 function buildSuccessResult(
   pr: PullRequestDetails,
   roundsExecuted: number,
   totalDistinctFindings: number,
   acceptedCount: number,
+  acMatrix?: AcTraceabilityItem[],
+  traceabilityTable?: string,
 ): DefinitionOfDoneResult {
   return {
     ok: true,
@@ -170,6 +207,8 @@ function buildSuccessResult(
     acceptedCount,
     remainingFindings: [],
     reason: "All automated review findings resolved or accepted.",
+    acMatrix,
+    traceabilityTable,
   };
 }
 
@@ -212,6 +251,9 @@ async function applyAcceptedDispositions(
     totalDistinctFindings: number;
   },
 ): Promise<DispositionOutcome> {
+  const errorFindings: ReviewFinding[] = [];
+  const validDispositions: { finding: ReviewFinding; explanation: string }[] = [];
+
   for (const disposition of dispositions) {
     if (disposition.status === "accepted") {
       const explanation = (disposition.explanation ?? "").trim();
@@ -237,16 +279,44 @@ async function applyAcceptedDispositions(
       const finding = unacceptedFindings.find(
         (f) => f.id === disposition.findingId,
       );
-      if (finding) {
-        await deps.commentWriter.postComment(
-          owner,
-          repoName,
-          pr.number,
-          renderAcceptedFindingComment(finding, explanation),
-        );
-        acceptedIds.add(disposition.findingId);
+      if (!finding) {
+        continue;
+      }
+      if (finding.severity === "error") {
+        errorFindings.push(finding);
+      } else {
+        validDispositions.push({ finding, explanation });
       }
     }
+  }
+
+  if (errorFindings.length > 0) {
+    const errSummary = errorFindings
+      .map((f) => `${f.id}: ${f.message}`)
+      .join("; ");
+    return {
+      blockedResult: {
+        ok: false,
+        status: "blocked",
+        pr,
+        roundsExecuted: state.roundsExecuted,
+        totalFindings: state.totalDistinctFindings,
+        resolvedCount: state.totalDistinctFindings - acceptedIds.size,
+        acceptedCount: acceptedIds.size,
+        remainingFindings: unacceptedFindings,
+        reason: `Definition of Done cannot accept findings with severity 'error' (${errSummary}).`,
+      },
+    };
+  }
+
+  for (const { finding, explanation } of validDispositions) {
+    await deps.commentWriter.postComment(
+      owner,
+      repoName,
+      pr.number,
+      renderAcceptedFindingComment(finding, explanation),
+    );
+    acceptedIds.add(finding.id);
   }
 
   return {};
@@ -294,6 +364,53 @@ export async function runDefinitionOfDone(
   }
 
   const pr = prResult.pr;
+
+  // 1b. Verify Acceptance Criteria if task has an ExecutionPlan
+  let acMatrix: AcTraceabilityItem[] | undefined;
+  let traceabilityTable: string | undefined;
+
+  if (
+    task.plan?.acceptanceCriteriaMap &&
+    task.plan.acceptanceCriteriaMap.length > 0
+  ) {
+    const verification = evaluateAcTraceability(
+      task.plan,
+      task.testResults ?? [],
+    );
+    acMatrix = verification.matrix;
+    traceabilityTable = renderAcTraceabilityTable(acMatrix);
+
+    if (!verification.allPassed) {
+      await deps.commentWriter.postComment(
+        owner,
+        repoName,
+        pr.number,
+        `🤖 **Eve** (Dark Factory) — Acceptance Criteria Verification Failed\n\n${traceabilityTable}`,
+      );
+      return {
+        ok: false,
+        status: "blocked",
+        pr,
+        roundsExecuted: 0,
+        totalFindings: 0,
+        resolvedCount: 0,
+        acceptedCount: 0,
+        remainingFindings: [],
+        reason: `Acceptance Criteria verification failed: AC(s) ${verification.failingAcs.map((a) => a.acId).join(", ")} did not pass tests.`,
+        acMatrix,
+        traceabilityTable,
+      };
+    }
+
+    // Post verified table to PR
+    await deps.commentWriter.postComment(
+      owner,
+      repoName,
+      pr.number,
+      `🤖 **Eve** (Dark Factory) — Acceptance Criteria Verified ✅\n\n${traceabilityTable}`,
+    );
+  }
+
   const recurrenceMap = new Map<string, number>();
   const acceptedIds = new Set<string>();
   let totalDistinctFindings = 0;
@@ -325,6 +442,8 @@ export async function runDefinitionOfDone(
         roundsExecuted,
         totalDistinctFindings,
         acceptedIds.size,
+        acMatrix,
+        traceabilityTable,
       );
     }
 
@@ -358,6 +477,8 @@ export async function runDefinitionOfDone(
           roundsExecuted,
           totalDistinctFindings,
           acceptedIds.size,
+          acMatrix,
+          traceabilityTable,
         );
       }
     }
