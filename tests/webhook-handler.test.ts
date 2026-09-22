@@ -173,4 +173,75 @@ describe("webhook handler (bug #39)", () => {
     expect(response.data.ok).toBe(true);
     expect(response.data.eveApiResult).toBe("accepted");
   });
+
+  // #184: the pull_request branch used to invoke Eve on EVERY action.
+  function prBody(action: string, merged: boolean): string {
+    return JSON.stringify({
+      action,
+      pull_request: {
+        number: 42,
+        title: "Fix the thing",
+        body: "Closes #39",
+        html_url: "https://github.com/ricardoblackskye/agent-eve/pull/42",
+        labels: [],
+        state: action === "closed" ? "closed" : "open",
+        merged,
+        merged_by: merged ? { login: "ricardoblackskye" } : null,
+        base: { ref: "main" },
+        head: { ref: "feat/fix" },
+      },
+      repository: { full_name: "ricardoblackskye/agent-eve" },
+    });
+  }
+
+  it("does NOT call the Eve API on a non-merged pull_request event (#184)", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const { POST } = await import("../app/api/github/webhook/route");
+
+    const cases: Array<[string, boolean]> = [
+      ["opened", false],
+      ["synchronize", false],
+      ["closed", false], // closed WITHOUT merging
+    ];
+    for (const [action, merged] of cases) {
+      const request = createRequest("/api/github/webhook", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-github-event": "pull_request",
+        },
+        body: prBody(action, merged),
+      });
+      const response: any = await POST(request as any);
+      expect(response.status).toBe(200);
+      expect(response.data.ok).toBe(true);
+      expect(response.data.message).toContain("not a release trigger");
+    }
+
+    // The whole point of #184: zero Eve calls for non-merge PR events.
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("STILL calls the Eve API when a PR is merged (#184 regression guard)", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ status: "accepted" }), { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const { POST } = await import("../app/api/github/webhook/route");
+    const request = createRequest("/api/github/webhook", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-github-event": "pull_request",
+      },
+      body: prBody("closed", true),
+    });
+
+    const response: any = await POST(request as any);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(response.status).toBe(200);
+    expect(response.data.eveApiResult).toBe("accepted");
+  });
 });

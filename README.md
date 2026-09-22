@@ -676,7 +676,12 @@ there to enable webhook processing for it.
   an AI code review (model set by the `MODEL_NAME` repo variable — defaults to
   `deepseek/deepseek-v4.1-flash`).
 - Merging a PR fires the webhook → the **Release Manager** subagent updates
-  [`releasenotes.md`](releasenotes.md) with a summary of the change.
+  [`releasenotes.md`](releasenotes.md) with a summary of the change. Release
+  notes fire **only** for a merged PR (a `pull_request` `closed` event with
+  `merged: true`, decided by `isReleaseNotesTrigger` in
+  `agent/lib/release-trigger.ts`); every other PR action — opened, synchronize,
+  reopened, labeled, edited, or a non-merged close — is acknowledged without
+  invoking Eve.
 
 ### Self-Hosted / Docker
 
