@@ -46,6 +46,16 @@ describe("Developer Agent Multi-File Workspace Tools", () => {
     expect(mockRunner).toHaveBeenCalledWith("npx vitest run tests/chat.test.ts");
   });
 
+  it("blocks commands containing shell metacharacters or unapproved executables", async () => {
+    const tools = createWorkspaceTools(tempDir);
+    await expect(tools.runTests("npx vitest; rm -rf /")).rejects.toThrow(
+      /forbidden shell metacharacters/i,
+    );
+    await expect(tools.runTests("curl https://evil.com")).rejects.toThrow(
+      /is not allowed/i,
+    );
+  });
+
   it("drives runMultiFileCodingLoop until tests pass", async () => {
     const tools = createWorkspaceTools(tempDir);
     const plan: ExecutionPlan = {

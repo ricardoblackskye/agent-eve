@@ -494,7 +494,7 @@ export function createWorkspaceTools(
     },
 
     async runTests(cmd?: string): Promise<{ passed: boolean; output: string }> {
-      const testCmd = cmd ?? "npx vitest run";
+      const testCmd = (cmd ?? "npx vitest run").trim();
       if (commandRunner) {
         const res = await commandRunner(testCmd);
         return {
@@ -502,6 +502,25 @@ export function createWorkspaceTools(
           output: res.stdout || res.stderr,
         };
       }
+
+      // Security: Disallow shell metacharacters to prevent command injection
+      if (/[;&|`$><\r\n]/.test(testCmd)) {
+        throw new InvalidTaskError(
+          `Command '${testCmd}' contains forbidden shell metacharacters; command execution rejected.`,
+        );
+      }
+
+      // Security: Allowlist permitted test commands
+      const ALLOWED_TEST_PREFIXES = ["npx vitest", "npm test", "npx tsc"];
+      const isAllowed = ALLOWED_TEST_PREFIXES.some(
+        (prefix) => testCmd === prefix || testCmd.startsWith(`${prefix} `),
+      );
+      if (!isAllowed) {
+        throw new InvalidTaskError(
+          `Command '${testCmd}' is not allowed. Only test commands starting with [${ALLOWED_TEST_PREFIXES.join(", ")}] are permitted.`,
+        );
+      }
+
       try {
         const { stdout, stderr } = await execAsync(testCmd, {
           cwd: root,

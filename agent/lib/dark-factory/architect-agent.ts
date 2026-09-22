@@ -39,20 +39,36 @@ export class ArchitectAgent {
     this.maxPlanRetries = deps.maxPlanRetries ?? 2;
   }
 
-  private parsePlanJson(text: string): ExecutionPlan | null {
+  /**
+   * Safely parses JSON output from LLM, stripping markdown fences if present.
+   * Returns parsed plan or detailed error message.
+   */
+  private parsePlanJson(text: string): { plan: ExecutionPlan | null; error?: string } {
     try {
       let raw = text.trim();
+      // Strip markdown code fences if present
+      if (raw.startsWith("```")) {
+        raw = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+      }
       const jsonMatch = raw.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         raw = jsonMatch[0];
       }
-      return JSON.parse(raw) as ExecutionPlan;
-    } catch {
-      return null;
+      const plan = JSON.parse(raw) as ExecutionPlan;
+      return { plan };
+    } catch (err: any) {
+      return {
+        plan: null,
+        error: `JSON parse failed: ${err.message}`,
+      };
     }
   }
 
+  /**
+   * Constructs the initial planning prompt for the LLM.
+   */
   private buildInitialPrompt(story: StoryInput, repoFiles: string[]): string {
+    const safeFiles = Array.isArray(repoFiles) ? repoFiles.slice(0, 100) : [];
     return [
       `You are Eve's autonomous Architect Agent.`,
       `Your task is to analyze the following User Story and create a comprehensive ExecutionPlan.`,
@@ -62,7 +78,7 @@ export class ArchitectAgent {
       ``,
       `### REPOSITORY STRUCTURE:`,
       `Existing files:`,
-      repoFiles.slice(0, 100).map((f) => `- ${f}`).join("\n"),
+      safeFiles.map((f) => `- ${f}`).join("\n"),
       ``,
       `### EXECUTION PLAN REQUIREMENTS:`,
       `You must output a JSON object with:`,
@@ -80,6 +96,9 @@ export class ArchitectAgent {
     ].join("\n");
   }
 
+  /**
+   * Constructs a repair prompt including specific validation feedback.
+   */
   private buildRepairPrompt(
     story: StoryInput,
     previousOutput: string,
@@ -103,6 +122,7 @@ export class ArchitectAgent {
 
   /**
    * Explores the repository and synthesizes a validated ExecutionPlan for the story.
+   * Executes 1 initial attempt plus up to maxPlanRetries self-correction cycles.
    */
   async planStory(story: StoryInput): Promise<ArchitectResult> {
     const repoFiles = await this.deps.listFiles(".");
@@ -114,16 +134,16 @@ export class ArchitectAgent {
 
     while (retries <= this.maxPlanRetries) {
       lastOutput = await this.deps.generateText(currentPrompt);
-      const parsedPlan = this.parsePlanJson(lastOutput);
+      const parseResult = this.parsePlanJson(lastOutput);
 
-      if (!parsedPlan) {
-        lastErrors = ["Failed to parse valid JSON from LLM response."];
+      if (!parseResult.plan) {
+        lastErrors = [parseResult.error ?? "Failed to parse valid JSON from LLM response."];
       } else {
-        const validation = validateExecutionPlan(parsedPlan, story.body);
+        const validation = validateExecutionPlan(parseResult.plan, story.body);
         if (validation.valid) {
           return {
             ok: true,
-            plan: parsedPlan,
+            plan: parseResult.plan,
             retries,
           };
         }

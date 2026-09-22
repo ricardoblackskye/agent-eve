@@ -7,6 +7,8 @@
  * Acceptance Criterion from the User Story is mapped to an automated test case.
  */
 
+import { normalize, isAbsolute } from "node:path";
+
 export interface PlanTargetFile {
   path: string;
   action: "create" | "modify";
@@ -81,23 +83,47 @@ export function validateExecutionPlan(
 ): PlanValidationResult {
   const errors: string[] = [];
 
+  // 0. Runtime schema integrity checks
+  if (!plan || typeof plan !== "object") {
+    return { valid: false, errors: ["Plan must be a valid non-null object."] };
+  }
+  if (typeof plan.storyId !== "number" || isNaN(plan.storyId)) {
+    errors.push("Plan storyId must be a valid number.");
+  }
+  if (!plan.title || typeof plan.title !== "string") {
+    errors.push("Plan title must be a non-empty string.");
+  }
+
   // 1. Target files presence check
-  if (!plan.targetFiles || plan.targetFiles.length === 0) {
+  if (!Array.isArray(plan.targetFiles) || plan.targetFiles.length === 0) {
     errors.push("Plan must specify at least one target file.");
     return { valid: false, errors };
   }
 
   // 2. Path safety check (no path traversal, relative paths only)
   for (const file of plan.targetFiles) {
-    const p = file.path.trim();
+    if (!file || typeof file !== "object") {
+      errors.push("Target file entries must be objects.");
+      continue;
+    }
+    const p = (file.path ?? "").trim();
     if (!p) {
       errors.push("Target file path cannot be empty.");
       continue;
     }
-    if (p.startsWith("/") || p.startsWith("\\") || /^[A-Za-z]:/.test(p)) {
-      errors.push(`Target file '${p}' must be relative to repository root.`);
+    if (file.action !== "create" && file.action !== "modify") {
+      errors.push(`Target file '${p}' action must be 'create' or 'modify' (received '${file.action}').`);
     }
-    if (p.includes("..")) {
+    if (p.includes("\0")) {
+      errors.push(`Target file '${p}' contains a null byte.`);
+      continue;
+    }
+    if (isAbsolute(p) || /^[A-Za-z]:/.test(p) || p.startsWith("\\\\") || p.startsWith("//")) {
+      errors.push(`Target file '${p}' must be relative to repository root.`);
+      continue;
+    }
+    const norm = normalize(p).replace(/\\/g, "/");
+    if (norm === ".." || norm.startsWith("../") || norm.includes("/../")) {
       errors.push(`Target file '${p}' contains illegal path traversal ('..').`);
     }
   }
