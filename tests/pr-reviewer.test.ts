@@ -458,5 +458,23 @@ describe("PR Reviewer Agent - TDD Tests", () => {
       expect(content).toMatch(/DO NOT NITPICK OR DICTATE TASTE/i);
     });
   });
+
+  describe("Structured Severity Classification (#182)", () => {
+    it("instructs the reviewer to tag findings with [BLOCKER] or [SUGGESTION]", () => {
+      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
+      const content = fs.readFileSync(scriptPath, "utf8");
+
+      expect(content).toMatch(/\[BLOCKER\]/);
+      expect(content).toMatch(/\[SUGGESTION\]/);
+    });
+
+    it("distinguishes between blocking bugs and non-blocking suggestions in summary output", () => {
+      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
+      const content = fs.readFileSync(scriptPath, "utf8");
+
+      expect(content).toMatch(/formatStructuredReview/);
+    });
+  });
 });
+
 

@@ -217,8 +217,33 @@ function buildSystemPrompt(runtimeContext) {
     `2. RUNTIME ACCURACY: For Node.js/JavaScript, the runtime executes on a single-threaded event loop. Do NOT flag "thread safety" or concurrent memory corruption on standard in-memory JavaScript data structures (Set, Map, Array, Object).`,
     `3. VERIFY BEFORE ASSERTING: Check if a capability is already provided. For example, if constructor options or parameter objects allow injecting dependencies or options, do NOT claim Dependency Injection or configurability is missing.`,
     `4. DO NOT NITPICK OR DICTATE TASTE: Do not flag subjective architectural preferences (e.g. debating Singleton vs Factory vs Registry) unless it causes an actual memory leak or unhandled exception. Avoid bike-shedding on patterns that provide reasonable encapsulation for the scope of the PR.`,
-    `5. EXACT CITATIONS: You MUST reference the exact line numbers from the diff headers (@@ -x,y +a,b @@) for any reported defect.`,
+    `5. SEVERITY CLASSIFICATION: Classify any reported findings into:`,
+    `   - [BLOCKER]: Demonstrable runtime crash, data corruption, verified security exploit, or severe regression.`,
+    `   - [SUGGESTION]: Non-blocking observation, minor cleanup, or optional test enhancement.`,
+    `   If there are no BLOCKER items, clearly state that the PR is safe to merge.`,
+    `6. EXACT CITATIONS: You MUST reference the exact line numbers from the diff headers (@@ -x,y +a,b @@) for any reported defect.`,
   ].join("\n");
+}
+
+/**
+ * Format raw review content into clean, structured markdown with severity indicators.
+ */
+function formatStructuredReview(rawReview) {
+  if (!rawReview || typeof rawReview !== "string") {
+    return rawReview;
+  }
+
+  const trimmed = rawReview.trim();
+  const hasBlockers = /\[BLOCKER\]/i.test(trimmed);
+  const isLgtm = /\bLGTM\b/i.test(trimmed) && !hasBlockers;
+
+  const header = isLgtm
+    ? "## 🤖 Automated PR Review — Approved (LGTM) ✅"
+    : hasBlockers
+      ? "## 🤖 Automated PR Review — Changes Requested 🛑"
+      : "## 🤖 Automated PR Review — Comments & Suggestions 💡";
+
+  return [header, "", trimmed].join("\n");
 }
 
 const RUNTIME_CONTEXT = detectRuntimeEnvironment(reviewDiff);
@@ -389,7 +414,7 @@ try {
   }
 
   if (content) {
-    review = content;
+    review = formatStructuredReview(content);
     console.log(`Generated review of length ${review.length}`);
   } else {
     review = generateFallbackReview(
