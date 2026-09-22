@@ -46,14 +46,47 @@ describe("Developer Agent Multi-File Workspace Tools", () => {
     expect(mockRunner).toHaveBeenCalledWith("npx vitest run tests/chat.test.ts");
   });
 
-  it("blocks commands containing shell metacharacters or unapproved executables", async () => {
+  it("blocks commands containing shell metacharacters, subshells, or unapproved executables", async () => {
     const tools = createWorkspaceTools(tempDir);
     await expect(tools.runTests("npx vitest; rm -rf /")).rejects.toThrow(
+      /forbidden shell metacharacters/i,
+    );
+    await expect(tools.runTests("npx vitest $(whoami)")).rejects.toThrow(
+      /forbidden shell metacharacters/i,
+    );
+    await expect(tools.runTests("npx vitest `id`")).rejects.toThrow(
+      /forbidden shell metacharacters/i,
+    );
+    await expect(tools.runTests("npx vitest 'malicious'")).rejects.toThrow(
       /forbidden shell metacharacters/i,
     );
     await expect(tools.runTests("curl https://evil.com")).rejects.toThrow(
       /is not allowed/i,
     );
+  });
+
+  it("blocks reading or writing through symlinks resolving outside the workspace", async () => {
+    const { symlink, writeFile } = await import("node:fs/promises");
+    const tools = createWorkspaceTools(tempDir);
+    const outsideFile = join(tmpdir(), `df-outside-${Date.now()}.txt`);
+    await writeFile(outsideFile, "outside content", "utf8");
+
+    try {
+      await symlink(outsideFile, join(tempDir, "symlink-escape.txt"));
+      await expect(tools.readFile("symlink-escape.txt")).rejects.toThrow(
+        /symlink/i,
+      );
+      await expect(tools.writeFile("symlink-escape.txt", "overwrite")).rejects.toThrow(
+        /symlink/i,
+      );
+    } catch (err: any) {
+      // If OS environment does not permit non-admin symlink creation, verify graceful bypass
+      if (err.code !== "EPERM") {
+        throw err;
+      }
+    } finally {
+      await rm(outsideFile, { force: true });
+    }
   });
 
   it("drives runMultiFileCodingLoop until tests pass", async () => {

@@ -146,4 +146,23 @@ A user must authenticate via Google OAuth before accessing the Eve Chat UI.
       result.errors.some((e) => e.includes("missing testFile or testCaseName")),
     ).toBe(true);
   });
+
+  it("safely strips prototype pollution keys via safeJsonParse", async () => {
+    const { safeJsonParse } = await import("../../agent/lib/dark-factory/plan-validator");
+    const malicious = '{"__proto__": {"polluted": true}, "constructor": {"evil": true}, "storyId": 42}';
+    const parsed = safeJsonParse<any>(malicious);
+    expect(parsed.storyId).toBe(42);
+    expect(({} as any).polluted).toBeUndefined();
+    expect(parsed.__proto__.polluted).toBeUndefined();
+  });
+
+  it("extracts and parses plan JSON with DefaultPlanParser", async () => {
+    const { DefaultPlanParser } = await import("../../agent/lib/dark-factory/plan-validator");
+    const parser = new DefaultPlanParser();
+    const markdownWrapped = "Here is the plan:\n```json\n" + JSON.stringify(basePlan) + "\n```\nHope this helps!";
+    const res = parser.parse(markdownWrapped);
+    expect(res.plan).toEqual(basePlan);
+    expect(res.error).toBeUndefined();
+  });
 });
+

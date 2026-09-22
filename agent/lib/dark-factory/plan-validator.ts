@@ -175,3 +175,48 @@ export function validateExecutionPlan(
     errors,
   };
 }
+
+/**
+ * Safely parses JSON while stripping prototype pollution vectors (__proto__, constructor, prototype).
+ */
+export function safeJsonParse<T = unknown>(jsonString: string): T {
+  return JSON.parse(jsonString, (key, value) => {
+    if (key === "__proto__" || key === "constructor" || key === "prototype") {
+      return undefined;
+    }
+    return value;
+  });
+}
+
+/**
+ * Adapter interface for parsing ExecutionPlans from raw LLM output.
+ */
+export interface PlanParser {
+  parse(rawText: string): { plan: ExecutionPlan | null; error?: string };
+}
+
+/**
+ * Default adapter implementation for parsing ExecutionPlan JSON from LLM text.
+ * Strips markdown fences, extracts JSON object, and guards against prototype pollution.
+ */
+export class DefaultPlanParser implements PlanParser {
+  parse(text: string): { plan: ExecutionPlan | null; error?: string } {
+    try {
+      let raw = (text ?? "").trim();
+      if (raw.startsWith("```")) {
+        raw = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+      }
+      const jsonMatch = raw.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        raw = jsonMatch[0];
+      }
+      const plan = safeJsonParse<ExecutionPlan>(raw);
+      return { plan };
+    } catch (err: any) {
+      return {
+        plan: null,
+        error: `JSON parse failed: ${err.message}`,
+      };
+    }
+  }
+}

@@ -147,4 +147,69 @@ A user must authenticate via Google OAuth before accessing the Eve Chat UI.
     expect(result.plan).toEqual(validPlan);
     expect(result.retries).toBe(1);
   });
+
+  it("validates StoryInput fields and fails closed on invalid input", async () => {
+    const agent = new ArchitectAgent({
+      listFiles: vi.fn().mockResolvedValue([]),
+      generateText: vi.fn().mockResolvedValue(""),
+    });
+
+    const invalidStory1 = await agent.planStory(null as any);
+    expect(invalidStory1.ok).toBe(false);
+    expect(invalidStory1.error).toContain("valid non-null object");
+
+    const invalidStory2 = await agent.planStory({ number: -1, title: "Test", body: "Body" });
+    expect(invalidStory2.ok).toBe(false);
+    expect(invalidStory2.error).toContain("positive integer");
+
+    const invalidStory3 = await agent.planStory({ number: 1, title: "", body: "Body" });
+    expect(invalidStory3.ok).toBe(false);
+    expect(invalidStory3.error).toContain("non-empty string");
+
+    const invalidStory4 = await agent.planStory({ number: 1, title: "Test", body: "   " });
+    expect(invalidStory4.ok).toBe(false);
+    expect(invalidStory4.error).toContain("non-empty string");
+  });
+
+  it("prioritizes architectural configs and app/ entrypoints when building initial prompt", async () => {
+    let capturedPrompt = "";
+    const agent = new ArchitectAgent({
+      listFiles: vi.fn().mockResolvedValue([
+        "z-random/misc.ts",
+        "app/chat.tsx",
+        "deep/nested/path/file.ts",
+        "package.json",
+      ]),
+      generateText: vi.fn().mockImplementation(async (prompt) => {
+        capturedPrompt = prompt;
+        return JSON.stringify(validPlan);
+      }),
+    });
+
+    await agent.planStory(sampleStory);
+    const filesIndexPkg = capturedPrompt.indexOf("- package.json");
+    const filesIndexApp = capturedPrompt.indexOf("- app/chat.tsx");
+    const filesIndexRandom = capturedPrompt.indexOf("- z-random/misc.ts");
+
+    expect(filesIndexPkg).toBeGreaterThan(-1);
+    expect(filesIndexApp).toBeGreaterThan(-1);
+    expect(filesIndexPkg).toBeLessThan(filesIndexRandom);
+    expect(filesIndexApp).toBeLessThan(filesIndexRandom);
+  });
+
+  it("fails closed with a descriptive error when LLM interaction times out", async () => {
+    const agent = new ArchitectAgent({
+      listFiles: vi.fn().mockResolvedValue(["app/chat.tsx"]),
+      generateText: vi.fn().mockImplementation(
+        () => new Promise((resolve) => setTimeout(() => resolve("{}"), 500)),
+      ),
+      timeoutMs: 50,
+      maxPlanRetries: 0,
+    });
+
+    const result = await agent.planStory(sampleStory);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("timed out after 50ms");
+  });
 });
+

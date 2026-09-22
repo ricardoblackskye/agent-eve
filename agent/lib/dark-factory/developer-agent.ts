@@ -441,7 +441,7 @@ export function createWorkspaceTools(
 ): WorkspaceTools {
   const root = resolve(workspaceDir);
 
-  const resolveContainedPath = (relPath: string): string => {
+  const resolveContainedPath = async (relPath: string): Promise<string> => {
     if (isAbsolute(relPath)) {
       throw new InvalidTaskError(
         `Path '${relPath}' must be relative to workspace; absolute path rejected.`,
@@ -458,17 +458,66 @@ export function createWorkspaceTools(
         `Path '${relPath}' resolves outside workspace; path traversal rejected.`,
       );
     }
+
+    // Symlink defence: re-verify containment against real filesystem paths
+    const realRoot = await realpath(root).catch(() => root);
+
+    // If target exists, ensure it is not an escaping symlink
+    const targetStat = await lstat(target).catch(() => null);
+    if (targetStat?.isSymbolicLink()) {
+      const realTarget = await realpath(target).catch(() => null);
+      if (realTarget) {
+        const symRel = relative(realRoot, realTarget);
+        const symInside =
+          symRel === "" ||
+          (!isAbsolute(symRel) &&
+            !symRel.startsWith(".." + sep) &&
+            symRel !== "..");
+        if (!symInside) {
+          throw new InvalidTaskError(
+            `Path '${relPath}' is a symlink resolving outside workspace; symlink traversal rejected.`,
+          );
+        }
+      }
+    }
+
+    // Re-verify existing ancestor directories do not resolve outside workspace
+    let ancestor = dirname(target);
+    while (ancestor.length >= root.length) {
+      const ancestorStat = await lstat(ancestor).catch(() => null);
+      if (ancestorStat) {
+        const realAncestor = await realpath(ancestor).catch(() => null);
+        if (realAncestor) {
+          const ancRel = relative(realRoot, realAncestor);
+          const ancInside =
+            ancRel === "" ||
+            (!isAbsolute(ancRel) &&
+              !ancRel.startsWith(".." + sep) &&
+              ancRel !== "..");
+          if (!ancInside) {
+            throw new InvalidTaskError(
+              `Path '${relPath}' escapes workspace via directory symlink; symlink traversal rejected.`,
+            );
+          }
+        }
+        break;
+      }
+      const parent = dirname(ancestor);
+      if (parent === ancestor) break;
+      ancestor = parent;
+    }
+
     return target;
   };
 
   return {
     async readFile(relPath: string): Promise<string> {
-      const target = resolveContainedPath(relPath);
+      const target = await resolveContainedPath(relPath);
       return await readFile(target, "utf8");
     },
 
     async writeFile(relPath: string, content: string): Promise<void> {
-      const target = resolveContainedPath(relPath);
+      const target = await resolveContainedPath(relPath);
       await mkdir(dirname(target), { recursive: true });
       await writeFile(target, content, "utf8");
     },
@@ -503,11 +552,27 @@ export function createWorkspaceTools(
         };
       }
 
-      // Security: Disallow shell metacharacters to prevent command injection
-      if (/[;&|`$><\r\n]/.test(testCmd)) {
+      // Security: Disallow all shell metacharacters, subshells, substitutions, and redirections
+      if (/[;&|`$><()\\!#*?{}[\]^~"'\r\n]/.test(testCmd)) {
         throw new InvalidTaskError(
-          `Command '${testCmd}' contains forbidden shell metacharacters; command execution rejected.`,
+          `Command '${testCmd}' contains forbidden shell metacharacters or subshell syntax; command execution rejected.`,
         );
+      }
+
+      // Tokenize and parse command arguments
+      const tokens = testCmd.split(/\s+/).filter(Boolean);
+      if (tokens.length === 0) {
+        throw new InvalidTaskError("Test command cannot be empty.");
+      }
+
+      // Validate each token contains only safe path, identifier, or flag characters
+      const SAFE_TOKEN_PATTERN = /^[a-zA-Z0-9_.\/@:=-]+$/;
+      for (const token of tokens) {
+        if (!SAFE_TOKEN_PATTERN.test(token)) {
+          throw new InvalidTaskError(
+            `Command token '${token}' contains invalid characters; command execution rejected.`,
+          );
+        }
       }
 
       // Security: Allowlist permitted test commands
@@ -555,10 +620,11 @@ export async function runMultiFileCodingLoop(
   let iterations = 0;
   let passed = false;
 
-  for (let attempt = 1; attempt <= opts.maxIterations; attempt++) {
-    iterations = attempt;
+  for (let i = 0; i < opts.maxIterations; i++) {
+    const iteration = i + 1;
+    iterations = iteration;
     const res = await opts.worker({
-      iteration: attempt,
+      iteration,
       plan: opts.plan,
       tools: opts.tools,
     });
@@ -569,4 +635,5 @@ export async function runMultiFileCodingLoop(
   const fixCycles = passed ? iterations - 1 : iterations;
   return { status: passed ? "success" : "failed", iterations, fixCycles };
 }
+
 

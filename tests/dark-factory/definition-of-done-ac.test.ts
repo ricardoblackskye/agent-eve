@@ -173,4 +173,46 @@ describe("Definition of Done — Acceptance Criteria Traceability & Anti-Rubber-
     expect(result.status).toBe("blocked");
     expect(result.reason).toContain("cannot accept findings with severity 'error'");
   });
+
+  it("evaluates AC traceability as a pure component (SRP)", async () => {
+    const { evaluateAcTraceability } = await import(
+      "../../agent/lib/dark-factory/definition-of-done"
+    );
+
+    const testResults = [
+      { testFile: "tests/chat-auth.test.ts", testCaseName: "redirects to login", passed: true },
+      { testFile: "tests/chat-auth.test.ts", testCaseName: "grants access for allowed email", passed: true },
+    ];
+
+    const result = evaluateAcTraceability(plan, testResults);
+    expect(result.allPassed).toBe(true);
+    expect(result.matrix).toHaveLength(2);
+    expect(result.failingAcs).toHaveLength(0);
+  });
+
+  it("gracefully ignores finding disposition when finding is not found", async () => {
+    const { deps } = createMockDeps();
+    deps.runChecks = vi.fn().mockResolvedValue([]);
+    deps.attemptFixes = vi.fn().mockResolvedValue([
+      {
+        findingId: "NON-EXISTENT-FINDING",
+        status: "accepted",
+        explanation: "Some explanation",
+      },
+    ]);
+
+    const task: DefinitionOfDoneTask = {
+      runId: "run-4",
+      repo: "org/repo",
+      issue: 179,
+      head: "task-branch",
+      title: "Task with phantom finding",
+      body: "Closes #179",
+    };
+
+    const result = await runDefinitionOfDone(deps, task);
+    expect(result.ok).toBe(true);
+    expect(result.status).toBe("done");
+  });
 });
+

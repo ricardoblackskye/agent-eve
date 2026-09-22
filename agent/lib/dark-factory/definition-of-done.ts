@@ -138,6 +138,52 @@ export interface DefinitionOfDoneResult {
   traceabilityTable?: string;
 }
 
+export interface AcTestResult {
+  testFile: string;
+  testCaseName: string;
+  passed: boolean;
+}
+
+export interface AcVerificationResult {
+  matrix: AcTraceabilityItem[];
+  allPassed: boolean;
+  failingAcs: AcTraceabilityItem[];
+}
+
+/**
+ * Validates test results against the Acceptance Criteria mappings in an ExecutionPlan.
+ * Pure evaluation component separated from markdown rendering (SRP).
+ */
+export function evaluateAcTraceability(
+  plan: ExecutionPlan,
+  testResults: AcTestResult[] = [],
+): AcVerificationResult {
+  const mappings = plan.acceptanceCriteriaMap ?? [];
+  const matrix: AcTraceabilityItem[] = mappings.map((ac) => {
+    const match = testResults.find(
+      (tr) =>
+        tr.testFile === ac.testFile &&
+        (tr.testCaseName === ac.testCaseName ||
+          tr.testCaseName.includes(ac.testCaseName) ||
+          ac.testCaseName.includes(tr.testCaseName)),
+    );
+    return {
+      acId: ac.acId,
+      description: ac.description,
+      testFile: ac.testFile,
+      testCaseName: ac.testCaseName,
+      passed: match ? match.passed : false,
+    };
+  });
+
+  const failingAcs = matrix.filter((item) => !item.passed);
+  return {
+    matrix,
+    allPassed: failingAcs.length === 0,
+    failingAcs,
+  };
+}
+
 /**
  * Render a markdown table detailing Acceptance Criteria traceability to test cases.
  */
@@ -271,7 +317,10 @@ async function applyAcceptedDispositions(
       const finding = unacceptedFindings.find(
         (f) => f.id === disposition.findingId,
       );
-      if (finding?.severity === "error") {
+      if (!finding) {
+        continue;
+      }
+      if (finding.severity === "error") {
         return {
           blockedResult: {
             ok: false,
@@ -286,15 +335,13 @@ async function applyAcceptedDispositions(
           },
         };
       }
-      if (finding) {
-        await deps.commentWriter.postComment(
-          owner,
-          repoName,
-          pr.number,
-          renderAcceptedFindingComment(finding, explanation),
-        );
-        acceptedIds.add(disposition.findingId);
-      }
+      await deps.commentWriter.postComment(
+        owner,
+        repoName,
+        pr.number,
+        renderAcceptedFindingComment(finding, explanation),
+      );
+      acceptedIds.add(disposition.findingId);
     }
   }
 
@@ -352,29 +399,14 @@ export async function runDefinitionOfDone(
     task.plan?.acceptanceCriteriaMap &&
     task.plan.acceptanceCriteriaMap.length > 0
   ) {
-    const testResults = task.testResults ?? [];
-    acMatrix = task.plan.acceptanceCriteriaMap.map((ac) => {
-      const match = testResults.find(
-        (tr) =>
-          tr.testFile === ac.testFile &&
-          (tr.testCaseName === ac.testCaseName ||
-            tr.testCaseName.includes(ac.testCaseName) ||
-            ac.testCaseName.includes(tr.testCaseName)),
-      );
-      const passed = match ? match.passed : false;
-      return {
-        acId: ac.acId,
-        description: ac.description,
-        testFile: ac.testFile,
-        testCaseName: ac.testCaseName,
-        passed,
-      };
-    });
-
+    const verification = evaluateAcTraceability(
+      task.plan,
+      task.testResults ?? [],
+    );
+    acMatrix = verification.matrix;
     traceabilityTable = renderAcTraceabilityTable(acMatrix);
 
-    const failingAcs = acMatrix.filter((m) => !m.passed);
-    if (failingAcs.length > 0) {
+    if (!verification.allPassed) {
       await deps.commentWriter.postComment(
         owner,
         repoName,
@@ -390,7 +422,7 @@ export async function runDefinitionOfDone(
         resolvedCount: 0,
         acceptedCount: 0,
         remainingFindings: [],
-        reason: `Acceptance Criteria verification failed: AC(s) ${failingAcs.map((a) => a.acId).join(", ")} did not pass tests.`,
+        reason: `Acceptance Criteria verification failed: AC(s) ${verification.failingAcs.map((a) => a.acId).join(", ")} did not pass tests.`,
         acMatrix,
         traceabilityTable,
       };

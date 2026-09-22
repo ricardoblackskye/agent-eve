@@ -8,15 +8,19 @@
 
 import {
   validateExecutionPlan,
+  DefaultPlanParser,
   type ExecutionPlan,
   type PlanValidationResult,
+  type PlanParser,
 } from "./plan-validator";
 
 export interface ArchitectDeps {
   generateText: (prompt: string) => Promise<string>;
   listFiles: (dir: string) => Promise<string[]>;
   readFile?: (path: string) => Promise<string>;
+  planParser?: PlanParser;
   maxPlanRetries?: number;
+  timeoutMs?: number;
 }
 
 export interface ArchitectResult {
@@ -32,35 +36,67 @@ export interface StoryInput {
   body: string;
 }
 
+/**
+ * Sorts repository files by architectural relevance so critical config and
+ * UI entry points are prioritized when the context window is bounded.
+ */
+function sortFilesByRelevance(files: string[]): string[] {
+  if (!Array.isArray(files)) return [];
+  const priorityPatterns = [
+    /^package\.json$/i,
+    /^tsconfig.*\.json$/i,
+    /^(?:app|src\/app)\//i,
+    /^(?:components|src\/components)\//i,
+    /^agent\//i,
+    /^(?:lib|src\/lib)\//i,
+  ];
+
+  return [...files].sort((a, b) => {
+    const aPriority = priorityPatterns.findIndex((re) => re.test(a));
+    const bPriority = priorityPatterns.findIndex((re) => re.test(b));
+    const aScore = aPriority === -1 ? 999 : aPriority;
+    const bScore = bPriority === -1 ? 999 : bPriority;
+    if (aScore !== bScore) {
+      return aScore - bScore;
+    }
+    return a.localeCompare(b);
+  });
+}
+
 export class ArchitectAgent {
+  private parser: PlanParser;
   private maxPlanRetries: number;
+  private timeoutMs: number;
 
   constructor(private deps: ArchitectDeps) {
     this.maxPlanRetries = deps.maxPlanRetries ?? 2;
+    this.parser = deps.planParser ?? new DefaultPlanParser();
+    this.timeoutMs = deps.timeoutMs ?? 60000;
   }
 
   /**
-   * Safely parses JSON output from LLM, stripping markdown fences if present.
-   * Returns parsed plan or detailed error message.
+   * Invokes LLM generation with a timeout guard to prevent hanging interactions.
    */
-  private parsePlanJson(text: string): { plan: ExecutionPlan | null; error?: string } {
+  private async executeGenerate(prompt: string): Promise<string> {
+    const generatePromise = this.deps.generateText(prompt);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        reject(
+          new Error(
+            `ArchitectAgent LLM interaction timed out after ${this.timeoutMs}ms.`,
+          ),
+        );
+      }, this.timeoutMs);
+      if (typeof timer.unref === "function") {
+        timer.unref();
+      }
+    });
+
     try {
-      let raw = text.trim();
-      // Strip markdown code fences if present
-      if (raw.startsWith("```")) {
-        raw = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
-      }
-      const jsonMatch = raw.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        raw = jsonMatch[0];
-      }
-      const plan = JSON.parse(raw) as ExecutionPlan;
-      return { plan };
-    } catch (err: any) {
-      return {
-        plan: null,
-        error: `JSON parse failed: ${err.message}`,
-      };
+      return await Promise.race([generatePromise, timeoutPromise]);
+    } finally {
+      if (timer) clearTimeout(timer);
     }
   }
 
@@ -68,7 +104,8 @@ export class ArchitectAgent {
    * Constructs the initial planning prompt for the LLM.
    */
   private buildInitialPrompt(story: StoryInput, repoFiles: string[]): string {
-    const safeFiles = Array.isArray(repoFiles) ? repoFiles.slice(0, 100) : [];
+    const sortedFiles = sortFilesByRelevance(repoFiles);
+    const safeFiles = sortedFiles.slice(0, 100);
     return [
       `You are Eve's autonomous Architect Agent.`,
       `Your task is to analyze the following User Story and create a comprehensive ExecutionPlan.`,
@@ -125,6 +162,36 @@ export class ArchitectAgent {
    * Executes 1 initial attempt plus up to maxPlanRetries self-correction cycles.
    */
   async planStory(story: StoryInput): Promise<ArchitectResult> {
+    // 0. Fail-closed input validation for StoryInput
+    if (!story || typeof story !== "object") {
+      return {
+        ok: false,
+        retries: 0,
+        error: "StoryInput must be a valid non-null object.",
+      };
+    }
+    if (typeof story.number !== "number" || isNaN(story.number) || story.number <= 0) {
+      return {
+        ok: false,
+        retries: 0,
+        error: "StoryInput number must be a positive integer.",
+      };
+    }
+    if (!story.title || typeof story.title !== "string" || !story.title.trim()) {
+      return {
+        ok: false,
+        retries: 0,
+        error: "StoryInput title must be a non-empty string.",
+      };
+    }
+    if (!story.body || typeof story.body !== "string" || !story.body.trim()) {
+      return {
+        ok: false,
+        retries: 0,
+        error: "StoryInput body must be a non-empty string.",
+      };
+    }
+
     const repoFiles = await this.deps.listFiles(".");
     let retries = 0;
     let lastOutput = "";
@@ -132,37 +199,50 @@ export class ArchitectAgent {
 
     let currentPrompt = this.buildInitialPrompt(story, repoFiles);
 
-    while (retries <= this.maxPlanRetries) {
-      lastOutput = await this.deps.generateText(currentPrompt);
-      const parseResult = this.parsePlanJson(lastOutput);
-
-      if (!parseResult.plan) {
-        lastErrors = [parseResult.error ?? "Failed to parse valid JSON from LLM response."];
-      } else {
-        const validation = validateExecutionPlan(parseResult.plan, story.body);
-        if (validation.valid) {
-          return {
-            ok: true,
-            plan: parseResult.plan,
-            retries,
-          };
-        }
-        lastErrors = validation.errors;
+    while (true) {
+      try {
+        lastOutput = await this.executeGenerate(currentPrompt);
+      } catch (err: any) {
+        lastErrors = [err.message];
+        lastOutput = "";
       }
 
-      retries++;
-      if (retries <= this.maxPlanRetries) {
+      if (lastOutput) {
+        const parseResult = this.parser.parse(lastOutput);
+        if (!parseResult.plan) {
+          lastErrors = [
+            parseResult.error ?? "Failed to parse valid JSON from LLM response.",
+          ];
+        } else {
+          const validation = validateExecutionPlan(parseResult.plan, story.body);
+          if (validation.valid) {
+            return {
+              ok: true,
+              plan: parseResult.plan,
+              retries,
+            };
+          }
+          lastErrors = validation.errors;
+        }
+      }
+
+      // Allow up to maxPlanRetries self-correction loops (< condition)
+      if (retries < this.maxPlanRetries) {
+        retries++;
         currentPrompt = this.buildRepairPrompt(story, lastOutput, {
           valid: false,
           errors: lastErrors,
         });
+      } else {
+        break;
       }
     }
 
     return {
       ok: false,
-      retries: this.maxPlanRetries,
+      retries,
       error: `ArchitectAgent exceeded max retries (${this.maxPlanRetries}). Errors: ${lastErrors.join("; ")}`,
     };
   }
 }
+
