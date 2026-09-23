@@ -24,7 +24,7 @@ and tests beneath them.
 - **Parent epic release placement:**
 
 | Release          | Deliverables                                                      | Proposed branch                                          |
-| ---------------- | ----------------------------------------------------------------- | -------------------------------------------------------- |
+|------------------|-------------------------------------------------------------------|----------------------------------------------------------|
 | R6a — foundation | #197 platform adapters, then #198 durable run history and metrics | `feat/df-run-ledger` for the coordinated foundation work |
 | R6b — board      | #199 read API and #200 progress board                             | `feat/df-progress-board`                                 |
 
