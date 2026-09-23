@@ -1,11 +1,15 @@
 import { describe, it, expect } from "vitest";
-import { ALLOWED_GOOGLE_USERS, verifyGoogleChatAccess, type GoogleUserProfile } from "../app/google-auth";
+import {
+  ALLOWED_GOOGLE_USERS,
+  verifyGoogleChatAccess,
+  type GoogleUserProfile,
+} from "../app/google-auth";
 
 describe("Google Auth Verification", () => {
   it("grants access for cuillinguy@gmail.com with verifiedEmail: true", () => {
     const profile: GoogleUserProfile = {
       email: "cuillinguy@gmail.com",
-      verifiedEmail: true
+      verifiedEmail: true,
     };
     const result = verifyGoogleChatAccess(profile);
     expect(result.allowed).toBe(true);
@@ -15,7 +19,7 @@ describe("Google Auth Verification", () => {
   it("handles case-insensitivity", () => {
     const profile: GoogleUserProfile = {
       email: "CUILLINGUY@GMAIL.COM",
-      verifiedEmail: true
+      verifiedEmail: true,
     };
     const result = verifyGoogleChatAccess(profile);
     expect(result.allowed).toBe(true);
@@ -25,7 +29,7 @@ describe("Google Auth Verification", () => {
   it("handles leading/trailing whitespace", () => {
     const profile: GoogleUserProfile = {
       email: "  cuillinguy@gmail.com  ",
-      verifiedEmail: true
+      verifiedEmail: true,
     };
     const result = verifyGoogleChatAccess(profile);
     expect(result.allowed).toBe(true);
@@ -35,7 +39,7 @@ describe("Google Auth Verification", () => {
   it("rejects unauthorized email address", () => {
     const profile: GoogleUserProfile = {
       email: "someone.else@gmail.com",
-      verifiedEmail: true
+      verifiedEmail: true,
     };
     const result = verifyGoogleChatAccess(profile);
     expect(result.allowed).toBe(false);
@@ -45,7 +49,7 @@ describe("Google Auth Verification", () => {
   it("rejects unverified email", () => {
     const profile: GoogleUserProfile = {
       email: "cuillinguy@gmail.com",
-      verifiedEmail: false
+      verifiedEmail: false,
     };
     const result = verifyGoogleChatAccess(profile);
     expect(result.allowed).toBe(false);
@@ -54,7 +58,7 @@ describe("Google Auth Verification", () => {
 
   it("rejects missing email", () => {
     const profile: GoogleUserProfile = {
-      verifiedEmail: true
+      verifiedEmail: true,
     };
     const result = verifyGoogleChatAccess(profile);
     expect(result.allowed).toBe(false);
@@ -64,7 +68,7 @@ describe("Google Auth Verification", () => {
   it("rejects empty email", () => {
     const profile: GoogleUserProfile = {
       email: "",
-      verifiedEmail: true
+      verifiedEmail: true,
     };
     const result = verifyGoogleChatAccess(profile);
     expect(result.allowed).toBe(false);
@@ -75,6 +79,17 @@ describe("Google Auth Verification", () => {
     const result = verifyGoogleChatAccess(null);
     expect(result.allowed).toBe(false);
     expect(result.reason).toBe("Missing profile");
+  });
+
+  it("accepts an injected allow-list (ALLOWED_GOOGLE_EMAIL override)", () => {
+    const profile: GoogleUserProfile = {
+      email: "me@example.com",
+      verifiedEmail: true,
+    };
+    expect(verifyGoogleChatAccess(profile).allowed).toBe(false);
+    expect(verifyGoogleChatAccess(profile, ["me@example.com"]).allowed).toBe(
+      true,
+    );
   });
 
   it("rejects undefined profile", () => {

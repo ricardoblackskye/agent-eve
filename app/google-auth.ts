@@ -13,7 +13,10 @@ export interface AuthVerificationResult {
   email?: string;
 }
 
-export function verifyGoogleChatAccess(profile?: GoogleUserProfile | null): AuthVerificationResult {
+export function verifyGoogleChatAccess(
+  profile?: GoogleUserProfile | null,
+  allowedEmails: readonly string[] = ALLOWED_GOOGLE_USERS,
+): AuthVerificationResult {
   if (!profile) {
     return { allowed: false, reason: "Missing profile" };
   }
@@ -27,7 +30,7 @@ export function verifyGoogleChatAccess(profile?: GoogleUserProfile | null): Auth
   }
 
   const normalizedEmail = profile.email.toLowerCase().trim();
-  const isAllowed = ALLOWED_GOOGLE_USERS.includes(normalizedEmail);
+  const isAllowed = allowedEmails.includes(normalizedEmail);
 
   if (isAllowed) {
     return { allowed: true, email: normalizedEmail };
