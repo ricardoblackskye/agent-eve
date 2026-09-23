@@ -29,8 +29,9 @@ describe("PR Reviewer Agent - TDD Tests", () => {
         "pr-reviewer.yml",
       );
       const content = fs.readFileSync(workflowPath, "utf8");
-      expect(content).toMatch(/node-version: '22'/);
-      expect(content).not.toMatch(/node-version: '24'/);
+      // Prettier (the CI YAML gate) normalises quotes, so accept either.
+      expect(content).toMatch(/node-version: ['"]22['"]/);
+      expect(content).not.toMatch(/node-version: ['"]24['"]/);
     });
 
     it("should have explicit cache key for npm ci (recommended)", () => {
@@ -433,6 +434,37 @@ describe("PR Reviewer Agent - TDD Tests", () => {
       expect(content).toMatch(/thread-safety|thread safety/i);
     });
   });
+  describe("Transient model-error retry (#191)", () => {
+    it("imports the retry policy module", () => {
+      const src = fs.readFileSync(
+        path.join(process.cwd(), "scripts", "pr-reviewer.ts"),
+        "utf8",
+      );
+      expect(src).toMatch(/from "\.\/pr-reviewer-retry"/);
+      expect(src).toMatch(/isTransientModelError/);
+      expect(src).toMatch(/retryDelayMs/);
+    });
+
+    it("routes both model calls through the retrying wrapper", () => {
+      const src = fs.readFileSync(
+        path.join(process.cwd(), "scripts", "pr-reviewer.ts"),
+        "utf8",
+      );
+      expect(src.match(/await postCompletion\(/g) || []).toHaveLength(2);
+      expect(src).toMatch(/AbortSignal\.timeout/);
+    });
+
+    it("cancels superseded runs for the same PR (workflow concurrency)", () => {
+      const wf = fs.readFileSync(
+        path.join(process.cwd(), ".github", "workflows", "pr-reviewer.yml"),
+        "utf8",
+      );
+      expect(wf).toMatch(/concurrency:/);
+      expect(wf).toMatch(/cancel-in-progress: true/);
+      expect(wf).toMatch(/github\.event\.pull_request\.number/);
+    });
+  });
+
 });
 
 
