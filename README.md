@@ -151,7 +151,7 @@ be flagged **Sensitive** in Vercel (masked, not readable via `vercel env pull`);
 | `GH_SPRINT_TOKEN`           | No*      | Secret | Token for reading the Projects V2 board (`read:project` scope); falls back to `GH_RELEASE_TOKEN`                                          |
 | `VERCEL_PROTECTION_BYPASS`  | No       | Secret | Bypass secret for Vercel Protection (password/SSO) so server-to-server calls reach the app                                                |
 | `EVE_CHAT_MODEL`            | No       | Config | Override the root chat model id (default `deepseek/deepseek-v4.1-flash`)                                                                  |
-| `MODEL_NAME`                | No       | Config | Model id for subagents (Sprint Metrics Analyst, PR-reviewer Action); default `deepseek/deepseek-v4.1-flash`                               |
+| `MODEL_NAME`                | No       | Config | Model id for subagents (Sprint Metrics Analyst); default `deepseek/deepseek-v4.1-flash`                               |
 | `EVE_STORY_MENTION`         | No       | Config | Mention that triggers the Product Owner in an issue body (default `@eve-agent`)                                                           |
 | `EVE_STORY_LABEL`           | No       | Config | Label that triggers the Product Owner (default `needs-story`)                                                                             |
 | `STORY_ALLOWED_REPOS`       | Yes      | Config | **Fail-closed** comma-separated `owner/repo` allow-list for story publishing; refusing if unset                                           |
@@ -672,9 +672,12 @@ there to enable webhook processing for it.
 
 **What happens:**
 
-- Opening or editing a PR triggers the **PR-reviewer** GitHub Action, which posts
-  an AI code review (model set by the `MODEL_NAME` repo variable — defaults to
-  `deepseek/deepseek-v4.1-flash`).
+- Opening or editing a PR triggers the **PR-reviewer** GitHub Action, which runs
+  `scripts/pr-reviewer.ts` (via `tsx`) and posts an AI code review. The reviewer
+  pins its **own, non-reasoning** model via `PR_REVIEW_MODEL` (default
+  `deepseek/deepseek-chat`) — the project's reasoning model exhausted the
+  completion budget and emitted no content (#87). It exists only as this script;
+  the unused `agent/subagents/pr-reviewer/` subagent was removed (#189).
 - Merging a PR fires the webhook → the **Release Manager** subagent updates
   [`releasenotes.md`](releasenotes.md) with a summary of the change. Release
   notes fire **only** for a merged PR (a `pull_request` `closed` event with

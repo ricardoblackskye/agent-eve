@@ -15,7 +15,7 @@ const ROOT = process.cwd();
 const EXEMPT = new Set(["release-manager"]);
 
 // Subagent directories that should resolve the shared Eve default.
-const SUBAGENTS = ["product-owner", "sprint-reporter", "pr-reviewer"];
+const SUBAGENTS = ["product-owner", "sprint-reporter"];
 
 describe("subagent model source (no hardcoded old default)", () => {
   for (const name of SUBAGENTS) {
