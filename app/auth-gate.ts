@@ -12,6 +12,9 @@ const PUBLIC_EXACT = ["/unauthorized", "/favicon.ico", "/robots.txt"];
  * Public by design:
  * - `/api/auth/*`      the OAuth flow itself (chicken/egg) + signout
  * - `/api/github/webhook` server-to-server, has its own signature check (Dark Factory)
+ * - `/eve/*`           the Eve runtime itself (own auth); `/api/eve/*` rewrites
+ *                      to it server-side WITHOUT forwarding cookies, and CI
+ *                      health-checks `/eve/v1/health`, so it must stay public
  * - `/api/eve/*`       the Eve proxy keeps its own Bearer auth (server callers
  *                      and the browser send the same key, so it cannot be
  *                      re-gated here without breaking the eval/DF bearer flow)
@@ -22,6 +25,7 @@ const PUBLIC_PREFIXES = [
   "/api/github/webhook",
   "/_next",
   "/api/eve",
+  "/eve",
 ];
 
 export function isApiPath(pathname: string): boolean {

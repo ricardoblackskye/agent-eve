@@ -1,6 +1,11 @@
 import { expect, test } from "@playwright/test";
+import { signInAsAllowed } from "./auth";
 
 test.describe("Architecture page", () => {
+  test.beforeEach(async ({ page }) => {
+    await signInAsAllowed(page);
+  });
+
   test("loads the architecture page with title", async ({ page }) => {
     await page.goto("/architecture");
 

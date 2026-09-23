@@ -25,6 +25,14 @@ describe("auth gate policy (#99)", () => {
     expect(isProtectedPath("/api/github/webhook")).toBe(false);
   });
 
+  it("keeps the Eve runtime paths public (health probe + session API)", () => {
+    // The Eve runtime serves /eve/* directly; /api/eve/* rewrites to it
+    // server-side without forwarding cookies, and CI health-checks it.
+    expect(isProtectedPath("/eve/v1/health")).toBe(false);
+    expect(isProtectedPath("/eve/v1/info")).toBe(false);
+    expect(isProtectedPath("/eve/v1/session/abc/stream")).toBe(false);
+  });
+
   it("leaves the Eve API on its own Bearer auth", () => {
     expect(isProtectedPath("/api/eve/v1/info")).toBe(false);
   });

@@ -124,6 +124,8 @@ jobs:
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           VERCEL_PROTECTION_BYPASS: ${{ secrets.VERCEL_PROTECTION_BYPASS }}
+          # Dev-mode sign-in so the gated pages can be tested (fail-closed in production)
+          AUTH_DEV_MODE: "1"
         run: npm run test:e2e
       - name: Upload Playwright artifacts
         if: always()

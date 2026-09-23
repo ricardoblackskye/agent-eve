@@ -6,3 +6,5 @@ http://localhost:3000/.*
 # Generated MegaLinter filename reports
 .*megalinter_file_names.*
 
+# Funding metadata in package-lock.json blocks link checkers (403)
+.*patreon\.com.*
