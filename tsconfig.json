@@ -21,6 +21,7 @@
     "isolatedModules": true
   },
   "include": [
+    "proxy.ts",
     "agent/**/*.ts",
     "evals/**/*.ts",
     "app/**/*.ts",

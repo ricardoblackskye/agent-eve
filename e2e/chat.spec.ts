@@ -1,6 +1,11 @@
 import { expect, test } from "@playwright/test";
+import { signInAsAllowed } from "./auth";
 
 test.describe("Eve chat", () => {
+  test.beforeEach(async ({ page }) => {
+    await signInAsAllowed(page);
+  });
+
   test("renders ready chat controls without an error", async ({ page }) => {
     await page.goto("/");
 
