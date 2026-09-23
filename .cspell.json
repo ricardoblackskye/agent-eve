@@ -24,6 +24,8 @@
     "Authorisation",
     "Neutralise",
     "parseable",
+    "retryable",
+    "BYOK",
     "sanitised",
     "yamllint",
     "markdownlint",

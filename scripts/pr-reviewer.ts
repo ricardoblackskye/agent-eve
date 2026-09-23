@@ -1,4 +1,10 @@
 import fs from "fs";
+import {
+  isTransientModelError,
+  parseRetryAfter,
+  retryDelayMs,
+  RETRY_DEFAULTS,
+} from "./pr-reviewer-retry";
 
 // NOTE: the reviewer deliberately does NOT use the project's default model —
 // that default is a REASONING model, which is the #87 root cause. See REVIEW_MODEL
@@ -327,10 +333,62 @@ function buildUserMessage(
   return `Please review the following diff and provide your feedback with specific line number citations:${excludedNote}${truncationNote}\n\n\`\`\`diff\n${sanitizedDiff}\n\`\`\``;
 }
 
+const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
+const OPENROUTER_MAX_ATTEMPTS =
+  Number(process.env.PR_REVIEW_MAX_ATTEMPTS) || RETRY_DEFAULTS.maxAttempts;
+const OPENROUTER_TIMEOUT_MS = Number(process.env.PR_REVIEW_TIMEOUT_MS) || 90000;
+const PROVIDER_SORT = (process.env.PR_REVIEW_PROVIDER_SORT || "").trim();
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * POST to OpenRouter, retrying TRANSIENT failures (#191): HTTP 429/5xx and
+ * network/timeout errors, with exponential backoff (+ jitter), honouring
+ * Retry-After. Non-transient responses (e.g. 400/401/403) are returned at once
+ * so the caller surfaces the real cause instead of looping. Adds a request
+ * timeout so a hung provider cannot stall the job.
+ */
+async function postCompletion(
+  url: string,
+  init: RequestInit,
+): Promise<Response> {
+  const request: RequestInit = {
+    ...init,
+    signal: init.signal ?? AbortSignal.timeout(OPENROUTER_TIMEOUT_MS),
+  };
+  let lastError: unknown = null;
+  for (let attempt = 1; attempt <= OPENROUTER_MAX_ATTEMPTS; attempt++) {
+    try {
+      const res = await fetch(url, request);
+      if (res.ok || !isTransientModelError({ status: res.status })) return res;
+      lastError = new Error(`HTTP ${res.status}`);
+      if (attempt === OPENROUTER_MAX_ATTEMPTS) return res;
+      const delay = retryDelayMs(attempt, {
+        retryAfterMs: parseRetryAfter(res.headers.get("retry-after")),
+      });
+      console.warn(
+        `OpenRouter ${res.status}; retrying in ${delay}ms (attempt ${attempt + 1}/${OPENROUTER_MAX_ATTEMPTS}).`,
+      );
+      await sleep(delay);
+    } catch (err) {
+      lastError = err;
+      if (attempt === OPENROUTER_MAX_ATTEMPTS) throw err;
+      const delay = retryDelayMs(attempt);
+      console.warn(
+        `OpenRouter request failed (${err instanceof Error ? err.message : String(err)}); retrying in ${delay}ms (attempt ${attempt + 1}/${OPENROUTER_MAX_ATTEMPTS}).`,
+      );
+      await sleep(delay);
+    }
+  }
+  throw lastError ?? new Error("OpenRouter request failed");
+}
+
 // Call OpenRouter API to generate review, with fallback for rate limits
 let review: string;
 try {
-  const openrouterResponse = await fetch(
+  const openrouterResponse = await postCompletion(
     "https://openrouter.ai/api/v1/chat/completions",
     {
       method: "POST",
@@ -360,6 +418,7 @@ try {
         // ~17k tokens for the same diff). max_tokens must comfortably exceed it.
         reasoning: { max_tokens: REVIEW_REASONING_MAX_TOKENS },
         max_tokens: REVIEW_MAX_TOKENS,
+        ...(PROVIDER_SORT ? { provider: { sort: PROVIDER_SORT } } : {}),
       }),
     },
   );
@@ -419,7 +478,7 @@ try {
       "Reasoning exhausted the token budget; retrying with a smaller diff (#87).",
     );
 
-    const retryResponse = await fetch(
+    const retryResponse = await postCompletion(
       "https://openrouter.ai/api/v1/chat/completions",
       {
         method: "POST",
@@ -444,6 +503,7 @@ try {
           temperature: 0.2,
           reasoning: { max_tokens: REVIEW_REASONING_MAX_TOKENS },
           max_tokens: REVIEW_MAX_TOKENS,
+          ...(PROVIDER_SORT ? { provider: { sort: PROVIDER_SORT } } : {}),
         }),
       },
     );
