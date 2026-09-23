@@ -233,6 +233,7 @@ describe("#163 cycle 15-18: local mode is opt-in and impossible in production", 
 
   it("REFUSES local in Vercel production", () => {
     const d = resolveRunnerMode({
+      DF_PLATFORM_PROVIDER: "vercel",
       DF_RUNNER: "local",
       VERCEL_ENV: "production",
     });
@@ -241,9 +242,29 @@ describe("#163 cycle 15-18: local mode is opt-in and impossible in production", 
   });
 
   it("REFUSES local in a self-hosted production build (the #78 hole)", () => {
-    const d = resolveRunnerMode({ DF_RUNNER: "local", NODE_ENV: "production" });
+    const d = resolveRunnerMode({
+      DF_PLATFORM_PROVIDER: "generic",
+      DF_RUNNER: "local",
+      NODE_ENV: "production",
+    });
     expect(d.mode).toBe("session");
     expect(d.refusal).toMatch(/production/i);
+  });
+
+  it("allows an explicitly classified preview build but not an implicit local build", () => {
+    const d = resolveRunnerMode({
+      DF_PLATFORM_PROVIDER: "generic",
+      DF_DEPLOYMENT_ENV: "preview",
+      DF_RUNNER: "local",
+      NODE_ENV: "production",
+    });
+    expect(d.mode).toBe("local");
+  });
+
+  it("refuses to guess the platform provider for an unconfigured production build", () => {
+    expect(() =>
+      resolveRunnerMode({ DF_RUNNER: "local", NODE_ENV: "production" }),
+    ).toThrow(/DF_PLATFORM_PROVIDER/);
   });
 
   it("never selects local implicitly", () => {
@@ -296,9 +317,35 @@ describe("#163 security: the session handoff origin is never taken from the requ
     expect(r.reason).toMatch(/DF_API_BASE_URL/);
   });
 
-  it("falls back to VERCEL_URL on Vercel", () => {
-    const r = resolveApiOrigin({ VERCEL_URL: "my-app.vercel.app" });
+  it("resolves VERCEL_URL only when the Vercel adapter is selected", () => {
+    const r = resolveApiOrigin({
+      DF_PLATFORM_PROVIDER: "vercel",
+      VERCEL_URL: "my-app.vercel.app",
+    });
     expect(r.origin).toBe("https://my-app.vercel.app");
+  });
+
+  it("does not read Vercel deployment values through the generic adapter", () => {
+    const r = resolveApiOrigin(
+      {
+        DF_PLATFORM_PROVIDER: "generic",
+        VERCEL_URL: "must-not-be-used.vercel.app",
+      },
+      "https://attacker.test",
+    );
+    expect(r.origin).toBeNull();
+  });
+
+  it("rejects a malformed configured origin instead of falling back to request input", () => {
+    expect(() =>
+      resolveApiOrigin(
+        {
+          DF_PLATFORM_PROVIDER: "generic",
+          DF_API_BASE_URL: "not a url",
+        },
+        "https://attacker.test",
+      ),
+    ).toThrow(/DF_API_BASE_URL/);
   });
 
   it("trusts the request origin only when it is loopback/local", () => {
@@ -322,12 +369,12 @@ describe("#163 security: the session handoff origin is never taken from the requ
   });
 
   it("does not fall back to an external request origin even when DF_API_BASE_URL is unparseable", () => {
-    expect(
+    expect(() =>
       resolveApiOrigin(
-        { DF_API_BASE_URL: "not a url" },
+        { DF_PLATFORM_PROVIDER: "generic", DF_API_BASE_URL: "not a url" },
         "https://attacker.test",
-      ).origin,
-    ).toBeNull();
+      ),
+    ).toThrow(/DF_API_BASE_URL/);
   });
 
   it("a trusted local origin lets the handoff proceed; an untrusted one is skipped", async () => {

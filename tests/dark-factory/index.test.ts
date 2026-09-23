@@ -256,6 +256,12 @@ describe("index.ts is the single import surface (R2 seams, #135/#142)", () => {
     expect(typeof mod.createWorkerHandler).toBe("function");
   });
 
+  it("re-exports the platform adapter contract", async () => {
+    const mod = await import("../../agent/lib/dark-factory/index");
+    expect(typeof mod.createPlatformAdapter).toBe("function");
+    expect(typeof mod.PlatformConfigurationError).toBe("function");
+  });
+
   it("re-exports the R5 definition of DONE and PR writer seams (#164)", async () => {
     const mod = await import("../../agent/lib/dark-factory/index");
     expect(mod.DEFAULT_MAX_REVIEW_ROUNDS).toBe(3);

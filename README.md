@@ -133,11 +133,12 @@ To force the live tests to skip (e.g. in a constrained CI slice) set
 
 ### Environment Variables
 
-All variables are set as **Vercel environment variables** (Project Settings →
-Environment Variables) in production, or in a local `.env.local` copied from
-[`.env.example`](.env.example) for development. Variables marked **Secret** must
-be flagged **Sensitive** in Vercel (masked, not readable via `vercel env pull`);
-**Config** values are non-sensitive (e.g. allow-lists, board ids).
+Set variables in the environment of the selected deployment platform, or in a
+local `.env.local` copied from [`.env.example`](.env.example). For Vercel, use
+Project Settings → Environment Variables. Variables marked **Secret** must be
+flagged **Sensitive** in Vercel (masked, not readable via `vercel env pull`);
+**Config** values are non-sensitive (e.g. allow-lists, board ids). `DF_PLATFORM_PROVIDER`
+is required in production: select `vercel` or `generic`.
 
 | Variable                    | Required | Type                              | Description                                                                                                                                                    |
 |-----------------------------|----------|-----------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -149,7 +150,9 @@ be flagged **Sensitive** in Vercel (masked, not readable via `vercel env pull`);
 | `GITHUB_TOKEN`              | No       | Secret                            | Final fallback token if neither `GH_RELEASE_TOKEN` nor `GH_STORY_TOKEN` is set                                                                                 |
 | `GH_WEBHOOK_SECRET`         | Yes      | Secret                            | Shared secret that authenticates incoming webhook payloads (required on Vercel; see Webhooks)                                                                  |
 | `GH_SPRINT_TOKEN`           | No*      | Secret                            | Token for reading the Projects V2 board (`read:project` scope); falls back to `GH_RELEASE_TOKEN`                                                               |
-| `VERCEL_PROTECTION_BYPASS`  | No       | Secret                            | Bypass secret for Vercel Protection (password/SSO) so server-to-server calls reach the app                                                                     |
+| `VERCEL_PROTECTION_BYPASS`  | No       | Secret                            | Vercel Protection bypass; read/forwarded only when `DF_PLATFORM_PROVIDER=vercel`                                                                                |
+| `DF_PLATFORM_PROVIDER`      | Yes*     | Config                            | Required in production: `vercel` enables Vercel adapters; `generic` uses platform-neutral settings                                                             |
+| `DF_DEPLOYMENT_ENV`         | No       | Config                            | Generic platform stage: `development`, `preview`, or `production`; production builds cannot be downgraded to development                                      |
 | `GOOGLE_CLIENT_SECRET`      | Secret   | Vercel (Sensitive) / `.env.local` | Google OAuth client secret (#99)                                                                                                                               |
 | `AUTH_SESSION_SECRET`       | Secret   | Vercel (Sensitive) / `.env.local` | Signs the HttpOnly session cookie (#99)                                                                                                                        |
 | `EVE_CHAT_MODEL`            | No       | Config                            | Override the root chat model id (default `deepseek/deepseek-v4.1-flash`)                                                                                       |
@@ -174,11 +177,14 @@ be flagged **Sensitive** in Vercel (masked, not readable via `vercel env pull`);
 | `DF_WORKER_PROVIDER`        | No       | Config                            | Where a worker sandbox runs; unset/`local` = dry-run provider that reports `isolated: false`                                                                   |
 | `DF_WORKER_ALLOWED_REPOS`   | No*      | Config                            | **Fail-closed** comma-separated `owner/repo` allow-list for worker tasks; unset = every task refused with 403 before provisioning                              |
 | `DF_WORKER_RUNTIME`         | No       | Config                            | Runtime requested in the worker environment: `node` or `python` (default `node`)                                                                               |
+| `DF_SECURITY_SCAN_ENABLED` | No       | Config                            | Enables the tester-agent Gitleaks scan when set to `true` (default `false`)                                                                                   |
+| `DF_TESTER_TIMEOUT_MS`     | No       | Config                            | Timeout per tester check in milliseconds (default `60000`; positive integer)                                                                                  |
+| `DF_SECURITY_TOOLS`        | No       | Config                            | Comma-separated tester security tools; currently only `gitleaks` is accepted (default `gitleaks`)                                                            |
 | `DF_REPORTER_PROVIDER`      | No       | Config                            | Where worker progress/completion/questions go: unset/`console` = **dry-run, writes nothing**; `github` posts issue comments gated by `DF_WORKER_ALLOWED_REPOS` |
 | `DF_TRIGGER_LABEL`          | No       | Config                            | The issue label that requests Dark Factory work (default `dark-factory`); removing it aborts the run                                                           |
 | `DF_TRIGGER_ALLOWED_USERS`  | No*      | Config                            | **Fail-closed** comma-separated GitHub logins allowed to trigger work; unset = every trigger REFUSED                                                           |
 | `DF_RUNNER`                 | No       | Config                            | Where a triggered run executes: unset/`session` = the deployed path; `local` = in-process, and **refused in any production build**                             |
-| `DF_API_BASE_URL`           | No       | Config                            | Canonical base URL for the Eve session handoff; required for self-hosted deployments so the origin is never taken from the request Host header (SSRF)          |
+| `DF_API_BASE_URL`           | No*      | Config                            | Trusted HTTP(S) Eve API origin; used by the generic adapter and overrides `VERCEL_URL`; remote generic deployments must set it (never derived from request Host) |
 | `DF_CREDENTIAL_TTL_SECONDS` | No       | Config                            | Per-task credential lease lifetime, 1..3600 (default `3600`); the sandbox gets a lease, never the token                                                        |
 | `GOOGLE_CLIENT_ID`          | No*      | Secret                            | Google OAuth client id; required for real Google sign-in (#99)                                                                                                 |
 | `GOOGLE_CLIENT_SECRET`      | No*      | Secret                            | Google OAuth client secret; required for real Google sign-in (#99)                                                                                             |

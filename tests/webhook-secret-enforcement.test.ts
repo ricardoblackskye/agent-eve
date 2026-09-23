@@ -85,6 +85,7 @@ describe("webhook secret enforcement in production", () => {
   // SECURITY: `verifySignature` returned true when no secret was configured,
   // so a deployment that forgets GH_WEBHOOK_SECRET accepts forged payloads.
   it("rejects webhooks when the secret is unset in production", async () => {
+    vi.stubEnv("DF_PLATFORM_PROVIDER", "vercel");
     vi.stubEnv("VERCEL_ENV", "production");
     vi.stubEnv("GH_WEBHOOK_SECRET", "");
 
@@ -97,6 +98,7 @@ describe("webhook secret enforcement in production", () => {
   });
 
   it("rejects webhooks when the secret is undefined in production", async () => {
+    vi.stubEnv("DF_PLATFORM_PROVIDER", "vercel");
     vi.stubEnv("VERCEL_ENV", "production");
     vi.stubEnv("GH_WEBHOOK_SECRET", undefined as unknown as string);
 
@@ -108,6 +110,7 @@ describe("webhook secret enforcement in production", () => {
   });
 
   it("still allows unsigned webhooks in local development", async () => {
+    vi.stubEnv("DF_PLATFORM_PROVIDER", "vercel");
     vi.stubEnv("VERCEL_ENV", "development");
     vi.stubEnv("GH_WEBHOOK_SECRET", "");
 
@@ -122,6 +125,7 @@ describe("webhook secret enforcement in production", () => {
   // Preview has no webhook secret configured and the preview eval suite posts
   // unsigned webhooks at it, so that broke CI without adding security.
   it("still allows unsigned webhooks on preview deployments", async () => {
+    vi.stubEnv("DF_PLATFORM_PROVIDER", "vercel");
     vi.stubEnv("VERCEL_ENV", "preview");
     vi.stubEnv("GH_WEBHOOK_SECRET", "");
 
@@ -132,6 +136,7 @@ describe("webhook secret enforcement in production", () => {
   });
 
   it("still verifies the signature on preview when a secret IS configured", async () => {
+    vi.stubEnv("DF_PLATFORM_PROVIDER", "vercel");
     vi.stubEnv("VERCEL_ENV", "preview");
     vi.stubEnv("GH_WEBHOOK_SECRET", "preview-secret");
 
@@ -183,7 +188,8 @@ describe("fail-closed signature enforcement off Vercel (#78)", () => {
         json: async () => ({ status: "accepted" }),
       }),
     );
-    // Baseline: no platform marker at all, and no secret configured.
+    // Baseline: generic host and no webhook secret configured.
+    vi.stubEnv("DF_PLATFORM_PROVIDER", "generic");
     vi.stubEnv("VERCEL_ENV", undefined as unknown as string);
     vi.stubEnv("GH_WEBHOOK_SECRET", "");
     vi.stubEnv("REQUIRE_WEBHOOK_SIGNATURE", undefined as unknown as string);
@@ -221,6 +227,7 @@ describe("fail-closed signature enforcement off Vercel (#78)", () => {
   });
 
   it("still allows unsigned webhooks on a Vercel preview build (evals preserved)", async () => {
+    vi.stubEnv("DF_PLATFORM_PROVIDER", "vercel");
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("VERCEL_ENV", "preview");
 
@@ -228,6 +235,41 @@ describe("fail-closed signature enforcement off Vercel (#78)", () => {
     const res: any = await POST(createRequest(PR_BODY));
 
     expect(res.status).not.toBe(500);
+  });
+
+  it("refuses an unknown platform provider instead of silently using a security mode", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("DF_PLATFORM_PROVIDER", "unknown-platform");
+
+    const { POST } = await import("../app/api/github/webhook/route");
+    const res: any = await POST(createRequest(PR_BODY));
+
+    expect(res.status).toBe(500);
+    expect(res.data.error).toMatch(/DF_PLATFORM_PROVIDER/i);
+  });
+
+  it("does not let an explicit unsigned opt-out mask an invalid provider", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("DF_PLATFORM_PROVIDER", "unknown-platform");
+    vi.stubEnv("ALLOW_UNSIGNED_WEBHOOKS", "true");
+
+    const { POST } = await import("../app/api/github/webhook/route");
+    const res: any = await POST(createRequest(PR_BODY));
+
+    expect(res.status).toBe(500);
+    expect(res.data.error).toMatch(/DF_PLATFORM_PROVIDER/i);
+  });
+
+  it("requires a signature for an explicitly configured generic preview deployment", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("DF_DEPLOYMENT_ENV", "preview");
+    vi.stubEnv("VERCEL_ENV", "preview");
+
+    const { POST } = await import("../app/api/github/webhook/route");
+    const res: any = await POST(createRequest(PR_BODY));
+
+    expect(res.status).toBe(500);
+    expect(res.data.error).toMatch(/signature/i);
   });
 
   it("still allows unsigned webhooks in local development", async () => {

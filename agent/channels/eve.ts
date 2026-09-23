@@ -6,6 +6,8 @@ import {
   vercelOidc,
 } from "eve/channels/auth";
 import type { SessionAuthContext } from "eve/context";
+import { createPlatformAdapter } from "../lib/dark-factory/platform";
+import { selectPlatformAuth } from "../lib/dark-factory/platform-auth";
 
 /**
  * Custom bearer-token auth that checks the `Authorization` header against
@@ -45,13 +47,13 @@ const bearerAuth = (request: Request): SessionAuthContext | null => {
   });
 };
 
+const platform = createPlatformAdapter();
+
 export default eveChannel({
-  auth: [
-    // Lets the Vercel platform reach the deployed agent via OIDC.
-    vercelOidc(),
+  auth: selectPlatformAuth(platform.id, vercelOidc, [
     // Opens on localhost for `eve dev` and the REPL; ignored in production.
     localDev(),
     // Custom bearer-token auth. Accepts requests with a valid EVE_API_KEY.
     bearerAuth,
-  ],
+  ]),
 });

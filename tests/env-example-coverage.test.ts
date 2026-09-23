@@ -1,10 +1,10 @@
 /**
  * Doc-consistency guard (issue #124 / #123).
  *
- * Extracts every `process.env.<NAME>` referenced by non-test application
- * source code and asserts each user-settable variable is documented in
- * `.env.example`. This is the regression guard so the documentation gap
- * cannot silently re-open.
+ * Extracts environment variables referenced by non-test application source
+ * (`process.env.<NAME>` or an injected `env.<NAME>`) and asserts each
+ * user-settable variable is documented in `.env.example`. This is the regression
+ * guard so the documentation gap cannot silently re-open.
  *
  * Vars that are Vercel/CI auto-provided or Playwright-only are whitelisted
  * because they are NOT part of the operator's `.env.example` setup surface.
@@ -24,6 +24,7 @@ const WHITELIST = new Set<string>([
   "NODE_ENV", // set by Next.js / Vitest, never by the operator
   "PLAYWRIGHT_EXECUTABLE_PATH", // Playwright config only
   "VERCEL_ENV", // Vercel auto-provided
+  "VERCEL_URL", // Vercel auto-provided deployment URL
   "VERCEL_GIT_REPO_OWNER", // Vercel auto-provided
   "VERCEL_GIT_REPO_SLUG", // Vercel auto-provided
   "GITHUB_EVENT_PATH", // GitHub Actions built-in (set by the Actions runner)
@@ -59,7 +60,7 @@ function walk(dir: string): string[] {
 
 function extractSourceEnvVars(): Set<string> {
   const vars = new Set<string>();
-  const re = /process\.env\.([A-Z][A-Z0-9_]*)/g;
+  const re = /(?:process\.)?env\.([A-Z][A-Z0-9_]*)/g;
   for (const file of walk(ROOT)) {
     // skip this test file itself (it references env var names as strings)
     if (file.endsWith("env-example-coverage.test.ts")) continue;

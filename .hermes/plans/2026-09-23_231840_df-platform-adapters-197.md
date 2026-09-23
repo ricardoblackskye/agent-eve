@@ -4,7 +4,13 @@
 
 **Goal:** Isolate the Dark Factory runtime choices that currently depend on Vercel behind explicit, provider-neutral contracts and configuration, while preserving the existing secure Vercel path and a testable local/non-Vercel path.
 
-**Architecture:** Keep orchestration and canonical payloads in `agent/lib/dark-factory/`; put deployment discovery, handoff transport, and runtime authentication decisions behind capability-specific adapters. Reuse existing `StateStore` and `WorkerProvider` seams rather than introducing a catch-all platform abstraction or a second storage system. Keep Next.js route files as hosting adapters at the edge, with platform-independent decision logic and tests beneath them.
+**Architecture:** Keep orchestration and canonical payloads in
+`agent/lib/dark-factory/`; put deployment discovery, handoff transport, and
+runtime authentication decisions behind capability-specific adapters. Reuse
+existing `StateStore` and `WorkerProvider` seams rather than introducing a
+catch-all platform abstraction or a second storage system. Keep Next.js route
+files as hosting adapters at the edge, with platform-independent decision logic
+and tests beneath them.
 
 **Tech Stack:** TypeScript, Node 24, Vitest, standard `Request`/`Response` interfaces at application boundaries, existing Next.js and Eve adapters.
 

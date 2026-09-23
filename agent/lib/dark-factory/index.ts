@@ -21,6 +21,14 @@ import type { DispatchObserver } from "./dispatch";
 import type { MetricsStore } from "./metrics";
 
 export { createMetricsStore } from "./metrics";
+export {
+  createPlatformAdapter,
+  PlatformConfigurationError,
+  type DeploymentStage,
+  type PlatformAdapter,
+  type PlatformContext,
+  type PlatformProviderId,
+} from "./platform";
 
 // R2 seams re-exported so index.ts stays the single import surface (mirrors the
 // createMetricsStore re-export above). Factories live next to their seam so the
