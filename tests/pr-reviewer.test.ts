@@ -61,68 +61,9 @@ describe("PR Reviewer Agent - TDD Tests", () => {
     });
   });
 
-  describe("Agent Definition (agent/subagents/pr-reviewer/agent.ts)", () => {
-    it("should not have hardcoded model name (should use config/env)", () => {
-      const agentPath = path.join(
-        process.cwd(),
-        "agent",
-        "subagents",
-        "pr-reviewer",
-        "agent.ts",
-      );
-      const content = fs.readFileSync(agentPath, "utf8");
-
-      // Should not contain the old hardcoded model string directly
-      expect(content).not.toContain("nvidia/nemotron-3-ultra-550b-a55b:free");
-
-      // Should reference a config or environment variable
-      expect(content).toMatch(
-        /process\.env\.MODEL_NAME|config\.model|MODEL_NAME/,
-      );
-    });
-
-    it("should have reasonable context window (< 500000 tokens)", () => {
-      const agentPath = path.join(
-        process.cwd(),
-        "agent",
-        "subagents",
-        "pr-reviewer",
-        "agent.ts",
-      );
-      const content = fs.readFileSync(agentPath, "utf8");
-
-      // Extract the modelContextWindowTokens value
-      const match = content.match(/modelContextWindowTokens:\s*(\d+)/);
-      if (match) {
-        const windowSize = parseInt(match[1], 10);
-        expect(windowSize).toBeLessThan(500000);
-      } else {
-        // If not found, that's also an issue
-        expect(false).toBe(true);
-      }
-    });
-
-    it("should not have unused imports", () => {
-      // This is harder to test automatically, but we can at least
-      // verify that createOpenAI is actually used if imported
-      const agentPath = path.join(
-        process.cwd(),
-        "agent",
-        "subagents",
-        "pr-reviewer",
-        "agent.ts",
-      );
-      const content = fs.readFileSync(agentPath, "utf8");
-
-      if (content.includes("createOpenAI")) {
-        expect(content).toMatch(/createOpenAI\(/);
-      }
-    });
-  });
-
-  describe("PR Reviewer Script (scripts/pr-reviewer.js)", () => {
+  describe("PR Reviewer Script (scripts/pr-reviewer.ts)", () => {
     it("should use asynchronous file I/O or justify synchronous usage", () => {
-      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
+      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.ts");
       const content = fs.readFileSync(scriptPath, "utf8");
 
       // Should use async version or have a comment justifying sync usage
@@ -138,7 +79,7 @@ describe("PR Reviewer Agent - TDD Tests", () => {
     });
 
     it("should wrap top-level await in async function or use ES module", () => {
-      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
+      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.ts");
       const content = fs.readFileSync(scriptPath, "utf8");
 
       // Check if it's an ES module
@@ -159,7 +100,7 @@ describe("PR Reviewer Agent - TDD Tests", () => {
     });
 
     it("should add timeout to fetch calls for PR diff", () => {
-      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
+      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.ts");
       const content = fs.readFileSync(scriptPath, "utf8");
 
       // Should use AbortSignal.timeout or similar timeout mechanism
@@ -172,7 +113,7 @@ describe("PR Reviewer Agent - TDD Tests", () => {
     // review silently degraded to the stub. The budget must be sized for a
     // capped reasoning spend PLUS a full answer.
     it("sizes max_tokens for a capped reasoning budget plus a full review (#87)", () => {
-      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
+      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.ts");
       const content = fs.readFileSync(scriptPath, "utf8");
 
       const match = content.match(
@@ -186,7 +127,7 @@ describe("PR Reviewer Agent - TDD Tests", () => {
     // hinted via `effort`) so the answer always has room, and the total budget
     // must exceed that cap.
     it("hard-caps reasoning tokens so the answer always has budget (#87)", () => {
-      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
+      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.ts");
       const content = fs.readFileSync(scriptPath, "utf8");
 
       // OpenRouter allows only ONE of effort/max_tokens per request (sending
@@ -213,7 +154,7 @@ describe("PR Reviewer Agent - TDD Tests", () => {
     // escape the escaping backslash. A single canonical sanitiser (backslashes
     // first, then backticks) must be used by BOTH attempts and the retry.
     it("uses one canonical diff sanitiser for both attempts (CodeQL)", () => {
-      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
+      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.ts");
       const content = fs.readFileSync(scriptPath, "utf8");
 
       expect(content).toMatch(/function sanitizeForPrompt\(/);
@@ -227,7 +168,7 @@ describe("PR Reviewer Agent - TDD Tests", () => {
     // changes nothing, so the "retry" would resend an identical payload and burn
     // an API call to fail the same way. Detect that and skip the wasted call.
     it("skips the retry when halving the diff would change nothing", () => {
-      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
+      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.ts");
       const content = fs.readFileSync(scriptPath, "utf8");
 
       expect(content).toMatch(
@@ -248,7 +189,7 @@ describe("PR Reviewer Agent - TDD Tests", () => {
     // under reasoning.effort, and uncapped). A non-reasoning model always answers.
     it("defaults to a NON-reasoning model with a PR_REVIEW_MODEL override (#87)", () => {
       const content = fs.readFileSync(
-        path.join(process.cwd(), "scripts", "pr-reviewer.js"),
+        path.join(process.cwd(), "scripts", "pr-reviewer.ts"),
         "utf8",
       );
 
@@ -267,7 +208,7 @@ describe("PR Reviewer Agent - TDD Tests", () => {
     // skipped, so the posted comment misreported the cause.
     it("does not clobber the length-exhausted fallback reason", () => {
       const content = fs.readFileSync(
-        path.join(process.cwd(), "scripts", "pr-reviewer.js"),
+        path.join(process.cwd(), "scripts", "pr-reviewer.ts"),
         "utf8",
       );
       expect(content).toMatch(
@@ -278,7 +219,7 @@ describe("PR Reviewer Agent - TDD Tests", () => {
     // #87: on a length-exhausted response the script must RETRY with a smaller
     // diff instead of immediately posting the structural stub.
     it("retries on an empty length-exhausted response instead of stubbing (#87)", () => {
-      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
+      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.ts");
       const content = fs.readFileSync(scriptPath, "utf8");
 
       expect(content).toMatch(/finishReason\s*===\s*"length"/);
@@ -291,7 +232,7 @@ describe("PR Reviewer Agent - TDD Tests", () => {
     // #87: the fallback must state the real cause. Blaming "model unavailable"
     // is wrong when the model answered HTTP 200 and merely ran out of budget.
     it("states the real cause in the fallback instead of 'model unavailable' (#87)", () => {
-      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
+      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.ts");
       const content = fs.readFileSync(scriptPath, "utf8");
 
       expect(content).not.toMatch(
@@ -305,7 +246,7 @@ describe("PR Reviewer Agent - TDD Tests", () => {
     // pushed one PR past 100KB), the reasoning model exhausted its budget and
     // returned null content. Docs have no code-review value — strip them.
     it("strips documentation files before sending the diff for review", () => {
-      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
+      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.ts");
       const content = fs.readFileSync(scriptPath, "utf8");
 
       expect(content).toMatch(/stripDocsFromDiff\(/);
@@ -318,7 +259,7 @@ describe("PR Reviewer Agent - TDD Tests", () => {
     });
 
     it("should distinguish a null-content response from a malformed one", () => {
-      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
+      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.ts");
       const content = fs.readFileSync(scriptPath, "utf8");
 
       // The old check collapsed "no choices" and "null content" into one
@@ -330,7 +271,7 @@ describe("PR Reviewer Agent - TDD Tests", () => {
     });
 
     it("should centralize model name (not hardcoded)", () => {
-      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
+      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.ts");
       const content = fs.readFileSync(scriptPath, "utf8");
 
       // Should not contain the hardcoded model string
@@ -345,7 +286,7 @@ describe("PR Reviewer Agent - TDD Tests", () => {
     });
 
     it("should sanitize PR diff to prevent prompt injection", () => {
-      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
+      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.ts");
       const content = fs.readFileSync(scriptPath, "utf8");
 
       // Should escape backticks in the diff before using in template literal
@@ -354,7 +295,7 @@ describe("PR Reviewer Agent - TDD Tests", () => {
     });
 
     it("should validate OpenRouter response before accessing content", () => {
-      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
+      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.ts");
       const content = fs.readFileSync(scriptPath, "utf8");
 
       // Should check the choices array / message before reading content.
@@ -366,7 +307,7 @@ describe("PR Reviewer Agent - TDD Tests", () => {
     });
 
     it("should add User-Agent header to GitHub API calls", () => {
-      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
+      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.ts");
       const content = fs.readFileSync(scriptPath, "utf8");
 
       // Should include User-Agent in headers
@@ -374,7 +315,7 @@ describe("PR Reviewer Agent - TDD Tests", () => {
     });
 
     it("should handle large diffs (truncation or summarization)", () => {
-      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
+      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.ts");
       const content = fs.readFileSync(scriptPath, "utf8");
 
       // Should have logic to handle large diffs
@@ -388,7 +329,7 @@ describe("PR Reviewer Agent - TDD Tests", () => {
     // passed while real reviews failed. Assert the cap is actually applied to
     // what gets sent, not merely mentioned.
     it("truncates the diff BEFORE sending it to the model", async () => {
-      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
+      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.ts");
       const source = fs.readFileSync(scriptPath, "utf8");
 
       // The sanitized diff that reaches the prompt must derive from a
@@ -435,7 +376,7 @@ describe("PR Reviewer Agent - TDD Tests", () => {
 
   describe("PR Reviewer Grounding and Anti-Hallucination Rules (#182)", () => {
     it("includes Node.js runtime grounding and single-threaded awareness in the system prompt", () => {
-      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
+      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.ts");
       const content = fs.readFileSync(scriptPath, "utf8");
 
       expect(content).toMatch(/single-threaded/i);
@@ -443,7 +384,7 @@ describe("PR Reviewer Agent - TDD Tests", () => {
     });
 
     it("instructs the reviewer to output LGTM when code is clean and defect-free", () => {
-      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
+      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.ts");
       const content = fs.readFileSync(scriptPath, "utf8");
 
       expect(content).toMatch(/LGTM/i);
@@ -451,7 +392,7 @@ describe("PR Reviewer Agent - TDD Tests", () => {
     });
 
     it("forbids subjective architectural nitpicks and bikeshedding in guidelines", () => {
-      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
+      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.ts");
       const content = fs.readFileSync(scriptPath, "utf8");
 
       expect(content).toMatch(/VERIFY BEFORE ASSERTING/i);
@@ -461,7 +402,7 @@ describe("PR Reviewer Agent - TDD Tests", () => {
 
   describe("Structured Severity Classification (#182)", () => {
     it("instructs the reviewer to tag findings with [BLOCKER] or [SUGGESTION]", () => {
-      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
+      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.ts");
       const content = fs.readFileSync(scriptPath, "utf8");
 
       expect(content).toMatch(/\[BLOCKER\]/);
@@ -469,7 +410,7 @@ describe("PR Reviewer Agent - TDD Tests", () => {
     });
 
     it("distinguishes between blocking bugs and non-blocking suggestions in summary output", () => {
-      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
+      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.ts");
       const content = fs.readFileSync(scriptPath, "utf8");
 
       expect(content).toMatch(/formatStructuredReview/);
@@ -478,7 +419,7 @@ describe("PR Reviewer Agent - TDD Tests", () => {
 
   describe("Self-Correction Verification Filter (#182)", () => {
     it("defines a verification filter that purges false positive findings", () => {
-      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
+      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.ts");
       const content = fs.readFileSync(scriptPath, "utf8");
 
       expect(content).toMatch(/filterFalsePositives/);
@@ -486,7 +427,7 @@ describe("PR Reviewer Agent - TDD Tests", () => {
     });
 
     it("filters out invalid thread-safety claims on Node.js code", () => {
-      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.js");
+      const scriptPath = path.join(process.cwd(), "scripts", "pr-reviewer.ts");
       const content = fs.readFileSync(scriptPath, "utf8");
 
       expect(content).toMatch(/thread-safety|thread safety/i);

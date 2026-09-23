@@ -3,26 +3,38 @@ import fs from "fs";
 // NOTE: the reviewer deliberately does NOT use the project's default model —
 // that default is a REASONING model, which is the #87 root cause. See REVIEW_MODEL
 // below for the measured evidence.
+interface PullRequestPayload {
+  number: number;
+  diff_url: string;
+  base: { repo: { owner: { login: string }; name: string } };
+}
+
+interface GitHubEvent {
+  pull_request?: PullRequestPayload;
+  issue?: { number: number; pull_request?: unknown };
+  repository?: { owner: { login: string }; name: string };
+}
+
 const eventPath = process.env.GITHUB_EVENT_PATH;
 if (!eventPath) {
   console.error("GITHUB_EVENT_PATH environment variable is not set.");
   process.exit(1);
 }
 
-let event;
+let event: GitHubEvent;
 try {
   const eventContent = fs.readFileSync(eventPath, "utf8"); // Synchronous is acceptable at startup
-  event = JSON.parse(eventContent);
+  event = JSON.parse(eventContent) as GitHubEvent;
 } catch (error) {
   console.error("Failed to read or parse GitHub event:", error);
   process.exit(1);
 }
 
 // Extract PR information
-let prNumber;
-let repoOwner;
-let repoName;
-let prDiffUrl;
+let prNumber: number;
+let repoOwner: string;
+let repoName: string;
+let prDiffUrl: string;
 
 if (event.pull_request) {
   prNumber = event.pull_request.number;
@@ -32,8 +44,8 @@ if (event.pull_request) {
 } else if (event.issue && event.issue.pull_request) {
   // Handle issue events that are actually PRs (like labeled, etc.)
   prNumber = event.issue.number;
-  repoOwner = event.repository.owner.login;
-  repoName = event.repository.name;
+  repoOwner = event.repository!.owner.login;
+  repoName = event.repository!.name;
   // We need to get the diff URL from the API or construct it
   prDiffUrl = `https://api.github.com/repos/${repoOwner}/${repoName}/pulls/${prNumber}.diff`;
 } else {
@@ -44,7 +56,7 @@ if (event.pull_request) {
 console.log(`Processing PR #${prNumber} in ${repoOwner}/${repoName}`);
 
 // Fetch the PR diff
-let prDiff;
+let prDiff: string;
 try {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
@@ -84,7 +96,11 @@ const NON_CODE_PATTERNS = [
   /(^|\/)\.hermes\/plans\//i,
 ];
 
-function stripDocsFromDiff(diff) {
+function stripDocsFromDiff(diff: string): {
+  diff: string;
+  removedBytes: number;
+  removedFiles: string[];
+} {
   const parts = diff.split(/(?=^diff --git )/m);
   const kept = [];
   const removedFiles = [];
@@ -152,7 +168,10 @@ const REVIEW_REASONING_MAX_TOKENS =
 // PR_REVIEW_MAX_TOKENS well above its observed reasoning length.
 const REVIEW_MODEL = process.env.PR_REVIEW_MODEL || "deepseek/deepseek-chat";
 
-function truncateDiff(diff, maxChars) {
+function truncateDiff(
+  diff: string,
+  maxChars: number,
+): { diff: string; truncated: boolean; omitted: number } {
   if (diff.length <= maxChars) return { diff, truncated: false, omitted: 0 };
 
   const kept = diff.slice(0, maxChars);
@@ -180,7 +199,7 @@ if (truncated) {
  * backslash able to escape the escaping backslash, i.e. incomplete escaping
  * (CodeQL flags exactly this). One canonical sanitiser, used by both attempts.
  */
-function sanitizeForPrompt(text) {
+function sanitizeForPrompt(text: string): string {
   return text.replace(/\\/g, "\\\\").replace(/`/g, "\\`");
 }
 
@@ -190,7 +209,7 @@ const sanitizedPrDiff = sanitizeForPrompt(reviewDiff);
 /**
  * Detect runtime environment from diff filenames to provide targeted runtime context.
  */
-function detectRuntimeEnvironment(diff) {
+function detectRuntimeEnvironment(diff: string): string {
   const isNode = /\.(ts|js|mjs|cjs|jsx|tsx|json)($|\b)/.test(diff);
   const isDotNet = /\.(cs|csproj|sln)($|\b)/.test(diff);
   const isPython = /\.(py|pyi)($|\b)/.test(diff);
@@ -207,7 +226,7 @@ function detectRuntimeEnvironment(diff) {
   return "General software project";
 }
 
-function buildSystemPrompt(runtimeContext) {
+function buildSystemPrompt(runtimeContext: string): string {
   return [
     `You are a pragmatic principal software engineer reviewing this code diff.`,
     `Target Runtime Environment: ${runtimeContext}`,
@@ -228,7 +247,7 @@ function buildSystemPrompt(runtimeContext) {
 /**
  * Format raw review content into clean, structured markdown with severity indicators.
  */
-function formatStructuredReview(rawReview) {
+function formatStructuredReview(rawReview: string): string {
   if (!rawReview || typeof rawReview !== "string") {
     return rawReview;
   }
@@ -249,7 +268,7 @@ function formatStructuredReview(rawReview) {
 /**
  * Filter known false-positive hallucination patterns from raw review output.
  */
-function filterFalsePositives(content, runtimeContext) {
+function filterFalsePositives(content: string, runtimeContext: string): string {
   if (!content || typeof content !== "string") return content;
 
   let filtered = content;
@@ -293,11 +312,11 @@ const SYSTEM_PROMPT = buildSystemPrompt(RUNTIME_CONTEXT);
  * reuses one prompt builder.
  */
 function buildUserMessage(
-  sanitizedDiff,
-  wasTruncated,
-  omittedChars,
-  keptLength,
-) {
+  sanitizedDiff: string,
+  wasTruncated: boolean,
+  omittedChars: number,
+  keptLength: number,
+): string {
   const excludedNote =
     removedFiles.length > 0
       ? `\n\nNote: ${removedFiles.length} documentation file(s) were excluded (${removedFiles.join(", ")}).`
@@ -309,7 +328,7 @@ function buildUserMessage(
 }
 
 // Call OpenRouter API to generate review, with fallback for rate limits
-let review;
+let review: string;
 try {
   const openrouterResponse = await fetch(
     "https://openrouter.ai/api/v1/chat/completions",
@@ -463,27 +482,33 @@ try {
     );
   }
 } catch (error) {
-  console.error(`Error calling OpenRouter: ${error.message}`);
+  console.error(`Error calling OpenRouter: ${(error as Error).message}`);
   review = generateFallbackReview(
     prNumber,
     repoOwner,
     repoName,
     prDiff,
-    `a transport error (${error.message})`,
+    `a transport error (${(error as Error).message})`,
   );
 }
 
 // Generate a deterministic fallback review when the model produced no content.
 // `reason` carries the REAL cause (reasoning budget exhausted vs a transport
 // error) so the comment stops blaming a model outage that never happened (#87).
-function generateFallbackReview(number, owner, repo, diff, reason) {
+function generateFallbackReview(
+  number: number,
+  owner: string,
+  repo: string,
+  diff: string,
+  reason: string,
+): string {
   const lineCount = diff.split("\n").length;
   const addedLines = diff
     .split("\n")
-    .filter((l) => l.startsWith("+") && !l.startsWith("+++")).length;
+    .filter((l: string) => l.startsWith("+") && !l.startsWith("+++")).length;
   const removedLines = diff
     .split("\n")
-    .filter((l) => l.startsWith("-") && !l.startsWith("---")).length;
+    .filter((l: string) => l.startsWith("-") && !l.startsWith("---")).length;
   const filesChanged = (diff.match(/diff --git/g) || []).length;
 
   return [
