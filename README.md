@@ -218,7 +218,7 @@ are R2/R3):
   exact test-fail→fix cycle counts, success rate per task type, and a buffered
   recorder that retains and retries records the backend rejected ("must not lose
   records").
-- **`index.ts`** — env-driven factories and the `dispatch → metrics` observer.
+- **`index.ts`** — public re-export surface for env-driven factories and the `dispatch → metrics` observer; Next.js route adapters should import focused factories directly to avoid bundling unrelated subsystems.
 
 `DF_STATE_DRIVER` is **fail-closed**: leaving it unset yields the refusing
 default rather than an in-process store that would silently lose state on the

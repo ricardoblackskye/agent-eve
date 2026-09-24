@@ -207,6 +207,22 @@ export function resolveRunnerMode(
   return { mode: "local", requestedLocal: true };
 }
 
+function isLoopbackOrigin(origin: string): boolean {
+  try {
+    const parsed = new URL(origin);
+    const hostname = parsed.hostname.toLowerCase();
+    return (
+      (parsed.protocol === "http:" || parsed.protocol === "https:") &&
+      (hostname === "localhost" ||
+        hostname === "127.0.0.1" ||
+        hostname === "[::1]") &&
+      parsed.origin.toLowerCase() === origin.toLowerCase()
+    );
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Resolve the base origin for the Eve session handoff.
  *
@@ -238,7 +254,7 @@ export function resolveApiOrigin(
     };
   }
   const ro = (requestOrigin ?? "").trim();
-  if (/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(ro)) {
+  if (isLoopbackOrigin(ro)) {
     return { origin: ro, reason: "local/dev request origin" };
   }
   return {
@@ -452,9 +468,19 @@ async function postHandoff(
 ): Promise<{ ok: boolean; reason: string }> {
   // The handoff URL is resolved through configuration, never straight from the request
   // origin (SSRF: an attacker-controlled Host header must not aim this POST+token elsewhere).
-  const resolved = resolveApiOrigin(deps.env ?? process.env, deps.origin);
+  const env = deps.env ?? process.env;
+  const runner = resolveRunnerMode(env);
+  const resolved = resolveApiOrigin(env, deps.origin);
   if (!resolved.origin) {
     return { ok: false, reason: `handoff skipped: ${resolved.reason}` };
+  }
+  if (runner.mode === "local" && !isLoopbackOrigin(resolved.origin)) {
+    return {
+      ok: false,
+      reason:
+        "local runner refused a non-loopback session origin; use localhost or " +
+        "127.0.0.1 for local handoff.",
+    };
   }
   const post = deps.postSession ?? fetch;
   const url = `${resolved.origin}/eve/v1/session`;

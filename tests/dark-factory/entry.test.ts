@@ -401,4 +401,23 @@ describe("#163 security: the session handoff origin is never taken from the requ
     expect(skipped.ok).toBe(false);
     expect(skipped.reason).toMatch(/skipped/i);
   });
+
+  it("refuses a remote session origin when the local runner is selected", async () => {
+    const store = new MemoryStore();
+    const post = recordingPost();
+    const result = await runDarkFactoryDispatch(triggerDecision(), {
+      store,
+      postSession: post.impl,
+      labels: recordingLabels().writer,
+      env: {
+        DF_PLATFORM_PROVIDER: "generic",
+        DF_RUNNER: "local",
+        DF_API_BASE_URL: "https://remote.example.test",
+      },
+    });
+
+    expect(post.calls).toHaveLength(0);
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/loopback/i);
+  });
 });

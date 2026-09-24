@@ -11,7 +11,7 @@ import {
   runDarkFactoryDispatch,
 } from "../../../../agent/lib/dark-factory/entry";
 import { createGitHubLabelWriter } from "../../../../agent/lib/dark-factory/issue-writer";
-import { createStateStore } from "../../../../agent/lib/dark-factory";
+import { createStateStore } from "../../../../agent/lib/dark-factory/state-provider";
 import { createPlatformAdapter } from "../../../../agent/lib/dark-factory/platform";
 
 interface RepoConfig {

@@ -32,10 +32,10 @@ Only #197 is planned in implementation detail here. Keep #198, #199, and #200 fo
 
 ## Verified current context
 
-- `agent/lib/dark-factory/state.ts` already defines a provider-neutral `StateStore`; `agent/lib/dark-factory/index.ts` owns its environment-based factory. Preserve and reuse this seam. No production shared-database adapter is part of #197; run-ledger persistence belongs to #198.
+- `agent/lib/dark-factory/state.ts` defines a provider-neutral `StateStore`; the env-driven factory lives in `state-provider.ts` and is re-exported from `index.ts`. The webhook imports the focused module directly so the Next route does not pull unrelated dynamic-filesystem code through the barrel. No production shared-database adapter is part of #197; run-ledger persistence belongs to #198.
 - `agent/lib/dark-factory/worker-env.ts` already defines `WorkerProvider` and a fail-closed provider factory. Its current `local` implementation is an honest dry run, not isolated execution.
 - `agent/lib/dark-factory/entry.ts` contains two Vercel-specific reads: `VERCEL_ENV` in `resolveRunnerMode()` and `VERCEL_URL` in `resolveApiOrigin()`. The explicit `DF_API_BASE_URL` path and SSRF protection are already present and must remain intact.
-- `resolveRunnerMode()` is exported and tested/demoed, but repository search found no production call site. The live entry path in `runDarkFactoryDispatch()` posts directly to the Eve session endpoint through `postHandoff()`; selection must be wired into that live path, not merely documented or tested in isolation.
+- `resolveRunnerMode()` was exported and tested but had no production call site. The implementation now resolves it inside the live `postHandoff()` path; an explicit local runner is limited to loopback origins, preventing it from sending a session request to a remote host.
 - `agent/channels/eve.ts` directly adds `vercelOidc()` to the agent authentication chain alongside `localDev()` and bearer authentication.
 - `app/api/github/webhook/route.ts` is a Next.js route adapter and uses `VERCEL_ENV` in the webhook-signature policy to distinguish Vercel preview from production and self-hosted production. The security policy must remain fail-closed in production while making deployment classification explicit and provider-neutral.
 - `app/api/eve/v1/[...slug]/route.ts` uses `NextRequest`/`NextResponse` and forwards Vercel Protection bypass configuration. `proxy.ts` is also Next-specific, but the Google session primitives in `app/auth-*` are not Vercel-specific.
@@ -142,12 +142,12 @@ Only #197 is planned in implementation detail here. Keep #198, #199, and #200 fo
 ## Likely files to change
 
 - `agent/lib/dark-factory/platform.ts` (new) and possibly `handoff.ts` (new)
-- `agent/lib/dark-factory/entry.ts`, `agent/lib/dark-factory/index.ts`
+- `agent/lib/dark-factory/entry.ts`, `agent/lib/dark-factory/index.ts`, `agent/lib/dark-factory/state-provider.ts` (focused factory extracted to avoid route barrel tracing)
 - `agent/channels/eve.ts`
 - `app/api/github/webhook/route.ts`
 - Possibly `app/api/eve/v1/[...slug]/route.ts` only for a contained host-adapter extraction
 - `.env.example`, `README.md`, `ARCHITECTURE.md`
-- `tests/dark-factory/platform.test.ts` (new), `tests/dark-factory/handoff.test.ts` (new if needed), `tests/dark-factory/entry.test.ts`, channel auth tests, `tests/webhook-secret-enforcement.test.ts`, `tests/webhook-handler.test.ts`, `tests/proxy-route.test.ts`
+- `tests/dark-factory/platform.test.ts` (new), `tests/dark-factory/state-provider.test.ts` (new), `tests/dark-factory/handoff.test.ts` (new if needed), `tests/dark-factory/entry.test.ts`, channel auth tests, `tests/webhook-secret-enforcement.test.ts`, `tests/webhook-handler.test.ts`, `tests/proxy-route.test.ts`, `tests/ci-unit-tests.test.ts` (Lychee-ignore contract)
 
 ## Validation commands
 
@@ -156,7 +156,8 @@ npx vitest run tests/dark-factory/platform.test.ts tests/dark-factory/entry.test
 npx vitest run tests/webhook-secret-enforcement.test.ts tests/webhook-handler.test.ts tests/proxy-route.test.ts
 npm test
 npm run typecheck
-npm run build
+DF_PLATFORM_PROVIDER=generic npm run build
+# Confirm the build output has no dynamic-filesystem tracing warnings from self-improve.ts
 ```
 
 Run only the test paths that exist after implementation; if a new focused test file is not needed, omit it from the command. Also run the repository's local spell/style checks against all changed files before pushing.
