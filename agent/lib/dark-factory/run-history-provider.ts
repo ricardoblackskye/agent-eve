@@ -2,7 +2,8 @@ import { PostgresRunHistoryStore } from "./run-history-postgres";
 import { SqliteRunHistoryStore } from "./run-history-store";
 import type {
   AcceptRunDelivery,
-
+  ClaimRunControlDelivery,
+  RunControlDeliveryReceipt,
   EventCursor,
   Page,
   PersistedRunEvent,
@@ -23,9 +24,25 @@ export class RunHistoryConfigurationError extends Error {
 
 const RUN_HISTORY_NOT_CONFIGURED = "Run history provider is not configured.";
 
+function isDeployedRuntime(env: Record<string, string | undefined>): boolean {
+  const nodeEnv = (env.NODE_ENV ?? "").trim().toLowerCase();
+  if (nodeEnv === "production") return true;
+  const provider = (env.DF_PLATFORM_PROVIDER ?? "").trim().toLowerCase();
+  const stage = (
+    provider === "vercel" ? env.VERCEL_ENV : env.DF_DEPLOYMENT_ENV
+  )?.trim().toLowerCase();
+  return stage === "preview" || stage === "production";
+}
+
 export class ConsoleRunHistoryStore implements RunHistoryStore {
   id = "console";
   async acceptDelivery(_input: AcceptRunDelivery): Promise<RunHistoryWriteResult<RunSummary>> {
+    return { ok: false, mode: "blocked", providerId: this.id, error: RUN_HISTORY_NOT_CONFIGURED };
+  }
+
+  async claimControlDelivery(
+    _input: ClaimRunControlDelivery,
+  ): Promise<RunHistoryWriteResult<RunControlDeliveryReceipt>> {
     return { ok: false, mode: "blocked", providerId: this.id, error: RUN_HISTORY_NOT_CONFIGURED };
   }
 
@@ -50,6 +67,11 @@ export function createRunHistoryStore(
   const driver = (env.DF_RUN_HISTORY_DRIVER ?? "").trim().toLowerCase();
   if (driver === "") return new ConsoleRunHistoryStore();
   if (driver === "sqlite") {
+    if (isDeployedRuntime(env)) {
+      throw new RunHistoryConfigurationError(
+        "SQLite run history is local-only; use PostgreSQL for deployed environments.",
+      );
+    }
     const path = (env.DF_RUN_HISTORY_DB_PATH ?? "").trim();
     if (!path) {
       throw new RunHistoryConfigurationError(

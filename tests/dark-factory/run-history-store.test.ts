@@ -51,7 +51,7 @@ describe("SqliteRunHistoryStore delivery acceptance", () => {
     store.close();
   });
 
-  it("maps a new trigger delivery to an active run but gives a rerun after terminal state a new ID", async () => {
+  it("creates a distinct run for a new trigger delivery even while another run is active", async () => {
     let generated = 0;
     const store = createStore(() => `active-run-${++generated}`);
     const first = await store.acceptDelivery({
@@ -70,9 +70,10 @@ describe("SqliteRunHistoryStore delivery acceptance", () => {
     if (!runId) throw new Error("run acceptance did not return a runId");
 
     expect(repeatedIntent.ok).toBe(true);
-    expect(repeatedIntent.duplicate).toBe(true);
-    expect(repeatedIntent.value?.runId).toBe(runId);
-    expect(generated).toBe(1);
+    expect(repeatedIntent.duplicate).toBe(false);
+    expect(repeatedIntent.value?.runId).toBe("active-run-2");
+    expect(repeatedIntent.value?.runId).not.toBe(runId);
+    expect(generated).toBe(2);
 
     const stopped = await store.appendEvent({
       eventId: "active-run-aborted",
@@ -92,7 +93,99 @@ describe("SqliteRunHistoryStore delivery acceptance", () => {
     });
     expect(deliberateRerun.ok).toBe(true);
     expect(deliberateRerun.duplicate).toBe(false);
-    expect(deliberateRerun.value?.runId).toBe("active-run-2");
+    expect(deliberateRerun.value?.runId).toBe("active-run-3");
+    expect(generated).toBe(3);
+  });
+
+  it("binds a replayed control delivery to its original run", async () => {
+    let generated = 0;
+    const store = createStore(() => `control-run-${++generated}`);
+    const first = await store.acceptDelivery({
+      deliveryId: "control-trigger-1",
+      repo: "owner/repo",
+      issue: 198,
+      receivedAt: at,
+    });
+    const firstRunId = first.value?.runId;
+    if (!firstRunId) throw new Error("first run was not created");
+
+    const claimed = await store.claimControlDelivery({
+      deliveryId: "control-abort-1",
+      repo: "owner/repo",
+      issue: 198,
+      transition: "abort",
+      receivedAt: "2026-09-24T12:00:01.000Z",
+      runId: firstRunId,
+    });
+    expect(claimed.ok).toBe(true);
+    expect(claimed.duplicate).toBe(false);
+
+    const aborted = await store.appendEvent({
+      eventId: "control-abort-event-1",
+      runId: firstRunId,
+      type: "run.terminal",
+      stage: "terminal",
+      occurredAt: "2026-09-24T12:00:02.000Z",
+      status: "aborted",
+    });
+    expect(aborted.ok).toBe(true);
+
+    const later = await store.acceptDelivery({
+      deliveryId: "control-trigger-2",
+      repo: "owner/repo",
+      issue: 198,
+      receivedAt: "2026-09-24T12:01:00.000Z",
+    });
+    const laterRunId = later.value?.runId;
+    if (!laterRunId) throw new Error("later run was not created");
+
+    const replay = await store.claimControlDelivery({
+      deliveryId: "control-abort-1",
+      repo: "owner/repo",
+      issue: 198,
+      transition: "abort",
+      receivedAt: "2026-09-24T12:02:00.000Z",
+      runId: laterRunId,
+    });
+
+    expect(replay.ok).toBe(true);
+    expect(replay.duplicate).toBe(true);
+    expect(replay.value?.runId).toBe(firstRunId);
+    expect(replay.value?.runStatus).toBe("aborted");
+  });
+
+  it("remembers a control delivery that found no eligible run", async () => {
+    let generated = 0;
+    const store = createStore(() => `no-run-${++generated}`);
+    const initial = await store.claimControlDelivery({
+      deliveryId: "control-resume-no-run",
+      repo: "owner/repo",
+      issue: 198,
+      transition: "resume",
+      receivedAt: at,
+    });
+    expect(initial.ok).toBe(true);
+    expect(initial.duplicate).toBe(false);
+
+    const later = await store.acceptDelivery({
+      deliveryId: "control-trigger-after-no-run",
+      repo: "owner/repo",
+      issue: 198,
+      receivedAt: "2026-09-24T12:01:00.000Z",
+    });
+    const replay = await store.claimControlDelivery({
+      deliveryId: "control-resume-no-run",
+      repo: "owner/repo",
+      issue: 198,
+      transition: "resume",
+      receivedAt: "2026-09-24T12:02:00.000Z",
+      runId: later.value?.runId,
+    });
+
+    expect(replay.ok).toBe(true);
+    expect(replay.duplicate).toBe(true);
+    expect(replay.value?.runId).toBeUndefined();
+    expect(generated).toBe(1);
   });
 
   it("atomically appends a new event and updates the current summary", async () => {

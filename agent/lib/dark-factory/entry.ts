@@ -359,8 +359,47 @@ export async function runDarkFactoryDispatch(
         error: active.error,
       });
     }
-    const intent = { ...baseIntent, ...(active.runId ? { runId: active.runId } : {}) };
-    if (active.runId) {
+    const claimed = await deps.runHistory.claimControlDelivery({
+      deliveryId,
+      repo: baseIntent.repo,
+      issue: baseIntent.issue,
+      transition: "abort",
+      receivedAt: now(),
+      ...(active.runId ? { runId: active.runId } : {}),
+    });
+    if (!claimed.ok || !claimed.value) {
+      const error = claimed.error ?? "abort delivery could not be persisted";
+      return statusResult(false, "refused", error, { error });
+    }
+    if (claimed.duplicate) {
+      return statusResult(
+        true,
+        "held",
+        "this abort delivery was already handled; no later run was changed",
+        {
+          ...(claimed.value.runId ? { runId: claimed.value.runId } : {}),
+          ...(claimed.value.runStatus ? { runStatus: claimed.value.runStatus } : {}),
+        },
+      );
+    }
+
+    const intent = {
+      ...baseIntent,
+      ...(claimed.value.runId ? { runId: claimed.value.runId } : {}),
+    };
+    const failures = await removeLabels(labels, intent, [
+      TRIGGER_LABELS.running,
+      TRIGGER_LABELS.question,
+    ]);
+    if (failures) {
+      return statusResult(false, "failed", failures, {
+        ...(claimed.value.runId
+          ? { runId: claimed.value.runId, runStatus: active.status }
+          : {}),
+        error: failures,
+      });
+    }
+    if (claimed.value.runId) {
       const terminalError = await recordTerminal(
         deps.runHistory,
         intent,
@@ -370,27 +409,21 @@ export async function runDarkFactoryDispatch(
         now(),
       );
       if (terminalError) {
-        return statusResult(false, "refused", terminalError, {
-          runId: active.runId,
+        return statusResult(false, "failed", terminalError, {
+          runId: intent.runId,
+          runStatus: active.status,
           error: terminalError,
         });
       }
     }
-    const failures = await removeLabels(labels, intent, [
-      TRIGGER_LABELS.running,
-      TRIGGER_LABELS.question,
-    ]);
-    if (failures)
-      return statusResult(false, "aborted", failures, {
-        runId: intent.runId,
-        error: failures,
-      });
     return statusResult(
       true,
       "aborted",
       "the run was aborted and its lifecycle labels cleared",
       {
-        ...(active.runId ? { runId: active.runId, runStatus: "aborted" as const } : {}),
+        ...(claimed.value.runId
+          ? { runId: claimed.value.runId, runStatus: "aborted" as const }
+          : {}),
       },
     );
   }
@@ -403,18 +436,42 @@ export async function runDarkFactoryDispatch(
         error: active.error,
       });
     }
-    if (!active.runId || active.status !== "blocked") {
+    const eligibleRunId = active.status === "blocked" ? active.runId : undefined;
+    const claimed = await deps.runHistory.claimControlDelivery({
+      deliveryId,
+      repo: baseIntent.repo,
+      issue: baseIntent.issue,
+      transition: "resume",
+      receivedAt: now(),
+      ...(eligibleRunId ? { runId: eligibleRunId } : {}),
+    });
+    if (!claimed.ok || !claimed.value) {
+      const error = claimed.error ?? "resume delivery could not be persisted";
+      return statusResult(false, "refused", error, { error });
+    }
+    if (claimed.duplicate) {
+      return statusResult(
+        true,
+        "held",
+        "this resume delivery was already handled; no later run was changed",
+        {
+          ...(claimed.value.runId ? { runId: claimed.value.runId } : {}),
+          ...(claimed.value.runStatus ? { runStatus: claimed.value.runStatus } : {}),
+        },
+      );
+    }
+    if (!eligibleRunId) {
       return statusResult(true, "held", "there is no blocked run to resume", {
         ...(active.runId ? { runId: active.runId, runStatus: active.status } : {}),
       });
     }
-    const intent = { ...baseIntent, runId: active.runId };
-    const failure = await removeLabels(labels, intent, [
-      TRIGGER_LABELS.question,
-    ]);
+
+    const intent = { ...baseIntent, runId: eligibleRunId };
+    const failure = await removeLabels(labels, intent, [TRIGGER_LABELS.question]);
     if (failure)
       return statusResult(false, "resumed", failure, {
         runId: intent.runId,
+        runStatus: "blocked",
         error: failure,
       });
     const resumed = await deps.runHistory.appendEvent({
@@ -428,6 +485,7 @@ export async function runDarkFactoryDispatch(
     if (!resumed.ok) {
       return statusResult(false, "refused", resumed.error ?? "resume could not be persisted", {
         runId: intent.runId,
+        runStatus: "blocked",
         error: resumed.error,
       });
     }
@@ -469,7 +527,7 @@ export async function runDarkFactoryDispatch(
     return statusResult(
       true,
       "held",
-      "this delivery or issue already has an accepted run; not starting duplicate work",
+      "this webhook delivery is already bound; not starting duplicate work",
       { runId: intent.runId, runStatus: accepted.value.status },
     );
   }

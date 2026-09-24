@@ -29,6 +29,15 @@ describe("configured run-history provider", () => {
     expect(write.ok).toBe(false);
     expect(write.mode).toBe("blocked");
     expect(write.error).toMatch(/not configured/i);
+    const control = await store.claimControlDelivery({
+      deliveryId: "control-delivery-1",
+      repo: "owner/repo",
+      issue: 198,
+      transition: "abort",
+      receivedAt: "2026-09-24T12:00:00.000Z",
+    });
+    expect(control.ok).toBe(false);
+    expect(control.error).toMatch(/not configured/i);
   });
 
   it("rejects an unknown driver and missing SQLite path", () => {
@@ -38,6 +47,24 @@ describe("configured run-history provider", () => {
     expect(() =>
       createRunHistoryStore({ DF_RUN_HISTORY_DRIVER: "sqlite" }),
     ).toThrow(/DF_RUN_HISTORY_DB_PATH/);
+  });
+
+  it("refuses ephemeral SQLite storage in deployed environments", () => {
+    const cases = [
+      { NODE_ENV: "production" },
+      { DF_PLATFORM_PROVIDER: "generic", DF_DEPLOYMENT_ENV: "preview" },
+      { DF_PLATFORM_PROVIDER: "generic", DF_DEPLOYMENT_ENV: "production" },
+      { DF_PLATFORM_PROVIDER: "vercel", VERCEL_ENV: "preview" },
+    ];
+    for (const environment of cases) {
+      expect(() =>
+        createRunHistoryStore({
+          DF_RUN_HISTORY_DRIVER: "sqlite",
+          DF_RUN_HISTORY_DB_PATH: "/tmp/runs.sqlite",
+          ...environment,
+        }),
+      ).toThrow(/SQLite.*local|local.*SQLite/i);
+    }
   });
 
   it("selects the explicit SQLite file adapter", () => {

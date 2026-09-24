@@ -337,16 +337,21 @@ Supabase as a managed host without a Supabase SDK or Vercel dependency.
 
 The ledger keeps three identities distinct: GitHub delivery IDs deduplicate
 webhook redelivery, opaque run IDs identify executions, and stable event IDs
-identify lifecycle transitions. Each accepted delivery/event and its summary
-projection are written atomically. Replaying an identical event is a no-op; a
-reused event ID with different contents is rejected. The store exposes bounded
-summary/event queries for the future #199 API; #198 does not add that API or the
-progress board tracked by #200.
+identify lifecycle transitions. A replayed trigger delivery reuses its bound
+run; a distinct trigger delivery gets a fresh run ID. Abort/resume receipts stay
+pinned to their original run (or record that no eligible run existed), so a
+late replay cannot mutate a later run. Lifecycle event appends and summary
+projections are atomic. Replaying an identical event is a no-op; a reused event
+ID with different contents is rejected. The store exposes bounded summary/event
+queries for the future #199 API; #198 does not add that API or the progress board
+tracked by #200.
 
 Run summaries track attempts, review rounds, iterations, fix cycles, and the PR
 URL. Latency and cost are optional measured values: absent measurements remain
 absent, while an explicitly measured zero is preserved. Set
 `DF_RUN_HISTORY_DRIVER=postgres` and `DF_RUN_HISTORY_DATABASE_URL` for a durable
 PostgreSQL endpoint, or `DF_RUN_HISTORY_DRIVER=sqlite` and
-`DF_RUN_HISTORY_DB_PATH` for local development. An unset driver refuses writes
-rather than claiming in-memory data is durable.
+`DF_RUN_HISTORY_DB_PATH` for local development. SQLite is rejected when
+`NODE_ENV=production` or the selected deployment stage is `preview` or
+`production`; deployed runtimes must use PostgreSQL. An unset driver refuses
+writes rather than claiming in-memory data is durable.

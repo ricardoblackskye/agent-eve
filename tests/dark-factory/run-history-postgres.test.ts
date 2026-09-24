@@ -87,13 +87,21 @@ describeWithDatabase("PostgresRunHistoryStore integration", () => {
     });
   });
 
-  it("reuses an active run for a second delivery and allows a terminal rerun", async () => {
+  it("creates a new run for each distinct delivery and permits reruns after terminal state", async () => {
     const repo = "owner/active-run";
     const first = await store.acceptDelivery({
       deliveryId: `pg-active-first-${namespace}`,
       repo,
       issue,
       receivedAt: at,
+    });
+    const controlClaim = await store.claimControlDelivery({
+      deliveryId: `pg-control-abort-${namespace}`,
+      repo,
+      issue,
+      transition: "abort",
+      receivedAt: "2026-09-24T12:00:00.500Z",
+      runId: first.value?.runId,
     });
     const activeDelivery = await store.acceptDelivery({
       deliveryId: `pg-active-second-${namespace}`,
@@ -104,9 +112,11 @@ describeWithDatabase("PostgresRunHistoryStore integration", () => {
     const runId = first.value?.runId;
     if (!runId) throw new Error("Postgres delivery acceptance returned no runId");
 
+    expect(controlClaim.ok).toBe(true);
+    expect(controlClaim.duplicate).toBe(false);
     expect(activeDelivery.ok).toBe(true);
-    expect(activeDelivery.duplicate).toBe(true);
-    expect(activeDelivery.value?.runId).toBe(runId);
+    expect(activeDelivery.duplicate).toBe(false);
+    expect(activeDelivery.value?.runId).not.toBe(runId);
 
     const aborted = await store.appendEvent({
       eventId: `pg-abort-${namespace}`,
@@ -116,6 +126,14 @@ describeWithDatabase("PostgresRunHistoryStore integration", () => {
       occurredAt: "2026-09-24T12:00:02.000Z",
       status: "aborted",
     });
+    const replay = await store.claimControlDelivery({
+      deliveryId: `pg-control-abort-${namespace}`,
+      repo,
+      issue,
+      transition: "abort",
+      receivedAt: "2026-09-24T12:00:02.500Z",
+      runId: activeDelivery.value?.runId,
+    });
     const rerun = await store.acceptDelivery({
       deliveryId: `pg-active-third-${namespace}`,
       repo,
@@ -124,6 +142,10 @@ describeWithDatabase("PostgresRunHistoryStore integration", () => {
     });
 
     expect(aborted.ok).toBe(true);
+    expect(replay.ok).toBe(true);
+    expect(replay.duplicate).toBe(true);
+    expect(replay.value?.runId).toBe(runId);
+    expect(replay.value?.runStatus).toBe("aborted");
     expect(rerun.ok).toBe(true);
     expect(rerun.duplicate).toBe(false);
     expect(rerun.value?.runId).not.toBe(runId);

@@ -179,8 +179,8 @@ describe("#163 cycle 9-10: record and hand off — the loop never runs inline", 
 });
 
 describe("#163 cycle 11: a parked run is never re-kicked", () => {
-  it("holds when the durable run is blocked waiting on a human answer (#162)", async () => {
-    const { runHistory, calls, deps: d } = deps();
+  it("holds a replayed delivery while the durable run waits on a human answer (#162)", async () => {
+    const { runHistory, calls, deps: d } = deps({ deliveryId: "seed-blocked-run" });
     const accepted = await runHistory.acceptDelivery({
       deliveryId: "seed-blocked-run",
       repo: "ricardoblackskye/agent-eve",
@@ -246,6 +246,117 @@ describe("#163 cycle 12-14: abort, resume and the lifecycle labels", () => {
     expect(res.runStatus).toBe("running");
     expect(ops).toContain("-needs-answer");
     expect(calls[0].body).toMatch(/"resume":true/);
+  });
+
+  it("a replayed abort delivery never aborts a later run", async () => {
+    const { runHistory, ops, deps: d } = deps();
+    const first = await runDarkFactoryDispatch(triggerDecision(), {
+      ...d,
+      deliveryId: "trigger-before-abort",
+    });
+    const abortDecision = triggerDecision({
+      action: "unlabeled",
+      label: { name: "dark-factory" },
+    });
+    const firstAbort = await runDarkFactoryDispatch(abortDecision, {
+      ...d,
+      deliveryId: "abort-delivery-replay",
+    });
+    const later = await runDarkFactoryDispatch(triggerDecision(), {
+      ...d,
+      deliveryId: "trigger-after-abort",
+    });
+
+    const replay = await runDarkFactoryDispatch(abortDecision, {
+      ...d,
+      deliveryId: "abort-delivery-replay",
+    });
+    const laterSummary = await runHistory.getRun(later.runId ?? "missing");
+
+    expect(firstAbort.status).toBe("aborted");
+    expect(replay.status).toBe("held");
+    expect(replay.runId).toBe(first.runId);
+    expect(laterSummary.value?.status).toBe("running");
+    expect(ops.filter((operation) => operation === "-df:running")).toHaveLength(1);
+  });
+
+  it("a replayed resume delivery never resumes a later blocked run", async () => {
+    const { runHistory, calls, deps: d } = deps();
+    const first = await runHistory.acceptDelivery({
+      deliveryId: "blocked-run-before-resume",
+      repo: "ricardoblackskye/agent-eve",
+      issue: 163,
+      receivedAt: "2026-09-24T12:00:00.000Z",
+    });
+    const firstRunId = first.value?.runId;
+    if (!firstRunId) throw new Error("first blocked run was not created");
+    await runHistory.appendEvent({
+      eventId: "question-before-resume",
+      runId: firstRunId,
+      type: "worker.question",
+      stage: "worker",
+      occurredAt: "2026-09-24T12:00:01.000Z",
+      status: "blocked",
+    });
+    const resumeDecision = triggerDecision({
+      action: "unlabeled",
+      label: { name: "needs-answer" },
+    });
+    const firstResume = await runDarkFactoryDispatch(resumeDecision, {
+      ...d,
+      deliveryId: "resume-delivery-replay",
+    });
+    const later = await runHistory.acceptDelivery({
+      deliveryId: "blocked-run-after-resume",
+      repo: "ricardoblackskye/agent-eve",
+      issue: 163,
+      receivedAt: "2026-09-24T12:01:00.000Z",
+    });
+    const laterRunId = later.value?.runId;
+    if (!laterRunId) throw new Error("later blocked run was not created");
+    await runHistory.appendEvent({
+      eventId: "question-after-resume",
+      runId: laterRunId,
+      type: "worker.question",
+      stage: "worker",
+      occurredAt: "2026-09-24T12:01:01.000Z",
+      status: "blocked",
+    });
+
+    const replay = await runDarkFactoryDispatch(resumeDecision, {
+      ...d,
+      deliveryId: "resume-delivery-replay",
+    });
+    const laterSummary = await runHistory.getRun(laterRunId);
+
+    expect(firstResume.status).toBe("resumed");
+    expect(replay.status).toBe("held");
+    expect(replay.runId).toBe(firstRunId);
+    expect(laterSummary.value?.status).toBe("blocked");
+    expect(calls).toHaveLength(1);
+  });
+
+  it("does not record abort as terminal until label removal succeeds", async () => {
+    const { runHistory, deps: defaults } = deps();
+    const started = await runDarkFactoryDispatch(triggerDecision(), {
+      ...defaults,
+      deliveryId: "run-before-abort-label-failure",
+    });
+    const { writer } = recordingLabels({ failOn: "remove" });
+    const aborted = await runDarkFactoryDispatch(
+      triggerDecision({ action: "unlabeled", label: { name: "dark-factory" } }),
+      {
+        ...defaults,
+        deliveryId: "abort-label-failure",
+        labels: writer,
+      },
+    );
+    const summary = await runHistory.getRun(started.runId ?? "missing");
+    const events = await runHistory.listRunEvents(started.runId ?? "missing");
+
+    expect(aborted.ok).toBe(false);
+    expect(summary.value?.status).toBe("running");
+    expect(events.value?.items.some((item) => item.event.status === "aborted")).toBe(false);
   });
 
   it("a trigger marks the run running", async () => {

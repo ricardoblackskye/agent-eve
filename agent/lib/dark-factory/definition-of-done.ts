@@ -575,12 +575,46 @@ export async function runDefinitionOfDone(
     return terminalError ? blockedByHistory(result, terminalError) : result;
   };
 
+  const failExecution = async (
+    round: number,
+    reason: string,
+    remainingFindings: ReviewFinding[],
+  ): Promise<DefinitionOfDoneResult> => {
+    const result: DefinitionOfDoneResult = {
+      ok: false,
+      status: "blocked",
+      pr,
+      roundsExecuted: round,
+      totalFindings: totalDistinctFindings,
+      resolvedCount: totalDistinctFindings - acceptedIds.size,
+      acceptedCount: acceptedIds.size,
+      remainingFindings,
+      reason,
+    };
+    const terminalError = await record({
+      eventId: `dod:${task.runId}:terminal`,
+      runId: task.runId,
+      type: "run.terminal",
+      stage: "terminal",
+      status: "failed",
+      reviewRound: round,
+      prUrl: pr.url,
+      ...task.runMetrics,
+    });
+    return terminalError ? blockedByHistory(result, terminalError) : result;
+  };
+
   // 2. Review and fix loop.
   // Iterates round from 1 to maxRounds inclusive [1..maxRounds], executing
   // exactly maxRounds iterations (e.g. 1, 2, 3 for maxRounds = 3).
   for (let round = 1; round <= maxRounds; round++) {
     roundsExecuted = round;
-    const findings = await deps.runChecks(round);
+    let findings: ReviewFinding[];
+    try {
+      findings = await deps.runChecks(round);
+    } catch {
+      return failExecution(round, "The review checks failed unexpectedly.", []);
+    }
 
     // Filter out findings already accepted in earlier rounds
     const unacceptedFindings = findings.filter((f) => !acceptedIds.has(f.id));
@@ -620,7 +654,16 @@ export async function runDefinitionOfDone(
 
     // Attempt fixes or acceptance dispositions
     if (deps.attemptFixes) {
-      const dispositions = await deps.attemptFixes(unacceptedFindings);
+      let dispositions: FindingDisposition[];
+      try {
+        dispositions = await deps.attemptFixes(unacceptedFindings);
+      } catch {
+        return failExecution(
+          round,
+          "The automated fix attempt failed unexpectedly.",
+          unacceptedFindings,
+        );
+      }
       const acceptedBeforeRound = acceptedIds.size;
 
       const outcome = await applyAcceptedDispositions(

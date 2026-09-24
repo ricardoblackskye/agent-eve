@@ -431,6 +431,47 @@ describe("#164 cycles 3-10: runDefinitionOfDone coordinator", () => {
     await history.close();
   });
 
+  it.each(["review-check", "fix-attempt"] as const)(
+    "records a failed terminal event when a %s callback throws",
+    async (failureStage) => {
+      const task = { ...sampleTask, runId: `run-history-${failureStage}-failure` };
+      const history = new SqliteRunHistoryStore(":memory:", () => task.runId);
+      const accepted = await history.acceptDelivery({
+        deliveryId: `delivery-${failureStage}-failure`,
+        repo: task.repo,
+        issue: task.issue,
+        receivedAt: "2026-09-24T12:00:00.000Z",
+      });
+      expect(accepted.ok).toBe(true);
+      const finding: ReviewFinding = {
+        id: "review-failure",
+        source: "test",
+        message: "Synthetic review failure fixture",
+      };
+      const { deps } = setupTestDeps({
+        runHistory: history,
+        runChecks: async () => {
+          if (failureStage === "review-check") throw new Error("review backend down");
+          return [finding];
+        },
+        attemptFixes: async () => {
+          throw new Error("fix backend down");
+        },
+      });
+
+      const result = await runDefinitionOfDone(deps, task);
+      const summary = await history.getRun(task.runId);
+      const events = await history.listRunEvents(task.runId);
+      const terminal = events.value?.items.find((item) => item.event.type === "run.terminal");
+
+      expect(result.ok).toBe(false);
+      expect(result.status).toBe("blocked");
+      expect(summary.value?.status).toBe("failed");
+      expect(terminal?.event.status).toBe("failed");
+      await history.close();
+    },
+  );
+
   it("cycle 4: findings resolved via code change in subsequent round mark task done", async () => {
     let roundCalled = 0;
     const { deps } = setupTestDeps({

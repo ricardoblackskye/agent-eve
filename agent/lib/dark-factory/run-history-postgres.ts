@@ -11,7 +11,9 @@ import {
 } from "./run-history";
 import type {
   AcceptRunDelivery,
-
+  ClaimRunControlDelivery,
+  RunControlDeliveryReceipt,
+  RunControlTransition,
   EventCursor,
   Page,
   PersistedRunEvent,
@@ -85,9 +87,7 @@ const POSTGRES_SCHEMA = `
     ON df_run_summaries (created_at DESC, run_id DESC);
   CREATE INDEX IF NOT EXISTS df_run_summaries_repo_idx
     ON df_run_summaries (repo, created_at DESC, run_id DESC);
-  CREATE UNIQUE INDEX IF NOT EXISTS df_run_active_issue_uidx
-    ON df_run_summaries (repo, issue)
-    WHERE status IN ('queued', 'running', 'blocked');
+  DROP INDEX IF EXISTS df_run_active_issue_uidx;
 
   CREATE TABLE IF NOT EXISTS df_run_events (
     sequence BIGSERIAL PRIMARY KEY,
@@ -122,6 +122,15 @@ const POSTGRES_SCHEMA = `
     run_id TEXT NOT NULL,
     FOREIGN KEY (run_id) REFERENCES df_run_summaries(run_id)
       ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED
+  );
+
+  CREATE TABLE IF NOT EXISTS df_run_control_receipts (
+    delivery_id TEXT PRIMARY KEY,
+    repo TEXT NOT NULL,
+    issue INTEGER NOT NULL,
+    transition TEXT NOT NULL CHECK(transition IN ('abort', 'resume')),
+    run_id TEXT REFERENCES df_run_summaries(run_id) ON DELETE SET NULL,
+    received_at TEXT NOT NULL
   );
 `;
 
@@ -470,22 +479,6 @@ export class PostgresRunHistoryStore implements RunHistoryStore {
           return { summary, duplicate: true };
         }
 
-        const activeResult = await client.query<RunSummaryRow>(
-          `SELECT * FROM df_run_summaries
-           WHERE repo = $1 AND issue = $2 AND status IN ('queued', 'running', 'blocked')
-           ORDER BY created_at DESC, run_id DESC LIMIT 1`,
-          [normalizedInput.repo, normalizedInput.issue],
-        );
-        const activeRow = activeResult.rows[0];
-        if (activeRow) {
-          const active = rowToSummary(activeRow);
-          await client.query(
-            "UPDATE df_run_deliveries SET run_id = $2 WHERE delivery_id = $1",
-            [eventId, active.runId],
-          );
-          return { summary: active, duplicate: true };
-        }
-
         const acceptedEvent = toRunEvent({
           eventId,
           runId,
@@ -523,6 +516,131 @@ export class PostgresRunHistoryStore implements RunHistoryStore {
     }
   }
 
+
+  async claimControlDelivery(
+    input: ClaimRunControlDelivery,
+  ): Promise<RunHistoryWriteResult<RunControlDeliveryReceipt>> {
+    const deliveryId = validateIdentifier(input.deliveryId, "deliveryId");
+    const repo = validateRepo(input.repo);
+    const issue = validateIssue(input.issue);
+    if (issue === undefined) {
+      throw new InvalidRunRecordError("Control delivery requires a positive issue number.");
+    }
+    if (input.transition !== "abort" && input.transition !== "resume") {
+      throw new InvalidRunRecordError("Control delivery transition must be abort or resume.");
+    }
+    const normalizedAt = toRunSummary({
+      runId: "control-receipt-validation",
+      repo,
+      issue,
+      status: "queued",
+      stage: "trigger",
+      createdAt: input.receivedAt,
+      updatedAt: input.receivedAt,
+      attemptCount: 0,
+      reviewCount: 0,
+      iterationCount: 0,
+      fixCycleCount: 0,
+    }).createdAt;
+    const runId =
+      input.runId === undefined
+        ? undefined
+        : validateIdentifier(input.runId, "runId");
+
+    try {
+      const claimed = await this.transaction(async (client) => {
+        const target = runId
+          ? await client.query<RunSummaryRow>(
+              "SELECT * FROM df_run_summaries WHERE run_id = $1 FOR UPDATE",
+              [runId],
+            )
+          : null;
+        const targetRow = target?.rows[0];
+        const targetSummary = targetRow ? rowToSummary(targetRow) : null;
+        if (
+          runId &&
+          (!targetSummary || targetSummary.repo !== repo || targetSummary.issue !== issue)
+        ) {
+          throw new InvalidRunRecordError(
+            "Control delivery runId does not identify the supplied repo and issue.",
+          );
+        }
+
+        const inserted = await client.query(
+          `INSERT INTO df_run_control_receipts
+           (delivery_id, repo, issue, transition, run_id, received_at)
+           VALUES ($1, $2, $3, $4, $5, $6)
+           ON CONFLICT (delivery_id) DO NOTHING
+           RETURNING delivery_id`,
+          [deliveryId, repo, issue, input.transition, runId ?? null, normalizedAt],
+        );
+        if (inserted.rowCount === 0) {
+          const existingResult = await client.query<{
+            repo: string;
+            issue: number;
+            transition: RunControlTransition;
+            run_id: string | null;
+          }>(
+            `SELECT repo, issue, transition, run_id
+             FROM df_run_control_receipts WHERE delivery_id = $1 FOR UPDATE`,
+            [deliveryId],
+          );
+          const existing = existingResult.rows[0];
+          if (!existing) throw new Error("Control delivery receipt disappeared during claim.");
+          if (
+            existing.repo !== repo ||
+            existing.issue !== issue ||
+            existing.transition !== input.transition
+          ) {
+            throw new InvalidRunRecordError(
+              "Control delivery identity was reused with different repo, issue, or transition data.",
+            );
+          }
+          let previousStatus: RunStatus | undefined;
+          if (existing.run_id) {
+            const previousResult = await client.query<RunSummaryRow>(
+              "SELECT * FROM df_run_summaries WHERE run_id = $1",
+              [existing.run_id],
+            );
+            const previousRow = previousResult.rows[0];
+            if (previousRow) previousStatus = rowToSummary(previousRow).status;
+          }
+          return {
+            duplicate: true,
+            value: {
+              deliveryId,
+              repo,
+              issue,
+              transition: input.transition,
+              ...(existing.run_id ? { runId: existing.run_id } : {}),
+              ...(previousStatus ? { runStatus: previousStatus } : {}),
+            } satisfies RunControlDeliveryReceipt,
+          };
+        }
+
+        return {
+          duplicate: false,
+          value: {
+            deliveryId,
+            repo,
+            issue,
+            transition: input.transition,
+            ...(runId ? { runId } : {}),
+            ...(targetSummary ? { runStatus: targetSummary.status } : {}),
+          } satisfies RunControlDeliveryReceipt,
+        };
+      });
+      return {
+        ok: true,
+        mode: "live",
+        providerId: this.id,
+        value: claimed.value,
+        duplicate: claimed.duplicate,
+      };
+    } catch (error) {
+      return failedWrite(error);
+    }
+  }
 
   async appendEvent(eventInput: RunEvent): Promise<RunHistoryWriteResult<RunSummary>> {
     const event = toRunEvent(eventInput);

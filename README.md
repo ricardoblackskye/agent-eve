@@ -571,13 +571,15 @@ standard PostgreSQL adapters implement the same contract; Supabase is supported
 as a PostgreSQL host without a Supabase SDK, and no Vercel SDK is used in the
 ledger.
 
-Each accepted delivery or lifecycle event updates the event log and run summary
-in one transaction. Identical event replay is a no-op; reusing an event ID with
-different event data fails visibly. A run is marked successful only after the
-Definition-of-Done flow passes, including PR creation and disposition of review
-findings. Latency and cost remain absent unless measured; an explicitly measured
-zero is preserved. The #199 read API and #200 progress board remain separate
-follow-ups.
+A replayed GitHub delivery reuses its bound run; a distinct trigger delivery
+gets a fresh run ID. Abort/resume receipts stay pinned to the original run (or
+record that no eligible run existed), so a delayed replay cannot mutate a later
+run. Lifecycle event appends and summary projections are atomic. Identical event
+replay is a no-op; reusing an event ID with different event data fails visibly.
+A run is marked successful only after the Definition-of-Done flow passes,
+including PR creation and disposition of review findings. Latency and cost
+remain absent unless measured; an explicitly measured zero is preserved. The
+The read API tracked by issue #199 and the progress board in issue #200 remain separate follow-ups.
 
 Configure the driver explicitly; the unset provider refuses writes rather than
 claiming an in-memory record is durable:
@@ -589,8 +591,9 @@ DF_RUN_HISTORY_DB_PATH=.data/dark-factory-runs.sqlite
 
 For a durable deployment, use `DF_RUN_HISTORY_DRIVER=postgres` and set
 `DF_RUN_HISTORY_DATABASE_URL` to a standard PostgreSQL connection URL. Keep that
-URL secret (mark it Sensitive in Vercel). The file-backed SQLite option is for
-local development, not ephemeral serverless filesystems.
+URL secret (mark it Sensitive in Vercel). SQLite is local-only; the provider
+rejects it when `NODE_ENV=production` or the selected deployment stage is
+`preview` or `production`, avoiding ephemeral serverless filesystems.
 
 ## Scripts
 
