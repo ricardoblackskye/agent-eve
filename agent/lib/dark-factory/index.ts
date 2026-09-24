@@ -34,6 +34,7 @@ export {
 export { SqliteRunHistoryStore } from "./run-history-store";
 export type {
   AcceptRunDelivery,
+  AdvanceRunControlDelivery,
   ClaimRunControlDelivery,
   RunControlDeliveryReceipt,
   RunControlTransition,

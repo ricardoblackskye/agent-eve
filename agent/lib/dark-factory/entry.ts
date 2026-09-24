@@ -22,7 +22,10 @@ import type { DispatchEvent } from "./dispatch";
 import { TRIGGER_LABELS } from "./trigger";
 import type { DarkFactoryTriggerDecision } from "./trigger";
 import type { RunStatus } from "./run-history";
-import type { RunHistoryStore } from "./run-history-store";
+import type {
+  RunControlDeliveryReceipt,
+  RunHistoryStore,
+} from "./run-history-store";
 import { createPlatformAdapter } from "./platform";
 
 /** The label operations the entry point needs; injected so tests need no GitHub. */
@@ -279,7 +282,10 @@ function statusResult(
 }
 
 function deliveryEventId(deliveryId: string, transition: string): string {
-  const digest = createHash("sha256").update(deliveryId).digest("hex").slice(0, 32);
+  const digest = createHash("sha256")
+    .update(deliveryId)
+    .digest("hex")
+    .slice(0, 32);
   return `delivery:${digest}:${transition}`;
 }
 
@@ -317,7 +323,29 @@ async function recordTerminal(
     occurredAt,
     status,
   });
-  return written.ok ? null : written.error ?? "terminal run state could not be persisted";
+  return written.ok
+    ? null
+    : (written.error ?? "terminal run state could not be persisted");
+}
+
+async function advanceControlReceipt(
+  history: RunHistoryStore,
+  receipt: RunControlDeliveryReceipt,
+  occurredAt: string,
+  progress: { handoffSent?: boolean; completed?: boolean },
+): Promise<string | null> {
+  const advanced = await history.advanceControlDelivery({
+    deliveryId: receipt.deliveryId,
+    repo: receipt.repo,
+    issue: receipt.issue,
+    transition: receipt.transition,
+    receivedAt: occurredAt,
+    ...(receipt.runId ? { runId: receipt.runId } : {}),
+    ...progress,
+  });
+  return advanced.ok
+    ? null
+    : (advanced.error ?? "control delivery progress could not be persisted");
 }
 
 export async function runDarkFactoryDispatch(
@@ -340,9 +368,18 @@ export async function runDarkFactoryDispatch(
     );
   }
 
-  const deliveryId = typeof deps.deliveryId === "string" ? deps.deliveryId.trim() : "";
-  if (!deliveryId || deliveryId.length > 256 || /[\u0000-\u001f\u007f]/.test(deliveryId)) {
-    return statusResult(false, "refused", "a valid GitHub delivery ID is required.");
+  const deliveryId =
+    typeof deps.deliveryId === "string" ? deps.deliveryId.trim() : "";
+  if (
+    !deliveryId ||
+    deliveryId.length > 256 ||
+    /[\u0000-\u001f\u007f]/.test(deliveryId)
+  ) {
+    return statusResult(
+      false,
+      "refused",
+      "a valid GitHub delivery ID is required.",
+    );
   }
   if (!deps.runHistory) {
     return statusResult(false, "refused", "run history is not configured.");
@@ -353,11 +390,20 @@ export async function runDarkFactoryDispatch(
 
   // --- abort: the operator's stop button ---
   if (baseIntent.kind === "abort") {
-    const active = await findActiveRun(deps.runHistory, baseIntent.repo, baseIntent.issue);
+    const active = await findActiveRun(
+      deps.runHistory,
+      baseIntent.repo,
+      baseIntent.issue,
+    );
     if (active.error) {
-      return statusResult(false, "refused", `could not read the active run: ${active.error}`, {
-        error: active.error,
-      });
+      return statusResult(
+        false,
+        "refused",
+        `could not read the active run: ${active.error}`,
+        {
+          error: active.error,
+        },
+      );
     }
     const claimed = await deps.runHistory.claimControlDelivery({
       deliveryId,
@@ -371,21 +417,65 @@ export async function runDarkFactoryDispatch(
       const error = claimed.error ?? "abort delivery could not be persisted";
       return statusResult(false, "refused", error, { error });
     }
-    if (claimed.duplicate) {
-      return statusResult(
-        true,
-        "held",
-        "this abort delivery was already handled; no later run was changed",
-        {
-          ...(claimed.value.runId ? { runId: claimed.value.runId } : {}),
-          ...(claimed.value.runStatus ? { runStatus: claimed.value.runStatus } : {}),
-        },
+    const receipt = claimed.value;
+    const held = (reason: string): EntryResult =>
+      statusResult(true, "held", reason, {
+        ...(receipt.runId ? { runId: receipt.runId } : {}),
+        ...(receipt.runStatus ? { runStatus: receipt.runStatus } : {}),
+      });
+    if (receipt.completed) {
+      return held(
+        "this abort delivery was already completed; no later run was changed",
       );
+    }
+    const terminal = ["aborted", "failed", "succeeded"].includes(
+      receipt.runStatus ?? "",
+    );
+    if (terminal) {
+      const progressError = await advanceControlReceipt(
+        deps.runHistory,
+        receipt,
+        now(),
+        { completed: true },
+      );
+      return progressError
+        ? statusResult(false, "failed", progressError, {
+            runId: receipt.runId,
+            error: progressError,
+          })
+        : held("the bound run is already terminal");
+    }
+    if (
+      claimed.duplicate &&
+      receipt.runId &&
+      active.runId &&
+      active.runId !== receipt.runId
+    ) {
+      const error =
+        "pending abort delivery targets an earlier run; refusing to change labels for a later active run";
+      return statusResult(false, "failed", error, {
+        runId: receipt.runId,
+        runStatus: receipt.runStatus,
+        error,
+      });
+    }
+    if (claimed.duplicate && !receipt.runId && active.runId) {
+      const progressError = await advanceControlReceipt(
+        deps.runHistory,
+        receipt,
+        now(),
+        { completed: true },
+      );
+      return progressError
+        ? statusResult(false, "failed", progressError, { error: progressError })
+        : held(
+            "this abort delivery had no eligible run and will not affect a later run",
+          );
     }
 
     const intent = {
       ...baseIntent,
-      ...(claimed.value.runId ? { runId: claimed.value.runId } : {}),
+      ...(receipt.runId ? { runId: receipt.runId } : {}),
     };
     const failures = await removeLabels(labels, intent, [
       TRIGGER_LABELS.running,
@@ -393,13 +483,13 @@ export async function runDarkFactoryDispatch(
     ]);
     if (failures) {
       return statusResult(false, "failed", failures, {
-        ...(claimed.value.runId
-          ? { runId: claimed.value.runId, runStatus: active.status }
+        ...(receipt.runId
+          ? { runId: receipt.runId, runStatus: receipt.runStatus }
           : {}),
         error: failures,
       });
     }
-    if (claimed.value.runId) {
+    if (receipt.runId) {
       const terminalError = await recordTerminal(
         deps.runHistory,
         intent,
@@ -410,19 +500,36 @@ export async function runDarkFactoryDispatch(
       );
       if (terminalError) {
         return statusResult(false, "failed", terminalError, {
-          runId: intent.runId,
-          runStatus: active.status,
+          runId: receipt.runId,
+          runStatus: receipt.runStatus,
           error: terminalError,
         });
       }
+    }
+    const progressError = await advanceControlReceipt(
+      deps.runHistory,
+      receipt,
+      now(),
+      { completed: true },
+    );
+    if (progressError) {
+      return statusResult(false, "failed", progressError, {
+        ...(receipt.runId
+          ? {
+              runId: receipt.runId,
+              runStatus: receipt.runId ? "aborted" : undefined,
+            }
+          : {}),
+        error: progressError,
+      });
     }
     return statusResult(
       true,
       "aborted",
       "the run was aborted and its lifecycle labels cleared",
       {
-        ...(claimed.value.runId
-          ? { runId: claimed.value.runId, runStatus: "aborted" as const }
+        ...(receipt.runId
+          ? { runId: receipt.runId, runStatus: "aborted" as const }
           : {}),
       },
     );
@@ -430,13 +537,23 @@ export async function runDarkFactoryDispatch(
 
   // --- resume: only ever after a human answered (never implied by a re-delivery) ---
   if (baseIntent.kind === "resume") {
-    const active = await findActiveRun(deps.runHistory, baseIntent.repo, baseIntent.issue);
+    const active = await findActiveRun(
+      deps.runHistory,
+      baseIntent.repo,
+      baseIntent.issue,
+    );
     if (active.error) {
-      return statusResult(false, "refused", `could not read the active run: ${active.error}`, {
-        error: active.error,
-      });
+      return statusResult(
+        false,
+        "refused",
+        `could not read the active run: ${active.error}`,
+        {
+          error: active.error,
+        },
+      );
     }
-    const eligibleRunId = active.status === "blocked" ? active.runId : undefined;
+    const eligibleRunId =
+      active.status === "blocked" ? active.runId : undefined;
     const claimed = await deps.runHistory.claimControlDelivery({
       deliveryId,
       repo: baseIntent.repo,
@@ -449,60 +566,136 @@ export async function runDarkFactoryDispatch(
       const error = claimed.error ?? "resume delivery could not be persisted";
       return statusResult(false, "refused", error, { error });
     }
-    if (claimed.duplicate) {
-      return statusResult(
-        true,
-        "held",
-        "this resume delivery was already handled; no later run was changed",
-        {
-          ...(claimed.value.runId ? { runId: claimed.value.runId } : {}),
-          ...(claimed.value.runStatus ? { runStatus: claimed.value.runStatus } : {}),
-        },
+    const receipt = claimed.value;
+    const held = (reason: string): EntryResult =>
+      statusResult(true, "held", reason, {
+        ...(receipt.runId ? { runId: receipt.runId } : {}),
+        ...(receipt.runStatus ? { runStatus: receipt.runStatus } : {}),
+      });
+    if (receipt.completed) {
+      return held(
+        "this resume delivery was already completed; no later run was changed",
       );
     }
-    if (!eligibleRunId) {
-      return statusResult(true, "held", "there is no blocked run to resume", {
-        ...(active.runId ? { runId: active.runId, runStatus: active.status } : {}),
+    if (!receipt.runId) {
+      const progressError = await advanceControlReceipt(
+        deps.runHistory,
+        receipt,
+        now(),
+        { completed: true },
+      );
+      return progressError
+        ? statusResult(false, "refused", progressError, {
+            error: progressError,
+          })
+        : held("there is no blocked run to resume");
+    }
+    if (["aborted", "failed", "succeeded"].includes(receipt.runStatus ?? "")) {
+      const progressError = await advanceControlReceipt(
+        deps.runHistory,
+        receipt,
+        now(),
+        { completed: true },
+      );
+      return progressError
+        ? statusResult(false, "refused", progressError, {
+            runId: receipt.runId,
+            error: progressError,
+          })
+        : held("the bound run is already terminal");
+    }
+    if (claimed.duplicate && active.runId && active.runId !== receipt.runId) {
+      const error =
+        "pending resume delivery targets an earlier run; refusing to change labels for a later active run";
+      return statusResult(false, "failed", error, {
+        runId: receipt.runId,
+        runStatus: receipt.runStatus,
+        error,
       });
+    }
+    if (receipt.runStatus === "running" && !receipt.handoffSent) {
+      const progressError = await advanceControlReceipt(
+        deps.runHistory,
+        receipt,
+        now(),
+        { completed: true },
+      );
+      return progressError
+        ? statusResult(false, "refused", progressError, {
+            runId: receipt.runId,
+            runStatus: "running",
+            error: progressError,
+          })
+        : held("the bound run is already running");
     }
 
-    const intent = { ...baseIntent, runId: eligibleRunId };
-    const failure = await removeLabels(labels, intent, [TRIGGER_LABELS.question]);
-    if (failure)
-      return statusResult(false, "resumed", failure, {
-        runId: intent.runId,
-        runStatus: "blocked",
-        error: failure,
-      });
-    const resumed = await deps.runHistory.appendEvent({
-      eventId: deliveryEventId(deliveryId, "resume"),
-      runId: intent.runId,
-      type: "run.resumed",
-      stage: "dispatch",
-      occurredAt: now(),
-      status: "running",
-    });
-    if (!resumed.ok) {
-      return statusResult(false, "refused", resumed.error ?? "resume could not be persisted", {
-        runId: intent.runId,
-        runStatus: "blocked",
-        error: resumed.error,
-      });
-    }
-    const posted = await postHandoff(deps, intent);
-    if (!posted.ok) {
-      const terminalError = await recordTerminal(
+    const intent = { ...baseIntent, runId: receipt.runId };
+    if (!receipt.handoffSent) {
+      const failure = await removeLabels(labels, intent, [
+        TRIGGER_LABELS.question,
+      ]);
+      if (failure)
+        return statusResult(false, "resumed", failure, {
+          runId: intent.runId,
+          runStatus: "blocked",
+          error: failure,
+        });
+      const posted = await postHandoff(deps, intent);
+      if (!posted.ok) {
+        return statusResult(false, "resumed", posted.reason, {
+          runId: intent.runId,
+          runStatus: "blocked",
+          error: posted.reason,
+        });
+      }
+      const progressError = await advanceControlReceipt(
         deps.runHistory,
-        intent,
-        deliveryId,
-        "resume-handoff-failed",
-        "failed",
+        receipt,
         now(),
+        { handoffSent: true },
       );
-      return statusResult(false, "resumed", posted.reason, {
+      if (progressError) {
+        return statusResult(false, "refused", progressError, {
+          runId: intent.runId,
+          runStatus: "blocked",
+          error: progressError,
+        });
+      }
+    }
+
+    if (receipt.runStatus !== "running") {
+      const resumed = await deps.runHistory.appendEvent({
+        eventId: deliveryEventId(deliveryId, "resume"),
         runId: intent.runId,
-        runStatus: terminalError ? "running" : "failed",
-        error: terminalError ? `${posted.reason}; ${terminalError}` : posted.reason,
+        type: "run.resumed",
+        stage: "dispatch",
+        occurredAt: now(),
+        status: "running",
+      });
+      if (!resumed.ok) {
+        return statusResult(
+          false,
+          "refused",
+          resumed.error ?? "resume could not be persisted",
+          {
+            runId: intent.runId,
+            runStatus: "blocked",
+            error: resumed.error,
+          },
+        );
+      }
+    }
+    const progressError = await advanceControlReceipt(
+      deps.runHistory,
+      receipt,
+      now(),
+      { completed: true },
+    );
+    if (progressError) {
+      return statusResult(false, "refused", progressError, {
+        runId: intent.runId,
+        runStatus: "running",
+        error: progressError,
       });
     }
     return statusResult(true, "resumed", "the parked run was resumed", {
@@ -544,11 +737,18 @@ export async function runDarkFactoryDispatch(
       "failed",
       now(),
     );
-    return statusResult(false, "failed", terminalError ? `${labelFailure}; ${terminalError}` : labelFailure, {
-      runId: intent.runId,
-      runStatus: terminalError ? "queued" : "failed",
-      error: terminalError ? `${labelFailure}; ${terminalError}` : labelFailure,
-    });
+    return statusResult(
+      false,
+      "failed",
+      terminalError ? `${labelFailure}; ${terminalError}` : labelFailure,
+      {
+        runId: intent.runId,
+        runStatus: terminalError ? "queued" : "failed",
+        error: terminalError
+          ? `${labelFailure}; ${terminalError}`
+          : labelFailure,
+      },
+    );
   }
 
   const posted = await postHandoff(deps, intent);
@@ -561,11 +761,18 @@ export async function runDarkFactoryDispatch(
       "failed",
       now(),
     );
-    return statusResult(false, "failed", terminalError ? `${posted.reason}; ${terminalError}` : posted.reason, {
-      runId: intent.runId,
-      runStatus: terminalError ? "queued" : "failed",
-      error: terminalError ? `${posted.reason}; ${terminalError}` : posted.reason,
-    });
+    return statusResult(
+      false,
+      "failed",
+      terminalError ? `${posted.reason}; ${terminalError}` : posted.reason,
+      {
+        runId: intent.runId,
+        runStatus: terminalError ? "queued" : "failed",
+        error: terminalError
+          ? `${posted.reason}; ${terminalError}`
+          : posted.reason,
+      },
+    );
   }
 
   const dispatched = await deps.runHistory.appendEvent({
@@ -577,11 +784,16 @@ export async function runDarkFactoryDispatch(
     status: "running",
   });
   if (!dispatched.ok) {
-    return statusResult(false, "failed", dispatched.error ?? "dispatch state could not be persisted", {
-      runId: intent.runId,
-      runStatus: "queued",
-      error: dispatched.error,
-    });
+    return statusResult(
+      false,
+      "failed",
+      dispatched.error ?? "dispatch state could not be persisted",
+      {
+        runId: intent.runId,
+        runStatus: "queued",
+        error: dispatched.error,
+      },
+    );
   }
 
   return statusResult(

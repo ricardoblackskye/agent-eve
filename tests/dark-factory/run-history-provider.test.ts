@@ -38,6 +38,16 @@ describe("configured run-history provider", () => {
     });
     expect(control.ok).toBe(false);
     expect(control.error).toMatch(/not configured/i);
+    const progress = await store.advanceControlDelivery({
+      deliveryId: "control-delivery-1",
+      repo: "owner/repo",
+      issue: 198,
+      transition: "abort",
+      receivedAt: "2026-09-24T12:00:00.000Z",
+      completed: true,
+    });
+    expect(progress.ok).toBe(false);
+    expect(progress.error).toMatch(/not configured/i);
   });
 
   it("rejects an unknown driver and missing SQLite path", () => {

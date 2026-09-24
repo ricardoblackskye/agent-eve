@@ -18,7 +18,10 @@ afterEach(async () => {
 function createStore(idFactory = () => "run-1") {
   const directory = mkdtempSync(join(tmpdir(), "df-run-history-"));
   directories.push(directory);
-  const store = new SqliteRunHistoryStore(join(directory, "runs.sqlite"), idFactory);
+  const store = new SqliteRunHistoryStore(
+    join(directory, "runs.sqlite"),
+    idFactory,
+  );
   stores.push(store);
   return store;
 }
@@ -188,6 +191,57 @@ describe("SqliteRunHistoryStore delivery acceptance", () => {
     expect(generated).toBe(1);
   });
 
+  it("advances control delivery progress monotonically and idempotently", async () => {
+    const store = createStore();
+    const accepted = await store.acceptDelivery({
+      deliveryId: "control-progress-trigger",
+      repo: "owner/repo",
+      issue: 198,
+      receivedAt: at,
+    });
+    const runId = accepted.value?.runId;
+    if (!runId) throw new Error("control progress run was not created");
+    const claim = {
+      deliveryId: "control-progress-resume",
+      repo: "owner/repo",
+      issue: 198,
+      transition: "resume" as const,
+      receivedAt: "2026-09-24T12:00:01.000Z",
+      runId,
+    };
+    const claimed = await store.claimControlDelivery(claim);
+    const handoff = await store.advanceControlDelivery({
+      ...claim,
+      receivedAt: "2026-09-24T12:00:02.000Z",
+      handoffSent: true,
+    });
+    const completed = await store.advanceControlDelivery({
+      ...claim,
+      receivedAt: "2026-09-24T12:00:03.000Z",
+      completed: true,
+    });
+    const replay = await store.claimControlDelivery(claim);
+
+    expect(claimed.ok).toBe(true);
+    expect(claimed.value).toMatchObject({
+      handoffSent: false,
+      completed: false,
+    });
+    expect(handoff.ok).toBe(true);
+    expect(handoff.value).toMatchObject({
+      handoffSent: true,
+      completed: false,
+    });
+    expect(completed.ok).toBe(true);
+    expect(completed.value).toMatchObject({
+      handoffSent: true,
+      completed: true,
+    });
+    expect(replay.ok).toBe(true);
+    expect(replay.duplicate).toBe(true);
+    expect(replay.value).toMatchObject({ handoffSent: true, completed: true });
+  });
+
   it("atomically appends a new event and updates the current summary", async () => {
     const store = createStore();
     const accepted = await store.acceptDelivery({
@@ -304,7 +358,8 @@ describe("SqliteRunHistoryStore delivery acceptance", () => {
     });
     const firstRunId = first.value?.runId;
     const secondRunId = second.value?.runId;
-    if (!firstRunId || !secondRunId) throw new Error("run acceptance returned no runId");
+    if (!firstRunId || !secondRunId)
+      throw new Error("run acceptance returned no runId");
     await store.appendEvent({
       eventId: "filter-started",
       runId: firstRunId,
@@ -408,9 +463,13 @@ describe("SqliteRunHistoryStore delivery acceptance", () => {
   });
 
   it("surfaces an unavailable durable path as a blocked write", async () => {
-    const directory = mkdtempSync(join(tmpdir(), "df-run-history-unavailable-"));
+    const directory = mkdtempSync(
+      join(tmpdir(), "df-run-history-unavailable-"),
+    );
     directories.push(directory);
-    const store = new SqliteRunHistoryStore(join(directory, "missing", "runs.sqlite"));
+    const store = new SqliteRunHistoryStore(
+      join(directory, "missing", "runs.sqlite"),
+    );
     stores.push(store);
 
     const result = await store.acceptDelivery({

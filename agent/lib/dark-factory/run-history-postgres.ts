@@ -11,6 +11,7 @@ import {
 } from "./run-history";
 import type {
   AcceptRunDelivery,
+  AdvanceRunControlDelivery,
   ClaimRunControlDelivery,
   RunControlDeliveryReceipt,
   RunControlTransition,
@@ -130,8 +131,12 @@ const POSTGRES_SCHEMA = `
     issue INTEGER NOT NULL,
     transition TEXT NOT NULL CHECK(transition IN ('abort', 'resume')),
     run_id TEXT REFERENCES df_run_summaries(run_id) ON DELETE SET NULL,
-    received_at TEXT NOT NULL
+    received_at TEXT NOT NULL,
+    handoff_sent BOOLEAN NOT NULL DEFAULT FALSE,
+    completed BOOLEAN NOT NULL DEFAULT FALSE
   );
+  ALTER TABLE df_run_control_receipts ADD COLUMN IF NOT EXISTS handoff_sent BOOLEAN NOT NULL DEFAULT FALSE;
+  ALTER TABLE df_run_control_receipts ADD COLUMN IF NOT EXISTS completed BOOLEAN NOT NULL DEFAULT FALSE;
 `;
 
 function failedWrite<T>(error: unknown): RunHistoryWriteResult<T> {
@@ -185,12 +190,24 @@ function rowToEvent(row: RunEventRow): PersistedRunEvent {
       occurredAt: row.occurred_at,
       ...(row.status !== null ? { status: row.status } : {}),
       ...(row.attempt !== null ? { attempt: Number(row.attempt) } : {}),
-      ...(row.review_round !== null ? { reviewRound: Number(row.review_round) } : {}),
-      ...(row.iteration_count !== null ? { iterationCount: Number(row.iteration_count) } : {}),
-      ...(row.fix_cycle_count !== null ? { fixCycleCount: Number(row.fix_cycle_count) } : {}),
-      ...(row.finding_count !== null ? { findingCount: Number(row.finding_count) } : {}),
-      ...(row.resolved_count !== null ? { resolvedCount: Number(row.resolved_count) } : {}),
-      ...(row.accepted_count !== null ? { acceptedCount: Number(row.accepted_count) } : {}),
+      ...(row.review_round !== null
+        ? { reviewRound: Number(row.review_round) }
+        : {}),
+      ...(row.iteration_count !== null
+        ? { iterationCount: Number(row.iteration_count) }
+        : {}),
+      ...(row.fix_cycle_count !== null
+        ? { fixCycleCount: Number(row.fix_cycle_count) }
+        : {}),
+      ...(row.finding_count !== null
+        ? { findingCount: Number(row.finding_count) }
+        : {}),
+      ...(row.resolved_count !== null
+        ? { resolvedCount: Number(row.resolved_count) }
+        : {}),
+      ...(row.accepted_count !== null
+        ? { acceptedCount: Number(row.accepted_count) }
+        : {}),
       ...(row.latency_ms !== null ? { latencyMs: Number(row.latency_ms) } : {}),
       ...(row.cost_usd !== null ? { costUsd: Number(row.cost_usd) } : {}),
       ...(row.pr_url !== null ? { prUrl: row.pr_url } : {}),
@@ -217,9 +234,12 @@ function validateIdentifier(value: string, field: string): string {
 }
 
 function validateRepo(value: string): string {
-  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
+  const normalized =
+    typeof value === "string" ? value.trim().toLowerCase() : "";
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(normalized)) {
-    throw new InvalidRunRecordError('Run history filter "repo" must be an owner/repo pair.');
+    throw new InvalidRunRecordError(
+      'Run history filter "repo" must be an owner/repo pair.',
+    );
   }
   return normalized;
 }
@@ -242,15 +262,21 @@ function validateStatus(value: RunStatus): RunStatus {
 function validateIssue(value: number | undefined): number | undefined {
   if (value === undefined) return undefined;
   if (!Number.isSafeInteger(value) || value < 1) {
-    throw new InvalidRunRecordError("Run history issue filter must be a positive safe integer.");
+    throw new InvalidRunRecordError(
+      "Run history issue filter must be a positive safe integer.",
+    );
   }
   return value;
 }
 
-function validateStatuses(value: RunStatus[] | undefined): RunStatus[] | undefined {
+function validateStatuses(
+  value: RunStatus[] | undefined,
+): RunStatus[] | undefined {
   if (value === undefined) return undefined;
   if (!Array.isArray(value) || value.length === 0) {
-    throw new InvalidRunRecordError("Run history statuses filter must be a non-empty array.");
+    throw new InvalidRunRecordError(
+      "Run history statuses filter must be a non-empty array.",
+    );
   }
   return [...new Set(value.map(validateStatus))];
 }
@@ -258,7 +284,9 @@ function validateStatuses(value: RunStatus[] | undefined): RunStatus[] | undefin
 function validateLimit(value: number | undefined): number {
   if (value === undefined) return 50;
   if (!Number.isInteger(value) || value < 1 || value > 100) {
-    throw new InvalidRunRecordError("Run history page limit must be an integer in [1, 100].");
+    throw new InvalidRunRecordError(
+      "Run history page limit must be an integer in [1, 100].",
+    );
   }
   return value;
 }
@@ -267,19 +295,26 @@ function validateRunCursor(cursor: RunCursor): RunCursor {
   const runId = validateIdentifier(cursor.runId, "cursor.runId");
   const parsed = Date.parse(cursor.createdAt);
   if (!Number.isFinite(parsed)) {
-    throw new InvalidRunRecordError("Run history cursor createdAt must be an ISO timestamp.");
+    throw new InvalidRunRecordError(
+      "Run history cursor createdAt must be an ISO timestamp.",
+    );
   }
   return { runId, createdAt: new Date(parsed).toISOString() };
 }
 
 function validateEventCursor(cursor: EventCursor): number {
   if (!Number.isSafeInteger(cursor.sequence) || cursor.sequence < 0) {
-    throw new InvalidRunRecordError("Run history event cursor must be a safe sequence number >= 0.");
+    throw new InvalidRunRecordError(
+      "Run history event cursor must be a safe sequence number >= 0.",
+    );
   }
   return cursor.sequence;
 }
 
-function insertSummary(client: PoolClient, summary: RunSummary): Promise<unknown> {
+function insertSummary(
+  client: PoolClient,
+  summary: RunSummary,
+): Promise<unknown> {
   return client.query(
     `INSERT INTO df_run_summaries (
        run_id, repo, issue, status, stage, created_at, updated_at,
@@ -307,7 +342,10 @@ function insertSummary(client: PoolClient, summary: RunSummary): Promise<unknown
   );
 }
 
-function updateSummary(client: PoolClient, summary: RunSummary): Promise<unknown> {
+function updateSummary(
+  client: PoolClient,
+  summary: RunSummary,
+): Promise<unknown> {
   return client.query(
     `UPDATE df_run_summaries SET
        repo = $2, issue = $3, status = $4, stage = $5,
@@ -378,8 +416,9 @@ export class PostgresRunHistoryStore implements RunHistoryStore {
 
   private async pool(): Promise<Pool> {
     if (!this.poolPromise) {
-      this.poolPromise = import("pg").then(({ Pool }) =>
-        new Pool({ connectionString: this.connectionString, max: 1 }),
+      this.poolPromise = import("pg").then(
+        ({ Pool }) =>
+          new Pool({ connectionString: this.connectionString, max: 1 }),
       );
     }
     return this.poolPromise;
@@ -465,16 +504,25 @@ export class PostgresRunHistoryStore implements RunHistoryStore {
             [eventId],
           );
           const existingRunId = existing.rows[0]?.run_id;
-          if (!existingRunId) throw new Error(`Delivery '${eventId}' has no run binding.`);
+          if (!existingRunId)
+            throw new Error(`Delivery '${eventId}' has no run binding.`);
           const summaryResult = await client.query<RunSummaryRow>(
             "SELECT * FROM df_run_summaries WHERE run_id = $1",
             [existingRunId],
           );
           const row = summaryResult.rows[0];
-          if (!row) throw new Error(`Delivery '${eventId}' points to a missing summary.`);
+          if (!row)
+            throw new Error(
+              `Delivery '${eventId}' points to a missing summary.`,
+            );
           const summary = rowToSummary(row);
-          if (summary.repo !== normalizedInput.repo || summary.issue !== normalizedInput.issue) {
-            throw new Error(`Delivery '${eventId}' was replayed with a different repo/issue identity.`);
+          if (
+            summary.repo !== normalizedInput.repo ||
+            summary.issue !== normalizedInput.issue
+          ) {
+            throw new Error(
+              `Delivery '${eventId}' was replayed with a different repo/issue identity.`,
+            );
           }
           return { summary, duplicate: true };
         }
@@ -516,7 +564,6 @@ export class PostgresRunHistoryStore implements RunHistoryStore {
     }
   }
 
-
   async claimControlDelivery(
     input: ClaimRunControlDelivery,
   ): Promise<RunHistoryWriteResult<RunControlDeliveryReceipt>> {
@@ -524,10 +571,14 @@ export class PostgresRunHistoryStore implements RunHistoryStore {
     const repo = validateRepo(input.repo);
     const issue = validateIssue(input.issue);
     if (issue === undefined) {
-      throw new InvalidRunRecordError("Control delivery requires a positive issue number.");
+      throw new InvalidRunRecordError(
+        "Control delivery requires a positive issue number.",
+      );
     }
     if (input.transition !== "abort" && input.transition !== "resume") {
-      throw new InvalidRunRecordError("Control delivery transition must be abort or resume.");
+      throw new InvalidRunRecordError(
+        "Control delivery transition must be abort or resume.",
+      );
     }
     const normalizedAt = toRunSummary({
       runId: "control-receipt-validation",
@@ -559,7 +610,9 @@ export class PostgresRunHistoryStore implements RunHistoryStore {
         const targetSummary = targetRow ? rowToSummary(targetRow) : null;
         if (
           runId &&
-          (!targetSummary || targetSummary.repo !== repo || targetSummary.issue !== issue)
+          (!targetSummary ||
+            targetSummary.repo !== repo ||
+            targetSummary.issue !== issue)
         ) {
           throw new InvalidRunRecordError(
             "Control delivery runId does not identify the supplied repo and issue.",
@@ -572,7 +625,14 @@ export class PostgresRunHistoryStore implements RunHistoryStore {
            VALUES ($1, $2, $3, $4, $5, $6)
            ON CONFLICT (delivery_id) DO NOTHING
            RETURNING delivery_id`,
-          [deliveryId, repo, issue, input.transition, runId ?? null, normalizedAt],
+          [
+            deliveryId,
+            repo,
+            issue,
+            input.transition,
+            runId ?? null,
+            normalizedAt,
+          ],
         );
         if (inserted.rowCount === 0) {
           const existingResult = await client.query<{
@@ -580,13 +640,18 @@ export class PostgresRunHistoryStore implements RunHistoryStore {
             issue: number;
             transition: RunControlTransition;
             run_id: string | null;
+            handoff_sent: boolean;
+            completed: boolean;
           }>(
-            `SELECT repo, issue, transition, run_id
+            `SELECT repo, issue, transition, run_id, handoff_sent, completed
              FROM df_run_control_receipts WHERE delivery_id = $1 FOR UPDATE`,
             [deliveryId],
           );
           const existing = existingResult.rows[0];
-          if (!existing) throw new Error("Control delivery receipt disappeared during claim.");
+          if (!existing)
+            throw new Error(
+              "Control delivery receipt disappeared during claim.",
+            );
           if (
             existing.repo !== repo ||
             existing.issue !== issue ||
@@ -614,6 +679,8 @@ export class PostgresRunHistoryStore implements RunHistoryStore {
               transition: input.transition,
               ...(existing.run_id ? { runId: existing.run_id } : {}),
               ...(previousStatus ? { runStatus: previousStatus } : {}),
+              handoffSent: existing.handoff_sent,
+              completed: existing.completed,
             } satisfies RunControlDeliveryReceipt,
           };
         }
@@ -627,6 +694,8 @@ export class PostgresRunHistoryStore implements RunHistoryStore {
             transition: input.transition,
             ...(runId ? { runId } : {}),
             ...(targetSummary ? { runStatus: targetSummary.status } : {}),
+            handoffSent: false,
+            completed: false,
           } satisfies RunControlDeliveryReceipt,
         };
       });
@@ -642,7 +711,129 @@ export class PostgresRunHistoryStore implements RunHistoryStore {
     }
   }
 
-  async appendEvent(eventInput: RunEvent): Promise<RunHistoryWriteResult<RunSummary>> {
+  async advanceControlDelivery(
+    input: AdvanceRunControlDelivery,
+  ): Promise<RunHistoryWriteResult<RunControlDeliveryReceipt>> {
+    const deliveryId = validateIdentifier(input.deliveryId, "deliveryId");
+    const repo = validateRepo(input.repo);
+    const issue = validateIssue(input.issue);
+    if (issue === undefined) {
+      throw new InvalidRunRecordError(
+        "Control delivery requires a positive issue number.",
+      );
+    }
+    if (input.transition !== "abort" && input.transition !== "resume") {
+      throw new InvalidRunRecordError(
+        "Control delivery transition must be abort or resume.",
+      );
+    }
+    if (input.handoffSent && input.transition !== "resume") {
+      throw new InvalidRunRecordError(
+        "Only resume deliveries can record a successful handoff.",
+      );
+    }
+    if (!input.handoffSent && !input.completed) {
+      throw new InvalidRunRecordError(
+        "Control delivery progress must advance at least one phase.",
+      );
+    }
+    toRunSummary({
+      runId: "control-progress-validation",
+      repo,
+      issue,
+      status: "queued",
+      stage: "trigger",
+      createdAt: input.receivedAt,
+      updatedAt: input.receivedAt,
+      attemptCount: 0,
+      reviewCount: 0,
+      iterationCount: 0,
+      fixCycleCount: 0,
+    });
+    const runId =
+      input.runId === undefined
+        ? null
+        : validateIdentifier(input.runId, "runId");
+
+    try {
+      const advanced = await this.transaction(async (client) => {
+        const existingResult = await client.query<{
+          repo: string;
+          issue: number;
+          transition: RunControlTransition;
+          run_id: string | null;
+          handoff_sent: boolean;
+          completed: boolean;
+        }>(
+          `SELECT repo, issue, transition, run_id, handoff_sent, completed
+           FROM df_run_control_receipts WHERE delivery_id = $1 FOR UPDATE`,
+          [deliveryId],
+        );
+        const existing = existingResult.rows[0];
+        if (!existing)
+          throw new Error(
+            "Control delivery must be claimed before it advances.",
+          );
+        if (
+          existing.repo !== repo ||
+          existing.issue !== issue ||
+          existing.transition !== input.transition ||
+          existing.run_id !== runId
+        ) {
+          throw new InvalidRunRecordError(
+            "Control progress does not match its claimed delivery identity.",
+          );
+        }
+        const handoffSent = existing.handoff_sent || input.handoffSent === true;
+        const completed = existing.completed || input.completed === true;
+        const duplicate =
+          (!input.handoffSent || existing.handoff_sent) &&
+          (!input.completed || existing.completed);
+        await client.query(
+          `UPDATE df_run_control_receipts
+           SET handoff_sent = handoff_sent OR $2,
+               completed = completed OR $3
+           WHERE delivery_id = $1`,
+          [deliveryId, input.handoffSent === true, input.completed === true],
+        );
+        const summaryResult = runId
+          ? await client.query<RunSummaryRow>(
+              "SELECT * FROM df_run_summaries WHERE run_id = $1",
+              [runId],
+            )
+          : null;
+        const summaryRow = summaryResult?.rows[0];
+        return {
+          duplicate,
+          value: {
+            deliveryId,
+            repo,
+            issue,
+            transition: input.transition,
+            ...(runId ? { runId } : {}),
+            ...(summaryRow
+              ? { runStatus: rowToSummary(summaryRow).status }
+              : {}),
+            handoffSent,
+            completed,
+          } satisfies RunControlDeliveryReceipt,
+        };
+      });
+      return {
+        ok: true,
+        mode: "live",
+        providerId: this.id,
+        value: advanced.value,
+        duplicate: advanced.duplicate,
+      };
+    } catch (error) {
+      return failedWrite(error);
+    }
+  }
+
+  async appendEvent(
+    eventInput: RunEvent,
+  ): Promise<RunHistoryWriteResult<RunSummary>> {
     const event = toRunEvent(eventInput);
     try {
       const appended = await this.transaction(async (client) => {
@@ -651,7 +842,8 @@ export class PostgresRunHistoryStore implements RunHistoryStore {
           [event.runId],
         );
         const summaryRow = summaryResult.rows[0];
-        if (!summaryRow) throw new Error(`Run '${event.runId}' does not exist.`);
+        if (!summaryRow)
+          throw new Error(`Run '${event.runId}' does not exist.`);
         const summary = rowToSummary(summaryRow);
         const existingResult = await client.query<RunEventRow>(
           "SELECT * FROM df_run_events WHERE run_id = $1 AND event_id = $2",
@@ -660,7 +852,9 @@ export class PostgresRunHistoryStore implements RunHistoryStore {
         const existingRow = existingResult.rows[0];
         if (existingRow) {
           if (!sameEvent(rowToEvent(existingRow).event, event)) {
-            throw new Error(`Event ID '${event.eventId}' was reused with different event data.`);
+            throw new Error(
+              `Event ID '${event.eventId}' was reused with different event data.`,
+            );
           }
           return { summary, duplicate: true };
         }
@@ -685,7 +879,9 @@ export class PostgresRunHistoryStore implements RunHistoryStore {
     const normalizedId = validateIdentifier(runId, "runId");
     try {
       await this.ensureSchema();
-      const result = await (await this.pool()).query<RunSummaryRow>(
+      const result = await (
+        await this.pool()
+      ).query<RunSummaryRow>(
         "SELECT * FROM df_run_summaries WHERE run_id = $1",
         [normalizedId],
       );
@@ -704,14 +900,20 @@ export class PostgresRunHistoryStore implements RunHistoryStore {
     options: RunListOptions = {},
   ): Promise<RunHistoryReadResult<Page<RunSummary, RunCursor>>> {
     const limit = validateLimit(options.limit);
-    const repo = options.repo === undefined ? undefined : validateRepo(options.repo);
+    const repo =
+      options.repo === undefined ? undefined : validateRepo(options.repo);
     const issue = validateIssue(options.issue);
-    const status = options.status === undefined ? undefined : validateStatus(options.status);
+    const status =
+      options.status === undefined ? undefined : validateStatus(options.status);
     const statuses = validateStatuses(options.statuses);
     if (status !== undefined && statuses !== undefined) {
-      throw new InvalidRunRecordError("Use either status or statuses, not both.");
+      throw new InvalidRunRecordError(
+        "Use either status or statuses, not both.",
+      );
     }
-    const cursor = options.cursor ? validateRunCursor(options.cursor) : undefined;
+    const cursor = options.cursor
+      ? validateRunCursor(options.cursor)
+      : undefined;
     try {
       await this.ensureSchema();
       const values: unknown[] = [];
@@ -723,7 +925,9 @@ export class PostgresRunHistoryStore implements RunHistoryStore {
       if (repo !== undefined) clauses.push(`repo = ${bind(repo)}`);
       if (issue !== undefined) clauses.push(`issue = ${bind(issue)}`);
       if (statuses) {
-        clauses.push(`status IN (${statuses.map((value) => bind(value)).join(", ")})`);
+        clauses.push(
+          `status IN (${statuses.map((value) => bind(value)).join(", ")})`,
+        );
       } else if (status !== undefined) {
         clauses.push(`status = ${bind(status)}`);
       }
@@ -731,10 +935,14 @@ export class PostgresRunHistoryStore implements RunHistoryStore {
         const created = bind(cursor.createdAt);
         const equalCreated = bind(cursor.createdAt);
         const runId = bind(cursor.runId);
-        clauses.push(`(created_at < ${created} OR (created_at = ${equalCreated} AND run_id < ${runId}))`);
+        clauses.push(
+          `(created_at < ${created} OR (created_at = ${equalCreated} AND run_id < ${runId}))`,
+        );
       }
       const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
-      const result = await (await this.pool()).query<RunSummaryRow>(
+      const result = await (
+        await this.pool()
+      ).query<RunSummaryRow>(
         `SELECT * FROM df_run_summaries ${where} ORDER BY created_at DESC, run_id DESC LIMIT ${bind(limit + 1)}`,
         values,
       );
@@ -747,7 +955,9 @@ export class PostgresRunHistoryStore implements RunHistoryStore {
         providerId: this.id,
         value: {
           items,
-          ...(hasMore && last ? { nextCursor: { createdAt: last.createdAt, runId: last.runId } } : {}),
+          ...(hasMore && last
+            ? { nextCursor: { createdAt: last.createdAt, runId: last.runId } }
+            : {}),
         },
       };
     } catch (error) {
@@ -764,7 +974,9 @@ export class PostgresRunHistoryStore implements RunHistoryStore {
     const after = options.after ? validateEventCursor(options.after) : 0;
     try {
       await this.ensureSchema();
-      const result = await (await this.pool()).query<RunEventRow>(
+      const result = await (
+        await this.pool()
+      ).query<RunEventRow>(
         "SELECT * FROM df_run_events WHERE run_id = $1 AND sequence > $2 ORDER BY sequence ASC LIMIT $3",
         [normalizedId, after, limit + 1],
       );
@@ -777,7 +989,9 @@ export class PostgresRunHistoryStore implements RunHistoryStore {
         providerId: this.id,
         value: {
           items,
-          ...(hasMore && last ? { nextCursor: { sequence: last.sequence } } : {}),
+          ...(hasMore && last
+            ? { nextCursor: { sequence: last.sequence } }
+            : {}),
         },
       };
     } catch (error) {

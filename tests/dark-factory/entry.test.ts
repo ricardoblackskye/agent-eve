@@ -114,7 +114,10 @@ describe("#163 cycle 9-10: record and hand off — the loop never runs inline", 
     const summary = await runHistory.getRun(res.runId ?? "missing");
     const events = await runHistory.listRunEvents(res.runId ?? "missing");
     expect(res.runStatus).toBe("running");
-    expect(summary.value).toMatchObject({ runId: res.runId, status: "running" });
+    expect(summary.value).toMatchObject({
+      runId: res.runId,
+      status: "running",
+    });
     expect(events.value?.items.map((item) => item.event.type)).toEqual([
       "run.accepted",
       "dispatch.started",
@@ -180,7 +183,11 @@ describe("#163 cycle 9-10: record and hand off — the loop never runs inline", 
 
 describe("#163 cycle 11: a parked run is never re-kicked", () => {
   it("holds a replayed delivery while the durable run waits on a human answer (#162)", async () => {
-    const { runHistory, calls, deps: d } = deps({ deliveryId: "seed-blocked-run" });
+    const {
+      runHistory,
+      calls,
+      deps: d,
+    } = deps({ deliveryId: "seed-blocked-run" });
     const accepted = await runHistory.acceptDelivery({
       deliveryId: "seed-blocked-run",
       repo: "ricardoblackskye/agent-eve",
@@ -248,6 +255,163 @@ describe("#163 cycle 12-14: abort, resume and the lifecycle labels", () => {
     expect(calls[0].body).toMatch(/"resume":true/);
   });
 
+  it("retries an incomplete resume handoff on the receipt-bound run", async () => {
+    const { runHistory, deps: d } = deps();
+    const accepted = await runHistory.acceptDelivery({
+      deliveryId: "resume-retry-seed",
+      repo: "ricardoblackskye/agent-eve",
+      issue: 163,
+      receivedAt: "2026-09-24T12:00:00.000Z",
+    });
+    const runId = accepted.value?.runId;
+    if (!runId) throw new Error("resume retry fixture did not return a run ID");
+    await runHistory.appendEvent({
+      eventId: "resume-retry-question",
+      runId,
+      type: "worker.question",
+      stage: "worker",
+      occurredAt: "2026-09-24T12:00:01.000Z",
+      status: "blocked",
+    });
+    let postAttempts = 0;
+    const postSession = (async () => {
+      postAttempts += 1;
+      const ok = postAttempts > 1;
+      return { ok, status: ok ? 200 : 503, json: async () => ({ ok }) };
+    }) as unknown as typeof fetch;
+    const resumeDecision = triggerDecision({
+      action: "unlabeled",
+      label: { name: "needs-answer" },
+    });
+    const options = {
+      ...d,
+      deliveryId: "resume-handoff-retry",
+      postSession,
+    };
+    const first = await runDarkFactoryDispatch(resumeDecision, options);
+    const afterFirst = await runHistory.getRun(runId);
+    const retry = await runDarkFactoryDispatch(resumeDecision, options);
+    const afterRetry = await runHistory.getRun(runId);
+
+    expect(first.ok).toBe(false);
+    expect(afterFirst.value?.status).toBe("blocked");
+    expect(retry.status).toBe("resumed");
+    expect(retry.runId).toBe(runId);
+    expect(afterRetry.value?.status).toBe("running");
+    expect(postAttempts).toBe(2);
+  });
+
+  it("retries a failed resume event write without posting the handoff twice", async () => {
+    const { runHistory, deps: d } = deps();
+    const accepted = await runHistory.acceptDelivery({
+      deliveryId: "resume-event-write-seed",
+      repo: "ricardoblackskye/agent-eve",
+      issue: 163,
+      receivedAt: "2026-09-24T12:00:00.000Z",
+    });
+    const runId = accepted.value?.runId;
+    if (!runId)
+      throw new Error("resume event write fixture did not return a run ID");
+    await runHistory.appendEvent({
+      eventId: "resume-event-write-question",
+      runId,
+      type: "worker.question",
+      stage: "worker",
+      occurredAt: "2026-09-24T12:00:01.000Z",
+      status: "blocked",
+    });
+    const appendEvent = runHistory.appendEvent.bind(runHistory);
+    let failResumeEvent = true;
+    runHistory.appendEvent = async (event) => {
+      if (event.type === "run.resumed" && failResumeEvent) {
+        failResumeEvent = false;
+        return {
+          ok: false,
+          mode: "blocked",
+          providerId: runHistory.id,
+          error: "synthetic resume event write failure",
+        };
+      }
+      return appendEvent(event);
+    };
+    let postAttempts = 0;
+    const postSession = (async () => {
+      postAttempts += 1;
+      return { ok: true, status: 200, json: async () => ({ ok: true }) };
+    }) as unknown as typeof fetch;
+    const resumeDecision = triggerDecision({
+      action: "unlabeled",
+      label: { name: "needs-answer" },
+    });
+    const options = {
+      ...d,
+      deliveryId: "resume-event-write-retry",
+      postSession,
+    };
+
+    const first = await runDarkFactoryDispatch(resumeDecision, options);
+    const afterFirst = await runHistory.getRun(runId);
+    const retry = await runDarkFactoryDispatch(resumeDecision, options);
+    const afterRetry = await runHistory.getRun(runId);
+
+    expect(first.ok).toBe(false);
+    expect(afterFirst.value?.status).toBe("blocked");
+    expect(retry.status).toBe("resumed");
+    expect(afterRetry.value?.status).toBe("running");
+    expect(postAttempts).toBe(1);
+  });
+
+  it("does not replay a pending abort against a newer run's issue labels", async () => {
+    const { runHistory, ops, deps: d } = deps();
+    const first = await runDarkFactoryDispatch(triggerDecision(), {
+      ...d,
+      deliveryId: "pending-abort-first-trigger",
+    });
+    const abortDecision = triggerDecision({
+      action: "unlabeled",
+      label: { name: "dark-factory" },
+    });
+    const { writer: failingLabels } = recordingLabels({ failOn: "remove" });
+    const firstAbort = await runDarkFactoryDispatch(abortDecision, {
+      ...d,
+      deliveryId: "pending-abort-delivery",
+      labels: failingLabels,
+    });
+    const newerAt = new Date(Date.now() + 60_000).toISOString();
+    const newer = await runHistory.acceptDelivery({
+      deliveryId: "pending-abort-newer-trigger",
+      repo: "ricardoblackskye/agent-eve",
+      issue: 163,
+      receivedAt: newerAt,
+    });
+    const newerRunId = newer.value?.runId;
+    if (!newerRunId) throw new Error("newer run was not created");
+    await runHistory.appendEvent({
+      eventId: "pending-abort-newer-started",
+      runId: newerRunId,
+      type: "dispatch.started",
+      stage: "dispatch",
+      occurredAt: new Date(Date.parse(newerAt) + 1_000).toISOString(),
+      status: "running",
+    });
+
+    const replay = await runDarkFactoryDispatch(abortDecision, {
+      ...d,
+      deliveryId: "pending-abort-delivery",
+    });
+    const firstSummary = await runHistory.getRun(first.runId ?? "missing");
+    const newerSummary = await runHistory.getRun(newerRunId);
+
+    expect(firstAbort.ok).toBe(false);
+    expect(replay.ok).toBe(false);
+    expect(replay.reason).toMatch(/earlier run|later active run/i);
+    expect(firstSummary.value?.status).toBe("running");
+    expect(newerSummary.value?.status).toBe("running");
+    expect(ops.filter((operation) => operation === "-df:running")).toHaveLength(
+      0,
+    );
+  });
+
   it("a replayed abort delivery never aborts a later run", async () => {
     const { runHistory, ops, deps: d } = deps();
     const first = await runDarkFactoryDispatch(triggerDecision(), {
@@ -277,7 +441,67 @@ describe("#163 cycle 12-14: abort, resume and the lifecycle labels", () => {
     expect(replay.status).toBe("held");
     expect(replay.runId).toBe(first.runId);
     expect(laterSummary.value?.status).toBe("running");
-    expect(ops.filter((operation) => operation === "-df:running")).toHaveLength(1);
+    expect(ops.filter((operation) => operation === "-df:running")).toHaveLength(
+      1,
+    );
+  });
+
+  it("does not replay a pending resume against a newer run's issue labels", async () => {
+    const { runHistory, calls, deps: d } = deps();
+    const first = await runHistory.acceptDelivery({
+      deliveryId: "pending-resume-first-run",
+      repo: "ricardoblackskye/agent-eve",
+      issue: 163,
+      receivedAt: "2026-09-24T12:00:00.000Z",
+    });
+    const firstRunId = first.value?.runId;
+    if (!firstRunId) throw new Error("first blocked run was not created");
+    await runHistory.appendEvent({
+      eventId: "pending-resume-first-question",
+      runId: firstRunId,
+      type: "worker.question",
+      stage: "worker",
+      occurredAt: "2026-09-24T12:00:01.000Z",
+      status: "blocked",
+    });
+    const resumeDecision = triggerDecision({
+      action: "unlabeled",
+      label: { name: "needs-answer" },
+    });
+    const { writer: failingLabels } = recordingLabels({ failOn: "remove" });
+    const firstResume = await runDarkFactoryDispatch(resumeDecision, {
+      ...d,
+      deliveryId: "pending-resume-delivery",
+      labels: failingLabels,
+    });
+    const newer = await runHistory.acceptDelivery({
+      deliveryId: "pending-resume-newer-run",
+      repo: "ricardoblackskye/agent-eve",
+      issue: 163,
+      receivedAt: "2026-09-24T12:02:00.000Z",
+    });
+    const newerRunId = newer.value?.runId;
+    if (!newerRunId) throw new Error("newer blocked run was not created");
+    await runHistory.appendEvent({
+      eventId: "pending-resume-newer-question",
+      runId: newerRunId,
+      type: "worker.question",
+      stage: "worker",
+      occurredAt: "2026-09-24T12:02:01.000Z",
+      status: "blocked",
+    });
+
+    const replay = await runDarkFactoryDispatch(resumeDecision, {
+      ...d,
+      deliveryId: "pending-resume-delivery",
+    });
+    const newerSummary = await runHistory.getRun(newerRunId);
+
+    expect(firstResume.ok).toBe(false);
+    expect(replay.ok).toBe(false);
+    expect(replay.reason).toMatch(/earlier run|later active run/i);
+    expect(newerSummary.value?.status).toBe("blocked");
+    expect(calls).toHaveLength(0);
   });
 
   it("a replayed resume delivery never resumes a later blocked run", async () => {
@@ -353,10 +577,19 @@ describe("#163 cycle 12-14: abort, resume and the lifecycle labels", () => {
     );
     const summary = await runHistory.getRun(started.runId ?? "missing");
     const events = await runHistory.listRunEvents(started.runId ?? "missing");
+    const retried = await runDarkFactoryDispatch(
+      triggerDecision({ action: "unlabeled", label: { name: "dark-factory" } }),
+      { ...defaults, deliveryId: "abort-label-failure" },
+    );
+    const retriedSummary = await runHistory.getRun(started.runId ?? "missing");
 
     expect(aborted.ok).toBe(false);
     expect(summary.value?.status).toBe("running");
-    expect(events.value?.items.some((item) => item.event.status === "aborted")).toBe(false);
+    expect(
+      events.value?.items.some((item) => item.event.status === "aborted"),
+    ).toBe(false);
+    expect(retried.status).toBe("aborted");
+    expect(retriedSummary.value?.status).toBe("aborted");
   });
 
   it("a trigger marks the run running", async () => {
@@ -537,12 +770,18 @@ describe("#163 security: the session handoff origin is never taken from the requ
 
   it("a trusted local origin lets the handoff proceed; an untrusted one is skipped", async () => {
     const local = deps({ origin: "http://localhost:3000" });
-    const localResult = await runDarkFactoryDispatch(triggerDecision(), local.deps);
+    const localResult = await runDarkFactoryDispatch(
+      triggerDecision(),
+      local.deps,
+    );
     expect(local.calls).toHaveLength(1);
     expect(localResult.ok).toBe(true);
 
     const external = deps({ origin: "https://attacker.test" });
-    const skipped = await runDarkFactoryDispatch(triggerDecision(), external.deps);
+    const skipped = await runDarkFactoryDispatch(
+      triggerDecision(),
+      external.deps,
+    );
     expect(external.calls).toHaveLength(0);
     expect(skipped.ok).toBe(false);
     expect(skipped.reason).toMatch(/skipped/i);
@@ -556,7 +795,10 @@ describe("#163 security: the session handoff origin is never taken from the requ
         DF_API_BASE_URL: "https://remote.example.test",
       },
     });
-    const result = await runDarkFactoryDispatch(triggerDecision(), configured.deps);
+    const result = await runDarkFactoryDispatch(
+      triggerDecision(),
+      configured.deps,
+    );
 
     expect(configured.calls).toHaveLength(0);
     expect(result.ok).toBe(false);

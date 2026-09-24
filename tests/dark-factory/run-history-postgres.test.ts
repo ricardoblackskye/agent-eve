@@ -30,7 +30,8 @@ describeWithDatabase("PostgresRunHistoryStore integration", () => {
       receivedAt: at,
     });
     const runId = accepted.value?.runId;
-    if (!runId) throw new Error("Postgres delivery acceptance returned no runId");
+    if (!runId)
+      throw new Error("Postgres delivery acceptance returned no runId");
 
     const event = await store.appendEvent({
       eventId: `pg-dispatch-${namespace}`,
@@ -64,7 +65,8 @@ describeWithDatabase("PostgresRunHistoryStore integration", () => {
       receivedAt: at,
     });
     const runId = accepted.value?.runId;
-    if (!runId) throw new Error("Postgres delivery acceptance returned no runId");
+    if (!runId)
+      throw new Error("Postgres delivery acceptance returned no runId");
 
     const recorded = await store.appendEvent({
       eventId: `pg-review-round-${namespace}`,
@@ -110,7 +112,8 @@ describeWithDatabase("PostgresRunHistoryStore integration", () => {
       receivedAt: "2026-09-24T12:00:01.000Z",
     });
     const runId = first.value?.runId;
-    if (!runId) throw new Error("Postgres delivery acceptance returned no runId");
+    if (!runId)
+      throw new Error("Postgres delivery acceptance returned no runId");
 
     expect(controlClaim.ok).toBe(true);
     expect(controlClaim.duplicate).toBe(false);
@@ -149,5 +152,59 @@ describeWithDatabase("PostgresRunHistoryStore integration", () => {
     expect(rerun.ok).toBe(true);
     expect(rerun.duplicate).toBe(false);
     expect(rerun.value?.runId).not.toBe(runId);
+  });
+
+  it("persists control receipt progress across duplicate delivery reads", async () => {
+    const repo = "owner/control-progress";
+    const accepted = await store.acceptDelivery({
+      deliveryId: `pg-control-progress-run-${namespace}`,
+      repo,
+      issue,
+      receivedAt: at,
+    });
+    const runId = accepted.value?.runId;
+    if (!runId)
+      throw new Error("Postgres control progress run was not created");
+    const claim = {
+      deliveryId: `pg-control-progress-${namespace}`,
+      repo,
+      issue,
+      transition: "resume" as const,
+      receivedAt: "2026-09-24T12:00:01.000Z",
+      runId,
+    };
+    const first = await store.claimControlDelivery(claim);
+    const handoff = await store.advanceControlDelivery({
+      ...claim,
+      receivedAt: "2026-09-24T12:00:02.000Z",
+      handoffSent: true,
+    });
+    const replay = await store.claimControlDelivery(claim);
+    const completed = await store.advanceControlDelivery({
+      ...claim,
+      receivedAt: "2026-09-24T12:00:03.000Z",
+      completed: true,
+    });
+    const finalReplay = await store.claimControlDelivery(claim);
+
+    expect(first.ok).toBe(true);
+    expect(first.value).toMatchObject({ handoffSent: false, completed: false });
+    expect(handoff.ok).toBe(true);
+    expect(handoff.value).toMatchObject({
+      handoffSent: true,
+      completed: false,
+    });
+    expect(replay.ok).toBe(true);
+    expect(replay.duplicate).toBe(true);
+    expect(replay.value).toMatchObject({ handoffSent: true, completed: false });
+    expect(completed.ok).toBe(true);
+    expect(completed.value).toMatchObject({
+      handoffSent: true,
+      completed: true,
+    });
+    expect(finalReplay.value).toMatchObject({
+      handoffSent: true,
+      completed: true,
+    });
   });
 });

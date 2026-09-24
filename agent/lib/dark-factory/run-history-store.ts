@@ -35,8 +35,14 @@ export interface RunControlDeliveryReceipt {
   transition: RunControlTransition;
   runId?: string;
   runStatus?: RunStatus;
+  handoffSent: boolean;
+  completed: boolean;
 }
 
+export interface AdvanceRunControlDelivery extends ClaimRunControlDelivery {
+  handoffSent?: boolean;
+  completed?: boolean;
+}
 
 export interface RunHistoryWriteResult<T> {
   ok: boolean;
@@ -90,15 +96,25 @@ export interface PersistedRunEvent {
 
 export interface RunHistoryStore {
   id: string;
-  acceptDelivery(input: AcceptRunDelivery): Promise<RunHistoryWriteResult<RunSummary>>;
+  acceptDelivery(
+    input: AcceptRunDelivery,
+  ): Promise<RunHistoryWriteResult<RunSummary>>;
   claimControlDelivery(
     input: ClaimRunControlDelivery,
+  ): Promise<RunHistoryWriteResult<RunControlDeliveryReceipt>>;
+  advanceControlDelivery(
+    input: AdvanceRunControlDelivery,
   ): Promise<RunHistoryWriteResult<RunControlDeliveryReceipt>>;
 
   appendEvent(event: RunEvent): Promise<RunHistoryWriteResult<RunSummary>>;
   getRun(runId: string): Promise<RunHistoryReadResult<RunSummary>>;
-  listRuns(options?: RunListOptions): Promise<RunHistoryReadResult<Page<RunSummary, RunCursor>>>;
-  listRunEvents(runId: string, options?: RunEventListOptions): Promise<RunHistoryReadResult<Page<PersistedRunEvent, EventCursor>>>;
+  listRuns(
+    options?: RunListOptions,
+  ): Promise<RunHistoryReadResult<Page<RunSummary, RunCursor>>>;
+  listRunEvents(
+    runId: string,
+    options?: RunEventListOptions,
+  ): Promise<RunHistoryReadResult<Page<PersistedRunEvent, EventCursor>>>;
   close(): void | Promise<void>;
 }
 
@@ -160,11 +176,21 @@ function rowToEvent(row: RunEventRow): PersistedRunEvent {
       ...(row.status !== null ? { status: row.status } : {}),
       ...(row.attempt !== null ? { attempt: row.attempt } : {}),
       ...(row.review_round !== null ? { reviewRound: row.review_round } : {}),
-      ...(row.iteration_count !== null ? { iterationCount: row.iteration_count } : {}),
-      ...(row.fix_cycle_count !== null ? { fixCycleCount: row.fix_cycle_count } : {}),
-      ...(row.finding_count !== null ? { findingCount: row.finding_count } : {}),
-      ...(row.resolved_count !== null ? { resolvedCount: row.resolved_count } : {}),
-      ...(row.accepted_count !== null ? { acceptedCount: row.accepted_count } : {}),
+      ...(row.iteration_count !== null
+        ? { iterationCount: row.iteration_count }
+        : {}),
+      ...(row.fix_cycle_count !== null
+        ? { fixCycleCount: row.fix_cycle_count }
+        : {}),
+      ...(row.finding_count !== null
+        ? { findingCount: row.finding_count }
+        : {}),
+      ...(row.resolved_count !== null
+        ? { resolvedCount: row.resolved_count }
+        : {}),
+      ...(row.accepted_count !== null
+        ? { acceptedCount: row.accepted_count }
+        : {}),
       ...(row.latency_ms !== null ? { latencyMs: row.latency_ms } : {}),
       ...(row.cost_usd !== null ? { costUsd: row.cost_usd } : {}),
       ...(row.pr_url !== null ? { prUrl: row.pr_url } : {}),
@@ -240,11 +266,16 @@ const SQLITE_SCHEMA = `
     issue INTEGER NOT NULL,
     transition TEXT NOT NULL CHECK(transition IN ('abort', 'resume')),
     run_id TEXT REFERENCES df_run_summaries(run_id) ON DELETE SET NULL,
-    received_at TEXT NOT NULL
+    received_at TEXT NOT NULL,
+    handoff_sent INTEGER NOT NULL DEFAULT 0,
+    completed INTEGER NOT NULL DEFAULT 0
   );
 `;
 
-function blocked<T>(providerId: string, error: unknown): RunHistoryWriteResult<T> {
+function blocked<T>(
+  providerId: string,
+  error: unknown,
+): RunHistoryWriteResult<T> {
   const detail = error instanceof Error ? error.message : String(error);
   return {
     ok: false,
@@ -360,9 +391,12 @@ function validateIdentifier(value: string, field: string): string {
 }
 
 function validateRepo(value: string): string {
-  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
+  const normalized =
+    typeof value === "string" ? value.trim().toLowerCase() : "";
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(normalized)) {
-    throw new InvalidRunRecordError('Run history filter "repo" must be an owner/repo pair.');
+    throw new InvalidRunRecordError(
+      'Run history filter "repo" must be an owner/repo pair.',
+    );
   }
   return normalized;
 }
@@ -385,15 +419,21 @@ function validateStatus(value: RunStatus): RunStatus {
 function validateIssue(value: number | undefined): number | undefined {
   if (value === undefined) return undefined;
   if (!Number.isSafeInteger(value) || value < 1) {
-    throw new InvalidRunRecordError("Run history issue filter must be a positive safe integer.");
+    throw new InvalidRunRecordError(
+      "Run history issue filter must be a positive safe integer.",
+    );
   }
   return value;
 }
 
-function validateStatuses(value: RunStatus[] | undefined): RunStatus[] | undefined {
+function validateStatuses(
+  value: RunStatus[] | undefined,
+): RunStatus[] | undefined {
   if (value === undefined) return undefined;
   if (!Array.isArray(value) || value.length === 0) {
-    throw new InvalidRunRecordError("Run history statuses filter must be a non-empty array.");
+    throw new InvalidRunRecordError(
+      "Run history statuses filter must be a non-empty array.",
+    );
   }
   return [...new Set(value.map(validateStatus))];
 }
@@ -401,7 +441,9 @@ function validateStatuses(value: RunStatus[] | undefined): RunStatus[] | undefin
 function validateLimit(value: number | undefined): number {
   if (value === undefined) return 50;
   if (!Number.isInteger(value) || value < 1 || value > 100) {
-    throw new InvalidRunRecordError("Run history page limit must be an integer in [1, 100].");
+    throw new InvalidRunRecordError(
+      "Run history page limit must be an integer in [1, 100].",
+    );
   }
   return value;
 }
@@ -410,14 +452,18 @@ function validateRunCursor(cursor: RunCursor): RunCursor {
   const runId = validateIdentifier(cursor.runId, "cursor.runId");
   const parsed = Date.parse(cursor.createdAt);
   if (!Number.isFinite(parsed)) {
-    throw new InvalidRunRecordError("Run history cursor createdAt must be an ISO timestamp.");
+    throw new InvalidRunRecordError(
+      "Run history cursor createdAt must be an ISO timestamp.",
+    );
   }
   return { runId, createdAt: new Date(parsed).toISOString() };
 }
 
 function validateEventCursor(cursor: EventCursor): number {
   if (!Number.isSafeInteger(cursor.sequence) || cursor.sequence < 0) {
-    throw new InvalidRunRecordError("Run history event cursor must be a safe sequence number >= 0.");
+    throw new InvalidRunRecordError(
+      "Run history event cursor must be a safe sequence number >= 0.",
+    );
   }
   return cursor.sequence;
 }
@@ -446,6 +492,19 @@ export class SqliteRunHistoryStore implements RunHistoryStore {
     try {
       const db = new DatabaseSync(this.path);
       db.exec(SQLITE_SCHEMA);
+      const receiptColumns = db
+        .prepare("PRAGMA table_info(df_run_control_receipts)")
+        .all() as { name: string }[];
+      if (!receiptColumns.some((column) => column.name === "handoff_sent")) {
+        db.exec(
+          "ALTER TABLE df_run_control_receipts ADD COLUMN handoff_sent INTEGER NOT NULL DEFAULT 0",
+        );
+      }
+      if (!receiptColumns.some((column) => column.name === "completed")) {
+        db.exec(
+          "ALTER TABLE df_run_control_receipts ADD COLUMN completed INTEGER NOT NULL DEFAULT 0",
+        );
+      }
       this.db = db;
       return db;
     } catch (error) {
@@ -479,9 +538,12 @@ export class SqliteRunHistoryStore implements RunHistoryStore {
   async acceptDelivery(
     input: AcceptRunDelivery,
   ): Promise<RunHistoryWriteResult<RunSummary>> {
-    const deliveryId = typeof input.deliveryId === "string" ? input.deliveryId.trim() : "";
+    const deliveryId =
+      typeof input.deliveryId === "string" ? input.deliveryId.trim() : "";
     if (!deliveryId) {
-      throw new InvalidRunRecordError("Webhook delivery requires a non-empty deliveryId.");
+      throw new InvalidRunRecordError(
+        "Webhook delivery requires a non-empty deliveryId.",
+      );
     }
     const eventId = toRunEvent({
       eventId: deliveryId,
@@ -515,14 +577,18 @@ export class SqliteRunHistoryStore implements RunHistoryStore {
             .prepare("SELECT * FROM df_run_summaries WHERE run_id = ?")
             .get(existingDelivery.run_id) as RunSummaryRow | undefined;
           if (!row) {
-            throw new Error(`Delivery '${eventId}' points to a missing run summary.`);
+            throw new Error(
+              `Delivery '${eventId}' points to a missing run summary.`,
+            );
           }
           const existing = rowToSummary(row);
           if (
             existing.repo !== normalizedInput.repo ||
             existing.issue !== normalizedInput.issue
           ) {
-            throw new Error(`Delivery '${eventId}' was replayed with a different repo/issue identity.`);
+            throw new Error(
+              `Delivery '${eventId}' was replayed with a different repo/issue identity.`,
+            );
           }
           return { summary: existing, duplicate: true };
         }
@@ -569,7 +635,6 @@ export class SqliteRunHistoryStore implements RunHistoryStore {
     }
   }
 
-
   async claimControlDelivery(
     input: ClaimRunControlDelivery,
   ): Promise<RunHistoryWriteResult<RunControlDeliveryReceipt>> {
@@ -577,10 +642,14 @@ export class SqliteRunHistoryStore implements RunHistoryStore {
     const repo = validateRepo(input.repo);
     const issue = validateIssue(input.issue);
     if (issue === undefined) {
-      throw new InvalidRunRecordError("Control delivery requires a positive issue number.");
+      throw new InvalidRunRecordError(
+        "Control delivery requires a positive issue number.",
+      );
     }
     if (input.transition !== "abort" && input.transition !== "resume") {
-      throw new InvalidRunRecordError("Control delivery transition must be abort or resume.");
+      throw new InvalidRunRecordError(
+        "Control delivery transition must be abort or resume.",
+      );
     }
     const normalizedAt = toRunSummary({
       runId: "control-receipt-validation",
@@ -604,7 +673,7 @@ export class SqliteRunHistoryStore implements RunHistoryStore {
       const claimed = this.transaction((db) => {
         const existing = db
           .prepare(
-            `SELECT delivery_id, repo, issue, transition, run_id
+            `SELECT delivery_id, repo, issue, transition, run_id, handoff_sent, completed
              FROM df_run_control_receipts WHERE delivery_id = ?`,
           )
           .get(deliveryId) as
@@ -614,6 +683,8 @@ export class SqliteRunHistoryStore implements RunHistoryStore {
               issue: number;
               transition: RunControlTransition;
               run_id: string | null;
+              handoff_sent: number;
+              completed: number;
             }
           | undefined;
         if (existing) {
@@ -626,7 +697,9 @@ export class SqliteRunHistoryStore implements RunHistoryStore {
               "Control delivery identity was reused with different repo, issue, or transition data.",
             );
           }
-          const previous = existing.run_id ? readSummary(db, existing.run_id) : null;
+          const previous = existing.run_id
+            ? readSummary(db, existing.run_id)
+            : null;
           return {
             duplicate: true,
             value: {
@@ -636,12 +709,17 @@ export class SqliteRunHistoryStore implements RunHistoryStore {
               transition: input.transition,
               ...(existing.run_id ? { runId: existing.run_id } : {}),
               ...(previous ? { runStatus: previous.status } : {}),
+              handoffSent: Boolean(existing.handoff_sent),
+              completed: Boolean(existing.completed),
             } satisfies RunControlDeliveryReceipt,
           };
         }
 
         const target = runId ? readSummary(db, runId) : null;
-        if (runId && (!target || target.repo !== repo || target.issue !== issue)) {
+        if (
+          runId &&
+          (!target || target.repo !== repo || target.issue !== issue)
+        ) {
           throw new InvalidRunRecordError(
             "Control delivery runId does not identify the supplied repo and issue.",
           );
@@ -650,7 +728,14 @@ export class SqliteRunHistoryStore implements RunHistoryStore {
           `INSERT INTO df_run_control_receipts
            (delivery_id, repo, issue, transition, run_id, received_at)
            VALUES (?, ?, ?, ?, ?, ?)`,
-        ).run(deliveryId, repo, issue, input.transition, runId ?? null, normalizedAt);
+        ).run(
+          deliveryId,
+          repo,
+          issue,
+          input.transition,
+          runId ?? null,
+          normalizedAt,
+        );
         return {
           duplicate: false,
           value: {
@@ -660,6 +745,8 @@ export class SqliteRunHistoryStore implements RunHistoryStore {
             transition: input.transition,
             ...(runId ? { runId } : {}),
             ...(target ? { runStatus: target.status } : {}),
+            handoffSent: false,
+            completed: false,
           } satisfies RunControlDeliveryReceipt,
         };
       });
@@ -675,7 +762,123 @@ export class SqliteRunHistoryStore implements RunHistoryStore {
     }
   }
 
-  async appendEvent(eventInput: RunEvent): Promise<RunHistoryWriteResult<RunSummary>> {
+  async advanceControlDelivery(
+    input: AdvanceRunControlDelivery,
+  ): Promise<RunHistoryWriteResult<RunControlDeliveryReceipt>> {
+    const deliveryId = validateIdentifier(input.deliveryId, "deliveryId");
+    const repo = validateRepo(input.repo);
+    const issue = validateIssue(input.issue);
+    if (issue === undefined) {
+      throw new InvalidRunRecordError(
+        "Control delivery requires a positive issue number.",
+      );
+    }
+    if (input.transition !== "abort" && input.transition !== "resume") {
+      throw new InvalidRunRecordError(
+        "Control delivery transition must be abort or resume.",
+      );
+    }
+    if (input.handoffSent && input.transition !== "resume") {
+      throw new InvalidRunRecordError(
+        "Only resume deliveries can record a successful handoff.",
+      );
+    }
+    if (!input.handoffSent && !input.completed) {
+      throw new InvalidRunRecordError(
+        "Control delivery progress must advance at least one phase.",
+      );
+    }
+    toRunSummary({
+      runId: "control-progress-validation",
+      repo,
+      issue,
+      status: "queued",
+      stage: "trigger",
+      createdAt: input.receivedAt,
+      updatedAt: input.receivedAt,
+      attemptCount: 0,
+      reviewCount: 0,
+      iterationCount: 0,
+      fixCycleCount: 0,
+    });
+    const runId =
+      input.runId === undefined
+        ? null
+        : validateIdentifier(input.runId, "runId");
+
+    try {
+      const advanced = this.transaction((db) => {
+        const existing = db
+          .prepare(
+            `SELECT repo, issue, transition, run_id, handoff_sent, completed
+             FROM df_run_control_receipts WHERE delivery_id = ?`,
+          )
+          .get(deliveryId) as
+          | {
+              repo: string;
+              issue: number;
+              transition: RunControlTransition;
+              run_id: string | null;
+              handoff_sent: number;
+              completed: number;
+            }
+          | undefined;
+        if (!existing)
+          throw new Error(
+            "Control delivery must be claimed before it advances.",
+          );
+        if (
+          existing.repo !== repo ||
+          existing.issue !== issue ||
+          existing.transition !== input.transition ||
+          existing.run_id !== runId
+        ) {
+          throw new InvalidRunRecordError(
+            "Control progress does not match its claimed delivery identity.",
+          );
+        }
+        const handoffSent =
+          Boolean(existing.handoff_sent) || input.handoffSent === true;
+        const completed =
+          Boolean(existing.completed) || input.completed === true;
+        const duplicate =
+          (!input.handoffSent || Boolean(existing.handoff_sent)) &&
+          (!input.completed || Boolean(existing.completed));
+        db.prepare(
+          `UPDATE df_run_control_receipts
+           SET handoff_sent = ?, completed = ?
+           WHERE delivery_id = ?`,
+        ).run(Number(handoffSent), Number(completed), deliveryId);
+        const summary = runId ? readSummary(db, runId) : null;
+        return {
+          duplicate,
+          value: {
+            deliveryId,
+            repo,
+            issue,
+            transition: input.transition,
+            ...(runId ? { runId } : {}),
+            ...(summary ? { runStatus: summary.status } : {}),
+            handoffSent,
+            completed,
+          } satisfies RunControlDeliveryReceipt,
+        };
+      });
+      return {
+        ok: true,
+        mode: "live",
+        providerId: this.id,
+        value: advanced.value,
+        duplicate: advanced.duplicate,
+      };
+    } catch (error) {
+      return blocked(this.id, error);
+    }
+  }
+
+  async appendEvent(
+    eventInput: RunEvent,
+  ): Promise<RunHistoryWriteResult<RunSummary>> {
     const event = toRunEvent(eventInput);
     try {
       const appended = this.transaction((db) => {
@@ -716,7 +919,8 @@ export class SqliteRunHistoryStore implements RunHistoryStore {
     const normalizedId = validateIdentifier(runId, "runId");
     try {
       const db = this.handle();
-      if (!db) throw new Error(`SQLite run history is unavailable at '${this.path}'.`);
+      if (!db)
+        throw new Error(`SQLite run history is unavailable at '${this.path}'.`);
       return {
         ok: true,
         mode: "live",
@@ -738,17 +942,24 @@ export class SqliteRunHistoryStore implements RunHistoryStore {
     options: RunListOptions = {},
   ): Promise<RunHistoryReadResult<Page<RunSummary, RunCursor>>> {
     const limit = validateLimit(options.limit);
-    const repo = options.repo === undefined ? undefined : validateRepo(options.repo);
+    const repo =
+      options.repo === undefined ? undefined : validateRepo(options.repo);
     const issue = validateIssue(options.issue);
-    const status = options.status === undefined ? undefined : validateStatus(options.status);
+    const status =
+      options.status === undefined ? undefined : validateStatus(options.status);
     const statuses = validateStatuses(options.statuses);
     if (status !== undefined && statuses !== undefined) {
-      throw new InvalidRunRecordError("Use either status or statuses, not both.");
+      throw new InvalidRunRecordError(
+        "Use either status or statuses, not both.",
+      );
     }
-    const cursor = options.cursor ? validateRunCursor(options.cursor) : undefined;
+    const cursor = options.cursor
+      ? validateRunCursor(options.cursor)
+      : undefined;
     try {
       const db = this.handle();
-      if (!db) throw new Error(`SQLite run history is unavailable at '${this.path}'.`);
+      if (!db)
+        throw new Error(`SQLite run history is unavailable at '${this.path}'.`);
       const clauses: string[] = [];
       const values: (string | number)[] = [];
       if (repo !== undefined) {
@@ -811,7 +1022,8 @@ export class SqliteRunHistoryStore implements RunHistoryStore {
     const after = options.after ? validateEventCursor(options.after) : 0;
     try {
       const db = this.handle();
-      if (!db) throw new Error(`SQLite run history is unavailable at '${this.path}'.`);
+      if (!db)
+        throw new Error(`SQLite run history is unavailable at '${this.path}'.`);
       const rows = db
         .prepare(
           `SELECT * FROM df_run_events WHERE run_id = ? AND sequence > ? ` +
@@ -827,7 +1039,9 @@ export class SqliteRunHistoryStore implements RunHistoryStore {
         providerId: this.id,
         value: {
           items,
-          ...(hasMore && last ? { nextCursor: { sequence: last.sequence } } : {}),
+          ...(hasMore && last
+            ? { nextCursor: { sequence: last.sequence } }
+            : {}),
         },
       };
     } catch (error) {

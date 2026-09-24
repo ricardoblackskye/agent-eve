@@ -2,6 +2,7 @@ import { PostgresRunHistoryStore } from "./run-history-postgres";
 import { SqliteRunHistoryStore } from "./run-history-store";
 import type {
   AcceptRunDelivery,
+  AdvanceRunControlDelivery,
   ClaimRunControlDelivery,
   RunControlDeliveryReceipt,
   EventCursor,
@@ -28,35 +29,90 @@ function isDeployedRuntime(env: Record<string, string | undefined>): boolean {
   const nodeEnv = (env.NODE_ENV ?? "").trim().toLowerCase();
   if (nodeEnv === "production") return true;
   const provider = (env.DF_PLATFORM_PROVIDER ?? "").trim().toLowerCase();
-  const stage = (
-    provider === "vercel" ? env.VERCEL_ENV : env.DF_DEPLOYMENT_ENV
-  )?.trim().toLowerCase();
+  const stage = (provider === "vercel" ? env.VERCEL_ENV : env.DF_DEPLOYMENT_ENV)
+    ?.trim()
+    .toLowerCase();
   return stage === "preview" || stage === "production";
 }
 
 export class ConsoleRunHistoryStore implements RunHistoryStore {
   id = "console";
-  async acceptDelivery(_input: AcceptRunDelivery): Promise<RunHistoryWriteResult<RunSummary>> {
-    return { ok: false, mode: "blocked", providerId: this.id, error: RUN_HISTORY_NOT_CONFIGURED };
+  async acceptDelivery(
+    _input: AcceptRunDelivery,
+  ): Promise<RunHistoryWriteResult<RunSummary>> {
+    return {
+      ok: false,
+      mode: "blocked",
+      providerId: this.id,
+      error: RUN_HISTORY_NOT_CONFIGURED,
+    };
   }
 
   async claimControlDelivery(
     _input: ClaimRunControlDelivery,
   ): Promise<RunHistoryWriteResult<RunControlDeliveryReceipt>> {
-    return { ok: false, mode: "blocked", providerId: this.id, error: RUN_HISTORY_NOT_CONFIGURED };
+    return {
+      ok: false,
+      mode: "blocked",
+      providerId: this.id,
+      error: RUN_HISTORY_NOT_CONFIGURED,
+    };
   }
 
-  async appendEvent(_event: RunEvent): Promise<RunHistoryWriteResult<RunSummary>> {
-    return { ok: false, mode: "blocked", providerId: this.id, error: RUN_HISTORY_NOT_CONFIGURED };
+  async advanceControlDelivery(
+    _input: AdvanceRunControlDelivery,
+  ): Promise<RunHistoryWriteResult<RunControlDeliveryReceipt>> {
+    return {
+      ok: false,
+      mode: "blocked",
+      providerId: this.id,
+      error: RUN_HISTORY_NOT_CONFIGURED,
+    };
+  }
+
+  async appendEvent(
+    _event: RunEvent,
+  ): Promise<RunHistoryWriteResult<RunSummary>> {
+    return {
+      ok: false,
+      mode: "blocked",
+      providerId: this.id,
+      error: RUN_HISTORY_NOT_CONFIGURED,
+    };
   }
   async getRun(_runId: string): Promise<RunHistoryReadResult<RunSummary>> {
-    return { ok: false, mode: "blocked", providerId: this.id, value: null, error: RUN_HISTORY_NOT_CONFIGURED };
+    return {
+      ok: false,
+      mode: "blocked",
+      providerId: this.id,
+      value: null,
+      error: RUN_HISTORY_NOT_CONFIGURED,
+    };
   }
-  async listRuns(_options: RunListOptions = {}): Promise<RunHistoryReadResult<Page<RunSummary, { createdAt: string; runId: string }>>> {
-    return { ok: false, mode: "blocked", providerId: this.id, value: null, error: RUN_HISTORY_NOT_CONFIGURED };
+  async listRuns(
+    _options: RunListOptions = {},
+  ): Promise<
+    RunHistoryReadResult<Page<RunSummary, { createdAt: string; runId: string }>>
+  > {
+    return {
+      ok: false,
+      mode: "blocked",
+      providerId: this.id,
+      value: null,
+      error: RUN_HISTORY_NOT_CONFIGURED,
+    };
   }
-  async listRunEvents(_runId: string, _options: RunEventListOptions = {}): Promise<RunHistoryReadResult<Page<PersistedRunEvent, EventCursor>>> {
-    return { ok: false, mode: "blocked", providerId: this.id, value: null, error: RUN_HISTORY_NOT_CONFIGURED };
+  async listRunEvents(
+    _runId: string,
+    _options: RunEventListOptions = {},
+  ): Promise<RunHistoryReadResult<Page<PersistedRunEvent, EventCursor>>> {
+    return {
+      ok: false,
+      mode: "blocked",
+      providerId: this.id,
+      value: null,
+      error: RUN_HISTORY_NOT_CONFIGURED,
+    };
   }
   close(): void {}
 }
