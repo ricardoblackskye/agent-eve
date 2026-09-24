@@ -11,7 +11,8 @@ import {
   runDarkFactoryDispatch,
 } from "../../../../agent/lib/dark-factory/entry";
 import { createGitHubLabelWriter } from "../../../../agent/lib/dark-factory/issue-writer";
-import { createStateStore } from "../../../../agent/lib/dark-factory";
+import { createStateStore } from "../../../../agent/lib/dark-factory/state-provider";
+import { createPlatformAdapter } from "../../../../agent/lib/dark-factory/platform";
 
 interface RepoConfig {
   webhook_secret_env: string;
@@ -50,58 +51,59 @@ function isTruthy(value: string | undefined): boolean {
 }
 
 /**
- * Does THIS deployment require a webhook signature?
+ * Resolve the webhook signature policy from normalized deployment context.
  *
- * SECURITY (#78): the gate must not be keyed on a platform-owned variable
- * alone. `VERCEL_ENV` is set only by Vercel, so a self-hosted deployment
- * (`npm run build && npm start`, documented in the README, where
- * NODE_ENV=production but VERCEL_ENV is unset) was previously treated as local
- * development — a missing secret skipped the refusal below AND
- * `verifySignature()` returned true, silently accepting unsigned, forgeable
- * payloads. The absence of configuration was read as permission to relax the
- * control.
- *
- * The default is now DENY for any production build:
- *  - `REQUIRE_WEBHOOK_SIGNATURE=true` opts IN on any environment, including
- *    preview and local development.
- *  - `ALLOW_UNSIGNED_WEBHOOKS=true` opts OUT explicitly. Documented as
- *    dangerous; it exists so an operator who genuinely wants an open endpoint
- *    says so on purpose instead of by omission.
- *  - Vercel production requires a signature.
- *  - Any OTHER production build (self-hosted/Docker) requires one too.
- *  - Vercel Preview stays permissive: it has no secret configured and the
- *    preview eval suite posts unsigned webhooks at it (failing closed there
- *    broke CI once already — see 23dbd46), and a preview URL sits behind
- *    Vercel's protection bypass with no production data.
- *  - Local development (`NODE_ENV=development`) stays permissive.
- *
- * Whenever a secret IS configured, the HMAC is verified regardless of this
- * function — that path is unchanged.
+ * `REQUIRE_WEBHOOK_SIGNATURE=true` opts in on every platform. The explicitly
+ * dangerous `ALLOW_UNSIGNED_WEBHOOKS=true` opt-out is retained for operators who
+ * choose it deliberately. Otherwise all production deployments and generic
+ * preview deployments require a signature; only an explicitly selected Vercel
+ * preview keeps the existing unsigned-evals exception. Invalid or missing
+ * production platform configuration is treated as a refusal. Local development
+ * remains permissive. A configured secret is always HMAC-verified.
  */
-function requiresSignature(): boolean {
-  if (isTruthy(process.env.REQUIRE_WEBHOOK_SIGNATURE)) return true;
-  if (isTruthy(process.env.ALLOW_UNSIGNED_WEBHOOKS)) return false;
-  if (process.env.VERCEL_ENV === "production") return true;
-  return (
-    process.env.NODE_ENV === "production" &&
-    process.env.VERCEL_ENV !== "preview"
-  );
+interface SignaturePolicy {
+  required: boolean;
+  providerId?: string;
+  stage?: string;
+  configurationError?: string;
+}
+
+/** Resolve the deployment policy without letting platform variables leak upward. */
+function resolveSignaturePolicy(): SignaturePolicy {
+  let context: ReturnType<typeof createPlatformAdapter>["context"];
+  try {
+    context = createPlatformAdapter().context;
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    return { required: true, configurationError: detail };
+  }
+
+  if (isTruthy(process.env.REQUIRE_WEBHOOK_SIGNATURE)) {
+    return { required: true, providerId: context.providerId, stage: context.stage };
+  }
+  if (isTruthy(process.env.ALLOW_UNSIGNED_WEBHOOKS)) {
+    return { required: false, providerId: context.providerId, stage: context.stage };
+  }
+  return {
+    required:
+      context.stage === "production" ||
+      (context.stage === "preview" && context.providerId !== "vercel"),
+    providerId: context.providerId,
+    stage: context.stage,
+  };
 }
 
 let warnedPermissive = false;
 
-/**
- * Say so, once, when unsigned payloads are accepted. A self-hosted deployment
- * that forgot the secret used to be silent; a warning makes the permissive path
- * observable instead.
- */
-function warnPermissiveOnce(): void {
+/** Say so once when unsigned payloads are accepted; keep the decision visible. */
+function warnPermissiveOnce(policy: SignaturePolicy): void {
   if (warnedPermissive) return;
   warnedPermissive = true;
   console.warn(
     "[webhook] Signature verification is NOT enforced: no webhook secret is " +
-      `configured and this deployment is not required to verify signatures ` +
-      `(NODE_ENV=${process.env.NODE_ENV}, VERCEL_ENV=${process.env.VERCEL_ENV}). ` +
+      "configured and this deployment is not required to verify signatures " +
+      `(provider=${policy.providerId ?? "explicit opt-out"}, ` +
+      `stage=${policy.stage ?? "explicit policy"}). ` +
       "Unsigned webhook payloads will be accepted. Configure the secret, or set " +
       "REQUIRE_WEBHOOK_SIGNATURE=true, to enforce signatures.",
   );
@@ -109,23 +111,18 @@ function warnPermissiveOnce(): void {
 
 /**
  * Verify the x-hub-signature-256 against the webhook secret.
- * Returns true if the signature is valid, or if no secret is configured and
- * this deployment is not required to verify signatures (local dev / preview).
+ * A configured secret is always checked, regardless of the deployment policy.
  */
 function verifySignature(
   payload: string,
   signatureHeader: string | null,
   secret: string | undefined,
+  policy: SignaturePolicy,
 ): boolean {
-  // An unset secret historically returned true, which silently accepted
-  // forged payloads on any deployment that forgot GH_WEBHOOK_SECRET.
-  // In a deployed environment that is a fatal misconfiguration: fail closed.
   if (!secret) {
-    if (requiresSignature()) {
-      return false;
-    }
-    warnPermissiveOnce();
-    return true; // Local development and Vercel preview only.
+    if (policy.required || policy.configurationError) return false;
+    warnPermissiveOnce(policy);
+    return true;
   }
   if (!signatureHeader) return false;
 
@@ -190,31 +187,41 @@ async function handler(request: NextRequest) {
     );
   }
 
-  // Validate signature with the per-repo secret.
-  // A missing secret in a deployed environment is a misconfiguration, not a
-  // signature failure: surface it as a 500 with an explicit message so it is
-  // distinguishable from a genuine bad signature (401) in the delivery logs.
-  const webhookSecret = process.env[repoConfig.webhook_secret_env];
-  if (!webhookSecret && requiresSignature()) {
+  const signaturePolicy = resolveSignaturePolicy();
+  if (signaturePolicy.configurationError) {
     console.error(
-      `[webhook] ${repoConfig.webhook_secret_env} is not set, and this deployment ` +
-        `requires signature verification ` +
-        `(NODE_ENV=${process.env.NODE_ENV}, VERCEL_ENV=${process.env.VERCEL_ENV}). ` +
-        `Refusing to process the webhook without signature verification. ` +
-        `Set the secret in your environment variables.`,
+      `[webhook] Invalid platform configuration: ${signaturePolicy.configurationError}`,
+    );
+    return NextResponse.json(
+      {
+        ok: false,
+        error: `Invalid platform configuration: ${signaturePolicy.configurationError}`,
+      },
+      { status: 500 },
+    );
+  }
+
+  // A missing secret in a protected deployment is a misconfiguration (500), not
+  // a bad signature (401). Configured secrets are still verified in every mode.
+  const webhookSecret = process.env[repoConfig.webhook_secret_env];
+  if (!webhookSecret && signaturePolicy.required) {
+    console.error(
+      `[webhook] ${repoConfig.webhook_secret_env} is not set; signature verification ` +
+        `is required (provider=${signaturePolicy.providerId}, ` +
+        `stage=${signaturePolicy.stage}). Refusing to process the webhook.`,
     );
     return NextResponse.json(
       {
         ok: false,
         error:
           `Webhook secret '${repoConfig.webhook_secret_env}' is not configured in this ` +
-          `deployment. Refusing to process an unverified webhook.`,
+          `deployment. Signature verification is required; refusing to process an unverified webhook.`,
       },
       { status: 500 },
     );
   }
 
-  if (!verifySignature(payload, signature, webhookSecret)) {
+  if (!verifySignature(payload, signature, webhookSecret, signaturePolicy)) {
     return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
   }
 

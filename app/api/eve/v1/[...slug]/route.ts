@@ -1,7 +1,10 @@
 import { type NextRequest, NextResponse } from "next/server";
+import { createPlatformAdapter } from "../../../../../agent/lib/dark-factory/platform";
 
 const API_KEY = process.env.EVE_API_KEY;
-const BYPASS_SECRET = process.env.VERCEL_PROTECTION_BYPASS;
+const platform = createPlatformAdapter();
+const BYPASS_SECRET =
+  platform.id === "vercel" ? process.env.VERCEL_PROTECTION_BYPASS : undefined;
 
 async function handler(request: NextRequest) {
   // Health endpoint is always accessible without authentication.
@@ -41,9 +44,11 @@ async function handler(request: NextRequest) {
   if (accept) headers["accept"] = accept;
 
   const bypass =
-    BYPASS_SECRET ||
-    request.headers.get("x-vercel-protection-bypass") ||
-    request.nextUrl.searchParams.get("x-vercel-protection-bypass");
+    platform.id === "vercel"
+      ? BYPASS_SECRET ||
+        request.headers.get("x-vercel-protection-bypass") ||
+        request.nextUrl.searchParams.get("x-vercel-protection-bypass")
+      : undefined;
   if (bypass) {
     headers["x-vercel-protection-bypass"] = bypass;
   }

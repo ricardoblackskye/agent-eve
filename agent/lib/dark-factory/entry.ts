@@ -26,6 +26,7 @@ import {
 import { TRIGGER_LABELS } from "./trigger";
 import type { DarkFactoryTriggerDecision } from "./trigger";
 import type { StateStore } from "./state";
+import { createPlatformAdapter } from "./platform";
 
 /** The label operations the entry point needs; injected so tests need no GitHub. */
 export interface LabelWriter {
@@ -190,22 +191,36 @@ export interface RunnerDecision {
 export function resolveRunnerMode(
   env: Record<string, string | undefined> = process.env,
 ): RunnerDecision {
+  const platform = createPlatformAdapter(env);
   const requestedLocal = (env.DF_RUNNER ?? "").trim().toLowerCase() === "local";
   if (!requestedLocal) return { mode: "session", requestedLocal: false };
 
-  const vercelProduction = env.VERCEL_ENV === "production";
-  const selfHostedProduction =
-    env.NODE_ENV === "production" && env.VERCEL_ENV !== "preview";
-  if (vercelProduction || selfHostedProduction) {
+  if (platform.context.stage === "production") {
     return {
       mode: "session",
       requestedLocal: true,
       refusal:
-        "DF_RUNNER=local was requested but this environment looks like a production build " +
-        "(VERCEL_ENV/NODE_ENV); refusing to use the local runner. Local mode is for the laptop.",
+        `DF_RUNNER=local was requested for ${platform.id} production; ` +
+        "refusing to use the local runner.",
     };
   }
   return { mode: "local", requestedLocal: true };
+}
+
+function isLoopbackOrigin(origin: string): boolean {
+  try {
+    const parsed = new URL(origin);
+    const hostname = parsed.hostname.toLowerCase();
+    return (
+      (parsed.protocol === "http:" || parsed.protocol === "https:") &&
+      (hostname === "localhost" ||
+        hostname === "127.0.0.1" ||
+        hostname === "[::1]") &&
+      parsed.origin.toLowerCase() === origin.toLowerCase()
+    );
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -227,24 +242,19 @@ export function resolveApiOrigin(
   env: Record<string, string | undefined> = process.env,
   requestOrigin?: string,
 ): { origin: string | null; reason: string } {
-  const configured = (env.DF_API_BASE_URL ?? "").trim();
-  if (configured) {
-    try {
-      const u = new URL(configured);
-      if (u.protocol === "http:" || u.protocol === "https:") {
-        return { origin: u.origin, reason: "configured DF_API_BASE_URL" };
-      }
-    } catch {
-      /* not a parseable URL; fall through to the next source */
-    }
-  }
-  const vercel = (env.VERCEL_URL ?? "").trim();
-  if (vercel) {
-    const host = vercel.replace(/^https?:\/\//, "");
-    return { origin: `https://${host}`, reason: "VERCEL_URL" };
+  const platform = createPlatformAdapter(env);
+  if (platform.context.apiOrigin) {
+    return {
+      origin: platform.context.apiOrigin,
+      reason: env.DF_API_BASE_URL?.trim()
+        ? "configured DF_API_BASE_URL"
+        : platform.id === "vercel"
+          ? "VERCEL_URL"
+          : "configured generic platform",
+    };
   }
   const ro = (requestOrigin ?? "").trim();
-  if (/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(ro)) {
+  if (isLoopbackOrigin(ro)) {
     return { origin: ro, reason: "local/dev request origin" };
   }
   return {
@@ -458,9 +468,19 @@ async function postHandoff(
 ): Promise<{ ok: boolean; reason: string }> {
   // The handoff URL is resolved through configuration, never straight from the request
   // origin (SSRF: an attacker-controlled Host header must not aim this POST+token elsewhere).
-  const resolved = resolveApiOrigin(deps.env ?? process.env, deps.origin);
+  const env = deps.env ?? process.env;
+  const runner = resolveRunnerMode(env);
+  const resolved = resolveApiOrigin(env, deps.origin);
   if (!resolved.origin) {
     return { ok: false, reason: `handoff skipped: ${resolved.reason}` };
+  }
+  if (runner.mode === "local" && !isLoopbackOrigin(resolved.origin)) {
+    return {
+      ok: false,
+      reason:
+        "local runner refused a non-loopback session origin; use localhost or " +
+        "127.0.0.1 for local handoff.",
+    };
   }
   const post = deps.postSession ?? fetch;
   const url = `${resolved.origin}/eve/v1/session`;

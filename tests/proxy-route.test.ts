@@ -58,7 +58,8 @@ describe("proxy route - bypass header", () => {
     process.env = { ...ORIGINAL_ENV };
   });
 
-  it("includes x-vercel-protection-bypass header when VERCEL_PROTECTION_BYPASS is set", async () => {
+  it("includes x-vercel-protection-bypass only when the Vercel adapter is selected", async () => {
+    process.env.DF_PLATFORM_PROVIDER = "vercel";
     process.env.VERCEL_PROTECTION_BYPASS = "my-bypass-secret";
 
     const fetchMock = vi.fn().mockResolvedValue(
@@ -79,6 +80,24 @@ describe("proxy route - bypass header", () => {
       "x-vercel-protection-bypass",
       "my-bypass-secret",
     );
+  });
+
+  it("does not forward the Vercel bypass secret through the generic adapter", async () => {
+    process.env.DF_PLATFORM_PROVIDER = "generic";
+    process.env.VERCEL_PROTECTION_BYPASS = "must-not-leak";
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response("{}", {
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { GET } = await import("../app/api/eve/v1/[...slug]/route");
+    await GET(createRequest("/api/eve/v1/health"));
+
+    const [, options] = fetchMock.mock.calls[0];
+    expect(options.headers).not.toHaveProperty("x-vercel-protection-bypass");
   });
 
   it("omits x-vercel-protection-bypass header when env var is not set", async () => {

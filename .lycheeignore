@@ -6,5 +6,9 @@ http://localhost:3000/.*
 # Generated MegaLinter filename reports
 .*megalinter_file_names.*
 
+# The production eval target is an OAuth-protected app origin, not a content link.
+# Its auth-start route intentionally returns 500 until Google OAuth is configured.
+^https://agent-eve-gold\.vercel\.app/?$
+
 # Funding metadata in package-lock.json blocks link checkers (403)
 .*patreon\.com.*
