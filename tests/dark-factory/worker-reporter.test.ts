@@ -217,7 +217,7 @@ describe("#162 cycle 3-4: the default is console and writes NOTHING", () => {
     expect(reporter.mode).toBe("dry-run");
   });
 
-  it("persists worker progress idempotently when a run-history store is configured", async () => {
+  it("persists worker progress through idempotent events when a run-history store is configured", async () => {
     const history = new SqliteRunHistoryStore(":memory:", () => "worker-run-1");
     const accepted = await history.acceptDelivery({
       deliveryId: "worker-report-delivery",
