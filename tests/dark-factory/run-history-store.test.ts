@@ -191,7 +191,7 @@ describe("SqliteRunHistoryStore delivery acceptance", () => {
     expect(generated).toBe(1);
   });
 
-  it("advances control delivery progress monotonically and idempotently", async () => {
+  it("advances control delivery progress monotonically with idempotent updates", async () => {
     const store = createStore();
     const accepted = await store.acceptDelivery({
       deliveryId: "control-progress-trigger",
