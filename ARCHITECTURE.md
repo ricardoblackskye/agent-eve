@@ -168,24 +168,27 @@ sequenceDiagram
 
 ## Environment Variables
 
-| Variable                    | Purpose                                                                   | Required           |
-|-----------------------------|---------------------------------------------------------------------------|--------------------|
-| `OPENROUTER_API_KEY`        | API key for OpenRouter model access                                       | Yes                |
-| `EVE_API_KEY`               | Bearer token for Eve API authentication                                   | Yes                |
-| `DF_PLATFORM_PROVIDER`      | Platform adapter selector (`vercel` or `generic`; required in production) | Yes, production    |
-| `DF_DEPLOYMENT_ENV`         | Generic adapter stage (`development`, `preview`, `production`)            | No                 |
-| `DF_API_BASE_URL`           | Trusted Eve API origin; generic provider handoff target                   | For remote generic |
-| `VERCEL_PROTECTION_BYPASS`  | Vercel-only bypass, forwarded only for the Vercel adapter                 | Vercel only        |
-| `DF_STATE_DRIVER`           | Dark Factory execution-memory store (`sqlite`; unset = fail-closed)       | No                 |
-| `DF_STATE_DB_PATH`          | SQLite file path, required when `DF_STATE_DRIVER=sqlite`                  | No                 |
-| `DF_STATE_DB_DIR`           | Optional sandbox root the state DB path must stay inside                  | No                 |
-| `DF_DISPATCH_MAX_RETRIES`   | Dispatch retry budget                                                     | No                 |
-| `DF_DISPATCH_BASE_DELAY_MS` | Dispatch base backoff delay in ms                                         | No                 |
-| `DF_METRICS_DRIVER`         | Observability store (`memory`; unset = in-process)                        | No                 |
-| `DF_WORKER_PROVIDER`        | Worker sandbox location (`local` dry-run; unset = local)                  | No                 |
-| `DF_WORKER_ALLOWED_REPOS`   | Fail-closed allow-list of repos a worker task may target                  | No                 |
-| `DF_WORKER_RUNTIME`         | Runtime inside the sandbox (`node` \| `python`)                           | No                 |
-| `DF_CREDENTIAL_TTL_SECONDS` | Per-task credential lease lifetime (1..3600)                              | No                 |
+| Variable                      | Purpose                                                                   | Required            |
+|-------------------------------|---------------------------------------------------------------------------|---------------------|
+| `OPENROUTER_API_KEY`          | API key for OpenRouter model access                                       | Yes                 |
+| `EVE_API_KEY`                 | Bearer token for Eve API authentication                                   | Yes                 |
+| `DF_PLATFORM_PROVIDER`        | Platform adapter selector (`vercel` or `generic`; required in production) | Yes, production     |
+| `DF_DEPLOYMENT_ENV`           | Generic adapter stage (`development`, `preview`, `production`)            | No                  |
+| `DF_API_BASE_URL`             | Trusted Eve API origin; generic provider handoff target                   | For remote generic  |
+| `VERCEL_PROTECTION_BYPASS`    | Vercel-only bypass, forwarded only for the Vercel adapter                 | Vercel only         |
+| `DF_STATE_DRIVER`             | Dark Factory execution-memory store (`sqlite`; unset = fail-closed)       | No                  |
+| `DF_STATE_DB_PATH`            | SQLite file path, required when `DF_STATE_DRIVER=sqlite`                  | No                  |
+| `DF_STATE_DB_DIR`             | Optional sandbox root the state DB path must stay inside                  | No                  |
+| `DF_DISPATCH_MAX_RETRIES`     | Dispatch retry budget                                                     | No                  |
+| `DF_DISPATCH_BASE_DELAY_MS`   | Dispatch base backoff delay in ms                                         | No                  |
+| `DF_METRICS_DRIVER`           | Observability store (`memory`; unset = in-process)                        | No                  |
+| `DF_RUN_HISTORY_DRIVER`       | Durable ledger adapter (`sqlite` or `postgres`; unset refuses writes)     | Required for writes |
+| `DF_RUN_HISTORY_DB_PATH`      | SQLite ledger path, required when driver is `sqlite`                      | SQLite only         |
+| `DF_RUN_HISTORY_DATABASE_URL` | Standard PostgreSQL URL (Supabase-compatible)                             | PostgreSQL only     |
+| `DF_WORKER_PROVIDER`          | Worker sandbox location (`local` dry-run; unset = local)                  | No                  |
+| `DF_WORKER_ALLOWED_REPOS`     | Fail-closed allow-list of repos a worker task may target                  | No                  |
+| `DF_WORKER_RUNTIME`           | Runtime inside the sandbox (`node` \| `python`)                           | No                  |
+| `DF_CREDENTIAL_TTL_SECONDS`   | Per-task credential lease lifetime (1..3600)                              | No                  |
 
 ## Platform adapters (R6 foundation)
 
@@ -323,3 +326,32 @@ breaker** that caps how much a single PBI may cost before a human is pulled in.
 
 The Developer (#133) and Tester (#136) agents plug into this seam in their own
 story branches; neither can run a worker task past a tripped PBI.
+
+## Durable Dark Factory run history (#198)
+
+`agent/lib/dark-factory/run-history.ts` defines provider-neutral run summaries,
+validated lifecycle events, and projection rules. `run-history-store.ts` provides
+SQLite persistence for local development; `run-history-postgres.ts` uses the
+standard PostgreSQL protocol for durable deployments. PostgreSQL works with
+Supabase as a managed host without a Supabase SDK or Vercel dependency.
+
+The ledger keeps three identities distinct: GitHub delivery IDs deduplicate
+webhook redelivery, opaque run IDs identify executions, and stable event IDs
+identify lifecycle transitions. A replayed trigger delivery reuses its bound
+run; a distinct trigger delivery gets a fresh run ID. Abort/resume receipts stay
+pinned to their original run (or record that no eligible run existed), so a
+late replay cannot mutate a later run. Lifecycle event appends and summary
+projections are atomic. Replaying an identical event is a no-op; a reused event
+ID with different contents is rejected. The store exposes bounded summary/event
+queries for the future #199 API; #198 does not add that API or the progress board
+tracked by #200.
+
+Run summaries track attempts, review rounds, iterations, fix cycles, and the PR
+URL. Latency and cost are optional measured values: absent measurements remain
+absent, while an explicitly measured zero is preserved. Set
+`DF_RUN_HISTORY_DRIVER=postgres` and `DF_RUN_HISTORY_DATABASE_URL` for a durable
+PostgreSQL endpoint, or `DF_RUN_HISTORY_DRIVER=sqlite` and
+`DF_RUN_HISTORY_DB_PATH` for local development. SQLite is rejected when
+`NODE_ENV=production` or the selected deployment stage is `preview` or
+`production`; deployed runtimes must use PostgreSQL. An unset driver refuses
+writes rather than claiming in-memory data is durable.

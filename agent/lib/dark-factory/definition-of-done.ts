@@ -17,6 +17,8 @@ import type {
   PullRequestDetails,
 } from "./pr-writer";
 import type { ExecutionPlan } from "./plan-validator";
+import { toRunEvent, type RunEvent } from "./run-history";
+import type { EventCursor, RunHistoryStore } from "./run-history-store";
 
 export class InvalidConfigurationError extends Error {
   constructor(message: string) {
@@ -73,6 +75,8 @@ export interface DefinitionOfDoneTask {
   body: string;
   plan?: ExecutionPlan;
   testResults?: { testFile: string; testCaseName: string; passed: boolean }[];
+  /** Only provide metrics observed by the caller; omitted values stay unmeasured. */
+  runMetrics?: Pick<RunEvent, "iterationCount" | "fixCycleCount" | "latencyMs" | "costUsd">;
 }
 
 export interface PrCommentWriter {
@@ -112,6 +116,7 @@ export interface DefinitionOfDoneDeps {
   env?: Record<string, string | undefined>;
   runChecks: (round: number) => Promise<ReviewFinding[]>;
   attemptFixes?: (findings: ReviewFinding[]) => Promise<FindingDisposition[]>;
+  runHistory?: RunHistoryStore;
 }
 
 import {
@@ -310,15 +315,40 @@ async function applyAcceptedDispositions(
   }
 
   for (const { finding, explanation } of validDispositions) {
-    await deps.commentWriter.postComment(
-      owner,
-      repoName,
-      pr.number,
-      renderAcceptedFindingComment(finding, explanation),
-    );
+    let posted: { ok: boolean; error?: string };
+    try {
+      posted = await deps.commentWriter.postComment(
+        owner,
+        repoName,
+        pr.number,
+        renderAcceptedFindingComment(finding, explanation),
+      );
+    } catch (error) {
+      posted = {
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+    if (!posted.ok) {
+      if (deps.labelWriter) {
+        await deps.labelWriter.add(task.repo, task.issue, "needs-answer");
+      }
+      return {
+        blockedResult: {
+          ok: false,
+          status: "blocked",
+          pr,
+          roundsExecuted: state.roundsExecuted,
+          totalFindings: state.totalDistinctFindings,
+          resolvedCount: state.totalDistinctFindings - acceptedIds.size,
+          acceptedCount: acceptedIds.size,
+          remainingFindings: unacceptedFindings,
+          reason: "An accepted finding was not persisted to the PR comment; the run is blocked.",
+        },
+      };
+    }
     acceptedIds.add(finding.id);
   }
-
   return {};
 }
 
@@ -333,6 +363,44 @@ async function applyAcceptedDispositions(
  * 5. Halting on exhaustion with `df:blocked` / `needs-answer`.
  * 6. Guaranteeing no merge operation ever occurs.
  */
+async function persistDODRunEvent(
+  store: RunHistoryStore,
+  input: Omit<RunEvent, "occurredAt">,
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    let cursor: EventCursor | undefined;
+    let existing: RunEvent | undefined;
+    do {
+      const page = await store.listRunEvents(input.runId, {
+        limit: 100,
+        ...(cursor ? { after: cursor } : {}),
+      });
+      if (!page.ok || !page.value) {
+        return {
+          ok: false,
+          error: page.error ?? "Run history could not read existing events.",
+        };
+      }
+      existing = page.value.items.find(({ event }) => event.eventId === input.eventId)?.event;
+      cursor = page.value.nextCursor;
+    } while (!existing && cursor);
+
+    const event = toRunEvent({
+      ...input,
+      occurredAt: existing?.occurredAt ?? new Date().toISOString(),
+    });
+    const result = await store.appendEvent(event);
+    return result.ok
+      ? { ok: true }
+      : { ok: false, error: result.error ?? "Run history rejected the event." };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
 export async function runDefinitionOfDone(
   deps: DefinitionOfDoneDeps,
   task: DefinitionOfDoneTask,
@@ -340,6 +408,22 @@ export async function runDefinitionOfDone(
   const env = deps.env ?? process.env;
   const maxRounds = resolveMaxReviewRounds(env);
   const [owner, repoName] = task.repo.split("/");
+  const record = async (
+    event: Omit<RunEvent, "occurredAt">,
+  ): Promise<string | undefined> => {
+    if (!deps.runHistory) return undefined;
+    const result = await persistDODRunEvent(deps.runHistory, event);
+    return result.ok ? undefined : result.error ?? "unknown storage error";
+  };
+  const blockedByHistory = (
+    result: DefinitionOfDoneResult,
+    error: string,
+  ): DefinitionOfDoneResult => ({
+    ...result,
+    ok: false,
+    status: "blocked",
+    reason: `Run history persistence failed: ${error}`,
+  });
 
   // 1. Open the PR linked to the issue
   const prResult = await deps.prWriter.createPullRequest(owner, repoName, {
@@ -351,7 +435,7 @@ export async function runDefinitionOfDone(
   });
 
   if (!prResult.ok || !prResult.pr) {
-    return {
+    const refused: DefinitionOfDoneResult = {
       ok: false,
       status: "refused",
       roundsExecuted: 0,
@@ -361,9 +445,39 @@ export async function runDefinitionOfDone(
       remainingFindings: [],
       reason: prResult.error ?? "Failed to open pull request.",
     };
+    const historyError = await record({
+      eventId: `dod:${task.runId}:terminal`,
+      runId: task.runId,
+      type: "run.terminal",
+      stage: "terminal",
+      status: "failed",
+      ...task.runMetrics,
+    });
+    return historyError ? blockedByHistory(refused, historyError) : refused;
   }
 
   const pr = prResult.pr;
+  const openedError = await record({
+    eventId: `dod:${task.runId}:pr-opened`,
+    runId: task.runId,
+    type: "pr.opened",
+    stage: "pull-request",
+    status: "running",
+    prUrl: pr.url,
+  });
+  if (openedError) {
+    return blockedByHistory({
+      ok: false,
+      status: "blocked",
+      pr,
+      roundsExecuted: 0,
+      totalFindings: 0,
+      resolvedCount: 0,
+      acceptedCount: 0,
+      remainingFindings: [],
+      reason: openedError,
+    }, openedError);
+  }
 
   // 1b. Verify Acceptance Criteria if task has an ExecutionPlan
   let acMatrix: AcTraceabilityItem[] | undefined;
@@ -387,7 +501,7 @@ export async function runDefinitionOfDone(
         pr.number,
         `🤖 **Eve** (Dark Factory) — Acceptance Criteria Verification Failed\n\n${traceabilityTable}`,
       );
-      return {
+      const blocked: DefinitionOfDoneResult = {
         ok: false,
         status: "blocked",
         pr,
@@ -400,6 +514,15 @@ export async function runDefinitionOfDone(
         acMatrix,
         traceabilityTable,
       };
+      const historyError = await record({
+        eventId: `dod:${task.runId}:ac-criteria-blocked`,
+        runId: task.runId,
+        type: "review.round",
+        stage: "review",
+        status: "blocked",
+        reviewRound: 1,
+      });
+      return historyError ? blockedByHistory(blocked, historyError) : blocked;
     }
 
     // Post verified table to PR
@@ -413,20 +536,98 @@ export async function runDefinitionOfDone(
 
   const recurrenceMap = new Map<string, number>();
   const acceptedIds = new Set<string>();
+  let previousActiveFindingIds = new Set<string>();
   let totalDistinctFindings = 0;
   let roundsExecuted = 0;
+
+  const recordReviewRound = async (
+    round: number,
+    status: "running" | "blocked",
+    counts: { findingCount: number; resolvedCount: number; acceptedCount: number },
+  ): Promise<string | undefined> => record({
+    eventId: `dod:${task.runId}:review:${round}`,
+    runId: task.runId,
+    type: "review.round",
+    stage: "review",
+    status,
+    reviewRound: round,
+    ...counts,
+    ...task.runMetrics,
+  });
+
+  const completeSuccessfully = async (
+    result: DefinitionOfDoneResult,
+    round: number,
+    counts: { findingCount: number; resolvedCount: number; acceptedCount: number },
+  ): Promise<DefinitionOfDoneResult> => {
+    const reviewError = await recordReviewRound(round, "running", counts);
+    if (reviewError) return blockedByHistory(result, reviewError);
+    const terminalError = await record({
+      eventId: `dod:${task.runId}:terminal`,
+      runId: task.runId,
+      type: "run.terminal",
+      stage: "terminal",
+      status: "succeeded",
+      reviewRound: round,
+      prUrl: pr.url,
+      ...task.runMetrics,
+    });
+    return terminalError ? blockedByHistory(result, terminalError) : result;
+  };
+
+  const failExecution = async (
+    round: number,
+    reason: string,
+    remainingFindings: ReviewFinding[],
+  ): Promise<DefinitionOfDoneResult> => {
+    const result: DefinitionOfDoneResult = {
+      ok: false,
+      status: "blocked",
+      pr,
+      roundsExecuted: round,
+      totalFindings: totalDistinctFindings,
+      resolvedCount: totalDistinctFindings - acceptedIds.size,
+      acceptedCount: acceptedIds.size,
+      remainingFindings,
+      reason,
+    };
+    const terminalError = await record({
+      eventId: `dod:${task.runId}:terminal`,
+      runId: task.runId,
+      type: "run.terminal",
+      stage: "terminal",
+      status: "failed",
+      reviewRound: round,
+      prUrl: pr.url,
+      ...task.runMetrics,
+    });
+    return terminalError ? blockedByHistory(result, terminalError) : result;
+  };
 
   // 2. Review and fix loop.
   // Iterates round from 1 to maxRounds inclusive [1..maxRounds], executing
   // exactly maxRounds iterations (e.g. 1, 2, 3 for maxRounds = 3).
   for (let round = 1; round <= maxRounds; round++) {
     roundsExecuted = round;
-    const findings = await deps.runChecks(round);
+    let findings: ReviewFinding[];
+    try {
+      findings = await deps.runChecks(round);
+    } catch {
+      return failExecution(round, "The review checks failed unexpectedly.", []);
+    }
 
     // Filter out findings already accepted in earlier rounds
     const unacceptedFindings = findings.filter((f) => !acceptedIds.has(f.id));
+    const activeFindingIds = new Set(unacceptedFindings.map((finding) => finding.id));
+    const roundCounts = {
+      findingCount: activeFindingIds.size,
+      resolvedCount: [...previousActiveFindingIds].filter(
+        (id) => !activeFindingIds.has(id) && !acceptedIds.has(id),
+      ).length,
+      acceptedCount: 0,
+    };
 
-    // Track distinct findings and recurrence
+    // Track distinct findings and recurrence.
     for (const f of unacceptedFindings) {
       const prev = recurrenceMap.get(f.id) ?? 0;
       if (prev === 0) {
@@ -437,19 +638,33 @@ export async function runDefinitionOfDone(
 
     // If no active findings remain, the task is DONE!
     if (unacceptedFindings.length === 0) {
-      return buildSuccessResult(
-        pr,
-        roundsExecuted,
-        totalDistinctFindings,
-        acceptedIds.size,
-        acMatrix,
-        traceabilityTable,
+      return completeSuccessfully(
+        buildSuccessResult(
+          pr,
+          roundsExecuted,
+          totalDistinctFindings,
+          acceptedIds.size,
+          acMatrix,
+          traceabilityTable,
+        ),
+        round,
+        roundCounts,
       );
     }
 
     // Attempt fixes or acceptance dispositions
     if (deps.attemptFixes) {
-      const dispositions = await deps.attemptFixes(unacceptedFindings);
+      let dispositions: FindingDisposition[];
+      try {
+        dispositions = await deps.attemptFixes(unacceptedFindings);
+      } catch {
+        return failExecution(
+          round,
+          "The automated fix attempt failed unexpectedly.",
+          unacceptedFindings,
+        );
+      }
+      const acceptedBeforeRound = acceptedIds.size;
 
       const outcome = await applyAcceptedDispositions(
         deps,
@@ -462,9 +677,13 @@ export async function runDefinitionOfDone(
         acceptedIds,
         { roundsExecuted, totalDistinctFindings },
       );
+      roundCounts.acceptedCount = acceptedIds.size - acceptedBeforeRound;
 
       if (outcome.blockedResult) {
-        return outcome.blockedResult;
+        const historyError = await recordReviewRound(round, "blocked", roundCounts);
+        return historyError
+          ? blockedByHistory(outcome.blockedResult, historyError)
+          : outcome.blockedResult;
       }
 
       // Check if all findings are now accepted
@@ -472,13 +691,17 @@ export async function runDefinitionOfDone(
         (f) => !acceptedIds.has(f.id),
       );
       if (remainingAfterDispositions.length === 0) {
-        return buildSuccessResult(
-          pr,
-          roundsExecuted,
-          totalDistinctFindings,
-          acceptedIds.size,
-          acMatrix,
-          traceabilityTable,
+        return completeSuccessfully(
+          buildSuccessResult(
+            pr,
+            roundsExecuted,
+            totalDistinctFindings,
+            acceptedIds.size,
+            acMatrix,
+            traceabilityTable,
+          ),
+          round,
+          roundCounts,
         );
       }
     }
@@ -491,7 +714,7 @@ export async function runDefinitionOfDone(
       if (deps.labelWriter) {
         await deps.labelWriter.add(task.repo, task.issue, "needs-answer");
       }
-      return buildBudgetExhaustedResult(
+      const blocked: DefinitionOfDoneResult = buildBudgetExhaustedResult(
         pr,
         maxRounds,
         roundsExecuted,
@@ -499,6 +722,28 @@ export async function runDefinitionOfDone(
         acceptedIds.size,
         remaining,
       );
+      const historyError = await recordReviewRound(round, "blocked", roundCounts);
+      return historyError ? blockedByHistory(blocked, historyError) : blocked;
+    }
+
+    previousActiveFindingIds = new Set(
+      unacceptedFindings
+        .filter((finding) => !acceptedIds.has(finding.id))
+        .map((finding) => finding.id),
+    );
+    const historyError = await recordReviewRound(round, "running", roundCounts);
+    if (historyError) {
+      return blockedByHistory({
+        ok: false,
+        status: "blocked",
+        pr,
+        roundsExecuted,
+        totalFindings: totalDistinctFindings,
+        resolvedCount: totalDistinctFindings - acceptedIds.size,
+        acceptedCount: acceptedIds.size,
+        remainingFindings: unacceptedFindings.filter((f) => !acceptedIds.has(f.id)),
+        reason: historyError,
+      }, historyError);
     }
   }
 

@@ -11,7 +11,7 @@ import {
   runDarkFactoryDispatch,
 } from "../../../../agent/lib/dark-factory/entry";
 import { createGitHubLabelWriter } from "../../../../agent/lib/dark-factory/issue-writer";
-import { createStateStore } from "../../../../agent/lib/dark-factory/state-provider";
+import { createRunHistoryStore } from "../../../../agent/lib/dark-factory/run-history-provider";
 import { createPlatformAdapter } from "../../../../agent/lib/dark-factory/platform";
 
 interface RepoConfig {
@@ -502,23 +502,33 @@ async function handler(request: NextRequest) {
       repository: { full_name: repoFullName },
     });
     if (dfDecision.kind !== "not-a-trigger") {
+      const deliveryId = request.headers.get("x-github-delivery");
+      if (!deliveryId) {
+        return NextResponse.json(
+          { ok: false, error: "Missing x-github-delivery header for Dark Factory event." },
+          { status: 400 },
+        );
+      }
       const result = await runDarkFactoryDispatch(dfDecision, {
-        store: createStateStore(),
+        runHistory: createRunHistoryStore(),
+        deliveryId,
         labels: createGitHubLabelWriter(),
         apiKey: process.env.EVE_API_KEY,
         env: process.env,
         origin: request.nextUrl.origin,
       });
-      // A refusal is OUR gate doing its job, not a transient failure: answering 4xx
-      // would invite GitHub to redeliver a decision that will not change. The body
-      // carries the explicit error instead (the #78 lesson: refusal must be visible).
+      // Gate refusals are final for this event; infrastructure/write failures must
+      // remain non-2xx so GitHub can retry after the operator repairs configuration.
+      const retryableFailure = !result.ok && (result.status === "failed" || Boolean(result.error));
       return NextResponse.json(
         {
           ok: result.ok,
           message: `dark-factory trigger: ${result.status}`,
+          ...(result.runId ? { runId: result.runId } : {}),
+          ...(result.runStatus ? { runStatus: result.runStatus } : {}),
           ...(result.ok ? {} : { error: result.reason }),
         },
-        { status: result.ok ? 202 : 200 },
+        { status: result.ok ? 202 : retryableFailure ? 503 : 200 },
       );
     }
 

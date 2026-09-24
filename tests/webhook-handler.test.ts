@@ -223,6 +223,36 @@ describe("webhook handler (bug #39)", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("returns a retryable failure when run-history storage is unconfigured", async () => {
+    process.env.DF_TRIGGER_LABEL = "dark-factory";
+    process.env.DF_WORKER_ALLOWED_REPOS = "ricardoblackskye/agent-eve";
+    process.env.DF_TRIGGER_ALLOWED_USERS = "ricardoblackskye";
+    delete process.env.DF_RUN_HISTORY_DRIVER;
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const body = JSON.stringify({
+      action: "labeled",
+      label: { name: "dark-factory" },
+      sender: { login: "ricardoblackskye" },
+      repository: { full_name: "ricardoblackskye/agent-eve" },
+      issue: { number: 198, title: "Run ledger", body: "Persist it", labels: [{ name: "dark-factory" }] },
+    });
+    const { POST } = await import("../app/api/github/webhook/route");
+    const response: any = await POST(createRequest("/api/github/webhook", {
+      headers: {
+        "content-type": "application/json",
+        "x-github-event": "issues",
+        "x-github-delivery": "unconfigured-history-delivery",
+      },
+      body,
+    }) as any);
+
+    expect(response.status).toBe(503);
+    expect(response.data.ok).toBe(false);
+    expect(response.data.error).toMatch(/run history/i);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("STILL calls the Eve API when a PR is merged (#184 regression guard)", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ status: "accepted" }), { status: 200 }),

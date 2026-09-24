@@ -140,62 +140,67 @@ flagged **Sensitive** in Vercel (masked, not readable via `vercel env pull`);
 **Config** values are non-sensitive (e.g. allow-lists, board ids). `DF_PLATFORM_PROVIDER`
 is required in production: select `vercel` or `generic`.
 
-| Variable                    | Required | Type                              | Description                                                                                                                                                      |
-|-----------------------------|----------|-----------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `OPENROUTER_API_KEY`        | Yes      | Secret                            | OpenRouter API key for model access                                                                                                                              |
-| `EVE_API_KEY`               | Yes      | Secret                            | Bearer token for production auth (sent as `Authorization: Bearer` header)                                                                                        |
-| `NEXT_PUBLIC_EVE_API_KEY`   | Yes*     | Public                            | Client-side chat-widget key sent to your own `/api/eve` proxy (inlined in the browser bundle — **public by design, never a real secret**)                        |
-| `GH_RELEASE_TOKEN`          | Yes      | Secret                            | GitHub token the Release Manager uses to write `releasenotes.md` on merge (needs `Contents` + `Issues: write`)                                                   |
-| `GH_STORY_TOKEN`            | Yes*     | Secret                            | Token the Product Owner uses to create `[Story]` issues (needs `Issues: read and write`); read before `GH_RELEASE_TOKEN`                                         |
-| `GITHUB_TOKEN`              | No       | Secret                            | Final fallback token if neither `GH_RELEASE_TOKEN` nor `GH_STORY_TOKEN` is set                                                                                   |
-| `GH_WEBHOOK_SECRET`         | Yes      | Secret                            | Shared secret that authenticates incoming webhook payloads (required on Vercel; see Webhooks)                                                                    |
-| `GH_SPRINT_TOKEN`           | No*      | Secret                            | Token for reading the Projects V2 board (`read:project` scope); falls back to `GH_RELEASE_TOKEN`                                                                 |
-| `VERCEL_PROTECTION_BYPASS`  | No       | Secret                            | Vercel Protection bypass; read/forwarded only when `DF_PLATFORM_PROVIDER=vercel`                                                                                 |
-| `DF_PLATFORM_PROVIDER`      | Yes*     | Config                            | Required in production: `vercel` enables Vercel adapters; `generic` uses platform-neutral settings                                                               |
-| `DF_DEPLOYMENT_ENV`         | No       | Config                            | Generic platform stage: `development`, `preview`, or `production`; production builds cannot be downgraded to development                                         |
-| `GOOGLE_CLIENT_SECRET`      | Secret   | Vercel (Sensitive) / `.env.local` | Google OAuth client secret (#99)                                                                                                                                 |
-| `AUTH_SESSION_SECRET`       | Secret   | Vercel (Sensitive) / `.env.local` | Signs the HttpOnly session cookie (#99)                                                                                                                          |
-| `EVE_CHAT_MODEL`            | No       | Config                            | Override the root chat model id (default `deepseek/deepseek-v4.1-flash`)                                                                                         |
-| `MODEL_NAME`                | No       | Config                            | Model id for subagents (Sprint Metrics Analyst); default `deepseek/deepseek-v4.1-flash`                                                                          |
-| `EVE_STORY_MENTION`         | No       | Config                            | Mention that triggers the Product Owner in an issue body (default `@eve-agent`)                                                                                  |
-| `EVE_STORY_LABEL`           | No       | Config                            | Label that triggers the Product Owner (default `needs-story`)                                                                                                    |
-| `STORY_ALLOWED_REPOS`       | Yes      | Config                            | **Fail-closed** comma-separated `owner/repo` allow-list for story publishing; refusing if unset                                                                  |
-| `GITHUB_REPO_OWNER`         | No       | Config                            | Optional env override for the default publish owner                                                                                                              |
-| `GITHUB_REPO_NAME`          | No       | Config                            | Optional env override for the default publish repo                                                                                                               |
-| `SPRINT_PROJECT_OWNER`      | No       | Config                            | Projects V2 board owner for sprint reports (default `ricardoblackskye`)                                                                                          |
-| `SPRINT_PROJECT_NUMBER`     | No       | Config                            | Projects V2 board number for sprint reports (default `3`)                                                                                                        |
-| `PR_REVIEW_MAX_DIFF_CHARS`  | No       | Config                            | Cap on diff chars sent to the PR-reviewer LLM (default `20000`)                                                                                                  |
-| `PR_REVIEW_MAX_ATTEMPTS`    | No       | Config                            | Attempts for the PR-reviewer model call (initial + retries) before the structural fallback (default `3`)                                                         |
-| `PR_REVIEW_TIMEOUT_MS`      | No       | Config                            | Per-attempt timeout in ms for the PR-reviewer model call (default `90000`)                                                                                       |
-| `PR_REVIEW_PROVIDER_SORT`   | No       | Config                            | OpenRouter provider sort for the reviewer (`throughput`/`price`); unset = price load-balancing. A BYOK key is the robust fix for 429s                            |
-| `DF_STATE_DRIVER`           | No       | Config                            | Dark Factory execution-memory store: `sqlite` = file-backed adapter; unset = fail-closed refusing default                                                        |
-| `DF_STATE_DB_PATH`          | No*      | Config                            | Required when `DF_STATE_DRIVER=sqlite` — path to the SQLite file (ephemeral on Vercel)                                                                           |
-| `DF_STATE_DB_DIR`           | No       | Config                            | Optional sandbox root: when set, `DF_STATE_DB_PATH` must resolve inside it or boot refuses                                                                       |
-| `DF_DISPATCH_MAX_RETRIES`   | No       | Config                            | Retry budget for a failed worker dispatch (default `2`)                                                                                                          |
-| `DF_DISPATCH_BASE_DELAY_MS` | No       | Config                            | Base backoff delay in ms, multiplied per retry (default `1000`)                                                                                                  |
-| `DF_METRICS_DRIVER`         | No       | Config                            | Dark Factory observability store; unset or `memory` = in-process (default)                                                                                       |
-| `DF_WORKER_PROVIDER`        | No       | Config                            | Where a worker sandbox runs; unset/`local` = dry-run provider that reports `isolated: false`                                                                     |
-| `DF_WORKER_ALLOWED_REPOS`   | No*      | Config                            | **Fail-closed** comma-separated `owner/repo` allow-list for worker tasks; unset = every task refused with 403 before provisioning                                |
-| `DF_WORKER_RUNTIME`         | No       | Config                            | Runtime requested in the worker environment: `node` or `python` (default `node`)                                                                                 |
-| `DF_SECURITY_SCAN_ENABLED`  | No       | Config                            | Enables the tester-agent Gitleaks scan when set to `true` (default `false`)                                                                                      |
-| `DF_TESTER_TIMEOUT_MS`      | No       | Config                            | Timeout per tester check in milliseconds (default `60000`; positive integer)                                                                                     |
-| `DF_SECURITY_TOOLS`         | No       | Config                            | Comma-separated tester security tools; currently only `gitleaks` is accepted (default `gitleaks`)                                                                |
-| `DF_REPORTER_PROVIDER`      | No       | Config                            | Where worker progress/completion/questions go: unset/`console` = **dry-run, writes nothing**; `github` posts issue comments gated by `DF_WORKER_ALLOWED_REPOS`   |
-| `DF_TRIGGER_LABEL`          | No       | Config                            | The issue label that requests Dark Factory work (default `dark-factory`); removing it aborts the run                                                             |
-| `DF_TRIGGER_ALLOWED_USERS`  | No*      | Config                            | **Fail-closed** comma-separated GitHub logins allowed to trigger work; unset = every trigger REFUSED                                                             |
-| `DF_RUNNER`                 | No       | Config                            | Where a triggered run executes: unset/`session` = the deployed path; `local` = in-process, and **refused in any production build**                               |
-| `DF_API_BASE_URL`           | No*      | Config                            | Trusted HTTP(S) Eve API origin; used by the generic adapter and overrides `VERCEL_URL`; remote generic deployments must set it (never derived from request Host) |
-| `DF_CREDENTIAL_TTL_SECONDS` | No       | Config                            | Per-task credential lease lifetime, 1..3600 (default `3600`); the sandbox gets a lease, never the token                                                          |
-| `GOOGLE_CLIENT_ID`          | No*      | Secret                            | Google OAuth client id; required for real Google sign-in (#99)                                                                                                   |
-| `GOOGLE_CLIENT_SECRET`      | No*      | Secret                            | Google OAuth client secret; required for real Google sign-in (#99)                                                                                               |
-| `GOOGLE_REDIRECT_URI`       | No       | Config                            | Exact callback URL registered on the OAuth client; unset = derived from the request origin                                                                       |
-| `ALLOWED_GOOGLE_EMAIL`      | No       | Config                            | Only account granted access to the chat UI (default `cuillinguy@gmail.com`; comma-separated)                                                                     |
-| `AUTH_SESSION_SECRET`       | No*      | Secret                            | Signs the HttpOnly session cookie; required in production (`openssl rand -base64 32`)                                                                            |
-| `AUTH_DEV_MODE`             | No       | Config                            | Dev/e2e only: lets `/api/auth/dev` mint a session without Google; **refused when `NODE_ENV=production`**                                                         |
+| Variable                      | Required | Type                              | Description                                                                                                                                                      |
+|-------------------------------|----------|-----------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `OPENROUTER_API_KEY`          | Yes      | Secret                            | OpenRouter API key for model access                                                                                                                              |
+| `EVE_API_KEY`                 | Yes      | Secret                            | Bearer token for production auth (sent as `Authorization: Bearer` header)                                                                                        |
+| `NEXT_PUBLIC_EVE_API_KEY`     | Yes*     | Public                            | Client-side chat-widget key sent to your own `/api/eve` proxy (inlined in the browser bundle — **public by design, never a real secret**)                        |
+| `GH_RELEASE_TOKEN`            | Yes      | Secret                            | GitHub token the Release Manager uses to write `releasenotes.md` on merge (needs `Contents` + `Issues: write`)                                                   |
+| `GH_STORY_TOKEN`              | Yes*     | Secret                            | Token the Product Owner uses to create `[Story]` issues (needs `Issues: read and write`); read before `GH_RELEASE_TOKEN`                                         |
+| `GITHUB_TOKEN`                | No       | Secret                            | Final fallback token if neither `GH_RELEASE_TOKEN` nor `GH_STORY_TOKEN` is set                                                                                   |
+| `GH_WEBHOOK_SECRET`           | Yes      | Secret                            | Shared secret that authenticates incoming webhook payloads (required on Vercel; see Webhooks)                                                                    |
+| `GH_SPRINT_TOKEN`             | No*      | Secret                            | Token for reading the Projects V2 board (`read:project` scope); falls back to `GH_RELEASE_TOKEN`                                                                 |
+| `VERCEL_PROTECTION_BYPASS`    | No       | Secret                            | Vercel Protection bypass; read/forwarded only when `DF_PLATFORM_PROVIDER=vercel`                                                                                 |
+| `DF_PLATFORM_PROVIDER`        | Yes*     | Config                            | Required in production: `vercel` enables Vercel adapters; `generic` uses platform-neutral settings                                                               |
+| `DF_DEPLOYMENT_ENV`           | No       | Config                            | Generic platform stage: `development`, `preview`, or `production`; production builds cannot be downgraded to development                                         |
+| `GOOGLE_CLIENT_SECRET`        | Secret   | Vercel (Sensitive) / `.env.local` | Google OAuth client secret (#99)                                                                                                                                 |
+| `AUTH_SESSION_SECRET`         | Secret   | Vercel (Sensitive) / `.env.local` | Signs the HttpOnly session cookie (#99)                                                                                                                          |
+| `EVE_CHAT_MODEL`              | No       | Config                            | Override the root chat model id (default `deepseek/deepseek-v4.1-flash`)                                                                                         |
+| `MODEL_NAME`                  | No       | Config                            | Model id for subagents (Sprint Metrics Analyst); default `deepseek/deepseek-v4.1-flash`                                                                          |
+| `EVE_STORY_MENTION`           | No       | Config                            | Mention that triggers the Product Owner in an issue body (default `@eve-agent`)                                                                                  |
+| `EVE_STORY_LABEL`             | No       | Config                            | Label that triggers the Product Owner (default `needs-story`)                                                                                                    |
+| `STORY_ALLOWED_REPOS`         | Yes      | Config                            | **Fail-closed** comma-separated `owner/repo` allow-list for story publishing; refusing if unset                                                                  |
+| `GITHUB_REPO_OWNER`           | No       | Config                            | Optional env override for the default publish owner                                                                                                              |
+| `GITHUB_REPO_NAME`            | No       | Config                            | Optional env override for the default publish repo                                                                                                               |
+| `SPRINT_PROJECT_OWNER`        | No       | Config                            | Projects V2 board owner for sprint reports (default `ricardoblackskye`)                                                                                          |
+| `SPRINT_PROJECT_NUMBER`       | No       | Config                            | Projects V2 board number for sprint reports (default `3`)                                                                                                        |
+| `PR_REVIEW_MAX_DIFF_CHARS`    | No       | Config                            | Cap on diff chars sent to the PR-reviewer LLM (default `20000`)                                                                                                  |
+| `PR_REVIEW_MAX_ATTEMPTS`      | No       | Config                            | Attempts for the PR-reviewer model call (initial + retries) before the structural fallback (default `3`)                                                         |
+| `PR_REVIEW_TIMEOUT_MS`        | No       | Config                            | Per-attempt timeout in ms for the PR-reviewer model call (default `90000`)                                                                                       |
+| `PR_REVIEW_PROVIDER_SORT`     | No       | Config                            | OpenRouter provider sort for the reviewer (`throughput`/`price`); unset = price load-balancing. A BYOK key is the robust fix for 429s                            |
+| `DF_STATE_DRIVER`             | No       | Config                            | Dark Factory execution-memory store: `sqlite` = file-backed adapter; unset = fail-closed refusing default                                                        |
+| `DF_STATE_DB_PATH`            | No*      | Config                            | Required when `DF_STATE_DRIVER=sqlite` — path to the SQLite file (ephemeral on Vercel)                                                                           |
+| `DF_STATE_DB_DIR`             | No       | Config                            | Optional sandbox root: when set, `DF_STATE_DB_PATH` must resolve inside it or boot refuses                                                                       |
+| `DF_DISPATCH_MAX_RETRIES`     | No       | Config                            | Retry budget for a failed worker dispatch (default `2`)                                                                                                          |
+| `DF_DISPATCH_BASE_DELAY_MS`   | No       | Config                            | Base backoff delay in ms, multiplied per retry (default `1000`)                                                                                                  |
+| `DF_METRICS_DRIVER`           | No       | Config                            | Dark Factory observability store; unset or `memory` = in-process (default)                                                                                       |
+| `DF_WORKER_PROVIDER`          | No       | Config                            | Where a worker sandbox runs; unset/`local` = dry-run provider that reports `isolated: false`                                                                     |
+| `DF_WORKER_ALLOWED_REPOS`     | No*      | Config                            | **Fail-closed** comma-separated `owner/repo` allow-list for worker tasks; unset = every task refused with 403 before provisioning                                |
+| `DF_WORKER_RUNTIME`           | No       | Config                            | Runtime requested in the worker environment: `node` or `python` (default `node`)                                                                                 |
+| `DF_SECURITY_SCAN_ENABLED`    | No       | Config                            | Enables the tester-agent Gitleaks scan when set to `true` (default `false`)                                                                                      |
+| `DF_TESTER_TIMEOUT_MS`        | No       | Config                            | Timeout per tester check in milliseconds (default `60000`; positive integer)                                                                                     |
+| `DF_SECURITY_TOOLS`           | No       | Config                            | Comma-separated tester security tools; currently only `gitleaks` is accepted (default `gitleaks`)                                                                |
+| `DF_REPORTER_PROVIDER`        | No       | Config                            | Where worker progress/completion/questions go: unset/`console` = **dry-run, writes nothing**; `github` posts issue comments gated by `DF_WORKER_ALLOWED_REPOS`   |
+| `DF_TRIGGER_LABEL`            | No       | Config                            | The issue label that requests Dark Factory work (default `dark-factory`); removing it aborts the run                                                             |
+| `DF_TRIGGER_ALLOWED_USERS`    | No*      | Config                            | **Fail-closed** comma-separated GitHub logins allowed to trigger work; unset = every trigger REFUSED                                                             |
+| `DF_RUNNER`                   | No       | Config                            | Where a triggered run executes: unset/`session` = the deployed path; `local` = in-process, and **refused in any production build**                               |
+| `DF_RUN_HISTORY_DRIVER`       | Yes*     | Config                            | Durable ledger adapter (`sqlite` or `postgres`); unset = refusing default                                                                                        |
+| `DF_RUN_HISTORY_DB_PATH`      | No*      | Config                            | Required for `DF_RUN_HISTORY_DRIVER=sqlite`; local SQLite file path                                                                                              |
+| `DF_RUN_HISTORY_DATABASE_URL` | Yes*     | Secret                            | Standard PostgreSQL URL for `postgres` (Supabase-compatible; set Sensitive in Vercel)                                                                            |
+| `DF_API_BASE_URL`             | No*      | Config                            | Trusted HTTP(S) Eve API origin; used by the generic adapter and overrides `VERCEL_URL`; remote generic deployments must set it (never derived from request Host) |
+| `DF_CREDENTIAL_TTL_SECONDS`   | No       | Config                            | Per-task credential lease lifetime, 1..3600 (default `3600`); the sandbox gets a lease, never the token                                                          |
+| `GOOGLE_CLIENT_ID`            | No*      | Secret                            | Google OAuth client id; required for real Google sign-in (#99)                                                                                                   |
+| `GOOGLE_CLIENT_SECRET`        | No*      | Secret                            | Google OAuth client secret; required for real Google sign-in (#99)                                                                                               |
+| `GOOGLE_REDIRECT_URI`         | No       | Config                            | Exact callback URL registered on the OAuth client; unset = derived from the request origin                                                                       |
+| `ALLOWED_GOOGLE_EMAIL`        | No       | Config                            | Only account granted access to the chat UI (default `cuillinguy@gmail.com`; comma-separated)                                                                     |
+| `AUTH_SESSION_SECRET`         | No*      | Secret                            | Signs the HttpOnly session cookie; required in production (`openssl rand -base64 32`)                                                                            |
+| `AUTH_DEV_MODE`               | No       | Config                            | Dev/e2e only: lets `/api/auth/dev` mint a session without Google; **refused when `NODE_ENV=production`**                                                         |
 
 \* `NEXT_PUBLIC_EVE_API_KEY` and `GH_STORY_TOKEN` are required for the chat
 widget and story generation respectively; `GH_SPRINT_TOKEN` is only needed for
-the sprint-metrics report. `GH_RELEASE_TOKEN` alone covers releases.
+the sprint-metrics report. `GH_RELEASE_TOKEN` alone covers releases. To enable
+Dark Factory webhook writes, set `DF_RUN_HISTORY_DRIVER` and its companion path
+or database URL for the selected provider; the default refuses writes.
 
 > **Provisioning rule:** after adding or changing ANY environment variable on
 > Vercel, you must **redeploy** — changes do not apply to existing deployments.
@@ -555,6 +560,40 @@ whether a change that buys success rate with latency or money is rejected.
 ```bash
 npx tsx scripts/latency-cost-demo.local.ts   # a real cycle: reverted on latency, accepted within tolerance
 ```
+
+## Dark Factory (R6a) — durable run history (#198)
+
+The run ledger gives the Dark Factory a durable, provider-neutral record of
+accepted runs, lifecycle events, and measured per-run metrics. It deliberately
+keeps the webhook delivery ID (redelivery identity), opaque run ID (execution
+identity), and stable event ID (transition identity) separate. SQLite and
+standard PostgreSQL adapters implement the same contract; Supabase is supported
+as a PostgreSQL host without a Supabase SDK, and no Vercel SDK is used in the
+ledger.
+
+A replayed GitHub delivery reuses its bound run; a distinct trigger delivery
+gets a fresh run ID. Abort/resume receipts stay pinned to the original run (or
+record that no eligible run existed), so a delayed replay cannot mutate a later
+run. Lifecycle event appends and summary projections are atomic. Identical event
+replay is a no-op; reusing an event ID with different event data fails visibly.
+A run is marked successful only after the Definition-of-Done flow passes,
+including PR creation and disposition of review findings. Latency and cost
+remain absent unless measured; an explicitly measured zero is preserved. The
+The read API tracked by issue #199 and the progress board in issue #200 remain separate follow-ups.
+
+Configure the driver explicitly; the unset provider refuses writes rather than
+claiming an in-memory record is durable:
+
+```dotenv
+DF_RUN_HISTORY_DRIVER=sqlite
+DF_RUN_HISTORY_DB_PATH=.data/dark-factory-runs.sqlite
+```
+
+For a durable deployment, use `DF_RUN_HISTORY_DRIVER=postgres` and set
+`DF_RUN_HISTORY_DATABASE_URL` to a standard PostgreSQL connection URL. Keep that
+URL secret (mark it Sensitive in Vercel). SQLite is local-only; the provider
+rejects it when `NODE_ENV=production` or the selected deployment stage is
+`preview` or `production`, avoiding ephemeral serverless filesystems.
 
 ## Scripts
 

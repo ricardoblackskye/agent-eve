@@ -25,6 +25,7 @@ import {
   type FindingDisposition,
 } from "../../agent/lib/dark-factory/definition-of-done";
 import { GitHubPrWriter } from "../../agent/lib/dark-factory/pr-writer";
+import { SqliteRunHistoryStore } from "../../agent/lib/dark-factory/run-history-store";
 
 describe("#164 cycle 1: resolveMaxReviewRounds — digits-only, fail-closed configuration", () => {
   it("exports DEFAULT_MAX_REVIEW_ROUNDS constant as 3", () => {
@@ -305,6 +306,172 @@ describe("#164 cycles 3-10: runDefinitionOfDone coordinator", () => {
     expect(prs).toHaveLength(1);
   });
 
+  it("persists PR, review-round, and terminal lifecycle events", async () => {
+    const task = {
+      ...sampleTask,
+      runId: "run-history-dod",
+      runMetrics: { iterationCount: 3, fixCycleCount: 1, latencyMs: 1200, costUsd: 0.03 },
+    };
+    const history = new SqliteRunHistoryStore(":memory:", () => task.runId);
+    const accepted = await history.acceptDelivery({
+      deliveryId: "delivery-dod",
+      repo: task.repo,
+      issue: task.issue,
+      receivedAt: "2026-09-24T12:00:00.000Z",
+    });
+    expect(accepted.ok).toBe(true);
+
+    const { deps } = setupTestDeps({
+      runChecks: async () => [],
+      runHistory: history,
+    });
+
+    const result = await runDefinitionOfDone(deps, task);
+    const summary = await history.getRun(task.runId);
+    const events = await history.listRunEvents(task.runId);
+
+    expect(result.status, result.reason).toBe("done");
+    expect(summary.value?.status).toBe("succeeded");
+    expect(summary.value?.reviewCount).toBe(1);
+    expect(summary.value?.iterationCount).toBe(3);
+    expect(summary.value?.fixCycleCount).toBe(1);
+    expect(summary.value?.latencyMs).toBe(1200);
+    expect(summary.value?.costUsd).toBe(0.03);
+    expect(summary.value?.prUrl).toBe(result.pr?.url);
+    expect(events.value?.items.map(({ event }) => event.type)).toEqual([
+      "run.accepted",
+      "pr.opened",
+      "review.round",
+      "run.terminal",
+    ]);
+    await history.close();
+  });
+
+  it("records aggregate review findings and verified dispositions per round", async () => {
+    const task = { ...sampleTask, runId: "run-history-dispositions" };
+    const history = new SqliteRunHistoryStore(":memory:", () => task.runId);
+    const accepted = await history.acceptDelivery({
+      deliveryId: "delivery-dod-dispositions",
+      repo: task.repo,
+      issue: task.issue,
+      receivedAt: "2026-09-24T12:00:00.000Z",
+    });
+    expect(accepted.ok).toBe(true);
+
+    const finding: ReviewFinding = {
+      id: "lint-1",
+      source: "linter",
+      message: "Unused declaration",
+    };
+    const { deps } = setupTestDeps({
+      runChecks: async (round) => (round === 1 ? [finding] : []),
+      attemptFixes: async () => [{ findingId: finding.id, status: "resolved" }],
+      runHistory: history,
+    });
+
+    const result = await runDefinitionOfDone(deps, task);
+    const events = await history.listRunEvents(task.runId);
+    const rounds = events.value?.items
+      .map(({ event }) => event)
+      .filter((event) => event.type === "review.round");
+
+    expect(result.status).toBe("done");
+    expect(rounds).toEqual([
+      expect.objectContaining({
+        reviewRound: 1,
+        findingCount: 1,
+        resolvedCount: 0,
+        acceptedCount: 0,
+      }),
+      expect.objectContaining({
+        reviewRound: 2,
+        findingCount: 0,
+        resolvedCount: 1,
+        acceptedCount: 0,
+      }),
+    ]);
+    await history.close();
+  });
+
+  it("records accepted findings as aggregate counts without persisting raw finding text", async () => {
+    const task = { ...sampleTask, runId: "run-history-accepted-disposition" };
+    const history = new SqliteRunHistoryStore(":memory:", () => task.runId);
+    const accepted = await history.acceptDelivery({
+      deliveryId: "delivery-dod-accepted-disposition",
+      repo: task.repo,
+      issue: task.issue,
+      receivedAt: "2026-09-24T12:00:00.000Z",
+    });
+    expect(accepted.ok).toBe(true);
+
+    const finding: ReviewFinding = {
+      id: "security-secret-finding-id",
+      source: "codeql",
+      message: "Raw secret-bearing explanation must not enter run history",
+      severity: "warning",
+    };
+    const { deps } = setupTestDeps({
+      runChecks: async () => [finding],
+      attemptFixes: async () => [{
+        findingId: finding.id,
+        status: "accepted",
+        explanation: "Accepted with a documented compensating control.",
+      }],
+      runHistory: history,
+    });
+
+    const result = await runDefinitionOfDone(deps, task);
+    const events = await history.listRunEvents(task.runId);
+    const review = events.value?.items.find((item) => item.event.type === "review.round")?.event;
+
+    expect(result.status).toBe("done");
+    expect(review).toMatchObject({ findingCount: 1, resolvedCount: 0, acceptedCount: 1 });
+    expect(JSON.stringify(review)).not.toContain(finding.id);
+    expect(JSON.stringify(review)).not.toContain(finding.message);
+    await history.close();
+  });
+
+  it.each(["review-check", "fix-attempt"] as const)(
+    "records a failed terminal event when a %s callback throws",
+    async (failureStage) => {
+      const task = { ...sampleTask, runId: `run-history-${failureStage}-failure` };
+      const history = new SqliteRunHistoryStore(":memory:", () => task.runId);
+      const accepted = await history.acceptDelivery({
+        deliveryId: `delivery-${failureStage}-failure`,
+        repo: task.repo,
+        issue: task.issue,
+        receivedAt: "2026-09-24T12:00:00.000Z",
+      });
+      expect(accepted.ok).toBe(true);
+      const finding: ReviewFinding = {
+        id: "review-failure",
+        source: "test",
+        message: "Synthetic review failure fixture",
+      };
+      const { deps } = setupTestDeps({
+        runHistory: history,
+        runChecks: async () => {
+          if (failureStage === "review-check") throw new Error("review backend down");
+          return [finding];
+        },
+        attemptFixes: async () => {
+          throw new Error("fix backend down");
+        },
+      });
+
+      const result = await runDefinitionOfDone(deps, task);
+      const summary = await history.getRun(task.runId);
+      const events = await history.listRunEvents(task.runId);
+      const terminal = events.value?.items.find((item) => item.event.type === "run.terminal");
+
+      expect(result.ok).toBe(false);
+      expect(result.status).toBe("blocked");
+      expect(summary.value?.status).toBe("failed");
+      expect(terminal?.event.status).toBe("failed");
+      await history.close();
+    },
+  );
+
   it("cycle 4: findings resolved via code change in subsequent round mark task done", async () => {
     let roundCalled = 0;
     const { deps } = setupTestDeps({
@@ -370,6 +537,32 @@ describe("#164 cycles 3-10: runDefinitionOfDone coordinator", () => {
     expect(comments[0].prNumber).toBe(101);
     expect(comments[0].body).toContain("SEC-1");
     expect(comments[0].body).toContain("resolveApiOrigin");
+  });
+
+  it("blocks an accepted finding when its PR explanation comment cannot be persisted", async () => {
+    const finding: ReviewFinding = {
+      id: "SEC-COMMENT-FAIL",
+      source: "codeql",
+      message: "The accepted explanation must reach the PR.",
+    };
+    const { deps } = setupTestDeps({
+      runChecks: async () => [finding],
+      attemptFixes: async () => [{
+        findingId: finding.id,
+        status: "accepted",
+        explanation: "A documented compensating control exists.",
+      }],
+      commentWriter: {
+        postComment: async () => ({ ok: false, error: "PR comment write failed" }),
+      },
+    });
+
+    const result = await runDefinitionOfDone(deps, sampleTask);
+
+    expect(result.ok).toBe(false);
+    expect(result.status).toBe("blocked");
+    expect(result.acceptedCount).toBe(0);
+    expect(result.reason).toMatch(/comment/i);
   });
 
   it("cycle 6: accepted disposition without explanation is rejected (validation error)", async () => {
