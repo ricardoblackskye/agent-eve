@@ -132,7 +132,11 @@
     "touchpoint",
     "touchpoints",
     "sanitiser",
-    "bikeshedding"
+    "bikeshedding",
+    "AUTOINCREMENT",
+    "BIGSERIAL",
+    "Supabase",
+    "uidx"
   ],
   "ignorePaths": [
     "node_modules/**",

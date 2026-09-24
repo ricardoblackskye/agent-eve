@@ -29,7 +29,9 @@ import {
   resolveIssueToken,
   type IssueWriterFetch,
 } from "./issue-writer";
-import type { StateStore } from "./state";
+import type { RunHistoryStore } from "./run-history-store";
+import { toRunEvent } from "./run-history";
+import type { StateReadResult, StateStore } from "./state";
 
 export type WorkerMessageKind = "progress" | "completed" | "question";
 
@@ -40,6 +42,9 @@ export interface WorkerMessage {
   /** Normalised `owner/repo` the run belongs to. */
   repo: string;
   issue: number;
+  /** Stable lifecycle-event identity and source time, required when run history is enabled. */
+  eventId?: string;
+  occurredAt?: string;
   /** progress: which iteration this is, and the budget. */
   attempt?: number;
   maxAttempts?: number;
@@ -118,6 +123,28 @@ export function toWorkerMessage(input: Partial<WorkerMessage>): WorkerMessage {
     repo,
     issue: input.issue as number,
   };
+
+  if (input.eventId !== undefined) {
+    const eventId = typeof input.eventId === "string" ? input.eventId.trim() : "";
+    if (
+      !eventId ||
+      eventId.length > 256 ||
+      [...eventId].some((ch) => {
+        const code = ch.charCodeAt(0);
+        return code < 0x20 || code === 0x7f;
+      })
+    ) {
+      throw new InvalidWorkerMessageError("Worker message eventId must be a valid non-empty identifier.");
+    }
+    message.eventId = eventId;
+  }
+  if (input.occurredAt !== undefined) {
+    const time = typeof input.occurredAt === "string" ? Date.parse(input.occurredAt) : Number.NaN;
+    if (!Number.isFinite(time)) {
+      throw new InvalidWorkerMessageError("Worker message occurredAt must be a valid timestamp.");
+    }
+    message.occurredAt = new Date(time).toISOString();
+  }
 
   if (input.attempt !== undefined)
     message.attempt = positiveInt(input.attempt, "attempt");
@@ -254,6 +281,64 @@ export class ConsoleReporter implements WorkerReporter {
   }
 }
 
+class RunHistoryWorkerReporter implements WorkerReporter {
+  readonly id: string;
+  readonly mode: "live" | "dry-run";
+
+  constructor(
+    private readonly inner: WorkerReporter,
+    private readonly runHistory: RunHistoryStore,
+  ) {
+    this.id = inner.id;
+    this.mode = inner.mode;
+  }
+
+  async report(message: WorkerMessage): Promise<ReportResult> {
+    const valid = toWorkerMessage(message);
+    if (!valid.eventId || !valid.occurredAt) {
+      throw new InvalidWorkerMessageError(
+        "Worker message eventId and occurredAt are required when run-history persistence is enabled.",
+      );
+    }
+
+    const event = toRunEvent({
+      eventId: valid.eventId,
+      runId: valid.runId,
+      type:
+        valid.kind === "progress"
+          ? "worker.progress"
+          : valid.kind === "completed"
+            ? "worker.completed"
+            : "worker.question",
+      stage: "worker",
+      occurredAt: valid.occurredAt,
+      status: valid.kind === "question" ? "blocked" : "running",
+      ...(valid.attempt !== undefined ? { iterationCount: valid.attempt } : {}),
+    });
+
+    try {
+      const persisted = await this.runHistory.appendEvent(event);
+      if (!persisted.ok) {
+        return {
+          ok: false,
+          mode: "blocked",
+          providerId: this.id,
+          error: persisted.error ?? "Run history refused the worker event.",
+        };
+      }
+    } catch (err) {
+      return {
+        ok: false,
+        mode: "blocked",
+        providerId: this.id,
+        error: `Run history write failed: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+
+    return this.inner.report(valid);
+  }
+}
+
 export interface GitHubCommentReporterOptions {
   store: StateStore;
   /** Defaults to `resolveIssueToken()`; absent means no write is possible. */
@@ -308,7 +393,16 @@ export class GitHubCommentReporter implements WorkerReporter {
 
     const body = renderMessage(valid);
     const [owner, repoName] = valid.repo.split("/");
-    const record = await this.readRecord(valid.runId);
+    const loaded = await this.readRecord(valid.runId);
+    if (!loaded.ok) {
+      return {
+        ok: false,
+        mode: "blocked",
+        providerId: this.id,
+        error: loaded.error,
+      };
+    }
+    const record = loaded.record;
     const recorded = record.commentIds[valid.kind];
 
     if (recorded !== undefined) {
@@ -349,9 +443,19 @@ export class GitHubCommentReporter implements WorkerReporter {
         error: posted.error ?? "GitHub did not return a comment id",
       };
     }
-    await this.writeRecord(valid.runId, {
+    const saved = await this.writeRecord(valid.runId, {
       commentIds: { ...record.commentIds, [valid.kind]: posted.id },
     });
+    if (!saved.ok) {
+      return {
+        ok: false,
+        mode: "blocked",
+        providerId: this.id,
+        commentId: posted.id,
+        error:
+          "The GitHub comment was posted, but its idempotency record could not be persisted.",
+      };
+    }
     return {
       ok: true,
       mode: "live",
@@ -361,24 +465,52 @@ export class GitHubCommentReporter implements WorkerReporter {
     };
   }
 
-  /** Read the id map, treating an unreadable store as "nothing posted yet". */
-  private async readRecord(runId: string): Promise<ReporterRecord> {
+  /** A missing key is empty state; an unreadable key is an operational failure. */
+  private async readRecord(
+    runId: string,
+  ): Promise<{ ok: true; record: ReporterRecord } | { ok: false; error: string }> {
+    let read: StateReadResult<ReporterRecord>;
     try {
-      const read = await this.store.get<ReporterRecord>(reporterKey(runId));
-      if (read.ok && read.value && typeof read.value === "object") {
-        return { commentIds: { ...read.value.commentIds } };
-      }
+      read = await this.store.get<ReporterRecord>(reporterKey(runId));
     } catch {
-      // Fall through: a fresh post is recoverable, a duplicate is not.
+      return { ok: false, error: `Cannot read reporter state from '${this.store.id}'.` };
     }
-    return { commentIds: {} };
+    if (!read.ok) {
+      return { ok: false, error: `Cannot read reporter state from '${this.store.id}'.` };
+    }
+    if (read.value === null) return { ok: true, record: { commentIds: {} } };
+    if (
+      typeof read.value !== "object" ||
+      read.value === null ||
+      typeof read.value.commentIds !== "object" ||
+      read.value.commentIds === null
+    ) {
+      return { ok: false, error: "Reporter state is malformed; refusing to post a duplicate comment." };
+    }
+    for (const [kind, id] of Object.entries(read.value.commentIds)) {
+      if (
+        !KINDS.includes(kind as WorkerMessageKind) ||
+        !Number.isSafeInteger(id) ||
+        (id as number) <= 0
+      ) {
+        return { ok: false, error: "Reporter state is malformed; refusing to post a duplicate comment." };
+      }
+    }
+    return { ok: true, record: { commentIds: { ...read.value.commentIds } } };
   }
 
   private async writeRecord(
     runId: string,
     record: ReporterRecord,
-  ): Promise<void> {
-    await this.store.save(reporterKey(runId), record);
+  ): Promise<{ ok: boolean }> {
+    try {
+      const saved = await this.store.save(reporterKey(runId), record);
+      return saved.ok
+        ? { ok: true }
+        : { ok: false };
+    } catch {
+      return { ok: false };
+    }
   }
 }
 
@@ -393,17 +525,21 @@ export function createWorkerReporter(
   env: Record<string, string | undefined> = process.env,
   deps: {
     store?: StateStore;
+    runHistory?: RunHistoryStore;
     fetchImpl?: IssueWriterFetch;
   } = {},
 ): WorkerReporter {
   const driver = (env.DF_REPORTER_PROVIDER ?? "").trim().toLowerCase();
-  if (driver === "github" && deps.store) {
-    return new GitHubCommentReporter({
-      store: deps.store,
-      token: resolveIssueToken(env),
-      allowedRepos: resolveWorkerAllowedRepos(env),
-      fetchImpl: deps.fetchImpl,
-    });
-  }
-  return new ConsoleReporter();
+  const reporter =
+    driver === "github" && deps.store
+      ? new GitHubCommentReporter({
+          store: deps.store,
+          token: resolveIssueToken(env),
+          allowedRepos: resolveWorkerAllowedRepos(env),
+          fetchImpl: deps.fetchImpl,
+        })
+      : new ConsoleReporter();
+  return deps.runHistory
+    ? new RunHistoryWorkerReporter(reporter, deps.runHistory)
+    : reporter;
 }

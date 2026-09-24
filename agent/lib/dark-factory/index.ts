@@ -16,6 +16,35 @@ import type { MetricsStore } from "./metrics";
 export { createMetricsStore } from "./metrics";
 export { createStateStore, resolveStateDbPath } from "./state-provider";
 export {
+  InvalidRunRecordError,
+  applyRunEvent,
+  toRunEvent,
+  toRunSummary,
+  type RunEvent,
+  type RunEventType,
+  type RunStage,
+  type RunStatus,
+  type RunSummary,
+} from "./run-history";
+export {
+  ConsoleRunHistoryStore,
+  RunHistoryConfigurationError,
+  createRunHistoryStore,
+} from "./run-history-provider";
+export { SqliteRunHistoryStore } from "./run-history-store";
+export type {
+  AcceptRunDelivery,
+  EventCursor,
+  Page,
+  PersistedRunEvent,
+  RunCursor,
+  RunEventListOptions,
+  RunHistoryReadResult,
+  RunHistoryStore,
+  RunHistoryWriteResult,
+  RunListOptions,
+} from "./run-history-store";
+export {
   createPlatformAdapter,
   PlatformConfigurationError,
   type DeploymentStage,

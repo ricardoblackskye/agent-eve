@@ -1,6 +1,6 @@
 /**
- * Doc-consistency guard for the Dark Factory R1 config surface
- * (issues #134 / #138 / #140), mirroring `tests/env-example.test.ts`.
+ * Doc-consistency guard for the Dark Factory config surface
+ * (including issue #198), mirroring `tests/env-example.test.ts`.
  *
  * Every DF_* knob the R1 seams read must be documented in `.env.example`, so
  * the operator-facing setup surface cannot silently drift from the code.
@@ -29,6 +29,9 @@ const DARK_FACTORY_VARS = [
   "DF_SELFIMPROVE_GUARDRAIL_TOLERANCE",
   "DF_SELFIMPROVE_INTERVAL_MINUTES",
   "DF_MAX_REVIEW_ROUNDS",
+  "DF_RUN_HISTORY_DRIVER",
+  "DF_RUN_HISTORY_DB_PATH",
+  "DF_RUN_HISTORY_DATABASE_URL",
 ];
 
 describe(".env.example — Dark Factory (#134/#138/#140/#135/#142/#144)", () => {

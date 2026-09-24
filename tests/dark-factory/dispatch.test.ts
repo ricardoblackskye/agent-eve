@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { SqliteStateAdapter } from "../../agent/lib/dark-factory/state";
+import { SqliteRunHistoryStore } from "../../agent/lib/dark-factory/run-history-store";
 import {
   toDispatchEvent,
   InvalidDispatchEventError,
@@ -68,6 +69,39 @@ describe("canonical CI-event payload (#138 AC1)", () => {
 });
 
 describe("idempotent dispatch lifecycle (#138 AC2)", () => {
+  it("records attempts without marking the overall run successful before definition-of-done", async () => {
+    const state = new SqliteStateAdapter(":memory:");
+    const history = new SqliteRunHistoryStore(":memory:", () => "dispatch-run-1");
+    const accepted = await history.acceptDelivery({
+      deliveryId: "dispatch-history-delivery",
+      repo: "owner/repo",
+      issue: 198,
+      receivedAt: "2026-09-24T12:00:00.000Z",
+    });
+    const runId = accepted.value?.runId;
+    if (!runId) throw new Error("run acceptance returned no runId");
+    const dispatcher = new Dispatcher({
+      store: state,
+      runHistory: history,
+      handler: async () => {},
+      sleep: async () => {},
+    } as never);
+
+    const outcome = await dispatcher.dispatch({ ...failure, runId, repo: "owner/repo" });
+    const summary = await history.getRun(runId);
+    const events = await history.listRunEvents(runId);
+
+    expect(outcome.ok).toBe(true);
+    expect(summary.value).toMatchObject({ status: "running", attemptCount: 1 });
+    expect(events.value?.items.map((item) => item.event.type)).toEqual([
+      "run.accepted",
+      "dispatch.attempt",
+      "dispatch.attempt",
+    ]);
+    state.close?.();
+    history.close();
+  });
+
   it("executes the worker handler exactly once for a re-delivered event", async () => {
     const store = new SqliteStateAdapter(":memory:");
     let handled = 0;

@@ -18,37 +18,12 @@ import {
   resolveRunnerMode,
   runDarkFactoryDispatch,
 } from "../agent/lib/dark-factory/entry";
-import {
-  dispatchKey,
-  type DispatchRecord,
-} from "../agent/lib/dark-factory/dispatch";
-import type {
-  StateReadResult,
-  StateStore,
-  StateWriteResult,
-} from "../agent/lib/dark-factory/state";
+import { SqliteRunHistoryStore } from "../agent/lib/dark-factory/run-history-store";
 
 const line = (label: string, value: unknown) =>
   console.log(
     `  ${label.padEnd(28)} ${typeof value === "string" ? value : JSON.stringify(value)}`,
   );
-
-class MemoryStore implements StateStore {
-  id = "memory";
-  readonly data = new Map<string, unknown>();
-  async save(key: string, value: unknown): Promise<StateWriteResult> {
-    this.data.set(key, value);
-    return { ok: true, mode: "live", providerId: this.id };
-  }
-  async get<T = unknown>(key: string): Promise<StateReadResult<T>> {
-    return {
-      ok: true,
-      mode: "live",
-      providerId: this.id,
-      value: (this.data.get(key) ?? null) as T | null,
-    };
-  }
-}
 
 /** Transports that record instead of reaching out — the offline guarantee. */
 const realNetworkCalls: string[] = [];
@@ -85,20 +60,22 @@ async function main(): Promise<void> {
   line("decision", decision.kind);
   line("reason", decision.reason);
 
-  const store = new MemoryStore();
+  const runHistory = new SqliteRunHistoryStore(":memory:", () => "offline-run-163");
+  const deliveryId = "offline-replay-delivery-163";
   const { impl, calls } = recordingPost();
   const labelOps: string[] = [];
   let handlerCalled = 0;
-  const outcome = await runDarkFactoryDispatch(decision, {
-    store,
+  const deps = {
+    runHistory,
+    deliveryId,
     postSession: impl,
     origin: "http://localhost:3000",
     labels: {
-      add: async (_r, _i, label) => {
+      add: async (_r: string, _i: number, label: string) => {
         labelOps.push(`+${label}`);
         return { ok: true };
       },
-      remove: async (_r, _i, label) => {
+      remove: async (_r: string, _i: number, label: string) => {
         labelOps.push(`-${label}`);
         return { ok: true };
       },
@@ -106,62 +83,67 @@ async function main(): Promise<void> {
     handler: async () => {
       handlerCalled += 1;
     },
-  });
+  };
+  const outcome = await runDarkFactoryDispatch(decision, deps);
 
-  line("outcome", { ok: outcome.ok, status: outcome.status });
+  line("outcome", {
+    ok: outcome.ok,
+    status: outcome.status,
+    runStatus: outcome.runStatus,
+    runId: outcome.runId,
+  });
   line("lifecycle labels", labelOps);
-  const record = store.data.get(
-    dispatchKey(`ricardoblackskye/agent-eve#163`),
-  ) as DispatchRecord | undefined;
-  line(
-    "dispatch recorded",
-    record ? { status: record.status, attempts: record.attempts } : null,
-  );
-  line(
-    "handoff POSTs",
-    calls.map((c) => c.url),
-  );
+  const summary = await runHistory.getRun(outcome.runId ?? "missing");
+  const events = outcome.runId
+    ? await runHistory.listRunEvents(outcome.runId)
+    : null;
+  line("durable summary", summary.value);
+  line("lifecycle events", events?.value?.items.map((item) => item.event.type) ?? []);
+  line("handoff POSTs", calls.map((call) => call.url));
   line("worker handler invoked", handlerCalled);
   line("REAL network calls", realNetworkCalls.length);
 
   console.log("\n  --- the handoff message (the brief arrives as DATA) ---");
   console.log(
-    calls[0].body
+    calls[0]?.body
       .split("\\n")
       .join("\n")
       .split("\n")
-      .map((l) => `  | ${l}`)
+      .map((entry) => `  | ${entry}`)
       .join("\n")
-      .slice(0, 1400),
+      .slice(0, 1400) ?? "  (no handoff was made)",
   );
 
   console.log("\n[2] LOCAL MODE — opt-in, and impossible in production");
   line("DF_RUNNER=local (laptop)", resolveRunnerMode({ DF_RUNNER: "local" }));
   line(
     "+ VERCEL_ENV=production",
-    resolveRunnerMode({ DF_RUNNER: "local", VERCEL_ENV: "production" }),
+    resolveRunnerMode({
+      DF_PLATFORM_PROVIDER: "vercel",
+      DF_RUNNER: "local",
+      VERCEL_ENV: "production",
+    }),
   );
   line(
     "+ NODE_ENV=production",
-    resolveRunnerMode({ DF_RUNNER: "local", NODE_ENV: "production" }),
+    resolveRunnerMode({
+      DF_PLATFORM_PROVIDER: "generic",
+      DF_RUNNER: "local",
+      NODE_ENV: "production",
+    }),
   );
   line("no flag at all", resolveRunnerMode({}));
 
   console.log("\n[3] A SECOND delivery of the same label is HELD (idempotent)");
-  const again = await runDarkFactoryDispatch(
-    decideDarkFactoryTrigger(payload, ENV),
-    {
-      store,
-      postSession: impl,
-      origin: "http://localhost:3000",
-      labels: {
-        add: async () => ({ ok: true }),
-        remove: async () => ({ ok: true }),
-      },
-    },
-  );
-  line("second outcome", { status: again.status, reason: again.reason });
+  const again = await runDarkFactoryDispatch(decision, deps);
+  line("second outcome", {
+    status: again.status,
+    reason: again.reason,
+    runId: again.runId,
+    runStatus: again.runStatus,
+  });
   line("total handoff POSTs", calls.length);
+  await runHistory.close();
 
   if (realNetworkCalls.length > 0) {
     throw new Error(

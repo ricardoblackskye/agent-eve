@@ -256,6 +256,14 @@ describe("index.ts is the single import surface (R2 seams, #135/#142)", () => {
     expect(typeof mod.createWorkerHandler).toBe("function");
   });
 
+  it("re-exports the run-history contracts", async () => {
+    const mod = await import("../../agent/lib/dark-factory/index");
+    expect(typeof mod.toRunSummary).toBe("function");
+    expect(typeof mod.toRunEvent).toBe("function");
+    expect(typeof mod.applyRunEvent).toBe("function");
+    expect(typeof mod.createRunHistoryStore).toBe("function");
+  });
+
   it("re-exports the platform adapter contract", async () => {
     const mod = await import("../../agent/lib/dark-factory/index");
     expect(typeof mod.createPlatformAdapter).toBe("function");

@@ -24,6 +24,7 @@ import type {
   StateStore,
   StateWriteResult,
 } from "../../agent/lib/dark-factory/state";
+import { SqliteRunHistoryStore } from "../../agent/lib/dark-factory/run-history-store";
 
 /** Minimal in-memory StateStore: the idempotence record is all we persist. */
 class MemoryStore implements StateStore {
@@ -216,6 +217,70 @@ describe("#162 cycle 3-4: the default is console and writes NOTHING", () => {
     expect(reporter.mode).toBe("dry-run");
   });
 
+  it("persists worker progress idempotently when a run-history store is configured", async () => {
+    const history = new SqliteRunHistoryStore(":memory:", () => "worker-run-1");
+    const accepted = await history.acceptDelivery({
+      deliveryId: "worker-report-delivery",
+      repo: "ricardoblackskye/agent-eve",
+      issue: 162,
+      receivedAt: "2026-09-24T12:00:00.000Z",
+    });
+    const runId = accepted.value?.runId;
+    if (!runId) throw new Error("run acceptance returned no runId");
+    const reporter = createWorkerReporter(
+      {},
+      { runHistory: history },
+    );
+    const message = msg({
+      runId,
+      attempt: 2,
+      eventId: "worker-progress-2",
+      occurredAt: "2026-09-24T12:01:00.000Z",
+    });
+
+    expect((await reporter.report(message)).ok).toBe(true);
+    expect((await reporter.report(message)).ok).toBe(true);
+    const summary = await history.getRun(runId);
+    const events = await history.listRunEvents(runId);
+
+    expect(summary.value).toMatchObject({ status: "running", iterationCount: 2 });
+    expect(events.value?.items.map((item) => item.event.type)).toEqual([
+      "run.accepted",
+      "worker.progress",
+    ]);
+    history.close();
+  });
+
+  it("persists worker questions as blocked until an explicit resume", async () => {
+    const history = new SqliteRunHistoryStore(":memory:", () => "worker-run-2");
+    const accepted = await history.acceptDelivery({
+      deliveryId: "worker-question-delivery",
+      repo: "ricardoblackskye/agent-eve",
+      issue: 162,
+      receivedAt: "2026-09-24T12:00:00.000Z",
+    });
+    const runId = accepted.value?.runId;
+    if (!runId) throw new Error("run acceptance returned no runId");
+    const reporter = createWorkerReporter(
+      {},
+      { runHistory: history },
+    );
+    const result = await reporter.report(
+      msg({
+        runId,
+        kind: "question",
+        question: "Which branch should be used?",
+        eventId: "worker-question-1",
+        occurredAt: "2026-09-24T12:01:00.000Z",
+      }),
+    );
+    const summary = await history.getRun(runId);
+
+    expect(result.ok).toBe(true);
+    expect(summary.value).toMatchObject({ status: "blocked", stage: "worker" });
+    history.close();
+  });
+
   it("a GitHub reporter with NO allow-list configured refuses every repo (fail-closed)", async () => {
     const { subject, calls } = makeReporter({ allowed: [] });
     const res = await subject.report(msg());
@@ -223,6 +288,71 @@ describe("#162 cycle 3-4: the default is console and writes NOTHING", () => {
     expect(res.mode).toBe("blocked");
     expect(res.error).toMatch(/allow-list/i);
     expect(calls).toHaveLength(0); // nothing was written
+  });
+
+  it("refuses to post when comment-ID state cannot be read", async () => {
+    const store: StateStore = {
+      id: "broken-read",
+      get: async () => ({
+        ok: false,
+        mode: "blocked",
+        providerId: "broken-read",
+        value: null,
+        error: "state store unreachable",
+      }),
+      save: async () => ({
+        ok: true,
+        mode: "live",
+        providerId: "broken-read",
+      }),
+    };
+    const { impl, calls } = fakeFetch();
+    const subject = new GitHubCommentReporter({
+      store,
+      allowedRepos: ALLOWED,
+      token: TOKEN,
+      fetchImpl: impl,
+    });
+
+    const result = await subject.report(msg());
+
+    expect(result.ok).toBe(false);
+    expect(result.mode).toBe("blocked");
+    expect(result.error).toMatch(/read reporter state/i);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("does not claim success when comment-ID state cannot be written", async () => {
+    const store: StateStore = {
+      id: "broken-write",
+      get: async () => ({
+        ok: true,
+        mode: "live",
+        providerId: "broken-write",
+        value: null,
+      }),
+      save: async () => ({
+        ok: false,
+        mode: "blocked",
+        providerId: "broken-write",
+        error: "state store unavailable",
+      }),
+    };
+    const { impl, calls } = fakeFetch();
+    const subject = new GitHubCommentReporter({
+      store,
+      allowedRepos: ALLOWED,
+      token: TOKEN,
+      fetchImpl: impl,
+    });
+
+    const result = await subject.report(msg());
+
+    expect(result.ok).toBe(false);
+    expect(result.mode).toBe("blocked");
+    expect(result.commentId).toBeGreaterThan(0);
+    expect(result.error).toMatch(/comment.*posted|state.*persist/i);
+    expect(calls.filter((call) => call.method === "POST")).toHaveLength(1);
   });
 });
 

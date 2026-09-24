@@ -1,3 +1,6 @@
+import { createHash } from "node:crypto";
+import type { RunHistoryStore } from "./run-history-store";
+import type { RunStatus } from "./run-history";
 import type { StateReadResult, StateStore } from "./state";
 
 /**
@@ -174,6 +177,9 @@ export interface DispatcherOptions {
   route?: (event: DispatchEvent) => string;
   observer?: DispatchObserver;
   sleep?: (ms: number) => Promise<void>;
+  /** Optional authoritative lifecycle sink; successful worker attempts remain running until #164 completes. */
+  runHistory?: RunHistoryStore;
+  now?: () => string;
 }
 
 export class Dispatcher {
@@ -184,6 +190,8 @@ export class Dispatcher {
   private readonly observer: DispatchObserver;
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly handlerTimeoutMs: number;
+  private readonly runHistory?: RunHistoryStore;
+  private readonly now: () => string;
 
   constructor(options: DispatcherOptions) {
     this.store = options.store;
@@ -194,6 +202,8 @@ export class Dispatcher {
     this.handlerTimeoutMs = options.handlerTimeoutMs ?? DEFAULT_HANDLER_TIMEOUT_MS;
     this.sleep =
       options.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
+    this.runHistory = options.runHistory;
+    this.now = options.now ?? (() => new Date().toISOString());
   }
 
   /**
@@ -244,6 +254,38 @@ export class Dispatcher {
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
       return `Cannot persist dispatch state for run '${runId}': store threw: ${detail}`;
+    }
+  }
+
+  /** Persist the observer signal and its run-ledger counterpart before progressing. */
+  private async emit(metric: DispatchAttemptMetric): Promise<string | null> {
+    try {
+      await this.observer(metric);
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      return `Dispatch observer failed for run '${metric.runId}': ${detail}`;
+    }
+    if (!this.runHistory) return null;
+
+    const runHash = createHash("sha256").update(metric.runId).digest("hex").slice(0, 32);
+    const status: RunStatus = metric.status === "failed" ? "failed" : metric.status === "blocked" ? "blocked" : "running";
+    const event = {
+      eventId: `dispatch:${runHash}:${metric.attempt}:${metric.status}`,
+      runId: metric.runId,
+      type: metric.status === "failed" ? "run.terminal" as const : metric.status === "blocked" ? "worker.question" as const : "dispatch.attempt" as const,
+      stage: metric.status === "failed" ? "terminal" as const : metric.status === "blocked" ? "worker" as const : "dispatch" as const,
+      occurredAt: this.now(),
+      status,
+      attempt: metric.attempt,
+    };
+    try {
+      const persisted = await this.runHistory.appendEvent(event);
+      return persisted.ok
+        ? null
+        : `Cannot persist dispatch event for run '${metric.runId}': ${persisted.error ?? "unknown error"}`;
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      return `Cannot persist dispatch event for run '${metric.runId}': ${detail}`;
     }
   }
 
@@ -323,13 +365,16 @@ export class Dispatcher {
 
     for (;;) {
       attempt += 1;
-      await this.observer({
+      const dispatchedError = await this.emit({
         type: "dispatch.attempt",
         runId: event.runId,
         attempt,
         status: "dispatched",
         worker,
       });
+      if (dispatchedError) {
+        return { ok: false, status: "failed", attempts: attempt - 1, worker, error: dispatchedError };
+      }
 
       try {
         await this.withDeadline(
@@ -357,13 +402,16 @@ export class Dispatcher {
               error: parkedPersistError,
             };
           }
-          await this.observer({
+          const observerError = await this.emit({
             type: "dispatch.attempt",
             runId: event.runId,
             attempt,
             status: "blocked",
             worker,
           });
+          if (observerError) {
+            return { ok: false, status: "failed", attempts: attempt, worker, error: observerError };
+          }
           return { ok: true, status: "blocked", attempts: attempt, worker };
         }
 
@@ -387,7 +435,7 @@ export class Dispatcher {
             error: retryPersistError,
           };
         }
-        await this.observer({
+        const observerError = await this.emit({
           type: "dispatch.attempt",
           runId: event.runId,
           attempt,
@@ -395,6 +443,9 @@ export class Dispatcher {
           worker,
           delayMs: schedule.delayMs,
         });
+        if (observerError) {
+          return { ok: false, status: "failed", attempts: attempt, worker, error: observerError };
+        }
         await this.sleep(schedule.delayMs);
         continue;
       }
@@ -417,13 +468,16 @@ export class Dispatcher {
           error: successPersistError,
         };
       }
-      await this.observer({
+      const observerError = await this.emit({
         type: "dispatch.attempt",
         runId: event.runId,
         attempt,
         status: "succeeded",
         worker,
       });
+      if (observerError) {
+        return { ok: false, status: "failed", attempts: attempt, worker, error: observerError };
+      }
       return { ok: true, status: "succeeded", attempts: attempt, worker };
     }
 
@@ -435,7 +489,7 @@ export class Dispatcher {
       updatedAt: new Date().toISOString(),
       error: lastError,
     });
-    await this.observer({
+    const terminalObserverError = await this.emit({
       type: "dispatch.attempt",
       runId: event.runId,
       attempt,
@@ -447,7 +501,11 @@ export class Dispatcher {
       status: "failed",
       attempts: attempt,
       worker,
-      error: terminalPersistError ? `${lastError} (also: ${terminalPersistError})` : lastError,
+      error: terminalObserverError
+        ? `${lastError} (also: ${terminalObserverError})`
+        : terminalPersistError
+          ? `${lastError} (also: ${terminalPersistError})`
+          : lastError,
     };
   }
 }

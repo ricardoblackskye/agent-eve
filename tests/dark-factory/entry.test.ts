@@ -8,7 +8,7 @@
  * triggers already use — a POST to Eve's own session API — and the worker handler is
  * never invoked inline.
  */
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect } from "vitest";
 import {
   buildIntent,
   renderHandoffMessage,
@@ -20,32 +20,15 @@ import {
   type LabelWriter,
 } from "../../agent/lib/dark-factory/entry";
 import { decideDarkFactoryTrigger } from "../../agent/lib/dark-factory/trigger";
-import {
-  dispatchKey,
-  type DispatchRecord,
-} from "../../agent/lib/dark-factory/dispatch";
-import type {
-  StateReadResult,
-  StateStore,
-  StateWriteResult,
-} from "../../agent/lib/dark-factory/state";
+import { SqliteRunHistoryStore } from "../../agent/lib/dark-factory/run-history-store";
 
-class MemoryStore implements StateStore {
-  id = "memory";
-  readonly data = new Map<string, unknown>();
-  async save(key: string, value: unknown): Promise<StateWriteResult> {
-    this.data.set(key, value);
-    return { ok: true, mode: "live", providerId: this.id };
-  }
-  async get<T = unknown>(key: string): Promise<StateReadResult<T>> {
-    return {
-      ok: true,
-      mode: "live",
-      providerId: this.id,
-      value: (this.data.get(key) ?? null) as T | null,
-    };
-  }
-}
+const historyStores: SqliteRunHistoryStore[] = [];
+let runIdCount = 0;
+let deliveryCount = 0;
+
+afterEach(async () => {
+  for (const store of historyStores.splice(0)) await store.close();
+});
 
 function recordingPost() {
   const calls: { url: string; body: string }[] = [];
@@ -95,17 +78,22 @@ const triggerDecision = (over: Record<string, unknown> = {}) =>
   );
 
 function deps(over: Partial<EntryDeps> = {}) {
-  const store = new MemoryStore();
+  const runHistory =
+    over.runHistory ??
+    new SqliteRunHistoryStore(":memory:", () => `entry-run-${++runIdCount}`);
+  if (!over.runHistory) historyStores.push(runHistory as SqliteRunHistoryStore);
+  const deliveryId = over.deliveryId ?? `entry-delivery-${++deliveryCount}`;
   const { impl, calls } = recordingPost();
   const { writer, ops } = recordingLabels();
   return {
-    store,
+    runHistory,
     calls,
     ops,
     // localhost is a trusted handoff origin (resolveApiOrigin only trusts the request
     // origin when it is loopback/local), so the recorded POST still happens in tests.
     deps: {
-      store,
+      runHistory,
+      deliveryId,
       postSession: impl,
       labels: writer,
       origin: "http://localhost:3000",
@@ -116,23 +104,21 @@ function deps(over: Partial<EntryDeps> = {}) {
 
 describe("#163 cycle 9-10: record and hand off — the loop never runs inline", () => {
   it("records the dispatch AND posts one session handoff", async () => {
-    const { store, calls, deps: d } = deps();
+    const { runHistory, calls, deps: d } = deps();
     const res = await runDarkFactoryDispatch(triggerDecision(), d);
 
     expect(res.ok).toBe(true);
     expect(res.status).toBe("dispatched");
     expect(calls).toHaveLength(1);
     expect(calls[0].url).toMatch(/\/eve\/v1\/session$/);
-    expect(
-      await store.get(dispatchKey(toRunId("ricardoblackskye/agent-eve", 163))),
-    ).toMatchObject({
-      ok: true,
-    });
-    expect(
-      store.data.get(dispatchKey(toRunId("ricardoblackskye/agent-eve", 163))),
-    ).toMatchObject({
-      status: "dispatched",
-    });
+    const summary = await runHistory.getRun(res.runId ?? "missing");
+    const events = await runHistory.listRunEvents(res.runId ?? "missing");
+    expect(res.runStatus).toBe("running");
+    expect(summary.value).toMatchObject({ runId: res.runId, status: "running" });
+    expect(events.value?.items.map((item) => item.event.type)).toEqual([
+      "run.accepted",
+      "dispatch.started",
+    ]);
   });
 
   it("never invokes a worker handler inline, even when one is supplied", async () => {
@@ -154,28 +140,68 @@ describe("#163 cycle 9-10: record and hand off — the loop never runs inline", 
     expect(second.status).toBe("held");
     expect(calls).toHaveLength(1);
   });
+
+  it("uses the durable receipt's opaque run identity for the handoff", async () => {
+    const history = new SqliteRunHistoryStore(":memory:", () => "opaque-run-1");
+    const { deps: d } = deps();
+    try {
+      const result = await runDarkFactoryDispatch(triggerDecision(), {
+        ...d,
+        runHistory: history,
+        deliveryId: "history-delivery-1",
+      } as never);
+      expect(result.runId).toBe("opaque-run-1");
+    } finally {
+      history.close();
+    }
+  });
+
+  it("creates a distinct run identity for a deliberate rerun after abort", async () => {
+    const { deps: d } = deps();
+    const first = await runDarkFactoryDispatch(triggerDecision(), {
+      ...d,
+      deliveryId: "delivery-first",
+    } as never);
+    const aborted = await runDarkFactoryDispatch(
+      triggerDecision({ action: "unlabeled", label: { name: "dark-factory" } }),
+      { ...d, deliveryId: "delivery-abort" } as never,
+    );
+    const rerun = await runDarkFactoryDispatch(triggerDecision(), {
+      ...d,
+      deliveryId: "delivery-rerun",
+    } as never);
+
+    expect(first.ok).toBe(true);
+    expect(aborted.status).toBe("aborted");
+    expect(rerun.ok).toBe(true);
+    expect(rerun.runId).not.toBe(first.runId);
+  });
 });
 
 describe("#163 cycle 11: a parked run is never re-kicked", () => {
-  it("holds when the dispatch record is `blocked` (#162)", async () => {
-    const { store, calls, deps: d } = deps();
-    const runId = toRunId("ricardoblackskye/agent-eve", 163);
-    await store.save(dispatchKey(runId), {
-      event: {
-        runId,
-        repo: "ricardoblackskye/agent-eve",
-        ref: "main",
-        status: "success",
-      },
-      worker: "W1",
+  it("holds when the durable run is blocked waiting on a human answer (#162)", async () => {
+    const { runHistory, calls, deps: d } = deps();
+    const accepted = await runHistory.acceptDelivery({
+      deliveryId: "seed-blocked-run",
+      repo: "ricardoblackskye/agent-eve",
+      issue: 163,
+      receivedAt: "2026-09-24T12:00:00.000Z",
+    });
+    const runId = accepted.value?.runId;
+    if (!runId) throw new Error("blocked-run fixture did not return a run ID");
+    await runHistory.appendEvent({
+      eventId: "seed-worker-question",
+      runId,
+      type: "worker.question",
+      stage: "worker",
+      occurredAt: "2026-09-24T12:00:01.000Z",
       status: "blocked",
-      attempts: 1,
-      updatedAt: new Date().toISOString(),
-    } satisfies DispatchRecord);
+    });
 
     const res = await runDarkFactoryDispatch(triggerDecision(), d);
     expect(res.status).toBe("held");
-    expect(res.reason).toMatch(/blocked|waiting/i);
+    expect(res.runId).toBe(runId);
+    expect(res.runStatus).toBe("blocked");
     expect(calls).toHaveLength(0);
   });
 });
@@ -193,34 +219,55 @@ describe("#163 cycle 12-14: abort, resume and the lifecycle labels", () => {
   });
 
   it("resuming clears the question label and asks the runner to resume explicitly", async () => {
-    const { ops, calls, deps: d } = deps();
+    const { runHistory, ops, calls, deps: d } = deps();
+    const accepted = await runHistory.acceptDelivery({
+      deliveryId: "seed-resume-run",
+      repo: "ricardoblackskye/agent-eve",
+      issue: 163,
+      receivedAt: "2026-09-24T12:00:00.000Z",
+    });
+    const runId = accepted.value?.runId;
+    if (!runId) throw new Error("resume fixture did not return a run ID");
+    await runHistory.appendEvent({
+      eventId: "seed-resume-question",
+      runId,
+      type: "worker.question",
+      stage: "worker",
+      occurredAt: "2026-09-24T12:00:01.000Z",
+      status: "blocked",
+    });
+
     const res = await runDarkFactoryDispatch(
       triggerDecision({ action: "unlabeled", label: { name: "needs-answer" } }),
       d,
     );
     expect(res.status).toBe("resumed");
+    expect(res.runId).toBe(runId);
+    expect(res.runStatus).toBe("running");
     expect(ops).toContain("-needs-answer");
     expect(calls[0].body).toMatch(/"resume":true/);
   });
 
   it("a trigger marks the run running", async () => {
-    const { ops, deps: d } = deps();
-    await runDarkFactoryDispatch(triggerDecision(), d);
+    const { runHistory, ops, deps: d } = deps();
+    const result = await runDarkFactoryDispatch(triggerDecision(), d);
+    const summary = await runHistory.getRun(result.runId ?? "missing");
     expect(ops).toContain("+df:running");
+    expect(summary.value?.status).toBe("running");
   });
 
-  it("SURFACES a label-write failure instead of swallowing it", async () => {
-    const store = new MemoryStore();
-    const { impl } = recordingPost();
+  it("SURFACES a label-write failure and stores a failed terminal outcome", async () => {
+    const { runHistory, deps: defaults } = deps();
     const { writer } = recordingLabels({ failOn: "add" });
     const res = await runDarkFactoryDispatch(triggerDecision(), {
-      store,
-      postSession: impl,
+      ...defaults,
       labels: writer,
     });
+    const summary = await runHistory.getRun(res.runId ?? "missing");
     expect(res.ok).toBe(false);
     expect(res.reason).toMatch(/label/i);
     expect(res.error).toBeTruthy();
+    expect(summary.value?.status).toBe("failed");
   });
 });
 
@@ -378,45 +425,29 @@ describe("#163 security: the session handoff origin is never taken from the requ
   });
 
   it("a trusted local origin lets the handoff proceed; an untrusted one is skipped", async () => {
-    const store = new MemoryStore();
-    const ok = recordingPost();
-    // localhost origin -> handoff happens
-    const local = await runDarkFactoryDispatch(triggerDecision(), {
-      store,
-      postSession: ok.impl,
-      labels: recordingLabels().writer,
-      origin: "http://localhost:3000",
-    } as never);
-    expect(ok.calls).toHaveLength(1);
-    // external origin + no config -> handoff skipped (fail closed)
-    store.data.clear();
-    const ext = recordingPost();
-    const skipped = await runDarkFactoryDispatch(triggerDecision(), {
-      store,
-      postSession: ext.impl,
-      labels: recordingLabels().writer,
-      origin: "https://attacker.test",
-    } as never);
-    expect(ext.calls).toHaveLength(0);
+    const local = deps({ origin: "http://localhost:3000" });
+    const localResult = await runDarkFactoryDispatch(triggerDecision(), local.deps);
+    expect(local.calls).toHaveLength(1);
+    expect(localResult.ok).toBe(true);
+
+    const external = deps({ origin: "https://attacker.test" });
+    const skipped = await runDarkFactoryDispatch(triggerDecision(), external.deps);
+    expect(external.calls).toHaveLength(0);
     expect(skipped.ok).toBe(false);
     expect(skipped.reason).toMatch(/skipped/i);
   });
 
   it("refuses a remote session origin when the local runner is selected", async () => {
-    const store = new MemoryStore();
-    const post = recordingPost();
-    const result = await runDarkFactoryDispatch(triggerDecision(), {
-      store,
-      postSession: post.impl,
-      labels: recordingLabels().writer,
+    const configured = deps({
       env: {
         DF_PLATFORM_PROVIDER: "generic",
         DF_RUNNER: "local",
         DF_API_BASE_URL: "https://remote.example.test",
       },
     });
+    const result = await runDarkFactoryDispatch(triggerDecision(), configured.deps);
 
-    expect(post.calls).toHaveLength(0);
+    expect(configured.calls).toHaveLength(0);
     expect(result.ok).toBe(false);
     expect(result.error).toMatch(/loopback/i);
   });

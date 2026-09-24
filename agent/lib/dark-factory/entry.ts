@@ -17,15 +17,12 @@
  * configuration must never be read as permission to relax the control**. So local runs
  * are opt-IN and refused for ANY production build — Vercel's or a self-hosted one.
  */
-import {
-  dispatchKey,
-  type DispatchEvent,
-  type DispatchRecord,
-  type DispatchStatus,
-} from "./dispatch";
+import { createHash } from "node:crypto";
+import type { DispatchEvent } from "./dispatch";
 import { TRIGGER_LABELS } from "./trigger";
 import type { DarkFactoryTriggerDecision } from "./trigger";
-import type { StateStore } from "./state";
+import type { RunStatus } from "./run-history";
+import type { RunHistoryStore } from "./run-history-store";
 import { createPlatformAdapter } from "./platform";
 
 /** The label operations the entry point needs; injected so tests need no GitHub. */
@@ -54,7 +51,9 @@ export interface DispatchIntent {
 }
 
 export interface EntryDeps {
-  store: StateStore;
+  runHistory: RunHistoryStore;
+  /** GitHub X-GitHub-Delivery; dedup identity, never the run ID. */
+  deliveryId: string;
   /** Injected transport for the session handoff (tests supply a recorder). */
   postSession?: typeof fetch;
   labels?: LabelWriter;
@@ -72,13 +71,20 @@ export interface EntryDeps {
 }
 
 export type EntryStatus =
-  "dispatched" | "held" | "aborted" | "resumed" | "refused" | "ignored";
+  | "dispatched"
+  | "held"
+  | "aborted"
+  | "resumed"
+  | "failed"
+  | "refused"
+  | "ignored";
 
 export interface EntryResult {
   ok: boolean;
   status: EntryStatus;
   reason: string;
   runId?: string;
+  runStatus?: RunStatus;
   error?: string;
 }
 
@@ -95,7 +101,7 @@ export function sanitizeIdentifier(value: string): string {
     .slice(0, 200);
 }
 
-/** Deterministic run id: the same issue always yields the same run, so a repeat label dedupes. */
+/** Legacy issue key; execution identities come from the durable run-history store. */
 export function toRunId(repo: string, issue: number): string {
   return `${sanitizeIdentifier(repo)}#${issue}`;
 }
@@ -263,8 +269,6 @@ export function resolveApiOrigin(
   };
 }
 
-const RUNNING: DispatchStatus = "dispatched";
-
 function statusResult(
   ok: boolean,
   status: EntryStatus,
@@ -272,6 +276,48 @@ function statusResult(
   extra: Partial<EntryResult> = {},
 ): EntryResult {
   return { ok, status, reason, ...extra };
+}
+
+function deliveryEventId(deliveryId: string, transition: string): string {
+  const digest = createHash("sha256").update(deliveryId).digest("hex").slice(0, 32);
+  return `delivery:${digest}:${transition}`;
+}
+
+async function findActiveRun(
+  history: RunHistoryStore,
+  repo: string,
+  issue: number,
+): Promise<{ runId?: string; status?: RunStatus; error?: string }> {
+  const page = await history.listRuns({
+    repo,
+    issue,
+    statuses: ["queued", "running", "blocked"],
+    limit: 1,
+  });
+  if (!page.ok) {
+    return { error: page.error ?? "run history could not be read" };
+  }
+  const active = page.value?.items[0];
+  return active ? { runId: active.runId, status: active.status } : {};
+}
+
+async function recordTerminal(
+  history: RunHistoryStore,
+  intent: DispatchIntent,
+  deliveryId: string,
+  transition: string,
+  status: "aborted" | "failed",
+  occurredAt: string,
+): Promise<string | null> {
+  const written = await history.appendEvent({
+    eventId: deliveryEventId(deliveryId, transition),
+    runId: intent.runId,
+    type: "run.terminal",
+    stage: "terminal",
+    occurredAt,
+    status,
+  });
+  return written.ok ? null : written.error ?? "terminal run state could not be persisted";
 }
 
 export async function runDarkFactoryDispatch(
@@ -285,8 +331,8 @@ export async function runDarkFactoryDispatch(
     return statusResult(false, "refused", decision.reason);
   }
 
-  const intent = buildIntent(decision);
-  if (!intent.repo || !intent.issue) {
+  const baseIntent = buildIntent(decision);
+  if (!baseIntent.repo || !baseIntent.issue) {
     return statusResult(
       false,
       "refused",
@@ -294,11 +340,42 @@ export async function runDarkFactoryDispatch(
     );
   }
 
+  const deliveryId = typeof deps.deliveryId === "string" ? deps.deliveryId.trim() : "";
+  if (!deliveryId || deliveryId.length > 256 || /[\u0000-\u001f\u007f]/.test(deliveryId)) {
+    return statusResult(false, "refused", "a valid GitHub delivery ID is required.");
+  }
+  if (!deps.runHistory) {
+    return statusResult(false, "refused", "run history is not configured.");
+  }
+
   const labels = deps.labels;
   const now = deps.now ?? (() => new Date().toISOString());
 
   // --- abort: the operator's stop button ---
-  if (intent.kind === "abort") {
+  if (baseIntent.kind === "abort") {
+    const active = await findActiveRun(deps.runHistory, baseIntent.repo, baseIntent.issue);
+    if (active.error) {
+      return statusResult(false, "refused", `could not read the active run: ${active.error}`, {
+        error: active.error,
+      });
+    }
+    const intent = { ...baseIntent, ...(active.runId ? { runId: active.runId } : {}) };
+    if (active.runId) {
+      const terminalError = await recordTerminal(
+        deps.runHistory,
+        intent,
+        deliveryId,
+        "abort",
+        "aborted",
+        now(),
+      );
+      if (terminalError) {
+        return statusResult(false, "refused", terminalError, {
+          runId: active.runId,
+          error: terminalError,
+        });
+      }
+    }
     const failures = await removeLabels(labels, intent, [
       TRIGGER_LABELS.running,
       TRIGGER_LABELS.question,
@@ -308,29 +385,30 @@ export async function runDarkFactoryDispatch(
         runId: intent.runId,
         error: failures,
       });
-    await deps.store.save(dispatchKey(intent.runId), {
-      event: toEvent(intent),
-      worker: "operator",
-      status: "failed" as DispatchStatus,
-      attempts: 1,
-      updatedAt: now(),
-      // "failed" rather than a new terminal status: the run did not complete and was
-      // stopped on purpose. Adding another member to a merged state machine for an
-      // operator action is not worth the churn; the reason string carries the detail.
-      error: "aborted: the trigger label was removed by the operator",
-    } satisfies DispatchRecord);
     return statusResult(
       true,
       "aborted",
       "the run was aborted and its lifecycle labels cleared",
       {
-        runId: intent.runId,
+        ...(active.runId ? { runId: active.runId, runStatus: "aborted" as const } : {}),
       },
     );
   }
 
   // --- resume: only ever after a human answered (never implied by a re-delivery) ---
-  if (intent.kind === "resume") {
+  if (baseIntent.kind === "resume") {
+    const active = await findActiveRun(deps.runHistory, baseIntent.repo, baseIntent.issue);
+    if (active.error) {
+      return statusResult(false, "refused", `could not read the active run: ${active.error}`, {
+        error: active.error,
+      });
+    }
+    if (!active.runId || active.status !== "blocked") {
+      return statusResult(true, "held", "there is no blocked run to resume", {
+        ...(active.runId ? { runId: active.runId, runStatus: active.status } : {}),
+      });
+    }
+    const intent = { ...baseIntent, runId: active.runId };
     const failure = await removeLabels(labels, intent, [
       TRIGGER_LABELS.question,
     ]);
@@ -339,50 +417,60 @@ export async function runDarkFactoryDispatch(
         runId: intent.runId,
         error: failure,
       });
+    const resumed = await deps.runHistory.appendEvent({
+      eventId: deliveryEventId(deliveryId, "resume"),
+      runId: intent.runId,
+      type: "run.resumed",
+      stage: "dispatch",
+      occurredAt: now(),
+      status: "running",
+    });
+    if (!resumed.ok) {
+      return statusResult(false, "refused", resumed.error ?? "resume could not be persisted", {
+        runId: intent.runId,
+        error: resumed.error,
+      });
+    }
     const posted = await postHandoff(deps, intent);
     if (!posted.ok) {
+      const terminalError = await recordTerminal(
+        deps.runHistory,
+        intent,
+        deliveryId,
+        "resume-handoff-failed",
+        "failed",
+        now(),
+      );
       return statusResult(false, "resumed", posted.reason, {
         runId: intent.runId,
-        error: posted.reason,
+        runStatus: terminalError ? "running" : "failed",
+        error: terminalError ? `${posted.reason}; ${terminalError}` : posted.reason,
       });
     }
     return statusResult(true, "resumed", "the parked run was resumed", {
       runId: intent.runId,
+      runStatus: "running",
     });
   }
 
-  // --- trigger: record first, so a repeat can never start a second run ---
-  const existing = await deps.store.get<DispatchRecord>(
-    dispatchKey(intent.runId),
-  );
-  if (existing.ok && existing.value && existing.value.status !== "failed") {
-    const parked = existing.value.status === "blocked";
+  // --- trigger: bind the delivery and create the run before any side effect ---
+  const accepted = await deps.runHistory.acceptDelivery({
+    deliveryId,
+    repo: baseIntent.repo,
+    issue: baseIntent.issue,
+    receivedAt: now(),
+  });
+  if (!accepted.ok || !accepted.value) {
+    const error = accepted.error ?? "run acceptance could not be persisted";
+    return statusResult(false, "refused", error, { error });
+  }
+  const intent = { ...baseIntent, runId: accepted.value.runId };
+  if (accepted.duplicate) {
     return statusResult(
       true,
       "held",
-      parked
-        ? "the run is blocked waiting on a human answer; not restarting it"
-        : "a run for this issue is already recorded; not starting a second one",
-      { runId: intent.runId },
-    );
-  }
-
-  const written = await deps.store.save(dispatchKey(intent.runId), {
-    event: toEvent(intent),
-    worker: "dark-factory",
-    status: RUNNING,
-    attempts: 1,
-    updatedAt: now(),
-    ...(existing.value?.error ? { error: existing.value.error } : {}),
-  } satisfies DispatchRecord);
-  if (!written.ok) {
-    return statusResult(
-      false,
-      "refused",
-      `could not record the dispatch: ${written.error ?? "unknown error"}`,
-      {
-        runId: intent.runId,
-      },
+      "this delivery or issue already has an accepted run; not starting duplicate work",
+      { runId: intent.runId, runStatus: accepted.value.status },
     );
   }
 
@@ -390,27 +478,51 @@ export async function runDarkFactoryDispatch(
     TRIGGER_LABELS.running,
   ]);
   if (labelFailure) {
-    return statusResult(false, "dispatched", labelFailure, {
+    const terminalError = await recordTerminal(
+      deps.runHistory,
+      intent,
+      deliveryId,
+      "label-failed",
+      "failed",
+      now(),
+    );
+    return statusResult(false, "failed", terminalError ? `${labelFailure}; ${terminalError}` : labelFailure, {
       runId: intent.runId,
-      error: labelFailure,
+      runStatus: terminalError ? "queued" : "failed",
+      error: terminalError ? `${labelFailure}; ${terminalError}` : labelFailure,
     });
   }
 
   const posted = await postHandoff(deps, intent);
   if (!posted.ok) {
-    // The handoff failed, so the record must say so — a "dispatched" record with no
-    // handoff would be a lie, and marking it failed is what lets a later label retry.
-    await deps.store.save(dispatchKey(intent.runId), {
-      event: toEvent(intent),
-      worker: "dark-factory",
-      status: "failed" as DispatchStatus,
-      attempts: 1,
-      updatedAt: now(),
-      error: posted.reason,
-    } satisfies DispatchRecord);
-    return statusResult(false, "dispatched", posted.reason, {
+    const terminalError = await recordTerminal(
+      deps.runHistory,
+      intent,
+      deliveryId,
+      "handoff-failed",
+      "failed",
+      now(),
+    );
+    return statusResult(false, "failed", terminalError ? `${posted.reason}; ${terminalError}` : posted.reason, {
       runId: intent.runId,
-      error: posted.reason,
+      runStatus: terminalError ? "queued" : "failed",
+      error: terminalError ? `${posted.reason}; ${terminalError}` : posted.reason,
+    });
+  }
+
+  const dispatched = await deps.runHistory.appendEvent({
+    eventId: deliveryEventId(deliveryId, "dispatch-started"),
+    runId: intent.runId,
+    type: "dispatch.started",
+    stage: "dispatch",
+    occurredAt: now(),
+    status: "running",
+  });
+  if (!dispatched.ok) {
+    return statusResult(false, "failed", dispatched.error ?? "dispatch state could not be persisted", {
+      runId: intent.runId,
+      runStatus: "queued",
+      error: dispatched.error,
     });
   }
 
@@ -420,17 +532,9 @@ export async function runDarkFactoryDispatch(
     "the run was recorded and handed off out of band",
     {
       runId: intent.runId,
+      runStatus: "running",
     },
   );
-}
-
-function toEvent(intent: DispatchIntent): DispatchEvent {
-  return {
-    runId: intent.runId,
-    repo: intent.repo,
-    ref: "main",
-    status: "success",
-  };
 }
 
 async function addLabels(
