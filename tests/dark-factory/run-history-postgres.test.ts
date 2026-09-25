@@ -237,4 +237,75 @@ describeWithDatabase("PostgresRunHistoryStore integration", () => {
 
     expect(page.value?.items.map((run) => run.issue)).toEqual([213, 212, 211]);
   });
+
+  it("aggregates status counts, terminal trend, and measured sums", async () => {
+    const repo = `owner/metrics-${namespace}`;
+    const terminal = async (
+      deliveryId: string,
+      runIssue: number,
+      status: "succeeded" | "failed" | "aborted",
+      completedAt: string,
+      extra: Record<string, unknown> = {},
+    ) => {
+      const accepted = await store.acceptDelivery({
+        deliveryId: `${deliveryId}-${namespace}`,
+        repo,
+        issue: runIssue,
+        receivedAt: completedAt,
+      });
+      if (!accepted.ok) throw new Error("delivery failed");
+      const result = await store.appendEvent({
+        eventId: `${deliveryId}-t-${namespace}`,
+        runId: accepted.value!.runId,
+        type: "run.terminal",
+        stage: "terminal",
+        occurredAt: completedAt,
+        status,
+        ...extra,
+      });
+      if (!result.ok) throw new Error("terminal failed");
+    };
+    await terminal(
+      "pg-m-succeeded",
+      500,
+      "succeeded",
+      "2026-09-24T12:00:00.000Z",
+      {
+        latencyMs: 1000,
+        costUsd: 0.5,
+      },
+    );
+    await terminal("pg-m-failed", 501, "failed", "2026-09-24T12:00:00.000Z", {
+      latencyMs: 2000,
+      costUsd: 1.0,
+    });
+    await terminal("pg-m-aborted", 502, "aborted", "2026-09-25T08:00:00.000Z", {
+      latencyMs: 500,
+      costUsd: 0.25,
+    });
+
+    const metrics = await store.getRunMetrics({ repo });
+
+    const byStatus = Object.fromEntries(
+      metrics.value?.statusCounts.map((c) => [c.status, c.count]) ?? [],
+    );
+    expect(byStatus).toEqual({
+      queued: 0,
+      running: 0,
+      blocked: 0,
+      aborted: 1,
+      succeeded: 1,
+      failed: 1,
+    });
+    const trend = metrics.value?.trend
+      .map((t) => `${t.date}:${t.outcome}:${t.count}`)
+      .sort();
+    expect(trend).toEqual([
+      "2026-09-24:failed:1",
+      "2026-09-24:succeeded:1",
+      "2026-09-25:aborted:1",
+    ]);
+    expect(metrics.value?.measured.latencyMs).toEqual({ sum: 3500, count: 3 });
+    expect(metrics.value?.measured.costUsd).toEqual({ sum: 1.75, count: 3 });
+  });
 });

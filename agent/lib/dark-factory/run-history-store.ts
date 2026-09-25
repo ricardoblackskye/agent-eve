@@ -1,14 +1,20 @@
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import {
+  ALL_RUN_STATUSES,
   applyRunEvent,
   InvalidRunRecordError,
   normalizeRunDateRange,
+  TERMINAL_RUN_STATUSES,
   toRunEvent,
   toRunSummary,
   type RunEvent,
+  type RunMetrics,
+  type RunMetricsQuery,
   type RunStatus,
+  type RunStatusCount,
   type RunSummary,
+  type RunTrendPoint,
 } from "./run-history";
 
 export interface AcceptRunDelivery {
@@ -120,6 +126,9 @@ export interface RunHistoryStore {
     runId: string,
     options?: RunEventListOptions,
   ): Promise<RunHistoryReadResult<Page<PersistedRunEvent, EventCursor>>>;
+  getRunMetrics(
+    options?: RunMetricsQuery,
+  ): Promise<RunHistoryReadResult<RunMetrics>>;
   close(): void | Promise<void>;
 }
 
@@ -1057,6 +1066,110 @@ export class SqliteRunHistoryStore implements RunHistoryStore {
             ? { nextCursor: { sequence: last.sequence } }
             : {}),
         },
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        mode: "blocked",
+        providerId: this.id,
+        value: null,
+        error: readError(error),
+      };
+    }
+  }
+
+  async getRunMetrics(
+    options: RunMetricsQuery = {},
+  ): Promise<RunHistoryReadResult<RunMetrics>> {
+    const repo =
+      options.repo === undefined ? undefined : validateRepo(options.repo);
+    const { from, to } = normalizeRunDateRange(options.from, options.to);
+    try {
+      const db = this.handle();
+      if (!db)
+        throw new Error(`SQLite run history is unavailable at '${this.path}'.`);
+      const clauses: string[] = [];
+      const values: (string | number)[] = [];
+      if (repo !== undefined) {
+        clauses.push("repo = ?");
+        values.push(repo);
+      }
+      if (from !== undefined) {
+        clauses.push("created_at >= ?");
+        values.push(from);
+      }
+      if (to !== undefined) {
+        clauses.push("created_at < ?");
+        values.push(to);
+      }
+      const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+
+      const statusRows = db
+        .prepare(
+          `SELECT status, COUNT(*) AS count FROM df_run_summaries ${where} GROUP BY status`,
+        )
+        .all(...values) as unknown as Array<{ status: string; count: number }>;
+      const statusMap = new Map<string, number>();
+      for (const row of statusRows)
+        statusMap.set(row.status, Number(row.count));
+      const statusCounts: RunStatusCount[] = ALL_RUN_STATUSES.map((status) => ({
+        status,
+        count: statusMap.get(status) ?? 0,
+      }));
+
+      const trendClauses = [
+        ...clauses,
+        "completed_at IS NOT NULL",
+        `status IN (${TERMINAL_RUN_STATUSES.map(() => "?").join(", ")})`,
+      ];
+      const trendWhere = `WHERE ${trendClauses.join(" AND ")}`;
+      const trendRows = db
+        .prepare(
+          `SELECT substr(completed_at, 1, 10) AS date, status, COUNT(*) AS count ` +
+            `FROM df_run_summaries ${trendWhere} GROUP BY date, status`,
+        )
+        .all(...values, ...TERMINAL_RUN_STATUSES) as unknown as Array<{
+        date: string;
+        status: RunStatus;
+        count: number;
+      }>;
+      const trend: RunTrendPoint[] = trendRows.map((row) => ({
+        date: row.date,
+        outcome: row.status,
+        count: Number(row.count),
+      }));
+
+      const measuredRow = db
+        .prepare(
+          `SELECT SUM(latency_ms) AS latency_sum, COUNT(latency_ms) AS latency_count, ` +
+            `SUM(cost_usd) AS cost_sum, COUNT(cost_usd) AS cost_count ` +
+            `FROM df_run_summaries ${where}`,
+        )
+        .get(...values) as unknown as {
+        latency_sum: number | null;
+        latency_count: number;
+        cost_sum: number | null;
+        cost_count: number;
+      };
+      const measured: RunMetrics["measured"] = {};
+      if (Number(measuredRow.latency_count) > 0) {
+        measured.latencyMs = {
+          sum: Number(measuredRow.latency_sum ?? 0),
+          count: Number(measuredRow.latency_count),
+        };
+      }
+      if (Number(measuredRow.cost_count) > 0) {
+        measured.costUsd = {
+          sum: Number(measuredRow.cost_sum ?? 0),
+          count: Number(measuredRow.cost_count),
+        };
+      }
+
+      return {
+        ok: true,
+        mode: "live",
+        providerId: this.id,
+        value: { statusCounts, trend, measured },
       };
     } catch (error) {
       return {

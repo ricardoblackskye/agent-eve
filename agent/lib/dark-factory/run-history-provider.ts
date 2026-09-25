@@ -14,7 +14,12 @@ import type {
   RunHistoryWriteResult,
   RunListOptions,
 } from "./run-history-store";
-import type { RunEvent, RunSummary } from "./run-history";
+import type {
+  RunEvent,
+  RunMetrics,
+  RunMetricsQuery,
+  RunSummary,
+} from "./run-history";
 
 export class RunHistoryConfigurationError extends Error {
   constructor(message: string) {
@@ -106,6 +111,17 @@ export class ConsoleRunHistoryStore implements RunHistoryStore {
     _runId: string,
     _options: RunEventListOptions = {},
   ): Promise<RunHistoryReadResult<Page<PersistedRunEvent, EventCursor>>> {
+    return {
+      ok: false,
+      mode: "blocked",
+      providerId: this.id,
+      value: null,
+      error: RUN_HISTORY_NOT_CONFIGURED,
+    };
+  }
+  async getRunMetrics(
+    _options: RunMetricsQuery = {},
+  ): Promise<RunHistoryReadResult<RunMetrics>> {
     return {
       ok: false,
       mode: "blocked",

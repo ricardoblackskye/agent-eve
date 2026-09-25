@@ -100,6 +100,57 @@ export class InvalidRunRecordError extends Error {
   }
 }
 
+export interface RunMetricsQuery {
+  repo?: string;
+  /** Inclusive lower bound for createdAt. */
+  from?: string;
+  /** Exclusive upper bound for createdAt. */
+  to?: string;
+}
+
+export interface RunStatusCount {
+  status: RunStatus;
+  count: number;
+}
+
+export interface RunTrendPoint {
+  /** UTC calendar date, YYYY-MM-DD. */
+  date: string;
+  outcome: RunStatus;
+  count: number;
+}
+
+export interface RunMeasuredSummary {
+  sum: number;
+  count: number;
+}
+
+export interface RunMetrics {
+  /** One entry per canonical status, including aborted; count may be 0. */
+  statusCounts: RunStatusCount[];
+  /** Terminal outcomes grouped by completedAt calendar day (UTC). */
+  trend: RunTrendPoint[];
+  /** Measured aggregates; a field is absent when no run reported it. */
+  measured: {
+    latencyMs?: RunMeasuredSummary;
+    costUsd?: RunMeasuredSummary;
+  };
+}
+
+export const ALL_RUN_STATUSES: readonly RunStatus[] = [
+  "queued",
+  "running",
+  "blocked",
+  "aborted",
+  "succeeded",
+  "failed",
+];
+export const TERMINAL_RUN_STATUSES: readonly RunStatus[] = [
+  "aborted",
+  "succeeded",
+  "failed",
+];
+
 const RUN_STATUSES: readonly RunStatus[] = [
   "queued",
   "running",
