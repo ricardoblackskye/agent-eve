@@ -136,7 +136,9 @@
     "AUTOINCREMENT",
     "BIGSERIAL",
     "Supabase",
-    "uidx"
+    "uidx",
+    "kpis",
+    "wireframes"
   ],
   "ignorePaths": [
     "node_modules/**",
