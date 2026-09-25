@@ -607,10 +607,10 @@ depends only on the `RunHistoryStore` contract, so SQLite and PostgreSQL behave
 identically and no Vercel SDK is involved. Full reference:
 [`docs/dark-factory-run-query-api.md`](docs/dark-factory-run-query-api.md).
 
-| Endpoint                          | Returns                                                |
-| --------------------------------- | ------------------------------------------------------ |
-| `GET /api/dark-factory/runs`      | Bounded, filtered run list + opaque pagination cursor  |
-| `GET /api/dark-factory/runs/{id}` | One run summary + its ordered, paginated events        |
+| Endpoint                          | Returns                                                     |
+|-----------------------------------|-------------------------------------------------------------|
+| `GET /api/dark-factory/runs`      | Bounded, filtered run list + opaque pagination cursor       |
+| `GET /api/dark-factory/runs/{id}` | One run summary + its ordered, paginated events             |
 | `GET /api/dark-factory/metrics`   | DOD aggregates: status counts, trend, measured latency/cost |
 
 All three are gated by the existing `eve_session` viewer cookie (missing or

@@ -31,7 +31,7 @@ Error responses (4xx/5xx) return JSON:
 ### Error Codes
 
 | Code | Meaning                                                                              |
-| ---- | ------------------------------------------------------------------------------------ |
+|------|--------------------------------------------------------------------------------------|
 | 400  | Invalid query parameter (malformed cursor, bad ISO date, out-of-range `limit`, etc.) |
 | 401  | Missing or invalid viewer session                                                    |
 | 404  | Run not found (`/runs/[runId]`)                                                      |
@@ -43,10 +43,10 @@ Error responses (4xx/5xx) return JSON:
 
 Returns a paginated list of run summaries matching the filters.
 
-#### Query Parameters
+#### Query Parameters for GET /runs
 
 | Parameter  | Type                                        | Description                                                                                                                           |
-| ---------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+|------------|---------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------|
 | `repo`     | string (optional)                           | Filter by repository (`owner/name`).                                                                                                  |
 | `issue`    | string (optional)                           | Filter by issue number (as string).                                                                                                   |
 | `statuses` | CSV string (optional)                       | Filter by run status (`queued`, `succeeded`, `failed`, `aborted`). Repeat for multiple values: `?statuses=succeeded&statuses=failed`. |
@@ -55,7 +55,7 @@ Returns a paginated list of run summaries matching the filters.
 | `limit`    | integer (optional, default `25`, max `100`) | Page size.                                                                                                                            |
 | `cursor`   | string (optional)                           | Opaque pagination cursor from previous response.                                                                                      |
 
-#### Successful Response (200)
+#### Successful Response (200) for GET /runs
 
 ```json
 {
@@ -89,7 +89,7 @@ interface RunSummary {
 
 If `nextCursor` is non‑null, use it as the `cursor` param for the next page. Cursors are base64url‑encoded, tamper‑evident, and contain no store‑internal identifiers.
 
-#### Examples
+#### Examples for GET /runs
 
 - **First page**, repo `owner/repo`, limit 10:  
   `GET /api/dark-factory/runs?repo=owner/repo&limit=10`
@@ -104,18 +104,18 @@ If `nextCursor` is non‑null, use it as the `cursor` param for the next page. C
 
 Returns a single run summary with its paginated event stream.
 
-#### Path Parameter
+#### Path Parameter for GET /runs/[runId]
 
 - `runId`: the run identifier (from `/runs` list or webhook).
 
-#### Query Parameters
+#### Query Parameters for GET /runs/[runId]
 
 | Parameter | Type                                        | Description                                      |
-| --------- | ------------------------------------------- | ------------------------------------------------ |
+|-----------|---------------------------------------------|--------------------------------------------------|
 | `limit`   | integer (optional, default `50`, max `200`) | Page size for events.                            |
 | `cursor`  | string (optional)                           | Opaque pagination cursor from previous response. |
 
-#### Successful Response (200)
+#### Successful Response (200) for GET /runs/[runId]
 
 ```json
 {
@@ -144,7 +144,7 @@ interface PersistedRunEvent {
 
 If `nextCursor` is non‑null, use it as the `cursor` param for the next page of events.
 
-#### Examples
+#### Examples for GET /runs/[runId]
 
 - **Get run with first 50 events**:  
   `GET /api/dark-factory/runs/run-xyz123`
@@ -156,11 +156,11 @@ If `nextCursor` is non‑null, use it as the `cursor` param for the next page of
 
 Returns definition‑of‑done (DOD) aggregated metrics over the filtered run set.
 
-#### Query Parameters
+#### Query Parameters for GET /metrics
 
 Same as `/runs` (`repo`, `issue`, `statuses`, `from`, `to`).
 
-#### Successful Response (200)
+#### Successful Response (200) for GET /metrics
 
 ```json
 {
@@ -185,7 +185,7 @@ Same as `/runs` (`repo`, `issue`, `statuses`, `from`, `to`).
 - `trend`: daily count of runs that reached `stage: "terminal"` (i.e. completed) on that calendar day (UTC), only for days with at least one terminal run; absent days are omitted (not zero).
 - `measured`: sums and observation counts for the optional numeric fields `latencyMs` and `costUsd`; if no run reported a field, both `sum` and `count` are `0`.
 
-#### Examples
+#### Examples for GET /metrics
 
 - **Overall metrics** (no filters):  
   `GET /api/dark-factory/metrics`

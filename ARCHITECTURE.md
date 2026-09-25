@@ -369,11 +369,11 @@ measurements stay absent).
 
 Three thin Route Handlers under `app/api/dark-factory/` expose it:
 
-| Route                             | Handler file           |
-| --------------------------------- | ---------------------- |
-| `GET /api/dark-factory/runs`      | `runs/route.ts`        |
+| Route                             | Handler file            |
+|-----------------------------------|-------------------------|
+| `GET /api/dark-factory/runs`      | `runs/route.ts`         |
 | `GET /api/dark-factory/runs/{id}` | `runs/[runId]/route.ts` |
-| `GET /api/dark-factory/metrics`   | `metrics/route.ts`     |
+| `GET /api/dark-factory/metrics`   | `metrics/route.ts`      |
 
 Design boundaries:
 
