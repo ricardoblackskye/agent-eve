@@ -578,8 +578,11 @@ run. Lifecycle event appends and summary projections are atomic. Identical event
 replay is a no-op; reusing an event ID with different event data fails visibly.
 A run is marked successful only after the Definition-of-Done flow passes,
 including PR creation and disposition of review findings. Latency and cost
-remain absent unless measured; an explicitly measured zero is preserved. The
-The read API tracked by issue #199 and the progress board in issue #200 remain separate follow-ups.
+remain absent unless measured; an explicitly measured zero is preserved.
+
+The read API for this ledger (issue #199) is exposed over authenticated HTTP —
+see [Dark Factory (R6b) — run query API](#dark-factory-r6b--run-query-api-199)
+below. The progress board UI (issue #200) remains a separate follow-up.
 
 Configure the driver explicitly; the unset provider refuses writes rather than
 claiming an in-memory record is durable:
@@ -594,6 +597,44 @@ For a durable deployment, use `DF_RUN_HISTORY_DRIVER=postgres` and set
 URL secret (mark it Sensitive in Vercel). SQLite is local-only; the provider
 rejects it when `NODE_ENV=production` or the selected deployment stage is
 `preview` or `production`, avoiding ephemeral serverless filesystems.
+
+## Dark Factory (R6b) — run query API (#199)
+
+The ledger is now readable over authenticated HTTP, so a progress board (#200)
+can render run history without touching a storage driver. The query layer
+depends only on the `RunHistoryStore` contract, so SQLite and PostgreSQL behave
+identically and no Vercel SDK is involved. Full reference:
+[`docs/dark-factory-run-query-api.md`](docs/dark-factory-run-query-api.md).
+
+| Endpoint                          | Returns                                                |
+| --------------------------------- | ------------------------------------------------------ |
+| `GET /api/dark-factory/runs`      | Bounded, filtered run list + opaque pagination cursor  |
+| `GET /api/dark-factory/runs/{id}` | One run summary + its ordered, paginated events        |
+| `GET /api/dark-factory/metrics`   | DOD aggregates: status counts, trend, measured latency/cost |
+
+All three are gated by the existing `eve_session` viewer cookie (missing or
+invalid session → 401), and `proxy.ts` remains the fail-closed first line for
+unknown `/api/*` paths. Responses are `Cache-Control: private, no-store` and
+never leak the driver, connection string, or SQL error text: invalid input is
+400, a missing run is 404 (distinct from 503 storage-unavailable). Date filters
+are inclusive `from` / exclusive `to` (UTC). Missing measurements stay absent —
+never fabricated as zero.
+
+```bash
+# list the newest 25 runs for a repo
+curl -s --cookie "eve_session=$EVE_SESSION" \
+  'http://localhost:3000/api/dark-factory/runs?repo=owner/repo&limit=25'
+
+# definition-of-done metrics for a date window
+curl -s --cookie "eve_session=$EVE_SESSION" \
+  'http://localhost:3000/api/dark-factory/metrics?from=2026-09-01T00:00:00.000Z&to=2026-10-01T00:00:00.000Z'
+```
+
+```bash
+npx vitest run tests/dark-factory/run-query.test.ts \
+               tests/dark-factory/run-query-store-integration.test.ts \
+               tests/dark-factory/run-query-api.test.ts --reporter=verbose
+```
 
 ## Scripts
 
