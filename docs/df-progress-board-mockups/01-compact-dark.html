@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Dark Factory · Progress Board — Wireframe Mockups</title>
+<style>
+  :root{
+    --bg:#020617; --panel:#0b1220; --panel-2:#0f172a; --border:#1e293b;
+    --fg:#e2e8f0; --muted:#94a3b8; --faint:#64748b;
+    --emerald:#34d399; --cyan:#22d3ee; --amber:#fbbf24; --violet:#a78bfa; --rose:#fb7185;
+    --blue:#60a5fa;
+    --mono:"SFMono-Regular",ui-monospace,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    background:var(--bg);color:var(--fg);line-height:1.45;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;padding:24px;
+  }
+  a{color:var(--blue);text-decoration:none}
+  .wrap{max-width:1180px;margin:0 auto}
+  .masthead{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:18px}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:600;letter-spacing:.3px}
+  .brand .dot{width:10px;height:10px;border-radius:50%;background:linear-gradient(135deg,var(--emerald),var(--cyan));box-shadow:0 0 12px var(--cyan)}
+  .brand small{color:var(--faint);font-weight:400;font-family:var(--mono);font-size:11px}
+  .refresh{font-size:12px;color:var(--muted);font-family:var(--mono)}
+  .refresh b{color:var(--emerald)}
+  .tabs{display:flex;gap:8px;border-bottom:1px solid var(--border);margin-bottom:22px}
+  .tab{appearance:none;background:transparent;border:0;color:var(--muted);padding:10px 16px;
+    font-size:13px;font-weight:600;cursor:pointer;border-bottom:2px solid transparent}
+  .tab:hover{color:var(--fg)}
+  .tab.active{color:var(--fg);border-bottom-color:var(--cyan)}
+  .screen{display:none}
+  .screen.active{display:block}
+  .panel{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:18px}
+  .panel + .panel{margin-top:16px}
+  .panel-title{font-size:12px;text-transform:uppercase;letter-spacing:.12em;color:var(--faint);margin-bottom:14px}
+  /* KPI cards */
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+  .kpi{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:16px}
+  .kpi .label{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:8px}
+  .kpi .num{font-size:30px;font-weight:700;margin-top:6px;font-family:var(--mono)}
+  .kpi .sub{font-size:11px;color:var(--faint);margin-top:2px}
+  .pip{width:8px;height:8px;border-radius:50%}
+  .pip.a{background:var(--cyan)} .pip.b{background:var(--amber)} .pip.c{background:var(--emerald)} .pip.f{background:var(--rose)}
+  /* distribution bar */
+  .bar{display:flex;height:14px;border-radius:7px;overflow:hidden;border:1px solid var(--border)}
+  .bar > span{display:block;height:100%}
+  .legend{display:flex;gap:16px;flex-wrap:wrap;margin-top:10px;font-size:11px;color:var(--muted)}
+  .legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:middle}
+  /* recent list */
+  .row{display:flex;align-items:center;gap:14px;padding:11px 4px;border-bottom:1px solid var(--border)}
+  .row:last-child{border-bottom:0}
+  .row .id{font-family:var(--mono);font-size:12px;color:var(--cyan);min-width:92px}
+  .row .tt{font-size:13px}
+  .row .meta{margin-left:auto;display:flex;gap:18px;font-size:12px;color:var(--muted)}
+  .row .meta b{color:var(--fg);font-family:var(--mono)}
+  .chip{font-size:11px;font-family:var(--mono);padding:2px 8px;border-radius:999px;border:1px solid var(--border)}
+  .chip.active{color:var(--cyan);border-color:rgba(34,211,238,.4)}
+  .chip.blocked{color:var(--amber);border-color:rgba(251,191,36,.4)}
+  .chip.completed{color:var(--emerald);border-color:rgba(52,211,153,.4)}
+  .chip.failed{color:var(--rose);border-color:rgba(251,113,133,.4)}
+  /* table */
+  .filters{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
+  .filters input,.filters select{background:var(--panel-2);border:1px solid var(--border);color:var(--fg);
+    border-radius:8px;padding:8px 10px;font-size:13px;font-family:var(--mono)}
+  .filters input{flex:1;min-width:220px}
+  .filters .spacer{margin-left:auto;font-size:12px;color:var(--faint)}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:11px 12px;border-bottom:1px solid var(--border)}
+  th{color:var(--faint);font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600}
+  tbody tr:hover{background:var(--panel-2)}
+  td.mono,th.mono{font-family:var(--mono)}
+  td a{margin-right:10px}
+  /* detail */
+  .detail-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap}
+  .detail-head h2{font-size:20px;font-weight:700;font-family:var(--mono)}
+  .detail-head .sub{color:var(--muted);font-size:13px;margin-top:4px}
+  .metastrip{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-top:16px}
+  .metastrip .m{background:var(--panel-2);border:1px solid var(--border);border-radius:10px;padding:12px}
+  .metastrip .m .k{font-size:11px;color:var(--faint);text-transform:uppercase;letter-spacing:.08em}
+  .metastrip .m .v{font-size:18px;font-weight:700;font-family:var(--mono);margin-top:4px}
+  .grid2{display:grid;grid-template-columns:1.4fr 1fr;gap:16px;margin-top:16px}
+  /* timeline */
+  .tl{position:relative;margin-left:8px;padding-left:22px;border-left:2px solid var(--border)}
+  .tl .ev{position:relative;padding:0 0 18px 0}
+  .tl .ev:before{content:"";position:absolute;left:-29px;top:2px;width:12px;height:12px;border-radius:50%;
+    background:var(--panel);border:2px solid var(--faint)}
+  .tl .ev.ok:before{border-color:var(--emerald);background:var(--emerald)}
+  .tl .ev.cur:before{border-color:var(--cyan);background:var(--cyan);box-shadow:0 0 10px var(--cyan)}
+  .tl .ev .t{font-family:var(--mono);font-size:11px;color:var(--faint)}
+  .tl .ev .h{font-size:14px;font-weight:600}
+  .tl .ev .d{font-size:12px;color:var(--muted);margin-top:2px}
+  /* worker / outcomes */
+  .work{display:flex;flex-direction:column;gap:10px}
+  .wbox{background:var(--panel-2);border:1px solid var(--border);border-radius:10px;padding:12px}
+  .wbox .wt{font-size:13px;font-weight:600;display:flex;align-items:center;gap:8px}
+  .wbox .wt .tag{font-size:10px;font-family:var(--mono);padding:2px 6px;border-radius:6px}
+  .tag.dev{color:var(--emerald);background:rgba(52,211,153,.12)}
+  .tag.test{color:var(--cyan);background:rgba(34,211,238,.12)}
+  .steps{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+  .step{font-size:11px;font-family:var(--mono);padding:3px 8px;border-radius:6px;border:1px solid var(--border);color:var(--muted)}
+  .step.done{color:var(--emerald);border-color:rgba(52,211,153,.35)}
+  .step.fail{color:var(--rose);border-color:rgba(251,113,133,.35)}
+  .metrics{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .metric{background:var(--panel-2);border:1px solid var(--border);border-radius:10px;padding:12px}
+  .metric .k{font-size:11px;color:var(--faint);text-transform:uppercase;letter-spacing:.07em}
+  .metric .v{font-size:16px;font-weight:700;font-family:var(--mono);margin-top:4px}
+  .links a{display:inline-block;margin:4px 10px 4px 0;font-size:13px}
+  .foot{margin-top:26px;color:var(--faint);font-size:11px;font-family:var(--mono);text-align:center}
+  .note{background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.3);color:#fde68a;
+    border-radius:10px;padding:10px 14px;font-size:12px;margin-bottom:18px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="masthead">
+    <div class="brand"><span class="dot"></span> Dark Factory <small>· Progress Board</small></div>
+    <div class="refresh">Updated <b>2 min ago</b> · auto-refresh 60s</div>
+  </div>
+
+  <div class="tabs">
+    <button class="tab active" data-t="overview">1 · Overview</button>
+    <button class="tab" data-t="table">2 · Run Table</button>
+    <button class="tab" data-t="detail">3 · Run Detail</button>
+  </div>
+
+  <!-- ===================== SCREEN 1: OVERVIEW ===================== -->
+  <section class="screen active" id="overview">
+    <div class="kpis">
+      <div class="kpi"><div class="label"><span class="pip a"></span> Active</div><div class="num">7</div><div class="sub">in-flight runs</div></div>
+      <div class="kpi"><div class="label"><span class="pip b"></span> Blocked</div><div class="num">2</div><div class="sub">awaiting input / dep</div></div>
+      <div class="kpi"><div class="label"><span class="pip c"></span> Completed</div><div class="num">23</div><div class="sub">DOD met, PR open</div></div>
+      <div class="kpi"><div class="label"><span class="pip f"></span> Failed</div><div class="num">4</div><div class="sub">terminal, not DOD</div></div>
+    </div>
+
+    <div class="panel" style="margin-top:16px">
+      <div class="panel-title">Outcome distribution (last 30 runs)</div>
+      <div class="bar">
+        <span style="width:58%;background:var(--emerald)"></span>
+        <span style="width:15%;background:var(--cyan)"></span>
+        <span style="width:12%;background:var(--amber)"></span>
+        <span style="width:15%;background:var(--rose)"></span>
+      </div>
+      <div class="legend">
+        <span><i style="background:var(--emerald)"></i>Completed 58%</span>
+        <span><i style="background:var(--cyan)"></i>Active 15%</span>
+        <span><i style="background:var(--amber)"></i>Blocked 12%</span>
+        <span><i style="background:var(--rose)"></i>Failed 15%</span>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">Recent outcomes · duration &amp; cost summaries</div>
+      <div class="row">
+        <span class="id">df-1a2b</span>
+        <div class="tt"><span class="chip completed">completed</span> &nbsp;#198 record run history <span style="color:var(--faint)">· ricardoblackskye/agent-eve</span></div>
+        <div class="meta"><span>dur <b>14m 02s</b></span><span>cost <b>$0.42</b></span><span>attempts <b>3</b></span></div>
+      </div>
+      <div class="row">
+        <span class="id">df-19f0</span>
+        <div class="tt"><span class="chip active">active</span> &nbsp;#201 operator CLI <span style="color:var(--faint)">· ricardoblackskye/agent-eve</span></div>
+        <div class="meta"><span>elapsed <b>06m 41s</b></span><span>stage <b>test</b></span><span>round <b>1</b></span></div>
+      </div>
+      <div class="row">
+        <span class="id">df-17c4</span>
+        <div class="tt"><span class="chip blocked">blocked</span> &nbsp;#188 schema migration <span style="color:var(--faint)">· ricardoblackskye/web</span></div>
+        <div class="meta"><span>since <b>3h</b></span><span>reason <b>creds</b></span></div>
+      </div>
+      <div class="row">
+        <span class="id">df-1608</span>
+        <div class="tt"><span class="chip failed">failed</span> &nbsp;#183 evaluator refactor <span style="color:var(--faint)">· ricardoblackskye/agent-eve</span></div>
+        <div class="meta"><span>dur <b>22m 10s</b></span><span>cost <b>$0.71</b></span><span>fix-cycles <b>3</b></span></div>
+      </div>
+      <div class="row">
+        <span class="id">df-1551</span>
+        <div class="tt"><span class="chip completed">completed</span> &nbsp;#179 backlog adapter <span style="color:var(--faint)">· ricardoblackskye/agent-eve</span></div>
+        <div class="meta"><span>dur <b>11m 33s</b></span><span>cost <b>$0.29</b></span><span>attempts <b>2</b></span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== SCREEN 2: RUN TABLE ===================== -->
+  <section class="screen" id="table">
+    <div class="panel">
+      <div class="filters">
+        <input id="q" placeholder="search issue #, repo, run id…" />
+        <select><option>Status: All</option><option>Active</option><option>Blocked</option><option>Completed</option><option>Failed</option></select>
+        <select><option>Repo: All</option><option>agent-eve</option><option>web</option></select>
+        <select><option>Stage: All</option><option>dispatch</option><option>dev</option><option>test</option><option>review</option></select>
+        <span class="spacer">34 runs · refresh ↻</span>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th class="mono">Run</th><th>Issue / Repo</th><th>Status</th><th>Stage</th>
+            <th>Last update</th><th class="mono">Attempts</th><th class="mono">Elapsed</th><th class="mono">Cost</th><th>Links</th>
+          </tr>
+        </thead>
+        <tbody id="tbody">
+          <tr><td class="mono">df-1a2b</td><td>#198 · agent-eve</td><td><span class="chip completed">completed</span></td><td>review</td><td>2m ago</td><td class="mono">3</td><td class="mono">14m</td><td class="mono">$0.42</td><td><a href="#">issue</a><a href="#">PR</a></td></tr>
+          <tr><td class="mono">df-19f0</td><td>#201 · agent-eve</td><td><span class="chip active">active</span></td><td>test</td><td>just now</td><td class="mono">1</td><td class="mono">6m</td><td class="mono">$0.11</td><td><a href="#">issue</a><a href="#">—</a></td></tr>
+          <tr><td class="mono">df-17c4</td><td>#188 · web</td><td><span class="chip blocked">blocked</span></td><td>dispatch</td><td>3h ago</td><td class="mono">0</td><td class="mono">—</td><td class="mono">$0.00</td><td><a href="#">issue</a><a href="#">—</a></td></tr>
+          <tr><td class="mono">df-1608</td><td>#183 · agent-eve</td><td><span class="chip failed">failed</span></td><td>test</td><td>1h ago</td><td class="mono">3</td><td class="mono">22m</td><td class="mono">$0.71</td><td><a href="#">issue</a><a href="#">—</a></td></tr>
+          <tr><td class="mono">df-1551</td><td>#179 · agent-eve</td><td><span class="chip completed">completed</span></td><td>review</td><td>1d ago</td><td class="mono">2</td><td class="mono">11m</td><td class="mono">$0.29</td><td><a href="#">issue</a><a href="#">PR</a></td></tr>
+          <tr><td class="mono">df-14e2</td><td>#176 · agent-eve</td><td><span class="chip active">active</span></td><td>dev</td><td>4m ago</td><td class="mono">1</td><td class="mono">9m</td><td class="mono">$0.18</td><td><a href="#">issue</a><a href="#">—</a></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ===================== SCREEN 3: RUN DETAIL ===================== -->
+  <section class="screen" id="detail">
+    <div class="panel">
+      <div class="detail-head">
+        <div>
+          <h2>df-1a2b</h2>
+          <div class="sub">#198 · ricardoblackskye/agent-eve &nbsp;·&nbsp; <span class="chip completed">completed</span> &nbsp;·&nbsp; stage: review-ready</div>
+        </div>
+        <div class="links">
+          <a href="#">View Issue #198 ↗</a>
+          <a href="#">View PR #202 ↗</a>
+          <a href="#">Repo ↗</a>
+        </div>
+      </div>
+      <div class="metastrip">
+        <div class="m"><div class="k">Started</div><div class="v">09:14</div></div>
+        <div class="m"><div class="k">Duration</div><div class="v">14m 02s</div></div>
+        <div class="m"><div class="k">Attempts</div><div class="v">3</div></div>
+        <div class="m"><div class="k">Review round</div><div class="v">2</div></div>
+        <div class="m"><div class="k">Cost</div><div class="v">$0.42</div></div>
+      </div>
+    </div>
+
+    <div class="grid2">
+      <div class="panel">
+        <div class="panel-title">Lifecycle timeline</div>
+        <div class="tl">
+          <div class="ev ok"><div class="t">09:14:01</div><div class="h">Triggered</div><div class="d">Webhook delivery accepted · run id minted</div></div>
+          <div class="ev ok"><div class="t">09:14:09</div><div class="h">Dispatched</div><div class="d">Job enqueued · worker sandbox provisioned</div></div>
+          <div class="ev ok"><div class="t">09:15:40</div><div class="h">Developer agent</div><div class="d">Code + unit tests written · 3 iterations</div></div>
+          <div class="ev ok"><div class="t">09:24:11</div><div class="h">Tester agent</div><div class="d">Static + smoke + security passed</div></div>
+          <div class="ev ok"><div class="t">09:27:55</div><div class="h">PR opened</div><div class="d">PR #202 created · findings surfaced</div></div>
+          <div class="ev ok"><div class="t">09:31:20</div><div class="h">Review dispositions</div><div class="d">2 findings resolved · 1 accepted</div></div>
+          <div class="ev cur"><div class="t">09:31:40</div><div class="h">Definition of Done met</div><div class="d">Terminal summary recorded · factory does not merge</div></div>
+        </div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:16px">
+        <div class="panel">
+          <div class="panel-title">Worker progress</div>
+          <div class="work">
+            <div class="wbox">
+              <div class="wt"><span class="tag dev">DEV</span> Developer agent</div>
+              <div class="steps">
+                <span class="step done">clone</span><span class="step done">read</span>
+                <span class="step done">write</span><span class="step done">tests</span>
+                <span class="step done">run_tests</span>
+              </div>
+            </div>
+            <div class="wbox">
+              <div class="wt"><span class="tag test">TEST</span> Tester agent</div>
+              <div class="steps">
+                <span class="step done">static</span><span class="step done">smoke</span>
+                <span class="step done">security</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-title">Metrics</div>
+          <div class="metrics">
+            <div class="metric"><div class="k">Latency p50</div><div class="v">1.9s</div></div>
+            <div class="metric"><div class="k">Iterations</div><div class="v">3</div></div>
+            <div class="metric"><div class="k">Fix cycles</div><div class="v">1</div></div>
+            <div class="metric"><div class="k">Findings</div><div class="v">3 / 2 / 1</div></div>
+          </div>
+          <div class="legend" style="margin-top:12px">
+            <span>total / resolved / accepted</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="foot">Wireframe mockup · Issue #178 — Eve Dark Factory Task Progress board · illustrative sample data only</div>
+</div>
+
+<script>
+  // Tab switching
+  const tabs=document.querySelectorAll('.tab'), screens=document.querySelectorAll('.screen');
+  tabs.forEach(t=>t.addEventListener('click',()=>{
+    tabs.forEach(x=>x.classList.remove('active')); screens.forEach(s=>s.classList.remove('active'));
+    t.classList.add('active'); document.getElementById(t.dataset.t).classList.add('active');
+  }));
+  // Simple table filter (interaction proof)
+  const q=document.getElementById('q'), tb=document.getElementById('tbody');
+  q.addEventListener('input',()=>{
+    const v=q.value.toLowerCase();
+    tb.querySelectorAll('tr').forEach(r=>{
+      r.style.display = r.textContent.toLowerCase().includes(v) ? '' : 'none';
+    });
+  });
+</script>
+</body>
+</html>
