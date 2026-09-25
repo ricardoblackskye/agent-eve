@@ -3,6 +3,7 @@ import type { Pool, PoolClient } from "pg";
 import {
   applyRunEvent,
   InvalidRunRecordError,
+  normalizeRunDateRange,
   toRunEvent,
   toRunSummary,
   type RunEvent,
@@ -911,6 +912,7 @@ export class PostgresRunHistoryStore implements RunHistoryStore {
         "Use either status or statuses, not both.",
       );
     }
+    const { from, to } = normalizeRunDateRange(options.from, options.to);
     const cursor = options.cursor
       ? validateRunCursor(options.cursor)
       : undefined;
@@ -931,6 +933,8 @@ export class PostgresRunHistoryStore implements RunHistoryStore {
       } else if (status !== undefined) {
         clauses.push(`status = ${bind(status)}`);
       }
+      if (from !== undefined) clauses.push(`created_at >= ${bind(from)}`);
+      if (to !== undefined) clauses.push(`created_at < ${bind(to)}`);
       if (cursor) {
         const created = bind(cursor.createdAt);
         const equalCreated = bind(cursor.createdAt);

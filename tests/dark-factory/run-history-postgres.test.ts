@@ -207,4 +207,34 @@ describeWithDatabase("PostgresRunHistoryStore integration", () => {
       completed: true,
     });
   });
+
+  it("filters runs by inclusive from and exclusive to alongside repo and status", async () => {
+    const repo = `owner/date-filter-${namespace}`;
+    const runs = [
+      ["pg-date-before", 210, "2026-09-24T12:00:00.999Z"],
+      ["pg-date-from", 211, "2026-09-24T12:00:01.000Z"],
+      ["pg-date-mid", 212, "2026-09-24T12:00:02.000Z"],
+      ["pg-date-before-to", 213, "2026-09-24T12:00:02.999Z"],
+      ["pg-date-at-to", 214, "2026-09-24T12:00:03.000Z"],
+    ] as const;
+
+    for (const [deliveryId, runIssue, receivedAt] of runs) {
+      const result = await store.acceptDelivery({
+        deliveryId: `${deliveryId}-${namespace}`,
+        repo,
+        issue: runIssue,
+        receivedAt,
+      });
+      if (!result.ok) throw new Error("Postgres delivery failed");
+    }
+
+    const page = await store.listRuns({
+      repo,
+      statuses: ["queued"],
+      from: "2026-09-24T12:00:01.000Z",
+      to: "2026-09-24T12:00:03.000Z",
+    });
+
+    expect(page.value?.items.map((run) => run.issue)).toEqual([213, 212, 211]);
+  });
 });
