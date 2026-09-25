@@ -581,8 +581,9 @@ including PR creation and disposition of review findings. Latency and cost
 remain absent unless measured; an explicitly measured zero is preserved.
 
 The read API for this ledger (issue #199) is exposed over authenticated HTTP —
-see [Dark Factory (R6b) — run query API](#dark-factory-r6b--run-query-api-199)
-below. The progress board UI (issue #200) remains a separate follow-up.
+see the *Dark Factory (R6b) — run query API* section below and the full
+[run query API reference](docs/dark-factory-run-query-api.md). The progress
+board UI (issue #200) remains a separate follow-up.
 
 Configure the driver explicitly; the unset provider refuses writes rather than
 claiming an in-memory record is durable:

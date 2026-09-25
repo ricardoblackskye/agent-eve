@@ -11,7 +11,7 @@ All endpoints are under `/api/dark-factory`.
 
 ## Authentication
 
-Requests must include a valid `eve_session` cookie (see [`app/auth-session.ts`](app/auth-session.ts)). Missing or invalid session → **401 Unauthorized**.
+Requests must include a valid `eve_session` cookie (see [`app/auth-session.ts`](../app/auth-session.ts)). Missing or invalid session → **401 Unauthorized**.
 
 ## Common Responses
 
