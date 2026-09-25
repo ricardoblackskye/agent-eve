@@ -385,6 +385,50 @@ describe("SqliteRunHistoryStore delivery acceptance", () => {
     expect(page.value?.items.map((run) => run.runId)).toEqual([firstRunId]);
   });
 
+  it("filters runs by inclusive from and exclusive to with repo and status filters", async () => {
+    let generated = 0;
+    const store = createStore(() => `date-filter-run-${++generated}`);
+    const runs = [
+      ["date-before", "owner/repo", 200, "2026-09-24T12:00:00.999Z"],
+      ["date-from", "owner/repo", 201, "2026-09-24T12:00:01.000Z"],
+      ["date-running", "owner/repo", 202, "2026-09-24T12:00:02.000Z"],
+      ["date-before-to", "owner/repo", 203, "2026-09-24T12:00:02.999Z"],
+      ["date-at-to", "owner/repo", 204, "2026-09-24T12:00:03.000Z"],
+      ["date-other-repo", "other/repo", 205, "2026-09-24T12:00:02.500Z"],
+    ] as const;
+
+    const accepted = new Map<number, string>();
+    for (const [deliveryId, repo, issue, receivedAt] of runs) {
+      const result = await store.acceptDelivery({
+        deliveryId,
+        repo,
+        issue,
+        receivedAt,
+      });
+      if (!result.value) throw new Error("run acceptance returned no summary");
+      accepted.set(issue, result.value.runId);
+    }
+    const runningRunId = accepted.get(202);
+    if (!runningRunId) throw new Error("running run was not accepted");
+    await store.appendEvent({
+      eventId: "date-filter-started",
+      runId: runningRunId,
+      type: "dispatch.started",
+      stage: "dispatch",
+      occurredAt: "2026-09-24T12:00:02.001Z",
+      status: "running",
+    });
+
+    const page = await store.listRuns({
+      repo: "owner/repo",
+      statuses: ["queued"],
+      from: "2026-09-24T12:00:01.000Z",
+      to: "2026-09-24T12:00:03.000Z",
+    });
+
+    expect(page.value?.items.map((run) => run.issue)).toEqual([203, 201]);
+  });
+
   it("loads runs and paginates in stable newest-first order", async () => {
     let generated = 0;
     const store = createStore(() => `page-run-${++generated}`);
