@@ -340,7 +340,11 @@ export function MeasuredMetrics({
   return (
     <div className="df-metrics">
       {metrics.map((metric) => (
-        <MetricTile key={metric.key} label={metric.label} value={metric.value} />
+        <MetricTile
+          key={metric.key}
+          label={metric.label}
+          value={metric.value}
+        />
       ))}
     </div>
   );

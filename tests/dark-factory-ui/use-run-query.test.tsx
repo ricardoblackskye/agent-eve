@@ -71,9 +71,12 @@ describe("useRunQuery", () => {
   it("polls on the configured interval", async () => {
     const fetcher = vi.fn().mockResolvedValue(jsonResponse({ n: 1 }));
     renderHook(() => useRunQuery("/x", { fetcher, intervalMs: 20 }));
-    await waitFor(() => expect(fetcher.mock.calls.length).toBeGreaterThanOrEqual(2), {
-      timeout: 2000,
-    });
+    await waitFor(
+      () => expect(fetcher.mock.calls.length).toBeGreaterThanOrEqual(2),
+      {
+        timeout: 2000,
+      },
+    );
   });
 
   it("stops polling after unmount", async () => {

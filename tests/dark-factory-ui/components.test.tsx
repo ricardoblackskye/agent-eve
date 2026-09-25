@@ -55,15 +55,17 @@ function summary(overrides: Partial<RunSummary> = {}): RunSummary {
 
 describe("state matrix", () => {
   it("renders the loading state", () => {
-    const { container } = render(
-      <RunTable rows={[]} loading error={null} />,
-    );
+    const { container } = render(<RunTable rows={[]} loading error={null} />);
     expect(container.querySelector(".df-state-loading")).toBeTruthy();
   });
 
   it("renders the error state with the message", () => {
     const { container } = render(
-      <RunTable rows={[]} loading={false} error="Request failed with status 503" />,
+      <RunTable
+        rows={[]}
+        loading={false}
+        error="Request failed with status 503"
+      />,
     );
     expect(container.querySelector(".df-state-error")?.textContent).toContain(
       "503",
@@ -107,7 +109,9 @@ describe("run states", () => {
   });
 
   it("renders a failed pill", () => {
-    const { container } = render(<StatusPill category="failed" label="failed" />);
+    const { container } = render(
+      <StatusPill category="failed" label="failed" />,
+    );
     expect(container.querySelector(".df-pill-failed")).toBeTruthy();
   });
 
@@ -142,7 +146,9 @@ describe("overview components", () => {
       { status: "blocked", count: 5 },
       { status: "failed", count: 6 },
     ]);
-    const { container } = render(<OutcomeMix total={total} segments={segments} />);
+    const { container } = render(
+      <OutcomeMix total={total} segments={segments} />,
+    );
     expect(container.querySelectorAll(".df-mix-item")).toHaveLength(4);
     expect(container.textContent).toContain("58%");
   });

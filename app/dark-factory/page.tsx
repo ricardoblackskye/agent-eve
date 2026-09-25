@@ -36,7 +36,9 @@ export default function DarkFactoryOverviewPage() {
     metrics.error === "Authentication required" ||
     runs.error === "Authentication required";
   if (authRequired) {
-    return <StatePanel state="auth" message="Sign in required to view the board" />;
+    return (
+      <StatePanel state="auth" message="Sign in required to view the board" />
+    );
   }
 
   const error = metrics.error ?? runs.error;

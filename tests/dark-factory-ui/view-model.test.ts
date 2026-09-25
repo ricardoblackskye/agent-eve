@@ -41,7 +41,9 @@ function summary(overrides: Partial<RunSummary> = {}): RunSummary {
   };
 }
 
-function event(overrides: Partial<PersistedRunEvent["event"]> & { sequence: number }): PersistedRunEvent {
+function event(
+  overrides: Partial<PersistedRunEvent["event"]> & { sequence: number },
+): PersistedRunEvent {
   const { sequence, ...rest } = overrides;
   return {
     sequence,

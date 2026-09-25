@@ -5,11 +5,7 @@ import type {
   RunStatus,
   RunSummary,
 } from "../../../agent/lib/dark-factory/run-history";
-import {
-  RunTable,
-  SelectedRunPreview,
-  StatePanel,
-} from "../ui/components";
+import { RunTable, SelectedRunPreview, StatePanel } from "../ui/components";
 import { DEFAULT_POLL_INTERVAL_MS, useRunQuery } from "../ui/use-run-query";
 import { filterRows, toQueryParams, toTableRows } from "../ui/view-model";
 
