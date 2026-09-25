@@ -49,7 +49,7 @@ export default function DarkFactoryRunDetailPage() {
   return (
     <div className="df-view">
       <RunDetailPanel summary={run.data.summary} view={view} />
-      <div className="df-detailgrid">
+      <div className="df-detail-grid">
         <section className="df-panel">
           <div className="df-panel-head">
             <strong>EVENT STREAM</strong>

@@ -614,7 +614,7 @@ header {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
-.df-tablepane {
+.df-table-pane {
   display: grid;
   grid-template-columns: 2fr 1fr;
   gap: 14px;
@@ -744,7 +744,7 @@ header {
   font-size: 12px;
 }
 
-.df-detailgrid {
+.df-detail-grid {
   display: grid;
   grid-template-columns: 1.5fr 1fr;
   gap: 14px;
@@ -819,11 +819,11 @@ header {
     grid-template-columns: 1fr;
   }
 
-  .df-tablepane {
+  .df-table-pane {
     grid-template-columns: 1fr;
   }
 
-  .df-detailgrid {
+  .df-detail-grid {
     grid-template-columns: 1fr;
   }
 

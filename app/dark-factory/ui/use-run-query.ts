@@ -19,7 +19,7 @@ export interface UseRunQueryOptions {
 export const DEFAULT_POLL_INTERVAL_MS = 60_000;
 
 /**
- * Reads a Dark Factory read-API path, exposes loading/error/data, refetches on
+ * Reads a Dark Factory read-API path, exposes loading/error/data, refreshes on
  * demand, and polls on an interval. The response is never cached: a 401 yields
  * an explicit error so the board can withhold data from an unauthenticated
  * viewer.

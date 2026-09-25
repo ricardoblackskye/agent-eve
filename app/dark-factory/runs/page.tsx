@@ -108,7 +108,7 @@ export default function DarkFactoryRunsPage() {
         <small>{`${rows.length} RECORDS`}</small>
       </div>
 
-      <div className="df-tablepane">
+      <div className="df-table-pane">
         <RunTable
           rows={rows}
           loading={runs.loading && !runs.data}

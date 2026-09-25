@@ -165,7 +165,7 @@ describe("toTableRows", () => {
     expect(row.prUrl).toBe("https://github.com/owner/repo/pull/202");
   });
 
-  it("shows em dashes for an unmeasured, unstarted run", () => {
+  it("shows em dashes for an unmeasured run that never started", () => {
     const [row] = toTableRows(
       [
         summary({

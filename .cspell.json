@@ -146,6 +146,8 @@
     ".vercel/**",
     "package-lock.json",
     "*megalinter_file_names_cspell.txt",
-    "tsconfig.tsbuildinfo"
+    "tsconfig.tsbuildinfo",
+    "docs/df-progress-board-mockups/**",
+    "docs/df-progress-board-wireframes.html"
   ]
 }

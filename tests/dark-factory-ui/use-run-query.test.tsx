@@ -54,7 +54,7 @@ describe("useRunQuery", () => {
     expect(result.current.data).toBeNull();
   });
 
-  it("refetches on refresh()", async () => {
+  it("refreshes on refresh()", async () => {
     const fetcher = vi
       .fn()
       .mockResolvedValueOnce(jsonResponse({ n: 1 }))
