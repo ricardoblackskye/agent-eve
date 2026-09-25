@@ -28,6 +28,7 @@
     "app/**/*.tsx",
     "scripts/**/*.ts",
     "tests/**/*.ts",
+    "tests/**/*.tsx",
     "next-env.d.ts",
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts"
