@@ -80,6 +80,10 @@ export interface RunListOptions {
   issue?: number;
   status?: RunStatus;
   statuses?: RunStatus[];
+  /** Inclusive lower bound for createdAt. */
+  from?: string;
+  /** Exclusive upper bound for createdAt. */
+  to?: string;
   limit?: number;
   cursor?: RunCursor;
 }
@@ -424,6 +428,37 @@ function validateIssue(value: number | undefined): number | undefined {
     );
   }
   return value;
+}
+
+export function normalizeRunDateRange(
+  from: string | undefined,
+  to: string | undefined,
+): { from?: string; to?: string } {
+  const normalize = (value: string | undefined, field: string) => {
+    if (value === undefined) return undefined;
+    const parsed = typeof value === "string" ? Date.parse(value) : NaN;
+    if (!Number.isFinite(parsed)) {
+      throw new InvalidRunRecordError(
+        `Run history filter "${field}" must be an ISO timestamp.`,
+      );
+    }
+    return new Date(parsed).toISOString();
+  };
+  const normalizedFrom = normalize(from, "from");
+  const normalizedTo = normalize(to, "to");
+  if (
+    normalizedFrom !== undefined &&
+    normalizedTo !== undefined &&
+    Date.parse(normalizedFrom) >= Date.parse(normalizedTo)
+  ) {
+    throw new InvalidRunRecordError(
+      'Run history filter "from" must be before "to".',
+    );
+  }
+  return {
+    ...(normalizedFrom !== undefined ? { from: normalizedFrom } : {}),
+    ...(normalizedTo !== undefined ? { to: normalizedTo } : {}),
+  };
 }
 
 function validateStatuses(
@@ -953,6 +988,7 @@ export class SqliteRunHistoryStore implements RunHistoryStore {
         "Use either status or statuses, not both.",
       );
     }
+    const { from, to } = normalizeRunDateRange(options.from, options.to);
     const cursor = options.cursor
       ? validateRunCursor(options.cursor)
       : undefined;
@@ -976,6 +1012,14 @@ export class SqliteRunHistoryStore implements RunHistoryStore {
       } else if (status !== undefined) {
         clauses.push("status = ?");
         values.push(status);
+      }
+      if (from !== undefined) {
+        clauses.push("created_at >= ?");
+        values.push(from);
+      }
+      if (to !== undefined) {
+        clauses.push("created_at < ?");
+        values.push(to);
       }
       if (cursor) {
         clauses.push("(created_at < ? OR (created_at = ? AND run_id < ?))");
