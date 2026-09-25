@@ -73,9 +73,7 @@ function sampleEvent(overrides: Partial<RunEvent> = {}): RunEvent {
 }
 
 interface FakeBehavior {
-  listRuns?: (
-    options: unknown,
-  ) => RunHistoryReadResult<{
+  listRuns?: (options: unknown) => RunHistoryReadResult<{
     items: RunSummary[];
     nextCursor: { createdAt: string; runId: string } | null;
   }>;
