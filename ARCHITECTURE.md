@@ -390,3 +390,25 @@ Design boundaries:
 - **No-store.** Every response sets `Cache-Control: private, no-store`.
 - **Portability.** No Vercel SDK and no storage-specific import in the query
   service; swapping `DF_RUN_HISTORY_DRIVER` changes the adapter, not the API.
+
+## Dark Factory progress board (UI, #200)
+
+The board is three Next 16 client pages under `app/dark-factory/`. They consume
+only the #199 read API (`/api/dark-factory/*`) through a small polling hook
+(`ui/use-run-query.ts`: 60 s interval, manual refresh, and a 401 surfaced as an
+explicit auth state), so the UI has no dependency on any storage driver or
+Vercel service.
+
+Presentation and logic are separated. `ui/view-model.ts` is a pure module that
+maps API payloads to UI state (KPI tiles, outcome-mix percentages that sum to
+100 via a largest-remainder allocation, terminal trend grouped by day, resource
+snapshot, table rows, and the run-detail view) and is unit-tested in the `node`
+environment. `ui/components.tsx` renders that state and is tested under `jsdom`
+with Testing Library across the empty / loading / error / active / blocked /
+terminal states.
+
+Honesty rules are enforced by tests: an absent measurement renders `—` (never
+`0`), the "unmeasured" count is derived only as total minus observed, and an
+unrecognized event type is displayed literally rather than guessed. Styling is
+plain CSS in `app/globals.css` (the `.df-*` operator-split rules); the trend
+chart is inline CSS with no third-party chart dependency.

@@ -10,7 +10,8 @@ DISABLE_LINTERS:
   - BASH_SHELLCHECK
   - BASH_SHFMT
   - TYPESCRIPT_STANDARD
-FILTER_REGEX_EXCLUDE: (node_modules/|\.git/|\.next/|\.eve/|\.vercel/)
+FILTER_REGEX_EXCLUDE: >-
+  (node_modules/|\.git/|\.next/|\.eve/|\.vercel/|docs/df-progress-board-)
 JAVASCRIPT_DEFAULT_STYLE: prettier
 JSON_PRETTIER_FILTER_REGEX_EXCLUDE: (\.next/|\.eve/|\.vercel/|node_modules/)
 PRINT_ALPACA: false

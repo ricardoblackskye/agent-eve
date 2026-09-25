@@ -637,6 +637,33 @@ npx vitest run tests/dark-factory/run-query.test.ts \
                tests/dark-factory/run-query-api.test.ts --reporter=verbose
 ```
 
+## Dark Factory (R6) — progress board (#200)
+
+An authenticated, read-only board renders the durable run ledger: an Overview
+("Factory status") with outcome tiles, outcome mix, trend and a
+measured-resource snapshot; an Execution ledger of filterable runs; and a Run
+detail view with the lifecycle timeline, worker checkpoints and measured
+metrics. It consumes the provider-neutral read API from #199
+(`/api/dark-factory/*`) and has no direct dependency on Vercel storage or
+execution services.
+
+| Route                     | Screen                                                                  |
+|---------------------------|-------------------------------------------------------------------------|
+| `/dark-factory`           | Overview — outcome tiles, mix, trend, resource snapshot, recent runs    |
+| `/dark-factory/runs`      | Execution ledger — filterable run table + selected-run preview          |
+| `/dark-factory/runs/{id}` | Run detail — summary tiles, event timeline, worker checkpoints, metrics |
+
+Board data is viewer-session gated (the `eve_session` cookie): an
+unauthenticated viewer sees a sign-in state and no ledger data. Refresh is
+periodic polling (60 s) plus a manual Refresh button; realtime streaming is out
+of scope. Absent measurements render as `—` rather than a fabricated zero, and
+the resource snapshot reports an "unmeasured" count derived only from observed
+data.
+
+```bash
+npx vitest run tests/dark-factory-ui   # pure logic + component state matrix
+```
+
 ## Scripts
 
 | Command             | Description                            |
