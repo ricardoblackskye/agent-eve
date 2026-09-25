@@ -48,6 +48,11 @@ describe("configured run-history provider", () => {
     });
     expect(progress.ok).toBe(false);
     expect(progress.error).toMatch(/not configured/i);
+    const metrics = await store.getRunMetrics({ repo: "owner/repo" });
+    expect(metrics.ok).toBe(false);
+    expect(metrics.mode).toBe("blocked");
+    expect(metrics.value).toBeNull();
+    expect(metrics.error).toMatch(/not configured/i);
   });
 
   it("rejects an unknown driver and missing SQLite path", () => {

@@ -1,23 +1,41 @@
-import {
-  MAX_METRIC_COST_USD,
-  MAX_METRIC_LATENCY_MS,
-} from "./metrics";
+import { MAX_METRIC_COST_USD, MAX_METRIC_LATENCY_MS } from "./metrics";
+
+export function normalizeRunDateRange(
+  from: string | undefined,
+  to: string | undefined,
+): { from?: string; to?: string } {
+  const normalize = (value: string | undefined, field: string) => {
+    if (value === undefined) return undefined;
+    const parsed = typeof value === "string" ? Date.parse(value) : NaN;
+    if (!Number.isFinite(parsed)) {
+      throw new InvalidRunRecordError(
+        `Run history filter "${field}" must be an ISO timestamp.`,
+      );
+    }
+    return new Date(parsed).toISOString();
+  };
+  const normalizedFrom = normalize(from, "from");
+  const normalizedTo = normalize(to, "to");
+  if (
+    normalizedFrom !== undefined &&
+    normalizedTo !== undefined &&
+    Date.parse(normalizedFrom) >= Date.parse(normalizedTo)
+  ) {
+    throw new InvalidRunRecordError(
+      'Run history filter "from" must be before "to".',
+    );
+  }
+  return {
+    ...(normalizedFrom !== undefined ? { from: normalizedFrom } : {}),
+    ...(normalizedTo !== undefined ? { to: normalizedTo } : {}),
+  };
+}
 
 export type RunStatus =
-  | "queued"
-  | "running"
-  | "blocked"
-  | "aborted"
-  | "succeeded"
-  | "failed";
+  "queued" | "running" | "blocked" | "aborted" | "succeeded" | "failed";
 
 export type RunStage =
-  | "trigger"
-  | "dispatch"
-  | "worker"
-  | "review"
-  | "pull-request"
-  | "terminal";
+  "trigger" | "dispatch" | "worker" | "review" | "pull-request" | "terminal";
 
 export type RunEventType =
   | "run.accepted"
@@ -82,6 +100,57 @@ export class InvalidRunRecordError extends Error {
   }
 }
 
+export interface RunMetricsQuery {
+  repo?: string;
+  /** Inclusive lower bound for createdAt. */
+  from?: string;
+  /** Exclusive upper bound for createdAt. */
+  to?: string;
+}
+
+export interface RunStatusCount {
+  status: RunStatus;
+  count: number;
+}
+
+export interface RunTrendPoint {
+  /** UTC calendar date, YYYY-MM-DD. */
+  date: string;
+  outcome: RunStatus;
+  count: number;
+}
+
+export interface RunMeasuredSummary {
+  sum: number;
+  count: number;
+}
+
+export interface RunMetrics {
+  /** One entry per canonical status, including aborted; count may be 0. */
+  statusCounts: RunStatusCount[];
+  /** Terminal outcomes grouped by completedAt calendar day (UTC). */
+  trend: RunTrendPoint[];
+  /** Measured aggregates; a field is absent when no run reported it. */
+  measured: {
+    latencyMs?: RunMeasuredSummary;
+    costUsd?: RunMeasuredSummary;
+  };
+}
+
+export const ALL_RUN_STATUSES: readonly RunStatus[] = [
+  "queued",
+  "running",
+  "blocked",
+  "aborted",
+  "succeeded",
+  "failed",
+];
+export const TERMINAL_RUN_STATUSES: readonly RunStatus[] = [
+  "aborted",
+  "succeeded",
+  "failed",
+];
+
 const RUN_STATUSES: readonly RunStatus[] = [
   "queued",
   "running",
@@ -132,7 +201,11 @@ function identifier(value: unknown, field: string): string {
     value.trim().length > MAX_IDENTIFIER_LENGTH ||
     /[\u0000-\u001f\u007f]/.test(value)
   ) {
-    return invalid(field, value, `to be a non-empty string of at most ${MAX_IDENTIFIER_LENGTH} characters`);
+    return invalid(
+      field,
+      value,
+      `to be a non-empty string of at most ${MAX_IDENTIFIER_LENGTH} characters`,
+    );
   }
   return value.trim();
 }
@@ -157,7 +230,11 @@ function count(value: unknown, field: string): number {
     (value as number) < 0 ||
     (value as number) > MAX_RUN_COUNTER
   ) {
-    return invalid(field, value, `to be a safe integer in [0, ${MAX_RUN_COUNTER}]`);
+    return invalid(
+      field,
+      value,
+      `to be a safe integer in [0, ${MAX_RUN_COUNTER}]`,
+    );
   }
   return value as number;
 }
@@ -184,10 +261,7 @@ function timestamp(value: unknown, field: string): string {
   return new Date(parsed).toISOString();
 }
 
-function optionalTimestamp(
-  value: unknown,
-  field: string,
-): string | undefined {
+function optionalTimestamp(value: unknown, field: string): string | undefined {
   return value === undefined ? undefined : timestamp(value, field);
 }
 
@@ -207,14 +281,19 @@ function optionalMeasurement(
   field: "latencyMs" | "costUsd",
 ): number | undefined {
   if (value === undefined) return undefined;
-  const max = field === "latencyMs" ? MAX_METRIC_LATENCY_MS : MAX_METRIC_COST_USD;
+  const max =
+    field === "latencyMs" ? MAX_METRIC_LATENCY_MS : MAX_METRIC_COST_USD;
   if (
     typeof value !== "number" ||
     !Number.isFinite(value) ||
     value < 0 ||
     value > max
   ) {
-    return invalid(field, value, `to be a finite measured value in [0, ${max}]`);
+    return invalid(
+      field,
+      value,
+      `to be a finite measured value in [0, ${max}]`,
+    );
   }
   return value;
 }
@@ -231,7 +310,11 @@ function optionalPrUrl(value: unknown): string | undefined {
       parsed.username !== "" ||
       parsed.password !== ""
     ) {
-      return invalid("prUrl", value, "to be an HTTP(S) URL without credentials");
+      return invalid(
+        "prUrl",
+        value,
+        "to be an HTTP(S) URL without credentials",
+      );
     }
     return parsed.toString();
   } catch {
@@ -336,25 +419,47 @@ export function toRunEvent(input: Partial<RunEvent>): RunEvent {
     return invalid("attempt", attempt, "to be present for dispatch.attempt");
   }
   if (type === "review.round" && reviewRound === undefined) {
-    return invalid("reviewRound", reviewRound, "to be present for review.round");
+    return invalid(
+      "reviewRound",
+      reviewRound,
+      "to be present for review.round",
+    );
   }
   const hasFindingMetrics =
     findingCount !== undefined ||
     resolvedCount !== undefined ||
     acceptedCount !== undefined;
   if (hasFindingMetrics && type !== "review.round") {
-    return invalid("findingCount", findingCount, "to be used only on review.round events");
+    return invalid(
+      "findingCount",
+      findingCount,
+      "to be used only on review.round events",
+    );
   }
-  if (findingCount === undefined && (resolvedCount !== undefined || acceptedCount !== undefined)) {
-    return invalid("findingCount", findingCount, "to be present when disposition counts are supplied");
+  if (
+    findingCount === undefined &&
+    (resolvedCount !== undefined || acceptedCount !== undefined)
+  ) {
+    return invalid(
+      "findingCount",
+      findingCount,
+      "to be present when disposition counts are supplied",
+    );
   }
   if (findingCount !== undefined && (acceptedCount ?? 0) > findingCount) {
-    return invalid("findingCount", findingCount, "to be at least acceptedCount");
+    return invalid(
+      "findingCount",
+      findingCount,
+      "to be at least acceptedCount",
+    );
   }
   if (type === "pr.opened" && prUrl === undefined) {
     return invalid("prUrl", prUrl, "to be present for pr.opened");
   }
-  if (type === "run.terminal" && (status === undefined || !isTerminal(status))) {
+  if (
+    type === "run.terminal" &&
+    (status === undefined || !isTerminal(status))
+  ) {
     return invalid("status", status, "to be terminal for run.terminal");
   }
 
@@ -403,24 +508,48 @@ export function applyRunEvent(
   const current = toRunSummary(currentInput);
   const event = toRunEvent(eventInput);
   if (current.runId !== event.runId) {
-    return invalid("runId", event.runId, `to match summary runId '${current.runId}'`);
+    return invalid(
+      "runId",
+      event.runId,
+      `to match summary runId '${current.runId}'`,
+    );
   }
   if (isTerminal(current.status)) {
     return invalid("runId", current.runId, "to reference a non-terminal run");
   }
   if (event.type === "run.accepted") {
-    return invalid("type", event.type, "to be applied only when the run is created");
+    return invalid(
+      "type",
+      event.type,
+      "to be applied only when the run is created",
+    );
   }
-  if (current.status === "blocked" && event.type !== "run.resumed" && event.type !== "run.terminal") {
-    return invalid("type", event.type, "to resume a blocked run before further work events");
+  if (
+    current.status === "blocked" &&
+    event.type !== "run.resumed" &&
+    event.type !== "run.terminal"
+  ) {
+    return invalid(
+      "type",
+      event.type,
+      "to resume a blocked run before further work events",
+    );
   }
   if (event.type === "run.resumed" && current.status !== "blocked") {
-    return invalid("status", current.status, 'to be "blocked" before run.resumed');
+    return invalid(
+      "status",
+      current.status,
+      'to be "blocked" before run.resumed',
+    );
   }
 
   const status = defaultStatusForEvent(event, current.status);
   if (isTerminal(status) && event.type !== "run.terminal") {
-    return invalid("type", event.type, "to be run.terminal for a terminal status");
+    return invalid(
+      "type",
+      event.type,
+      "to be run.terminal for a terminal status",
+    );
   }
   if (event.type === "run.terminal" && event.stage !== "terminal") {
     return invalid("stage", event.stage, 'to be "terminal" for run.terminal');

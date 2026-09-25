@@ -343,7 +343,7 @@ pinned to their original run (or record that no eligible run existed), so a
 late replay cannot mutate a later run. Lifecycle event appends and summary
 projections are atomic. Replaying an identical event is a no-op; a reused event
 ID with different contents is rejected. The store exposes bounded summary/event
-queries for the future #199 API; #198 does not add that API or the progress board
+queries; the read API (#199) is built on them (see below). #198 does not add the progress board
 tracked by #200.
 
 Run summaries track attempts, review rounds, iterations, fix cycles, and the PR
@@ -355,3 +355,38 @@ PostgreSQL endpoint, or `DF_RUN_HISTORY_DRIVER=sqlite` and
 `NODE_ENV=production` or the selected deployment stage is `preview` or
 `production`; deployed runtimes must use PostgreSQL. An unset driver refuses
 writes rather than claiming in-memory data is durable.
+
+## Dark Factory run query API (#199)
+
+`run-query.ts` is the provider-neutral application service over the #198 ledger.
+It depends only on the `RunHistoryStore` read contract — never on Next.js types
+or a storage driver — so identical query semantics hold for SQLite and
+PostgreSQL and the HTTP layer stays a thin adapter. It adds the two read
+capabilities the ledger lacked: a validated inclusive-`from` / exclusive-`to`
+date filter, and aggregate metrics (per-status counts, a terminal-outcome trend
+grouped by `completedAt`, and latency/cost sums with observation counts; absent
+measurements stay absent).
+
+Three thin Route Handlers under `app/api/dark-factory/` expose it:
+
+| Route                             | Handler file            |
+|-----------------------------------|-------------------------|
+| `GET /api/dark-factory/runs`      | `runs/route.ts`         |
+| `GET /api/dark-factory/runs/{id}` | `runs/[runId]/route.ts` |
+| `GET /api/dark-factory/metrics`   | `metrics/route.ts`      |
+
+Design boundaries:
+
+- **Viewer auth at the edge only.** `viewer-auth.ts` reads the `eve_session`
+  cookie and verifies it with the existing `AUTH_SESSION_SECRET` (no new
+  viewer-auth variable); a missing production secret fails closed to 401.
+  `proxy.ts` remains the fail-closed first line for unknown `/api/*` paths.
+- **Opaque cursors.** List and event cursors are base64url-encoded and validated
+  before use; the store's internal cursor shape never reaches the caller, and a
+  tampered cursor is a 400, not a silently wrong page.
+- **Distinct failure modes.** Not-found (`value: null` → 404) stays separate from
+  a blocked/unconfigured store (→ 503). Internal error text, SQL, connection
+  strings, and provider identifiers are never returned.
+- **No-store.** Every response sets `Cache-Control: private, no-store`.
+- **Portability.** No Vercel SDK and no storage-specific import in the query
+  service; swapping `DF_RUN_HISTORY_DRIVER` changes the adapter, not the API.

@@ -385,6 +385,50 @@ describe("SqliteRunHistoryStore delivery acceptance", () => {
     expect(page.value?.items.map((run) => run.runId)).toEqual([firstRunId]);
   });
 
+  it("filters runs by inclusive from and exclusive to with repo and status filters", async () => {
+    let generated = 0;
+    const store = createStore(() => `date-filter-run-${++generated}`);
+    const runs = [
+      ["date-before", "owner/repo", 200, "2026-09-24T12:00:00.999Z"],
+      ["date-from", "owner/repo", 201, "2026-09-24T12:00:01.000Z"],
+      ["date-running", "owner/repo", 202, "2026-09-24T12:00:02.000Z"],
+      ["date-before-to", "owner/repo", 203, "2026-09-24T12:00:02.999Z"],
+      ["date-at-to", "owner/repo", 204, "2026-09-24T12:00:03.000Z"],
+      ["date-other-repo", "other/repo", 205, "2026-09-24T12:00:02.500Z"],
+    ] as const;
+
+    const accepted = new Map<number, string>();
+    for (const [deliveryId, repo, issue, receivedAt] of runs) {
+      const result = await store.acceptDelivery({
+        deliveryId,
+        repo,
+        issue,
+        receivedAt,
+      });
+      if (!result.value) throw new Error("run acceptance returned no summary");
+      accepted.set(issue, result.value.runId);
+    }
+    const runningRunId = accepted.get(202);
+    if (!runningRunId) throw new Error("running run was not accepted");
+    await store.appendEvent({
+      eventId: "date-filter-started",
+      runId: runningRunId,
+      type: "dispatch.started",
+      stage: "dispatch",
+      occurredAt: "2026-09-24T12:00:02.001Z",
+      status: "running",
+    });
+
+    const page = await store.listRuns({
+      repo: "owner/repo",
+      statuses: ["queued"],
+      from: "2026-09-24T12:00:01.000Z",
+      to: "2026-09-24T12:00:03.000Z",
+    });
+
+    expect(page.value?.items.map((run) => run.issue)).toEqual([203, 201]);
+  });
+
   it("loads runs and paginates in stable newest-first order", async () => {
     let generated = 0;
     const store = createStore(() => `page-run-${++generated}`);
@@ -524,5 +568,218 @@ describe("SqliteRunHistoryStore delivery acceptance", () => {
     expect(firstPage.value?.items[0]?.sequence).toBe(1);
     expect(secondPage.value?.items[0]?.event.type).toBe("dispatch.started");
     expect(secondPage.value?.items[0]?.sequence).toBe(2);
+  });
+
+  it("aggregates status counts, terminal trend, and measured sums for a repo", async () => {
+    let generated = 0;
+    const store = createStore(() => `metrics-run-${++generated}`);
+    const terminal = async (
+      deliveryId: string,
+      repo: string,
+      issue: number,
+      status: "succeeded" | "failed" | "aborted",
+      completedAt: string,
+      extra: Record<string, unknown> = {},
+    ) => {
+      const accepted = await store.acceptDelivery({
+        deliveryId,
+        repo,
+        issue,
+        receivedAt: completedAt,
+      });
+      const runId = accepted.value?.runId;
+      if (!runId) throw new Error("no runId");
+      const result = await store.appendEvent({
+        eventId: `${deliveryId}-terminal`,
+        runId,
+        type: "run.terminal",
+        stage: "terminal",
+        occurredAt: completedAt,
+        status,
+        ...extra,
+      });
+      if (!result.ok) throw new Error("terminal event failed");
+    };
+    await terminal(
+      "m-succeeded",
+      "owner/repo",
+      300,
+      "succeeded",
+      "2026-09-24T12:00:00.000Z",
+      {
+        latencyMs: 1000,
+        costUsd: 0.5,
+      },
+    );
+    await terminal(
+      "m-failed",
+      "owner/repo",
+      301,
+      "failed",
+      "2026-09-24T12:00:00.000Z",
+      {
+        latencyMs: 2000,
+        costUsd: 1.0,
+      },
+    );
+    await terminal(
+      "m-aborted",
+      "owner/repo",
+      302,
+      "aborted",
+      "2026-09-25T08:00:00.000Z",
+      {
+        latencyMs: 500,
+        costUsd: 0.25,
+      },
+    );
+    const runningAccepted = await store.acceptDelivery({
+      deliveryId: "m-running",
+      repo: "owner/repo",
+      issue: 303,
+      receivedAt: "2026-09-26T08:00:00.000Z",
+    });
+    if (!runningAccepted.value?.runId) throw new Error("no runId");
+    await store.appendEvent({
+      eventId: "m-running-started",
+      runId: runningAccepted.value.runId,
+      type: "dispatch.started",
+      stage: "dispatch",
+      occurredAt: "2026-09-26T08:00:01.000Z",
+      status: "running",
+    });
+    await terminal(
+      "m-other",
+      "other/repo",
+      304,
+      "succeeded",
+      "2026-09-24T12:00:00.000Z",
+      {
+        latencyMs: 300,
+        costUsd: 0.3,
+      },
+    );
+
+    const metrics = await store.getRunMetrics({ repo: "owner/repo" });
+
+    const byStatus = Object.fromEntries(
+      metrics.value?.statusCounts.map((c) => [c.status, c.count]) ?? [],
+    );
+    expect(byStatus).toEqual({
+      queued: 0,
+      running: 1,
+      blocked: 0,
+      aborted: 1,
+      succeeded: 1,
+      failed: 1,
+    });
+    const trend = metrics.value?.trend
+      .map((t) => `${t.date}:${t.outcome}:${t.count}`)
+      .sort();
+    expect(trend).toEqual([
+      "2026-09-24:failed:1",
+      "2026-09-24:succeeded:1",
+      "2026-09-25:aborted:1",
+    ]);
+    expect(metrics.value?.measured.latencyMs).toEqual({ sum: 3500, count: 3 });
+    expect(metrics.value?.measured.costUsd).toEqual({ sum: 1.75, count: 3 });
+  });
+
+  it("reports explicit zero measurements as present and absent measurements as missing", async () => {
+    let generated = 0;
+    const store = createStore(() => `metrics-zero-run-${++generated}`);
+    const zero = await store.acceptDelivery({
+      deliveryId: "zero",
+      repo: "owner/zero",
+      issue: 400,
+      receivedAt: "2026-09-24T12:00:00.000Z",
+    });
+    if (!zero.value?.runId) throw new Error("no runId");
+    await store.appendEvent({
+      eventId: "zero-t",
+      runId: zero.value.runId,
+      type: "run.terminal",
+      stage: "terminal",
+      occurredAt: "2026-09-24T12:00:01.000Z",
+      status: "succeeded",
+      latencyMs: 0,
+      costUsd: 0,
+    });
+    const none = await store.acceptDelivery({
+      deliveryId: "none",
+      repo: "owner/none",
+      issue: 401,
+      receivedAt: "2026-09-24T12:00:00.000Z",
+    });
+    if (!none.value?.runId) throw new Error("no runId");
+    await store.appendEvent({
+      eventId: "none-t",
+      runId: none.value.runId,
+      type: "run.terminal",
+      stage: "terminal",
+      occurredAt: "2026-09-24T12:00:01.000Z",
+      status: "succeeded",
+    });
+
+    const zeroMetrics = await store.getRunMetrics({ repo: "owner/zero" });
+    expect(zeroMetrics.value?.measured.latencyMs).toEqual({ sum: 0, count: 1 });
+    expect(zeroMetrics.value?.measured.costUsd).toEqual({ sum: 0, count: 1 });
+
+    const noneMetrics = await store.getRunMetrics({ repo: "owner/none" });
+    expect(noneMetrics.value?.measured.latencyMs).toBeUndefined();
+    expect(noneMetrics.value?.measured.costUsd).toBeUndefined();
+  });
+
+  it("applies inclusive from and exclusive to date filtering to metrics", async () => {
+    let generated = 0;
+    const store = createStore(() => `metrics-range-run-${++generated}`);
+    const terminal = async (
+      deliveryId: string,
+      issue: number,
+      completedAt: string,
+      extra: Record<string, unknown> = {},
+    ) => {
+      const accepted = await store.acceptDelivery({
+        deliveryId,
+        repo: "owner/repo",
+        issue,
+        receivedAt: completedAt,
+      });
+      const runId = accepted.value?.runId;
+      if (!runId) throw new Error("no runId");
+      const result = await store.appendEvent({
+        eventId: `${deliveryId}-t`,
+        runId,
+        type: "run.terminal",
+        stage: "terminal",
+        occurredAt: completedAt,
+        status: "succeeded",
+        ...extra,
+      });
+      if (!result.ok) throw new Error("terminal failed");
+    };
+    await terminal("r-before", 410, "2026-09-23T12:00:00.000Z", {
+      latencyMs: 100,
+    });
+    await terminal("r-from", 411, "2026-09-24T00:00:00.000Z", {
+      latencyMs: 200,
+    });
+    await terminal("r-mid", 412, "2026-09-24T12:00:00.000Z", {
+      latencyMs: 300,
+    });
+    await terminal("r-at-to", 413, "2026-09-25T00:00:00.000Z", {
+      latencyMs: 400,
+    });
+
+    const metrics = await store.getRunMetrics({
+      repo: "owner/repo",
+      from: "2026-09-24T00:00:00.000Z",
+      to: "2026-09-25T00:00:00.000Z",
+    });
+    const trend = metrics.value?.trend
+      .map((t) => `${t.date}:${t.count}`)
+      .sort();
+    expect(trend).toEqual(["2026-09-24:2"]);
+    expect(metrics.value?.measured.latencyMs).toEqual({ sum: 500, count: 2 });
   });
 });
