@@ -39,6 +39,9 @@ import {
 import { createMetricsStore } from "../agent/lib/dark-factory/metrics";
 import { ArchitectAgent } from "../agent/lib/dark-factory/architect-agent";
 import { validateExecutionPlan, type ExecutionPlan } from "../agent/lib/dark-factory/plan-validator";
+import { createControlStore } from "../agent/lib/dark-factory/control";
+import { createControlCheckpoint } from "../agent/lib/dark-factory/control-checkpoint";
+import type { ControlStore } from "../agent/lib/dark-factory/control";
 
 // Load .env variables into process.env
 function initEnv(): Record<string, string | undefined> {
@@ -91,6 +94,30 @@ function scanWorkspaceFiles(dir: string, base: string = dir): string[] {
   return results;
 }
 
+let activeControlStore: ControlStore | null = null;
+
+/**
+ * Build the cooperative control checkpoint used by a runner execution.
+ * Returns the backing store (for operator actions) and the checkpoint callable
+ * that the Architect and Developer loops must invoke before each LLM call.
+ */
+export function buildRunControl(
+  env: Record<string, string | undefined>,
+  runId: string,
+): { store: ControlStore; checkpoint: () => Promise<void> } {
+  const store = createControlStore(env);
+  return { store, checkpoint: createControlCheckpoint(store, runId) };
+}
+
+export function resolveRunnerRunId(
+  argv: string[],
+  issueNum: number,
+  now = Date.now(),
+): string {
+  const index = argv.indexOf("--run-id");
+  return index !== -1 && argv[index + 1] ? argv[index + 1] : `run-${issueNum}-${now}`;
+}
+
 async function main(): Promise<void> {
   console.log("################################################################################");
   console.log("  DARK FACTORY: HARDENED ARCHITECT & MULTI-FILE DEVELOPER RUNNER (#179)        ");
@@ -107,6 +134,11 @@ async function main(): Promise<void> {
       ? parseInt(process.argv[issueArgIdx + 1], 10)
       : 179;
 
+  const runId = resolveRunnerRunId(process.argv, issueNum);
+  const { store: runControlStore, checkpoint } = buildRunControl(env, runId);
+  activeControlStore = runControlStore;
+  await checkpoint();
+
   const branchArgIdx = process.argv.indexOf("--branch");
   const branchName =
     branchArgIdx !== -1 && process.argv[branchArgIdx + 1]
@@ -122,7 +154,7 @@ async function main(): Promise<void> {
 
   if (!token || !env.OPENROUTER_API_KEY) {
     console.error("[ERROR] Missing GITHUB_TOKEN or OPENROUTER_API_KEY in environment or .env");
-    process.exit(1);
+    throw new Error("Dark Factory Runner stopped after the preceding error.");
   }
 
   const issueWriter = new GitHubIssueWriter({ token });
@@ -142,7 +174,7 @@ async function main(): Promise<void> {
   });
   if (!issueRes.ok) {
     console.error(`Failed to fetch issue #${issueNum}: HTTP ${issueRes.status}`);
-    process.exit(1);
+    throw new Error("Dark Factory Runner stopped after the preceding error.");
   }
   const issueData = (await issueRes.json()) as { title: string; body: string };
   line("Story Title", issueData.title);
@@ -166,6 +198,7 @@ async function main(): Promise<void> {
   const architectAgent = new ArchitectAgent({
     listFiles: async () => scanWorkspaceFiles(process.cwd()),
     generateText: async (prompt) => {
+      await checkpoint();
       const stream = streamText({ model, prompt });
       let output = "";
       for await (const chunk of stream.textStream) {
@@ -182,11 +215,12 @@ async function main(): Promise<void> {
     title: issueData.title,
     body: issueData.body,
   });
+  await checkpoint();
 
   if (!planResult.ok || !planResult.plan) {
     console.error(`[ERROR] Architect Agent planning failed: ${planResult.error}`);
     await issueWriter.addLabel("ricardoblackskye", "agent-eve", issueNum, "needs-answer");
-    process.exit(1);
+    throw new Error("Dark Factory Runner stopped after the preceding error.");
   }
 
   const executionPlan = planResult.plan;
@@ -200,7 +234,7 @@ async function main(): Promise<void> {
   const validation = validateExecutionPlan(executionPlan, issueData.body);
   if (!validation.valid) {
     console.error(`[ERROR] Plan domain validation rejected:`, validation.errors);
-    process.exit(1);
+    throw new Error("Dark Factory Runner stopped after the preceding error.");
   }
   console.log("  -> Domain Validation Passed!");
 
@@ -213,6 +247,7 @@ async function main(): Promise<void> {
     plan: executionPlan,
     tools: workspaceTools,
     maxIterations: developerAgent.maxIterations,
+    checkpoint,
     worker: async (ctx) => {
       console.log(`  -> Coding Iteration ${ctx.iteration}/${developerAgent.maxIterations}...`);
 
@@ -263,14 +298,17 @@ async function main(): Promise<void> {
 
   if (loopResult.status !== "success") {
     console.error("[ERROR] Developer Agent failed to achieve passing tests.");
-    process.exit(1);
+    throw new Error("Dark Factory Runner stopped after the preceding error.");
   }
 
   // STEP 6: Commit and Push Task Branch
   console.log(`\n[STEP 6] Committing changes to '${branchName}' and pushing to GitHub...`);
   const filesToCommit = executionPlan.targetFiles.map((f) => f.path).join(" ");
+  await checkpoint();
   execSync(`git add ${filesToCommit}`, { stdio: "inherit" });
+  await checkpoint();
   execSync(`git commit -m "feat: #${issueNum} ${executionPlan.title}"`, { stdio: "inherit" });
+  await checkpoint();
 
   const pushUrl = `https://x-access-token:${token}@github.com/${targetRepo}.git`;
   execSync(`git push ${pushUrl} ${branchName}`, { stdio: "pipe" });
@@ -278,8 +316,9 @@ async function main(): Promise<void> {
 
   // STEP 7: Definition of DONE with AC Traceability Matrix
   console.log(`\n[STEP 7] Executing Hardened Definition of DONE (#179)...`);
+  await checkpoint();
   const dodTask: DefinitionOfDoneTask = {
-    runId: `run-${issueNum}-${Date.now()}`,
+    runId,
     repo: targetRepo,
     issue: issueNum,
     head: branchName,
@@ -338,9 +377,21 @@ async function main(): Promise<void> {
   console.log("\n================================================================================");
   console.log("DARK FACTORY RUNNER: EXECUTION COMPLETED SUCCESSFULLY");
   console.log("================================================================================\n");
+  await activeControlStore?.close?.();
+  activeControlStore = null;
 }
 
 // Only execute main when run as script directly
 if (require.main === module || process.argv[1]?.endsWith("dark-factory-runner.ts")) {
-  void main();
+  void main().catch(async (error: unknown) => {
+    console.error(`[ERROR] Runner aborted: ${error instanceof Error ? error.message : String(error)}`);
+    try {
+      await activeControlStore?.close?.();
+    } catch (closeError) {
+      console.error(`[ERROR] Failed to close control store: ${closeError instanceof Error ? closeError.message : String(closeError)}`);
+    } finally {
+      activeControlStore = null;
+      process.exitCode = 1;
+    }
+  });
 }

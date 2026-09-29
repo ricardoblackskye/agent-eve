@@ -14,6 +14,8 @@ import {
   TrendChart,
 } from "./ui/components";
 import { DEFAULT_POLL_INTERVAL_MS, useRunQuery } from "./ui/use-run-query";
+import { useFactoryControl } from "./ui/use-factory-control";
+import { ControlPanel } from "./ui/control-panel";
 import {
   toKpiTiles,
   toOutcomeMix,
@@ -23,6 +25,7 @@ import {
 
 export default function DarkFactoryOverviewPage() {
   const intervalMs = DEFAULT_POLL_INTERVAL_MS;
+  const control = useFactoryControl({ intervalMs });
   const metrics = useRunQuery<{ metrics: RunMetrics }>(
     "/api/dark-factory/metrics",
     { intervalMs },
@@ -77,6 +80,20 @@ export default function DarkFactoryOverviewPage() {
           </button>
         </div>
       </div>
+
+      <section className="df-panel df-control-card">
+        <div className="df-panel-head"><strong>LIVE CONTROL</strong><span>OPERATOR OFF-SWITCH</span></div>
+        <div className="df-panel-body">
+          <ControlPanel
+            loading={control.loading}
+            error={control.error}
+            unauthenticated={control.unauthenticated}
+            pending={control.pending}
+            factory={control.data?.factory}
+            onAction={(action, scope) => { void control.act(action, scope); }}
+          />
+        </div>
+      </section>
 
       <KpiTiles tiles={toKpiTiles(statusCounts)} />
 

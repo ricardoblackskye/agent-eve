@@ -11,11 +11,14 @@ import {
   WorkerCheckpoints,
 } from "../../ui/components";
 import { DEFAULT_POLL_INTERVAL_MS, useRunQuery } from "../../ui/use-run-query";
+import { useFactoryControl } from "../../ui/use-factory-control";
+import { ControlPanel } from "../../ui/control-panel";
 import { toDetailView } from "../../ui/view-model";
 
 export default function DarkFactoryRunDetailPage() {
   const params = useParams<{ runId: string }>();
   const runId = typeof params?.runId === "string" ? params.runId : "";
+  const control = useFactoryControl({ runId, intervalMs: DEFAULT_POLL_INTERVAL_MS });
   const run = useRunQuery<{
     summary: RunSummary;
     events: PersistedRunEvent[];
@@ -48,6 +51,21 @@ export default function DarkFactoryRunDetailPage() {
 
   return (
     <div className="df-view">
+      <section className="df-panel df-control-card">
+        <div className="df-panel-head"><strong>RUN CONTROL</strong><span>COOPERATIVE PAUSE · TERMINAL STOP</span></div>
+        <div className="df-panel-body">
+          <ControlPanel
+            loading={control.loading}
+            error={control.error}
+            unauthenticated={control.unauthenticated}
+            pending={control.pending}
+            factory={control.data?.factory}
+            runId={runId}
+            run={control.data?.run}
+            onAction={(action, scope) => { void control.act(action, scope); }}
+          />
+        </div>
+      </section>
       <RunDetailPanel summary={run.data.summary} view={view} />
       <div className="df-detail-grid">
         <section className="df-panel">

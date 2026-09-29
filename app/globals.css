@@ -814,6 +814,71 @@ header {
   border-color: #392f1a;
 }
 
+.df-control-card {
+  margin-bottom: 16px;
+}
+
+.df-control-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 44px;
+}
+
+.df-control-state,
+.df-control-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.df-control-state small,
+.df-control-state time,
+.df-control-terminal {
+  color: #8993a0;
+  font-size: 11px;
+}
+
+.df-control-indicator {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #63c48b;
+  box-shadow: 0 0 9px #63c48b55;
+}
+
+.df-control-indicator.is-paused {
+  background: #f1cf70;
+  box-shadow: 0 0 9px #f1cf7055;
+}
+
+.df-control-indicator.is-stopped {
+  background: #ff7883;
+  box-shadow: 0 0 9px #ff788355;
+}
+
+.df-btn-danger {
+  color: #ff9ca4;
+  border-color: #69343a;
+}
+
+.df-control-notice {
+  margin: 0;
+  color: #8993a0;
+}
+
+@media (max-width: 700px) {
+  .df-control-panel {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .df-control-state {
+    flex-wrap: wrap;
+  }
+}
+
 @media (max-width: 1050px) {
   .df-grid {
     grid-template-columns: 1fr;

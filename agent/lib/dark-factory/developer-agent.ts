@@ -669,6 +669,8 @@ export interface MultiFileCodingLoopOptions {
     ctx: LoopContext & { plan: ExecutionPlan; tools: WorkspaceTools },
   ) => Promise<WorkerResult>;
   maxIterations: number;
+  /** Called before each worker iteration at a cooperative control boundary. */
+  checkpoint?: (iteration: number) => Promise<void>;
 }
 
 /**
@@ -683,6 +685,7 @@ export async function runMultiFileCodingLoop(
   for (let i = 0; i < opts.maxIterations; i++) {
     const iteration = i + 1;
     iterations = iteration;
+    await opts.checkpoint?.(iteration);
     const res = await opts.worker({
       iteration,
       plan: opts.plan,
@@ -691,6 +694,11 @@ export async function runMultiFileCodingLoop(
     passed = res.passed;
     if (passed) break;
   }
+
+  // Cooperative control check after the final worker call: a Stop (or Pause)
+  // that arrives during the last model/test call must be honored BEFORE we
+  // report success, so the runner never commits/pushes stopped work.
+  await opts.checkpoint?.(iterations);
 
   const fixCycles = passed ? iterations - 1 : iterations;
   return { status: passed ? "success" : "failed", iterations, fixCycles };

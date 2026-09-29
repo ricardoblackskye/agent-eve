@@ -12,6 +12,7 @@ import {
 } from "../../../../agent/lib/dark-factory/entry";
 import { createGitHubLabelWriter } from "../../../../agent/lib/dark-factory/issue-writer";
 import { createRunHistoryStore } from "../../../../agent/lib/dark-factory/run-history-provider";
+import { createControlStore } from "../../../../agent/lib/dark-factory/control";
 import { createPlatformAdapter } from "../../../../agent/lib/dark-factory/platform";
 
 interface RepoConfig {
@@ -509,14 +510,24 @@ async function handler(request: NextRequest) {
           { status: 400 },
         );
       }
+      const runHistory = createRunHistoryStore();
+      // Control is opt-in: only enforce the gate when a real control store is
+      // configured. An unset/console driver means control is disabled for this
+      // deployment, so the run-history configuration governs dispatch instead.
+      const controlDriver = (process.env.DF_CONTROL_DRIVER ?? "").trim().toLowerCase();
+      const controlStore = controlDriver && controlDriver !== "console"
+        ? createControlStore(process.env)
+        : undefined;
       const result = await runDarkFactoryDispatch(dfDecision, {
-        runHistory: createRunHistoryStore(),
+        runHistory,
+        controlStore,
         deliveryId,
         labels: createGitHubLabelWriter(),
         apiKey: process.env.EVE_API_KEY,
         env: process.env,
         origin: request.nextUrl.origin,
       });
+      await Promise.all([runHistory.close(), controlStore?.close?.()]);
       // Gate refusals are final for this event; infrastructure/write failures must
       // remain non-2xx so GitHub can retry after the operator repairs configuration.
       const retryableFailure = !result.ok && (result.status === "failed" || Boolean(result.error));
