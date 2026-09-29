@@ -39,6 +39,9 @@ import {
 import { createMetricsStore } from "../agent/lib/dark-factory/metrics";
 import { ArchitectAgent } from "../agent/lib/dark-factory/architect-agent";
 import { validateExecutionPlan, type ExecutionPlan } from "../agent/lib/dark-factory/plan-validator";
+import { createControlStore } from "../agent/lib/dark-factory/control";
+import { createControlCheckpoint } from "../agent/lib/dark-factory/control-checkpoint";
+import type { ControlStore } from "../agent/lib/dark-factory/control";
 
 // Load .env variables into process.env
 function initEnv(): Record<string, string | undefined> {
@@ -91,6 +94,21 @@ function scanWorkspaceFiles(dir: string, base: string = dir): string[] {
   return results;
 }
 
+let activeControlStore: ControlStore | null = null;
+
+/**
+ * Build the cooperative control checkpoint used by a runner execution.
+ * Returns the backing store (for operator actions) and the checkpoint callable
+ * that the Architect and Developer loops must invoke before each LLM call.
+ */
+export function buildRunControl(
+  env: Record<string, string | undefined>,
+  runId: string,
+): { store: ControlStore; checkpoint: () => Promise<void> } {
+  const store = createControlStore(env);
+  return { store, checkpoint: createControlCheckpoint(store, runId) };
+}
+
 async function main(): Promise<void> {
   console.log("################################################################################");
   console.log("  DARK FACTORY: HARDENED ARCHITECT & MULTI-FILE DEVELOPER RUNNER (#179)        ");
@@ -106,6 +124,14 @@ async function main(): Promise<void> {
     issueArgIdx !== -1 && process.argv[issueArgIdx + 1]
       ? parseInt(process.argv[issueArgIdx + 1], 10)
       : 179;
+
+  const runIdArgIdx = process.argv.indexOf("--run-id");
+  const runId = runIdArgIdx !== -1 && process.argv[runIdArgIdx + 1]
+    ? process.argv[runIdArgIdx + 1]
+    : `issue-${issueNum}`;
+  const { store: runControlStore, checkpoint } = buildRunControl(env, runId);
+  activeControlStore = runControlStore;
+  await checkpoint();
 
   const branchArgIdx = process.argv.indexOf("--branch");
   const branchName =
@@ -182,6 +208,7 @@ async function main(): Promise<void> {
     title: issueData.title,
     body: issueData.body,
   });
+  await checkpoint();
 
   if (!planResult.ok || !planResult.plan) {
     console.error(`[ERROR] Architect Agent planning failed: ${planResult.error}`);
@@ -213,6 +240,7 @@ async function main(): Promise<void> {
     plan: executionPlan,
     tools: workspaceTools,
     maxIterations: developerAgent.maxIterations,
+    checkpoint,
     worker: async (ctx) => {
       console.log(`  -> Coding Iteration ${ctx.iteration}/${developerAgent.maxIterations}...`);
 

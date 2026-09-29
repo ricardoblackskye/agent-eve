@@ -669,6 +669,8 @@ export interface MultiFileCodingLoopOptions {
     ctx: LoopContext & { plan: ExecutionPlan; tools: WorkspaceTools },
   ) => Promise<WorkerResult>;
   maxIterations: number;
+  /** Called before each worker iteration at a cooperative control boundary. */
+  checkpoint?: (iteration: number) => Promise<void>;
 }
 
 /**
@@ -683,6 +685,7 @@ export async function runMultiFileCodingLoop(
   for (let i = 0; i < opts.maxIterations; i++) {
     const iteration = i + 1;
     iterations = iteration;
+    await opts.checkpoint?.(iteration);
     const res = await opts.worker({
       iteration,
       plan: opts.plan,

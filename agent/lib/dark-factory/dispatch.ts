@@ -2,6 +2,13 @@ import { createHash } from "node:crypto";
 import type { RunHistoryStore } from "./run-history-store";
 import type { RunStatus } from "./run-history";
 import type { StateReadResult, StateStore } from "./state";
+import type { ControlStore } from "./control";
+import {
+  ControlUnavailableError,
+  PausedRunError,
+  StoppedRunError,
+  createControlCheckpoint,
+} from "./control-checkpoint";
 
 /**
  * Dark Factory — Orchestration Core (issues #137 / story #138).
@@ -36,6 +43,13 @@ export class ParkedRunError extends Error {
     this.name = "ParkedRunError";
   }
 }
+
+export type DispatchCheckpoint = () => Promise<void>;
+export type DispatchHandler = (
+  event: DispatchEvent,
+  worker: string,
+  checkpoint: DispatchCheckpoint,
+) => Promise<void>;
 
 export function toDispatchEvent(input: Partial<DispatchEvent>): DispatchEvent {
   const runId = typeof input.runId === "string" ? input.runId.trim() : "";
@@ -103,6 +117,8 @@ export type DispatchStatus =
   | "retrying"
   | "succeeded"
   | "failed"
+  | "paused"
+  | "stopped"
   /**
    * Parked on a HUMAN decision (#162). Deliberately distinct from "retrying": a
    * parked run is not failing and must not consume retries or backoff, because
@@ -149,6 +165,7 @@ export interface DispatchOutcome {
   attempts: number;
   worker?: string;
   duplicate?: boolean;
+  gate?: "factory" | "run" | "unavailable";
   error?: string;
 }
 
@@ -162,7 +179,9 @@ export const DEFAULT_HANDLER_TIMEOUT_MS = 30_000;
 
 export interface DispatcherOptions {
   store: StateStore;
-  handler: (event: DispatchEvent, worker: string) => Promise<void>;
+  handler: DispatchHandler;
+  /** Optional live control-state source. When absent, legacy dispatch behavior is unchanged. */
+  controlStore?: ControlStore;
   policy?: RetryPolicy;
   /**
    * Deadline for ONE handler invocation, in ms. Defaults to
@@ -184,7 +203,8 @@ export interface DispatcherOptions {
 
 export class Dispatcher {
   private readonly store: StateStore;
-  private readonly handler: (event: DispatchEvent, worker: string) => Promise<void>;
+  private readonly handler: DispatchHandler;
+  private readonly controlStore?: ControlStore;
   private readonly policy: RetryPolicy;
   private readonly route: (event: DispatchEvent) => string;
   private readonly observer: DispatchObserver;
@@ -196,6 +216,7 @@ export class Dispatcher {
   constructor(options: DispatcherOptions) {
     this.store = options.store;
     this.handler = options.handler;
+    this.controlStore = options.controlStore;
     this.policy = options.policy ?? DEFAULT_RETRY_POLICY;
     this.route = options.route ?? (() => "developer");
     this.observer = options.observer ?? (() => {});
@@ -265,7 +286,7 @@ export class Dispatcher {
       const detail = err instanceof Error ? err.message : String(err);
       return `Dispatch observer failed for run '${metric.runId}': ${detail}`;
     }
-    if (!this.runHistory) return null;
+    if (!this.runHistory || metric.status === "paused" || metric.status === "stopped") return null;
 
     const runHash = createHash("sha256").update(metric.runId).digest("hex").slice(0, 32);
     const status: RunStatus = metric.status === "failed" ? "failed" : metric.status === "blocked" ? "blocked" : "running";
@@ -297,10 +318,34 @@ export class Dispatcher {
    * delivery: webhook deliveries are at-least-once, so resuming on any delivery
    * would let a re-delivery consume the very wait the park exists to protect.
    */
+  private async getControlGate(runId: string): Promise<DispatchOutcome | null> {
+    if (!this.controlStore) return null;
+    try {
+      const factory = await this.controlStore.readFactory();
+      if (!factory.ok) return { ok: true, status: "paused", attempts: 0, gate: "unavailable", error: factory.error };
+      if (factory.value?.paused) return { ok: true, status: "paused", attempts: 0, gate: "factory" };
+      const run = await this.controlStore.readRun(runId);
+      if (!run.ok) return { ok: true, status: "paused", attempts: 0, gate: "unavailable", error: run.error };
+      if (run.value?.stopped) return { ok: true, status: "stopped", attempts: 0, gate: "run" };
+      if (run.value?.paused) return { ok: true, status: "paused", attempts: 0, gate: "run" };
+      return null;
+    } catch (error) {
+      return { ok: true, status: "paused", attempts: 0, gate: "unavailable", error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
+  private async checkpoint(runId: string): Promise<void> {
+    if (!this.controlStore) return;
+    await createControlCheckpoint(this.controlStore, runId)();
+  }
+
   async dispatch(
     event: DispatchEvent,
     options: { resume?: boolean } = {},
   ): Promise<DispatchOutcome> {
+    const gate = await this.getControlGate(event.runId);
+    if (gate) return gate;
+
     let existing: StateReadResult<DispatchRecord>;
     try {
       existing = await this.store.get<DispatchRecord>(dispatchKey(event.runId));
@@ -321,7 +366,9 @@ export class Dispatcher {
         error: `Cannot read dispatch state for run '${event.runId}': ${existing.error ?? "unknown error"}`,
       };
     }
-    const resuming = existing.value?.status === "blocked" && options.resume === true;
+    const resuming =
+      (existing.value?.status === "blocked" && options.resume === true) ||
+      existing.value?.status === "paused";
     if (existing.value && !resuming) {
       // At-most-once: anything already recorded for this run (in flight or
       // finished) is a duplicate delivery, never a second dispatch.
@@ -348,19 +395,22 @@ export class Dispatcher {
     }
 
     const worker = this.route(event);
-    const base: DispatchRecord = {
-      event,
-      worker,
-      status: "pending",
-      attempts: 0,
-      updatedAt: new Date().toISOString(),
-    };
+    const base: DispatchRecord =
+      resuming && existing.value
+        ? { ...existing.value, status: "pending", updatedAt: new Date().toISOString() }
+        : {
+            event,
+            worker,
+            status: "pending",
+            attempts: 0,
+            updatedAt: new Date().toISOString(),
+          };
     const basePersistError = await this.persist(base);
     if (basePersistError) {
       return { ok: false, status: "failed", attempts: 0, worker, error: basePersistError };
     }
 
-    let attempt = 0;
+    let attempt = resuming ? (existing.value?.attempts ?? 0) : 0;
     let lastError = "";
 
     for (;;) {
@@ -378,10 +428,31 @@ export class Dispatcher {
 
       try {
         await this.withDeadline(
-          this.handler(event, worker),
+          this.handler(event, worker, () => this.checkpoint(event.runId)),
           `handler for run '${event.runId}' (attempt ${attempt})`,
         );
       } catch (err) {
+        if (err instanceof PausedRunError || err instanceof StoppedRunError || err instanceof ControlUnavailableError) {
+          const status = err instanceof StoppedRunError ? "stopped" : "paused";
+          const error = err.message;
+          const saved = await this.persist({
+            ...base,
+            status,
+            attempts: attempt,
+            updatedAt: new Date().toISOString(),
+            error,
+          });
+          if (saved) return { ok: false, status: "failed", attempts: attempt, worker, error: saved };
+          await this.emit({ type: "dispatch.attempt", runId: event.runId, attempt, status, worker });
+          return {
+            ok: true,
+            status,
+            attempts: attempt,
+            worker,
+            ...(err instanceof ControlUnavailableError ? { gate: "unavailable" as const } : {}),
+            ...(err instanceof PausedRunError ? { gate: "run" as const } : {}),
+          };
+        }
         // Parked on a human: record it truthfully and STOP. No retry, no backoff
         // sleep - a human reading a question must not burn worker-minutes (#162).
         if (err instanceof ParkedRunError) {

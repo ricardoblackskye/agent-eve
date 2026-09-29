@@ -180,4 +180,30 @@ describe("Developer Agent Multi-File Workspace Tools", () => {
     expect(loopResult.fixCycles).toBe(1);
     expect(attempts).toBe(2);
   });
+
+  it("checks the cooperative control checkpoint before each coding iteration", async () => {
+    const tools = createWorkspaceTools(tempDir);
+    const plan: ExecutionPlan = {
+      storyId: 179,
+      title: "Test Story",
+      summary: "Test Summary",
+      targetFiles: [{ path: "app/chat.tsx", action: "modify", rationale: "test" }],
+      acceptanceCriteriaMap: [],
+    };
+    const checkpoints: number[] = [];
+    const workers: number[] = [];
+    const result = await runMultiFileCodingLoop({
+      plan,
+      tools,
+      maxIterations: 3,
+      checkpoint: async (iteration) => { checkpoints.push(iteration); },
+      worker: async ({ iteration }) => {
+        workers.push(iteration);
+        return { passed: iteration === 2 };
+      },
+    });
+    expect(result.status).toBe("success");
+    expect(checkpoints).toEqual([1, 2]);
+    expect(workers).toEqual([1, 2]);
+  });
 });
