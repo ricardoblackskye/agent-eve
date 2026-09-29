@@ -34,6 +34,9 @@ export interface ControlChange {
   factoryState?: FactoryControlState;
   runId?: string;
   runState?: RunControlState;
+  /** Snapshot observed by the action service; adapters compare it under lock. */
+  expectedFactoryState?: FactoryControlState | null;
+  expectedRunState?: RunControlState | null;
 }
 
 export interface ControlReadResult<T> {
@@ -49,6 +52,7 @@ export interface ControlWriteResult {
   mode: ControlStoreMode;
   providerId: string;
   error?: string;
+  conflict?: boolean;
 }
 
 export interface ControlStore {
@@ -95,6 +99,31 @@ export function validateControlReason(value: string | undefined): string | undef
   const reason = value?.trim();
   if (reason && reason.length > 1000) throw new InvalidControlError("Control reason must be <= 1000 characters.");
   return reason || undefined;
+}
+
+export function matchesFactorySnapshot(
+  actual: FactoryControlState | null,
+  expected: FactoryControlState | null,
+): boolean {
+  return actual === null || expected === null
+    ? actual === expected
+    : actual.paused === expected.paused &&
+        actual.updatedAt === expected.updatedAt &&
+        actual.actor === expected.actor &&
+        actual.reason === expected.reason;
+}
+
+export function matchesRunSnapshot(
+  actual: RunControlState | null,
+  expected: RunControlState | null,
+): boolean {
+  return actual === null || expected === null
+    ? actual === expected
+    : actual.paused === expected.paused &&
+        actual.stopped === expected.stopped &&
+        actual.updatedAt === expected.updatedAt &&
+        actual.actor === expected.actor &&
+        actual.reason === expected.reason;
 }
 
 export function toControlEvent(input: unknown): ControlEvent {
@@ -255,6 +284,26 @@ export class SqliteControlAdapter implements ControlStore {
     if (!db) return this.failedWrite("control change", this.openError ?? "unavailable");
     try {
       db.exec("BEGIN IMMEDIATE");
+      if (Object.prototype.hasOwnProperty.call(change, "expectedFactoryState")) {
+        const row = db.prepare("SELECT paused, updated_at, actor, reason FROM df_factory_control WHERE id = 1").get() as { paused: number; updated_at: string; actor: string | null; reason: string | null } | undefined;
+        const current = row ? { paused: row.paused === 1, updatedAt: row.updated_at, ...(row.actor ? { actor: row.actor } : {}), ...(row.reason ? { reason: row.reason } : {}) } : null;
+        if (!matchesFactorySnapshot(current, change.expectedFactoryState ?? null)) {
+          db.exec("ROLLBACK");
+          return { ok: false, mode: "live", providerId: this.id, conflict: true, error: "Factory control state changed; retry the action." };
+        }
+      }
+      if (Object.prototype.hasOwnProperty.call(change, "expectedRunState")) {
+        if (!change.runId) {
+          db.exec("ROLLBACK");
+          return this.failedWrite("control change", "run state expectation requires a runId");
+        }
+        const row = db.prepare("SELECT paused, stopped, updated_at, actor, reason FROM df_run_control WHERE run_id = ?").get(change.runId) as { paused: number; stopped: number; updated_at: string; actor: string | null; reason: string | null } | undefined;
+        const current = row ? { paused: row.paused === 1, stopped: row.stopped === 1, updatedAt: row.updated_at, ...(row.actor ? { actor: row.actor } : {}), ...(row.reason ? { reason: row.reason } : {}) } : null;
+        if (!matchesRunSnapshot(current, change.expectedRunState ?? null)) {
+          db.exec("ROLLBACK");
+          return { ok: false, mode: "live", providerId: this.id, conflict: true, error: "Run control state changed; retry the action." };
+        }
+      }
       if (change.factoryState) {
         const state = change.factoryState;
         db.prepare(`INSERT INTO df_factory_control (id, paused, updated_at, actor, reason)

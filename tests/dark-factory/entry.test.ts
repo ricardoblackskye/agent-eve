@@ -21,6 +21,8 @@ import {
 } from "../../agent/lib/dark-factory/entry";
 import { decideDarkFactoryTrigger } from "../../agent/lib/dark-factory/trigger";
 import { SqliteRunHistoryStore } from "../../agent/lib/dark-factory/run-history-store";
+import { ConsoleControlProvider, SqliteControlAdapter } from "../../agent/lib/dark-factory/control";
+import { performControlAction } from "../../agent/lib/dark-factory/control-service";
 
 const historyStores: SqliteRunHistoryStore[] = [];
 let runIdCount = 0;
@@ -103,6 +105,49 @@ function deps(over: Partial<EntryDeps> = {}) {
 }
 
 describe("#163 cycle 9-10: record and hand off — the loop never runs inline", () => {
+  it("holds new trigger handoffs while the factory is paused", async () => {
+    const controlStore = new SqliteControlAdapter(":memory:");
+    await performControlAction(controlStore, {
+      action: "pause",
+      scope: "factory",
+      actor: "operator@example.test",
+    });
+    const { runHistory, calls, ops, deps: d } = deps({ controlStore });
+    const result = await runDarkFactoryDispatch(triggerDecision(), d);
+    const runs = await runHistory.listRuns();
+    expect(result).toMatchObject({ ok: true, status: "held" });
+    expect(calls).toHaveLength(0);
+    expect(ops).toHaveLength(0);
+    expect(runs.value?.items).toHaveLength(0);
+    controlStore.close();
+  });
+
+  it("holds a per-run paused execution before its first handoff", async () => {
+    const controlStore = new SqliteControlAdapter(":memory:");
+    await controlStore.writeRun("entry-run-paused", {
+      paused: true,
+      stopped: false,
+      updatedAt: new Date().toISOString(),
+    });
+    const runHistory = new SqliteRunHistoryStore(":memory:", () => "entry-run-paused");
+    historyStores.push(runHistory);
+    const { calls, ops, deps: d } = deps({ runHistory, controlStore });
+    const result = await runDarkFactoryDispatch(triggerDecision(), d);
+    expect(result).toMatchObject({ ok: true, status: "held", runId: "entry-run-paused" });
+    expect(calls).toHaveLength(0);
+    expect(ops).toHaveLength(0);
+    controlStore.close();
+  });
+
+  it("fails closed when the control store is unavailable", async () => {
+    const { runHistory, calls, deps: d } = deps({ controlStore: new ConsoleControlProvider() });
+    const result = await runDarkFactoryDispatch(triggerDecision(), d);
+    const runs = await runHistory.listRuns();
+    expect(result).toMatchObject({ ok: false, status: "failed" });
+    expect(calls).toHaveLength(0);
+    expect(runs.value?.items).toHaveLength(0);
+  });
+
   it("records the dispatch AND posts one session handoff", async () => {
     const { runHistory, calls, deps: d } = deps();
     const res = await runDarkFactoryDispatch(triggerDecision(), d);

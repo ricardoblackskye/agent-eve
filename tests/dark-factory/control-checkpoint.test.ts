@@ -66,7 +66,7 @@ describe("createControlCheckpoint", () => {
   });
 
   it("works against a file-backed sqlite store (runner driver path)", async () => {
-    const dbPath = join(tmpdir(), `df-ckpt-${Date.now()}-${Math.random().toString(16).slice(2)}.sqlite`);
+    const dbPath = join(tmpdir(), `df-control-checkpoint-${Date.now()}-${Math.random().toString(16).slice(2)}.sqlite`);
     const store = new SqliteControlAdapter(dbPath);
     const checkpoint = createControlCheckpoint(store, "run-7");
     await expect(checkpoint()).resolves.toBeUndefined();

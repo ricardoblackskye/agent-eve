@@ -8,7 +8,7 @@ const pkg = JSON.parse(
 const ci = readFileSync(
   resolve(process.cwd(), ".github/workflows/ci.yml"),
   "utf-8",
-);
+).split(String.fromCharCode(13)).join("");
 const lycheeIgnore = readFileSync(
   resolve(process.cwd(), ".lycheeignore"),
   "utf-8",

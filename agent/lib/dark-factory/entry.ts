@@ -26,6 +26,7 @@ import type {
   RunControlDeliveryReceipt,
   RunHistoryStore,
 } from "./run-history-store";
+import type { ControlStore } from "./control";
 import { createPlatformAdapter } from "./platform";
 
 /** The label operations the entry point needs; injected so tests need no GitHub. */
@@ -55,6 +56,8 @@ export interface DispatchIntent {
 
 export interface EntryDeps {
   runHistory: RunHistoryStore;
+  /** Durable runtime controls; production callers must supply this fail-closed seam. */
+  controlStore?: ControlStore;
   /** GitHub X-GitHub-Delivery; dedup identity, never the run ID. */
   deliveryId: string;
   /** Injected transport for the session handoff (tests supply a recorder). */
@@ -383,6 +386,19 @@ export async function runDarkFactoryDispatch(
   }
   if (!deps.runHistory) {
     return statusResult(false, "refused", "run history is not configured.");
+  }
+
+  // The production webhook supplies this seam. Read it before accepting a new
+  // delivery or handing work to the session API; store errors fail closed.
+  if (deps.controlStore && baseIntent.kind !== "abort") {
+    const factory = await deps.controlStore.readFactory();
+    if (!factory.ok) {
+      const error = factory.error ?? "factory control state is unavailable";
+      return statusResult(false, "failed", error, { error });
+    }
+    if (factory.value?.paused) {
+      return statusResult(true, "held", "factory is paused; no new work was scheduled");
+    }
   }
 
   const labels = deps.labels;
@@ -716,6 +732,29 @@ export async function runDarkFactoryDispatch(
     return statusResult(false, "refused", error, { error });
   }
   const intent = { ...baseIntent, runId: accepted.value.runId };
+  if (deps.controlStore) {
+    const runControl = await deps.controlStore.readRun(intent.runId);
+    if (!runControl.ok) {
+      const error = runControl.error ?? "run control state is unavailable";
+      return statusResult(false, "failed", error, {
+        runId: intent.runId,
+        runStatus: accepted.value.status,
+        error,
+      });
+    }
+    if (runControl.value?.stopped) {
+      return statusResult(true, "held", "this run was stopped; no work was handed off", {
+        runId: intent.runId,
+        runStatus: "aborted",
+      });
+    }
+    if (runControl.value?.paused) {
+      return statusResult(true, "held", "this run is paused; no work was handed off", {
+        runId: intent.runId,
+        runStatus: accepted.value.status,
+      });
+    }
+  }
   if (accepted.duplicate) {
     return statusResult(
       true,

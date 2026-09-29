@@ -8,7 +8,7 @@ import type {
   FactoryControlState,
   RunControlState,
 } from "./control";
-import { toControlEvent } from "./control";
+import { matchesFactorySnapshot, matchesRunSnapshot, toControlEvent } from "./control";
 
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS df_factory_control (
@@ -206,6 +206,34 @@ export class PostgresControlAdapter implements ControlStore {
       await this.ensureSchema();
       client = await this.pool.connect();
       await client.query("BEGIN");
+      const expectsFactory = Object.prototype.hasOwnProperty.call(change, "expectedFactoryState");
+      const expectsRun = Object.prototype.hasOwnProperty.call(change, "expectedRunState");
+      if (expectsFactory || expectsRun) {
+        const lockKey = expectsFactory ? "df:factory-control" : `df:run-control:${change.runId ?? "missing"}`;
+        await client.query("SELECT pg_advisory_xact_lock(1718511203, hashtext($1))", [lockKey]);
+      }
+      if (expectsFactory) {
+        const { rows } = await client.query<FactoryRow>("SELECT paused, updated_at, actor, reason FROM df_factory_control WHERE id = 1 FOR UPDATE");
+        const row = rows[0];
+        const current = row ? { paused: row.paused, updatedAt: row.updated_at, ...(row.actor ? { actor: row.actor } : {}), ...(row.reason ? { reason: row.reason } : {}) } : null;
+        if (!matchesFactorySnapshot(current, change.expectedFactoryState ?? null)) {
+          await client.query("ROLLBACK");
+          return { ok: false, mode: "live", providerId: this.id, conflict: true, error: "Factory control state changed; retry the action." };
+        }
+      }
+      if (expectsRun) {
+        if (!change.runId) {
+          await client.query("ROLLBACK");
+          return this.failedWrite("run state expectation requires a runId");
+        }
+        const { rows } = await client.query<RunRow>("SELECT paused, stopped, updated_at, actor, reason FROM df_run_control WHERE run_id = $1 FOR UPDATE", [change.runId]);
+        const row = rows[0];
+        const current = row ? { paused: row.paused, stopped: row.stopped, updatedAt: row.updated_at, ...(row.actor ? { actor: row.actor } : {}), ...(row.reason ? { reason: row.reason } : {}) } : null;
+        if (!matchesRunSnapshot(current, change.expectedRunState ?? null)) {
+          await client.query("ROLLBACK");
+          return { ok: false, mode: "live", providerId: this.id, conflict: true, error: "Run control state changed; retry the action." };
+        }
+      }
       if (change.factoryState) {
         const state = change.factoryState;
         await client.query(

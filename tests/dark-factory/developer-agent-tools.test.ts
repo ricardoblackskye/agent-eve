@@ -7,6 +7,7 @@ import {
   runMultiFileCodingLoop,
 } from "../../agent/lib/dark-factory/developer-agent";
 import type { ExecutionPlan } from "../../agent/lib/dark-factory/plan-validator";
+import { StoppedRunError } from "../../agent/lib/dark-factory/control-checkpoint";
 
 describe("Developer Agent Multi-File Workspace Tools", () => {
   let tempDir: string;
@@ -181,6 +182,28 @@ describe("Developer Agent Multi-File Workspace Tools", () => {
     expect(attempts).toBe(2);
   });
 
+  it("honors Stop after the final worker iteration before reporting success", async () => {
+    const tools = createWorkspaceTools(tempDir);
+    const plan: ExecutionPlan = {
+      storyId: 179,
+      title: "Test Story",
+      summary: "Test Summary",
+      targetFiles: [{ path: "app/chat.tsx", action: "modify", rationale: "test" }],
+      acceptanceCriteriaMap: [],
+    };
+    let checkpoints = 0;
+    await expect(runMultiFileCodingLoop({
+      plan,
+      tools,
+      maxIterations: 1,
+      checkpoint: async () => {
+        checkpoints += 1;
+        if (checkpoints === 2) throw new StoppedRunError();
+      },
+      worker: async () => ({ passed: true }),
+    })).rejects.toBeInstanceOf(StoppedRunError);
+  });
+
   it("checks the cooperative control checkpoint before each coding iteration", async () => {
     const tools = createWorkspaceTools(tempDir);
     const plan: ExecutionPlan = {
@@ -203,7 +226,7 @@ describe("Developer Agent Multi-File Workspace Tools", () => {
       },
     });
     expect(result.status).toBe("success");
-    expect(checkpoints).toEqual([1, 2]);
+    expect(checkpoints).toEqual([1, 2, 2]);
     expect(workers).toEqual([1, 2]);
   });
 });

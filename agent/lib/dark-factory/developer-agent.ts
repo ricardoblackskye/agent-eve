@@ -695,6 +695,11 @@ export async function runMultiFileCodingLoop(
     if (passed) break;
   }
 
+  // Cooperative control check after the final worker call: a Stop (or Pause)
+  // that arrives during the last model/test call must be honored BEFORE we
+  // report success, so the runner never commits/pushes stopped work.
+  await opts.checkpoint?.(iterations);
+
   const fixCycles = passed ? iterations - 1 : iterations;
   return { status: passed ? "success" : "failed", iterations, fixCycles };
 }

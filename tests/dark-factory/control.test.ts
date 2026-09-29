@@ -77,6 +77,28 @@ describe("control stores", () => {
     }
   });
 
+  it("does not let a stale pause clear a committed terminal Stop", async () => {
+    const store = new SqliteControlAdapter(":memory:");
+    const at = "2026-09-29T10:00:00.000Z";
+    const stop = await store.applyChange({
+      event: { at, actor: "operator", action: "stop", scope: "run", runId: "run-42" },
+      runId: "run-42",
+      runState: { paused: false, stopped: true, updatedAt: at, actor: "operator" },
+      expectedRunState: null,
+    } as never);
+    expect(stop.ok).toBe(true);
+    const stalePause = await store.applyChange({
+      event: { at, actor: "operator", action: "pause", scope: "run", runId: "run-42" },
+      runId: "run-42",
+      runState: { paused: true, stopped: false, updatedAt: at, actor: "operator" },
+      expectedRunState: null,
+    } as never);
+    expect(stalePause).toMatchObject({ ok: false, conflict: true });
+    expect((await store.readRun("run-42")).value).toMatchObject({ stopped: true, paused: false });
+    expect((await store.listEvents()).value).toHaveLength(1);
+    store.close();
+  });
+
   it("reports a missing nested SQLite path as unavailable", async () => {
     const dir = join(tmpdir(), `df-control-absent-${Date.now()}`, "nested");
     const store = new SqliteControlAdapter(join(dir, "control.sqlite"));

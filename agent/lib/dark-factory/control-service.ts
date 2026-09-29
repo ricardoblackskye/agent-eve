@@ -34,9 +34,17 @@ function unavailable(error?: string): ControlActionResult {
   };
 }
 
-export async function performControlAction(
+export function performControlAction(
   store: ControlStore,
   input: ControlActionInput,
+): Promise<ControlActionResult> {
+  return performAction(store, input, 0);
+}
+
+async function performAction(
+  store: ControlStore,
+  input: ControlActionInput,
+  conflicts: number,
 ): Promise<ControlActionResult> {
   try {
     const actor = validateControlActor(input.actor);
@@ -77,7 +85,11 @@ export async function performControlAction(
       if (current.value?.paused === paused) {
         return { ok: true, status: "applied", state: current.value, event, duplicate: true };
       }
-      change = { event, factoryState: state as FactoryControlState };
+      change = {
+        event,
+        factoryState: state as FactoryControlState,
+        expectedFactoryState: current.value,
+      };
     } else {
       const current = await store.readRun(runId!);
       if (!current.ok) return unavailable(current.error);
@@ -100,7 +112,12 @@ export async function performControlAction(
       if (previous && previous.paused === state.paused && previous.stopped === state.stopped) {
         return { ok: true, status: "applied", state: previous, event, duplicate: true };
       }
-      change = { event, runId, runState: state as RunControlState };
+      change = {
+        event,
+        runId,
+        runState: state as RunControlState,
+        expectedRunState: previous,
+      };
     }
 
     let written;
@@ -108,6 +125,10 @@ export async function performControlAction(
       written = await store.applyChange(change);
     } catch (error) {
       return unavailable(error instanceof Error ? error.message : String(error));
+    }
+    if (written.conflict) {
+      if (conflicts < 3) return performAction(store, input, conflicts + 1);
+      return unavailable(written.error ?? "Control state changed repeatedly; retry the action.");
     }
     if (!written.ok) return unavailable(written.error);
     return { ok: true, status: "applied", state, event };

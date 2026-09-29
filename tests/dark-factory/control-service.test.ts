@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
-import type {
-  ControlEvent,
-  ControlReadResult,
-  ControlStore,
-  ControlWriteResult,
-  FactoryControlState,
-  RunControlState,
+import {
+  SqliteControlAdapter,
+  type ControlEvent,
+  type ControlReadResult,
+  type ControlStore,
+  type ControlWriteResult,
+  type FactoryControlState,
+  type RunControlState,
 } from "../../agent/lib/dark-factory/control";
 import { performControlAction } from "../../agent/lib/dark-factory/control-service";
 
@@ -46,6 +47,20 @@ class MemoryControlStore implements ControlStore {
 
 const time = "2026-09-29T10:00:00.000Z";
 
+class TwoReaderBarrierStore extends SqliteControlAdapter {
+  private reads = 0;
+  private release!: () => void;
+  private readonly barrier = new Promise<void>((resolve) => { this.release = resolve; });
+
+  override async readRun(runId: string) {
+    const snapshot = await super.readRun(runId);
+    this.reads += 1;
+    if (this.reads === 2) this.release();
+    if (this.reads <= 2) await this.barrier;
+    return snapshot;
+  }
+}
+
 describe("performControlAction", () => {
   it("pauses the factory and appends an auditable event", async () => {
     const store = new MemoryControlStore();
@@ -68,6 +83,36 @@ describe("performControlAction", () => {
     expect(await performControlAction(store, { ...common, action: "stop" })).toMatchObject({ ok: true, duplicate: true });
     expect((await performControlAction(store, { ...common, action: "resume" })).status).toBe("invalid");
     expect(store.events).toHaveLength(eventCount);
+  });
+
+  it("keeps Stop terminal when pause and Stop race from the same snapshot", async () => {
+    const store = new TwoReaderBarrierStore(":memory:");
+    const common = { scope: "run" as const, runId: "run-race", actor: "operator", now: () => time };
+    const [pause, stop] = await Promise.all([
+      performControlAction(store, { ...common, action: "pause" }),
+      performControlAction(store, { ...common, action: "stop" }),
+    ]);
+    const state = await store.readRun("run-race");
+    const events = await store.listEvents();
+    expect(stop.ok).toBe(true);
+    expect(state.value).toMatchObject({ paused: false, stopped: true });
+    expect(events.value?.filter((event) => event.action === "stop")).toHaveLength(1);
+    const actions = events.value?.map((event) => event.action);
+    expect(actions).toEqual(pause.ok ? ["stop", "pause"] : ["stop"]);
+    store.close();
+  });
+
+  it("writes only one audit event for concurrent identical actions", async () => {
+    const store = new TwoReaderBarrierStore(":memory:");
+    const input = { scope: "run" as const, runId: "run-duplicate", actor: "operator", action: "pause" as const, now: () => time };
+    const results = await Promise.all([
+      performControlAction(store, input),
+      performControlAction(store, input),
+    ]);
+    const events = await store.listEvents();
+    expect(results.every((result) => result.ok)).toBe(true);
+    expect(events.value).toHaveLength(1);
+    store.close();
   });
 
   it("fails closed when current state cannot be read", async () => {
