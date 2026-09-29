@@ -138,7 +138,9 @@
     "Supabase",
     "uidx",
     "kpis",
-    "wireframes"
+    "wireframes",
+    "hashtext",
+    "xact"
   ],
   "ignorePaths": [
     "node_modules/**",
