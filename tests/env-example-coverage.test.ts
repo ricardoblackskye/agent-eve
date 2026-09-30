@@ -28,6 +28,7 @@ const WHITELIST = new Set<string>([
   "VERCEL_GIT_REPO_OWNER", // Vercel auto-provided
   "VERCEL_GIT_REPO_SLUG", // Vercel auto-provided
   "GITHUB_EVENT_PATH", // GitHub Actions built-in (set by the Actions runner)
+  "GITHUB_RUN_ID", // GitHub Actions built-in (unique per workflow run)
 ]);
 
 // Directories to ignore when scanning for env usage.

@@ -198,8 +198,15 @@ describe("PR Reviewer Agent - TDD Tests", () => {
       expect(content).toMatch(
         /const REVIEW_MODEL = process\.env\.PR_REVIEW_MODEL \|\| "deepseek\/deepseek-chat"/,
       );
-      // BOTH call sites (first attempt + retry) must use the reviewed model.
-      expect(content.match(/model: REVIEW_MODEL,/g) || []).toHaveLength(2);
+      // BOTH LLM call sites (first attempt + retry) must use the reviewed model.
+      // Scoped to the `postCompletion` calls rather than counting the literal
+      // across the whole file, so an unrelated use of the model NAME (e.g. the
+      // usage-ledger telemetry record, #209) cannot weaken this assertion.
+      const llmCalls = content.split("await postCompletion(").slice(1);
+      expect(llmCalls).toHaveLength(2);
+      for (const call of llmCalls) {
+        expect(call).toMatch(/model: REVIEW_MODEL,/);
+      }
       // The project's reasoning model must no longer be wired into this script.
       expect(content).not.toMatch(/MODEL_NAME \|\| DEFAULT_MODEL_ID/);
     });
@@ -389,7 +396,9 @@ describe("PR Reviewer Agent - TDD Tests", () => {
       const content = fs.readFileSync(scriptPath, "utf8");
 
       expect(content).toMatch(/LGTM/i);
-      expect(content).toMatch(/HIGH PRECISION OVER HIGH RECALL|do not fabricate/i);
+      expect(content).toMatch(
+        /HIGH PRECISION OVER HIGH RECALL|do not fabricate/i,
+      );
     });
 
     it("forbids subjective architectural nitpicks and bikeshedding in guidelines", () => {
@@ -464,8 +473,4 @@ describe("PR Reviewer Agent - TDD Tests", () => {
       expect(wf).toMatch(/github\.event\.pull_request\.number/);
     });
   });
-
 });
-
-
-

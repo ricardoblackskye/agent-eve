@@ -20,7 +20,14 @@
  * - AC5: stops when tests pass and reports completed task
  */
 
-import { lstat, mkdir, readFile, readdir, realpath, writeFile } from "node:fs/promises";
+import {
+  lstat,
+  mkdir,
+  readFile,
+  readdir,
+  realpath,
+  writeFile,
+} from "node:fs/promises";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import {
@@ -346,10 +353,27 @@ export function assertToolAllowed(
 
 // --- Task 133.5: Metrics integration (observability) ---
 
+/**
+ * Optional usage-ledger sink (#209). Deliberately a narrow structural contract
+ * so the agent stays free of any store dependency — and best-effort by
+ * definition: a usage failure must never fail the task.
+ */
+export interface WorkerUsageSink {
+  record(measurement?: {
+    taskType?: string;
+    tokensIn?: number;
+    tokensOut?: number;
+    costUsd?: number;
+    durationMs?: number;
+  }): Promise<boolean>;
+}
+
 /** Options for createDeveloperAgent. */
 export interface DeveloperAgentConfig {
   metrics: MetricsStore;
   maxIterations?: number;
+  /** Usage-ledger sink; omitted or null means no usage events are recorded. */
+  usage?: WorkerUsageSink | null;
 }
 
 /** Iteration record written to the metrics store on task completion. */
@@ -384,11 +408,13 @@ function resolveMaxIterations(): number {
  */
 export class DeveloperAgent {
   private readonly metrics: MetricsStore;
+  private readonly usage: WorkerUsageSink | null;
   readonly maxIterations: number;
 
   constructor(config: DeveloperAgentConfig) {
     this.metrics = config.metrics;
     this.maxIterations = config.maxIterations ?? resolveMaxIterations();
+    this.usage = config.usage ?? null;
   }
 
   /** Record a completed task's iteration outcome to the metrics store. */
@@ -409,6 +435,17 @@ export class DeveloperAgent {
       fixCycles: rec.fixCycles,
       status: rec.status,
     });
+
+    // Usage recording is BEST-EFFORT (#209): telemetry must never fail the task,
+    // so a sink failure is swallowed here rather than propagated. The sink is
+    // absent unless an external usage driver is configured.
+    if (this.usage) {
+      try {
+        await this.usage.record();
+      } catch {
+        // Ignored by design: see the WorkerUsageSink contract.
+      }
+    }
   }
 }
 
@@ -703,5 +740,3 @@ export async function runMultiFileCodingLoop(
   const fixCycles = passed ? iterations - 1 : iterations;
   return { status: passed ? "success" : "failed", iterations, fixCycles };
 }
-
-
