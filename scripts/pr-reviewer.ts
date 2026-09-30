@@ -6,6 +6,7 @@ import {
   extractOpenRouterCost,
   settleReviewCall,
 } from "./pr-reviewer-budget";
+import { createReviewUsageStore, recordReviewUsage } from "./pr-reviewer-usage";
 import {
   isTransientModelError,
   parseRetryAfter,
@@ -396,7 +397,14 @@ async function postCompletion(
 // Cost-budget governance is OPT-IN: REVIEW_GOVERNOR is null unless a budget
 // backend is configured, in which case the call is admitted (or refused) first.
 const REVIEW_GOVERNOR = createReviewGovernor(process.env);
+// Usage recording is OPT-IN and BEST-EFFORT (#209): a ledger outage must never
+// fail the review. The store is null unless DF_USAGE_DRIVER names a real backend.
+const REVIEW_USAGE_STORE = createReviewUsageStore(process.env);
+const REVIEW_RUN_ID =
+  process.env.GITHUB_RUN_ID ?? `github:${repoOwner}/${repoName}:pr-${prNumber}`;
 let review: string;
+let reviewUsageData: unknown;
+let reviewUsageStartedAt = 0;
 try {
   const reviewPrompt = buildUserMessage(
     sanitizedPrDiff,
@@ -410,6 +418,7 @@ try {
     reviewPrompt.length,
     REVIEW_MAX_TOKENS,
   );
+  reviewUsageStartedAt = Date.now();
   const openrouterResponse = await postCompletion(
     "https://openrouter.ai/api/v1/chat/completions",
     {
@@ -444,20 +453,21 @@ try {
   let fallbackReason = "the model did not return a review";
 
   if (!openrouterResponse.ok) {
-      const errorText = await openrouterResponse.text();
-      await settleReviewCall(REVIEW_GOVERNOR, admission.reservationId, undefined);
-      console.warn(
+    const errorText = await openrouterResponse.text();
+    await settleReviewCall(REVIEW_GOVERNOR, admission.reservationId, undefined);
+    console.warn(
       `OpenRouter call failed (${openrouterResponse.status}). Response: ${errorText}`,
     );
     fallbackReason = `the model API returned HTTP ${openrouterResponse.status}`;
   } else {
-      const openrouterData = await openrouterResponse.json();
-      await settleReviewCall(
-        REVIEW_GOVERNOR,
-        admission.reservationId,
-        extractOpenRouterCost(openrouterData),
-      );
-      const choice = openrouterData.choices?.[0];
+    const openrouterData = await openrouterResponse.json();
+    reviewUsageData = openrouterData;
+    await settleReviewCall(
+      REVIEW_GOVERNOR,
+      admission.reservationId,
+      extractOpenRouterCost(openrouterData),
+    );
+    const choice = openrouterData.choices?.[0];
     const message = choice?.message;
 
     if (message && message.content) {
@@ -474,6 +484,18 @@ try {
       );
     }
   }
+
+  // Record what the provider actually measured (#209). Best-effort by design: a
+  // ledger outage must not fail the review, and an unmeasured field stays ABSENT
+  // rather than being zero-filled.
+  await recordReviewUsage(REVIEW_USAGE_STORE, {
+    runId: REVIEW_RUN_ID,
+    model: REVIEW_MODEL,
+    data: reviewUsageData,
+    ...(reviewUsageStartedAt > 0
+      ? { durationMs: Date.now() - reviewUsageStartedAt }
+      : {}),
+  });
 
   // #87: a length-exhausted response is NOT an outage — the model spent its
   // whole output budget reasoning. RETRY once with a smaller diff (reasoning
