@@ -222,6 +222,18 @@ export class InMemoryCostBudgetProvider implements CostBudgetStore {
   }
 }
 
+/**
+ * True when a real budget backend is selected. Governance is OPT-IN: an unset
+ * or `console` driver means "do not govern", so enabling this feature cannot
+ * silently break an existing deployment that has not configured a store.
+ */
+export function isCostGovernanceConfigured(
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  const driver = (env.DF_COST_BUDGET_DRIVER ?? "").trim().toLowerCase();
+  return driver !== "" && driver !== "console";
+}
+
 export function createCostBudgetStore(
   env: Record<string, string | undefined> = process.env,
 ): CostBudgetStore {
