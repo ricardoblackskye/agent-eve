@@ -932,6 +932,54 @@ Configuration (see `.env.example`): `DF_COST_BUDGET_DRIVER`,
 `DF_COST_BUDGET_PR_REVIEW_USD`. Only cost/count/category/timestamp are stored —
 never prompts or completions.
 
+## Dark Factory (R7.3) — LLM usage ledger (#209)
+
+An append-only record of per-call/per-task LLM usage — tokens, cost, duration,
+model, run/PBI — so consumption can be seen over time and surfaced on the
+dashboard. This release RECORDS and REPORTS; it enforces nothing (that is the
+cost-budget governance above).
+
+- **Seam:** `agent/lib/dark-factory/usage-store.ts` — a provider-neutral
+  `UsageStore` (in-memory default, local `sqlite`, `postgres`) selected by
+  `DF_USAGE_DRIVER`, plus `BufferedUsageRecorder`, a no-loss decorator that
+  retains an event when the backend refuses it. Mirrors the run-history seam.
+- **Canonical record:** `agent/lib/dark-factory/usage-ledger.ts` —
+  `{ runId, pbiId?, taskType, model, tokensIn?, tokensOut?, costUsd?, durationMs?,
+  ts }`, validated at a single contract point.
+- **Aggregation:** `agent/lib/dark-factory/usage-query.ts` — totals plus
+  per-model, per-day and per-run groupings over an inclusive-`from` /
+  exclusive-`to` window.
+- **Recording hooks:** `scripts/pr-reviewer-usage.ts` (reads the provider `usage`
+  block) and `agent/lib/dark-factory/worker-usage.ts` (worker task completion).
+- **Dashboard:** `/api/dark-factory/usage` (authenticated, read-only) and the
+  "LLM usage" panel on the Factory status page.
+- **Migration:** `db/migrations/002_df_usage_ledger.sql` — RLS enabled, no public
+  policies. The measurement columns are nullable ON PURPOSE: a `NULL` means
+  "never observed", and a `DEFAULT 0` would silently turn that into "measured
+  zero".
+
+**Recording is opt-in.** An unset or `memory` `DF_USAGE_DRIVER` keeps usage
+in-process and writes nothing external, so enabling the feature cannot break a
+deployment that has not configured a store.
+
+**Counts only.** No prompt or completion text is ever stored, consistent with the
+aggregates-only rule.
+
+**Honesty (#158).** An unmeasured value is recorded as ABSENT, never `0`, and the
+dashboard renders `—`. A worker event whose tokens/cost are not observable from
+the sandbox still counts toward the unmeasured figure rather than pretending the
+task cost nothing.
+
+**No-loss (#140).** A usage-store outage never fails the task: failed writes are
+buffered and retried, and both recording hooks are best-effort by contract.
+
+**Deferred:** the orchestrator surface. Its LLM call runs inside the Eve runtime,
+so a hook there needs the `defineDynamic` conversion tracked in #217.
+
+Configuration (see `.env.example`): `DF_USAGE_DRIVER`, `DF_USAGE_DATABASE_URL`,
+`DF_USAGE_DB_PATH`, and the optional `DF_USAGE_TEST_DATABASE_URL`, which enables
+the gated Postgres integration tests.
+
 ## Resources
 
 - [Eve Documentation](https://eve.dev/docs)
