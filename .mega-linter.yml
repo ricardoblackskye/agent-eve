@@ -14,6 +14,10 @@ FILTER_REGEX_EXCLUDE: >-
   (node_modules/|\.git/|\.next/|\.eve/|\.vercel/|docs/df-progress-board-)
 JAVASCRIPT_DEFAULT_STYLE: prettier
 JSON_PRETTIER_FILTER_REGEX_EXCLUDE: (\.next/|\.eve/|\.vercel/|node_modules/)
+# tsqllint is Microsoft's T-SQL linter; this repo's migrations are PostgreSQL
+# (CREATE TABLE IF NOT EXISTS, ENABLE ROW LEVEL SECURITY), which T-SQL reports
+# as syntax errors. Exclude the migration directory rather than the linter.
+SQL_TSQLLINT_FILTER_REGEX_EXCLUDE: (db/migrations/)
 PRINT_ALPACA: false
 SHOW_ELAPSED_TIME: true
 SPELL_LYCHEE_ARGUMENTS: --format detailed --no-progress --root-dir /github/workspace

@@ -4,7 +4,15 @@
 
 **Goal:** Govern Dark Factory LLM spend along two independent axes — (1) a per-token (or per-call) budget so we never silently exceed a configured ceiling, and (2) per cost-category budgets (orchestrator, developer/test worker, pr-review) so one surface cannot starve or bankrupt the others.
 
-**Architecture:** One provider-neutral `CostBudgetStore` seam (console refuse-default, postgres, optional sqlite) holding periodic cost caps + spent totals, plus an in-process `CostGovernor` that enforces ceilings before each LLM call and records actual cost afterwards. Cost is the canonical unit; token budgets are converted via a model price table. Categories are an explicit enum, each with its own configured cap. The existing `chat-model.ts` (orchestrator) and `scripts/pr-reviewer.ts` paths are wired first; the developer/test worker is wired through the sandbox-seam env injection described in #135/#142/#133. The dashboard exposes budget status read-only (operator-only in R1).
+**Architecture:** One provider-neutral `CostBudgetStore` seam (console
+refuse-default, postgres, optional sqlite) holding periodic cost caps + spent
+totals, plus an in-process `CostGovernor` that enforces ceilings before each LLM
+call and records actual cost afterwards. Cost is the canonical unit; token
+budgets are converted via a model price table. Categories are an explicit enum,
+each with its own configured cap. The existing `chat-model.ts` (orchestrator) and
+`scripts/pr-reviewer.ts` paths are wired first; the developer/test worker is
+wired through the sandbox-seam env injection described in #135/#142/#133. The
+dashboard exposes budget status read-only (operator-only in R1).
 
 **Tech Stack:** TypeScript, standard PostgreSQL via `pg` (Supabase as managed Postgres, not a required SDK — no vendor SDK import), optional SQLite for local/test, Next.js API routes + UI, Vitest. #211 migration/RLS foundation must land first so budget tables follow the same source-controlled, RLS-enabled pattern.
 
@@ -23,11 +31,11 @@
 
 ## Recommended release split
 
-| Release | Branch | Scope |
-|---|---|---|
-| R1 — Operator LLM cost governance | `feat/df-cost-budgets-208` | Per-token + per-cost-category budgets, fail-closed governor, operator dashboard read-only, console/postgres/sqlite drivers. (This plan.) |
-| R2 — Customer-scoped budgets | `feat/df-tenant-budgets-212b` | Reuse this governor with `tenantId` dimension (from #213 tenant attribution). Deferred to #214. |
-| R3 — Policy + budget unification | `feat/df-llm-policy-206b` | Fold thinking-level/max-steps (#208 policy) and budget reservation into one provider-neutral LLM policy seam. |
+| Release                           | Branch                        | Scope                                                                                                                                    |
+|-----------------------------------|-------------------------------|------------------------------------------------------------------------------------------------------------------------------------------|
+| R1 — Operator LLM cost governance | `feat/df-cost-budgets-208`    | Per-token + per-cost-category budgets, fail-closed governor, operator dashboard read-only, console/postgres/sqlite drivers. (This plan.) |
+| R2 — Customer-scoped budgets      | `feat/df-tenant-budgets-212b` | Reuse this governor with `tenantId` dimension (from #213 tenant attribution). Deferred to #214.                                          |
+| R3 — Policy + budget unification  | `feat/df-llm-policy-206b`     | Fold thinking-level/max-steps (#208 policy) and budget reservation into one provider-neutral LLM policy seam.                            |
 
 This issue = R1 only. Do not implement R2/R3 here.
 
@@ -35,7 +43,12 @@ This issue = R1 only. Do not implement R2/R3 here.
 
 1. **Canonical cost unit = USD.** Token budgets are expressed as tokens but enforced by converting to estimated USD via a model price table; the hard ceiling is always a USD amount per period.
 2. **Categories are explicit.** `CostCategory = "orchestrator" | "developer" | "tester" | "pr-review"` (aligned with #206 surfaces). Each has its own cap; a call MUST carry exactly one category.
-3. **Reserve before spend, reconcile after.** Before an LLM call: check cap for (period, category) and reserve `estimatedCost`. After: record actual `costUsd` (or counted call) to the ledger and decrement the reservation. Concurrent calls within one process use a shared in-memory reservation map; cross-process use the Postgres row with `SELECT ... FOR UPDATE`/advisory lock (same pattern as control-postgres CAS).
+3. **Reserve before spend, reconcile after.** Before an LLM call: check cap for
+   (period, category) and reserve `estimatedCost`. After: record actual `costUsd`
+   (or counted call) to the ledger and decrement the reservation. Concurrent
+   calls within one process use a shared in-memory reservation map; cross-process
+   use the Postgres row with `SELECT ... FOR UPDATE`/advisory lock (same pattern
+   as control-postgres CAS).
 4. **Fail-closed.** If the budget store is unavailable, or the model price is unknown or cannot be estimated, the call is REFUSED with a clear `budget_unavailable` / `unpriced_model` reason — never admitted unbounded. A refusal is a structured result, not a thrown crash, at the seam.
 5. **Honesty of measurement.** Missing `costUsd` from a provider response stays ABSENT (never `0`). If a call has no measurable cost, count it as a call (if call-count budget exists) but do not invent a dollar amount.
 6. **No content in budgets.** Only cost/count/category/model/timestamp. Never store prompts or completions.
@@ -75,7 +88,7 @@ This issue = R1 only. Do not implement R2/R3 here.
 4. Re-run focused + integration.
 
 **Migration sketch (final names/types in the file):**
-```
+```sql
 CREATE TABLE df_cost_budgets (
   id TEXT PRIMARY KEY,               -- e.g. "2026-02|orchestrator" (period|category)
   period TEXT NOT NULL,              -- YYYY-MM
