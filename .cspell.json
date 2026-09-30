@@ -148,7 +148,8 @@
     "EBUSY",
     "pooler",
     "sslmode",
-    "actioned"
+    "actioned",
+    "optimisation"
   ],
   "ignorePaths": [
     "node_modules/**",
