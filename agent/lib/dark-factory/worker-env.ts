@@ -12,6 +12,11 @@ import type { CredentialBroker } from "./credentials";
 import { MAX_TTL_SECONDS, REPO_PAIR_PATTERN, toRepoGrant } from "./credentials";
 import type { DispatchEvent } from "./dispatch";
 import type { MetricsStore, TaskStatus } from "./metrics";
+import {
+  buildWorkerCostEnv,
+  type WorkerCostBudgetEnv,
+  type WorkerCostCategory,
+} from "./worker-cost-env";
 
 export type WorkerRuntime = "node" | "python";
 
@@ -26,8 +31,10 @@ export interface WorkerTask {
   /** Skeletal file map pushed into the environment before execution. */
   files: Record<string, string>;
   /** PBI / issue context pushed alongside the file map. */
-  pbi?: string;
-}
+    pbi?: string;
+    /** Which LLM cost category this task's calls belong to (governed). */
+    costCategory?: WorkerCostCategory;
+  }
 
 export class InvalidWorkerTaskError extends Error {
   constructor(message: string) {
@@ -92,6 +99,8 @@ export function toWorkerTask(input: {
 export interface WorkerContext {
   fileMap: Record<string, string>;
   pbi?: string;
+  /** Non-secret cost-budget contract; absent when governance is disabled. */
+  costBudget?: WorkerCostBudgetEnv;
 }
 
 export interface WorkerHandle {
@@ -174,9 +183,10 @@ export class LocalWorkerProvider implements WorkerProvider {
       return { ok: false, error: `Handle '${handle.handleId}' was already destroyed.` };
     }
     this.contexts.set(handle.handleId, {
-      fileMap: { ...(context?.fileMap ?? {}) },
-      ...(context?.pbi !== undefined ? { pbi: context.pbi } : {}),
-    });
+          fileMap: { ...(context?.fileMap ?? {}) },
+          ...(context?.pbi !== undefined ? { pbi: context.pbi } : {}),
+          ...(context?.costBudget !== undefined ? { costBudget: context.costBudget } : {}),
+        });
     handle.contextPushed = true;
     return { ok: true };
   }
@@ -309,10 +319,13 @@ export async function withWorker<T>(
   };
 
   try {
-    const pushed = await deps.provider.pushContext(handle, {
-      fileMap: task.files,
-      ...(task.pbi !== undefined ? { pbi: task.pbi } : {}),
-    });
+    const costBudget =
+          task.costCategory !== undefined ? buildWorkerCostEnv(task.costCategory) : null;
+        const pushed = await deps.provider.pushContext(handle, {
+          fileMap: task.files,
+          ...(task.pbi !== undefined ? { pbi: task.pbi } : {}),
+          ...(costBudget ? { costBudget } : {}),
+        });
     if (!pushed.ok) {
       outcome = {
         ok: false,

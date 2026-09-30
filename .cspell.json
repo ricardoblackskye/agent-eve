@@ -139,8 +139,11 @@
     "uidx",
     "kpis",
     "wireframes",
+    "Containerised",
     "hashtext",
-    "xact"
+    "xact",
+    "tsqllint",
+    "TSQLLINT"
   ],
   "ignorePaths": [
     "node_modules/**",

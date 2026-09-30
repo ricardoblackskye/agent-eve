@@ -1,5 +1,12 @@
 import fs from "fs";
 import {
+  ReviewBudgetRefusal,
+  admitReviewCall,
+  createReviewGovernor,
+  extractOpenRouterCost,
+  settleReviewCall,
+} from "./pr-reviewer-budget";
+import {
   isTransientModelError,
   parseRetryAfter,
   retryDelayMs,
@@ -386,8 +393,23 @@ async function postCompletion(
 }
 
 // Call OpenRouter API to generate review, with fallback for rate limits
+// Cost-budget governance is OPT-IN: REVIEW_GOVERNOR is null unless a budget
+// backend is configured, in which case the call is admitted (or refused) first.
+const REVIEW_GOVERNOR = createReviewGovernor(process.env);
 let review: string;
 try {
+  const reviewPrompt = buildUserMessage(
+    sanitizedPrDiff,
+    truncated,
+    omitted,
+    reviewDiff.length,
+  );
+  const admission = await admitReviewCall(
+    REVIEW_GOVERNOR,
+    REVIEW_MODEL,
+    reviewPrompt.length,
+    REVIEW_MAX_TOKENS,
+  );
   const openrouterResponse = await postCompletion(
     "https://openrouter.ai/api/v1/chat/completions",
     {
@@ -400,15 +422,7 @@ try {
         model: REVIEW_MODEL,
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
-          {
-            role: "user",
-            content: buildUserMessage(
-              sanitizedPrDiff,
-              truncated,
-              omitted,
-              reviewDiff.length,
-            ),
-          },
+          { role: "user", content: reviewPrompt },
         ],
         temperature: 0.2,
         // HARD cap on reasoning tokens. OpenRouter allows only ONE of
@@ -430,14 +444,20 @@ try {
   let fallbackReason = "the model did not return a review";
 
   if (!openrouterResponse.ok) {
-    const errorText = await openrouterResponse.text();
-    console.warn(
+      const errorText = await openrouterResponse.text();
+      await settleReviewCall(REVIEW_GOVERNOR, admission.reservationId, undefined);
+      console.warn(
       `OpenRouter call failed (${openrouterResponse.status}). Response: ${errorText}`,
     );
     fallbackReason = `the model API returned HTTP ${openrouterResponse.status}`;
   } else {
-    const openrouterData = await openrouterResponse.json();
-    const choice = openrouterData.choices?.[0];
+      const openrouterData = await openrouterResponse.json();
+      await settleReviewCall(
+        REVIEW_GOVERNOR,
+        admission.reservationId,
+        extractOpenRouterCost(openrouterData),
+      );
+      const choice = openrouterData.choices?.[0];
     const message = choice?.message;
 
     if (message && message.content) {
@@ -542,14 +562,25 @@ try {
     );
   }
 } catch (error) {
-  console.error(`Error calling OpenRouter: ${(error as Error).message}`);
-  review = generateFallbackReview(
-    prNumber,
-    repoOwner,
-    repoName,
-    prDiff,
-    `a transport error (${(error as Error).message})`,
-  );
+  if (error instanceof ReviewBudgetRefusal) {
+    console.warn(`PR review refused by the LLM cost budget: ${error.message}`);
+    review = generateFallbackReview(
+      prNumber,
+      repoOwner,
+      repoName,
+      prDiff,
+      `the LLM cost budget refused this call (${error.reason})`,
+    );
+  } else {
+    console.error(`Error calling OpenRouter: ${(error as Error).message}`);
+    review = generateFallbackReview(
+      prNumber,
+      repoOwner,
+      repoName,
+      prDiff,
+      `a transport error (${(error as Error).message})`,
+    );
+  }
 }
 
 // Generate a deterministic fallback review when the model produced no content.
