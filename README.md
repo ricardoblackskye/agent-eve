@@ -893,6 +893,45 @@ export default defineTool({
 
 Eve auto-discovers tools by their file path — no registration needed.
 
+## Dark Factory (R7) — LLM cost budgets (#208)
+
+Hard per-period ceilings on LLM spend, per cost category, enforced with a
+**reserve-before-call / reconcile-after** model. Cost is the canonical unit
+(USD); token counts are converted through a model price table.
+
+- **Seam:** `agent/lib/dark-factory/cost-budget-store.ts` — a provider-neutral
+  store (`console` refuse-default, `postgres`, local `sqlite`, in-memory for
+  tests) selected by `DF_COST_BUDGET_DRIVER`. Tables are shipped as a
+  source-controlled migration (`db/migrations/001_df_cost_budgets.sql`) with RLS
+  enabled and no public policies.
+- **Governor:** `agent/lib/dark-factory/cost-governor.ts` — `admit()` reserves a
+  call's maximum estimated cost against the category cap; `settle()` reconciles
+  the actual cost (or charges the reserved estimate when the provider reports
+  none, never zero).
+- **Call wrapper:** `agent/lib/dark-factory/governed-llm-call.ts` — reserve, run
+  only if admitted, settle. Used by the PR reviewer
+  (`scripts/pr-reviewer-budget.ts`).
+- **Dashboard:** `/api/dark-factory/cost-budgets` (authenticated, read-only) and
+  the "LLM cost budgets" panel on the Factory status page. A category with no
+  configured budget shows as an explicit gap, not `$0.00`.
+
+**Governance is opt-in.** An unset or `console` `DF_COST_BUDGET_DRIVER` means
+"do not govern", so enabling the feature cannot silently break a deployment that
+has not configured a store.
+
+**Fail-closed.** An unconfigured cap, an unknown model price, or an unavailable
+store REFUSES the call with a structured reason (`not_configured`,
+`unpriced_model`, `budget_exceeded`, `budget_unavailable`) rather than letting it
+run unbounded.
+
+Configuration (see `.env.example`): `DF_COST_BUDGET_DRIVER`,
+`DF_COST_BUDGET_DATABASE_URL` (falls back to `DF_RUN_HISTORY_DATABASE_URL`),
+`DF_COST_BUDGET_DB_PATH`, `DF_COST_BUDGET_PERIOD` (default monthly UTC
+`YYYY-MM`), and the per-category caps `DF_COST_BUDGET_ORCHESTRATOR_USD`,
+`DF_COST_BUDGET_DEVELOPER_USD`, `DF_COST_BUDGET_TESTER_USD`,
+`DF_COST_BUDGET_PR_REVIEW_USD`. Only cost/count/category/timestamp are stored —
+never prompts or completions.
+
 ## Resources
 
 - [Eve Documentation](https://eve.dev/docs)

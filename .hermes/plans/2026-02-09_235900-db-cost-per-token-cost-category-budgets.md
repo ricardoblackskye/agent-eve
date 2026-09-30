@@ -19,7 +19,7 @@
 - Clarified with the user earlier (for #212, reused here as standing policy):
   - Hard monthly USD cap with pre-call reservations for customer budgets. For the operator budget here, the same "reserve before call, reconcile after" model applies but the cap is operator-configured, not per-customer.
   - LLM usage only for the first budget; other cost categories (sandbox compute, hosting) deferred.
-  - Fail-closed: an unavailable budget store or unknown model price must NOT silently allow an unmetered/unbounded call.
+  - Fail-closed: an unavailable budget store or unknown model price must NOT silently allow a call without a budget or a bound.
 
 ## Recommended release split
 
@@ -36,7 +36,7 @@ This issue = R1 only. Do not implement R2/R3 here.
 1. **Canonical cost unit = USD.** Token budgets are expressed as tokens but enforced by converting to estimated USD via a model price table; the hard ceiling is always a USD amount per period.
 2. **Categories are explicit.** `CostCategory = "orchestrator" | "developer" | "tester" | "pr-review"` (aligned with #206 surfaces). Each has its own cap; a call MUST carry exactly one category.
 3. **Reserve before spend, reconcile after.** Before an LLM call: check cap for (period, category) and reserve `estimatedCost`. After: record actual `costUsd` (or counted call) to the ledger and decrement the reservation. Concurrent calls within one process use a shared in-memory reservation map; cross-process use the Postgres row with `SELECT ... FOR UPDATE`/advisory lock (same pattern as control-postgres CAS).
-4. **Fail-closed.** If the budget store is unavailable, or the model price is unknown/unestimatable, the call is REFUSED with a clear `budget_unavailable` / `unpriced_model` reason — never admitted unbounded. A refusal is a structured result, not a thrown crash, at the seam.
+4. **Fail-closed.** If the budget store is unavailable, or the model price is unknown or cannot be estimated, the call is REFUSED with a clear `budget_unavailable` / `unpriced_model` reason — never admitted unbounded. A refusal is a structured result, not a thrown crash, at the seam.
 5. **Honesty of measurement.** Missing `costUsd` from a provider response stays ABSENT (never `0`). If a call has no measurable cost, count it as a call (if call-count budget exists) but do not invent a dollar amount.
 6. **No content in budgets.** Only cost/count/category/model/timestamp. Never store prompts or completions.
 7. **Provider-neutral.** No Supabase/Vercel SDK in the seam. Standard `pg` for Postgres; SQLite for local/test; `console` refuses.
