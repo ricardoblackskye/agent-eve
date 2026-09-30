@@ -143,7 +143,12 @@
     "hashtext",
     "xact",
     "tsqllint",
-    "TSQLLINT"
+    "TSQLLINT",
+    "unwritable",
+    "EBUSY",
+    "pooler",
+    "sslmode",
+    "actioned"
   ],
   "ignorePaths": [
     "node_modules/**",
