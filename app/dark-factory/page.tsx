@@ -17,6 +17,7 @@ import { DEFAULT_POLL_INTERVAL_MS, useRunQuery } from "./ui/use-run-query";
 import { useFactoryControl } from "./ui/use-factory-control";
 import { ControlPanel } from "./ui/control-panel";
 import { CostBudgetsPanel } from "./ui/cost-budgets-panel";
+import { UsagePanelContainer } from "./ui/usage-panel";
 import {
   toKpiTiles,
   toOutcomeMix,
@@ -103,6 +104,16 @@ export default function DarkFactoryOverviewPage() {
         </div>
         <div className="df-panel-body">
           <CostBudgetsPanel />
+        </div>
+      </section>
+
+      <section className="df-panel">
+        <div className="df-panel-head">
+          <strong>LLM USAGE</strong>
+          <span>OPERATOR ONLY · READ ONLY</span>
+        </div>
+        <div className="df-panel-body">
+          <UsagePanelContainer />
         </div>
       </section>
 
