@@ -1019,6 +1019,66 @@ inside the Eve runtime. That conversion is tracked in #217.
 Configuration (see `.env.example`): `DF_LLM_THINKING_LEVEL`, `DF_LLM_MAX_STEPS`,
 `DF_LLM_MODEL`.
 
+## Dark Factory — Customer tenancy & usage attribution (#213, epic #212 R1)
+
+Attributes Dark Factory runs and measured LLM usage to a **customer tenant**, so
+the operator can report usage per customer. R1 only RECORDS and REPORTS — it
+never refuses a run for being unattributable. That refusal is R2 (#214).
+
+- **Canonical model:** `agent/lib/dark-factory/tenant.ts` — a tenant has an
+  opaque, stable UUID `id` (never the slug and never a repository name, so
+  renaming either cannot break attribution), a mutable `slug`/`name`, and an
+  `active`/`inactive` status. Repository slugs arrive from webhooks, so they are
+  validated and normalised here before reaching any payload or log line.
+- **Seam:** `agent/lib/dark-factory/tenant-store.ts` — a provider-neutral
+  `TenantStore` (in-memory default, local `sqlite`, `postgres`) selected by
+  `DF_TENANT_DRIVER`. Postgres tables ship as a source-controlled migration
+  (`db/migrations/003_df_tenants.sql`) with RLS enabled and no public policies.
+- **Attribution is IMMUTABLE.** The tenant is resolved ONCE when a webhook
+  delivery is accepted and stored on the run (`db/migrations/005_df_run_tenant.sql`).
+  Both adapters make the column write-once — the SQLite `ON CONFLICT` update and
+  the Postgres `UPDATE` both omit it — so a later lifecycle event, or reassigning
+  the repository afterwards, can never rewrite a run's stored attribution. A
+  duplicate webhook delivery reuses the ORIGINAL assignment rather than
+  re-resolving it.
+- **Unassigned is a real state, not a default.** Usage with no tenant keeps a
+  `NULL` `tenant_id` and is reported in its own bucket
+  (`agent/lib/dark-factory/tenant-usage-query.ts`), never folded into a
+  customer's total: unattributed spend is not any customer's spend.
+- **Honesty rules.** An unmeasured value stays ABSENT and renders as `—`, never
+  `0` — a `0` asserts we measured zero, which is a different and false claim. A
+  malformed window is a 400 (caller error) and an unavailable ledger is a 503
+  (operational), deliberately distinguished.
+- **Surfaces.** `GET /api/dark-factory/tenants` lists tenants and their
+  repository assignments; the usage route accepts `?tenant=`; the dashboard
+  shows a CUSTOMER USAGE panel. All operator-only, read-only, and gated by the
+  existing signed session.
+
+### Operational rule: assign a repository before it is tracked
+
+A repository that has **not** been assigned to a tenant produces **unattributed**
+usage — visible in the Unassigned bucket, and billed to nobody. That is the
+correct default: guessing would silently attribute one customer's work to
+another.
+
+Seed the registry ONCE per environment, before R2 enforces the requirement:
+
+```bash
+npm run seed:tenants -- \
+  --slug=internal --name="Internal Operations" \
+  --repo=owner/repo [--repo=owner/other] [--dry-run]
+```
+
+The seed is explicit (every repository is named; there is no implicit default),
+idempotent (a re-run reuses the tenant id and assigns nothing new), and refuses
+to move a repository that already belongs to a **different** tenant — moving a
+repository between customers is a deliberate operation, not a side effect of
+re-running a seed.
+
+Configuration (see `.env.example`): `DF_TENANT_DRIVER` (`console` | `sqlite` |
+`postgres`), `DF_TENANT_DB_PATH`, `DF_TENANT_DATABASE_URL`, and the optional
+`DF_TENANT_TEST_DATABASE_URL`, which gates the Postgres integration tests.
+
 ## Resources
 
 - [Eve Documentation](https://eve.dev/docs)
