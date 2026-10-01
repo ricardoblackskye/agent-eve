@@ -28,8 +28,8 @@ two things Preflight would otherwise remove — heading sizes/weights and list
 markers — explicitly in `globals.css`.
 
 The end state is **one** styling method. The 97 existing selectors are not
-migrated in this change; that migration is a deliberate follow-on tracked as its
-own issue, because mixing Tailwind utilities and hand-written selectors
+migrated in this change; that migration is a deliberate follow-on tracked as
+**#241**, because mixing Tailwind utilities and hand-written selectors
 indefinitely is the outcome this decision exists to avoid.
 
 ## Consequences
@@ -46,5 +46,5 @@ indefinitely is the outcome this decision exists to avoid.
   `border-style: solid; border-width: 0`. Neither was restored here. If a page
   shifts, that is where to look — the visual check is the gate, not the unit
   suite.
-- Two styling systems coexist until the follow-on migration lands. That window is
-  intended to be finite.
+- Two styling systems coexist until the follow-on migration (**#241**) lands. That
+  window is intended to be finite.
