@@ -18,6 +18,8 @@ vi.mock(
 import * as route from "../../app/api/dark-factory/usage/route";
 
 const secret = "test-usage-session";
+const T1 = "11111111-1111-4111-8111-111111111111";
+const T2 = "22222222-2222-4222-8222-222222222222";
 let cookie = "";
 
 const DEFAULT_PATH = "https://eve.local/api/dark-factory/usage";
@@ -111,5 +113,36 @@ describe("Dark Factory usage API", () => {
     expect(text).not.toMatch(/completion/i);
     expect(text).not.toMatch(/content/i);
     expect(text).toMatch(/totals/);
+  });
+
+  it("filters usage to a single tenant via ?tenant=", async () => {
+    const store = storeHolder.store as InMemoryUsageStore;
+    await store.record({
+      runId: "run-1",
+      taskType: "pr-review",
+      model: "deepseek/deepseek-chat",
+      ts: "2026-09-30T10:00:00.000Z",
+      costUsd: 0.1,
+      tenantId: T1,
+    });
+    await store.record({
+      runId: "run-1",
+      taskType: "pr-review",
+      model: "deepseek/deepseek-chat",
+      ts: "2026-09-30T10:00:00.000Z",
+      costUsd: 0.2,
+      tenantId: T2,
+    });
+
+    const response = await route.GET(
+      req(`${DEFAULT_PATH}?tenant=${T1}`) as never,
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      report: { totals: { calls: number; costUsd?: number } };
+    };
+    // Only the requested tenant's spend, not the other tenant's.
+    expect(body.report.totals.calls).toBe(1);
+    expect(body.report.totals.costUsd).toBeCloseTo(0.1, 6);
   });
 });

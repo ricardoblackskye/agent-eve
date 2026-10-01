@@ -9,6 +9,8 @@ const report: UsageReport = {
   byModel: [{ model: "deepseek/deepseek-chat", calls: 2, costUsd: 1 }],
   byDay: [{ date: "2026-09-30", calls: 3, costUsd: 1.25 }],
   byRun: [{ runId: "run-1", calls: 3, costUsd: 1.25 }],
+  byTenant: [],
+  unassigned: { calls: 0, unmeasured: 0 },
   unmeasured: 1,
 };
 
@@ -65,6 +67,8 @@ describe("UsagePanel", () => {
           byModel: [],
           byDay: [],
           byRun: [],
+          byTenant: [],
+          unassigned: { calls: 0, unmeasured: 0 },
           unmeasured: 0,
         }}
         loading={false}
