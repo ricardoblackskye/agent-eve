@@ -980,6 +980,45 @@ Configuration (see `.env.example`): `DF_USAGE_DRIVER`, `DF_USAGE_DATABASE_URL`,
 `DF_USAGE_DB_PATH`, and the optional `DF_USAGE_TEST_DATABASE_URL`, which enables
 the gated Postgres integration tests.
 
+## Dark Factory (R7.2) — LLM call policy (#208)
+
+ONE canonical, provider-neutral policy for how LLM calls behave — **thinking
+level** and **maximum steps** — applied to all three LLM surfaces.
+
+- **Canonical type:** `agent/lib/dark-factory/llm-policy.ts` —
+  `{ thinkingLevel: 'off'|'low'|'medium'|'high', maxSteps, model? }`, resolved
+  from `DF_LLM_THINKING_LEVEL`, `DF_LLM_MAX_STEPS` and `DF_LLM_MODEL`.
+- **Provider adapter:** `agent/lib/dark-factory/llm-policy-adapter.ts` — maps the
+  policy onto provider parameters (`reasoning.effort`) and **degrades gracefully**
+  where a model cannot reason. Only `effort` is ever emitted: OpenRouter rejects a
+  request carrying both `effort` and `max_tokens`.
+- **Surfaces:** the orchestrator chat model, the worker sandbox (non-secret
+  contract in `worker-policy-env.ts`), and the PR review path
+  (`scripts/pr-reviewer-policy.ts`).
+- **Step bounds:** `DF_LLM_MAX_STEPS` governs the developer iteration cap and the
+  review-round cap. Precedence is LAYERED: an explicit `DF_MAX_ITERATIONS` or
+  `DF_MAX_REVIEW_ROUNDS` still wins, so an existing deployment is unchanged.
+- **Dashboard:** `/api/dark-factory/llm-policy` (authenticated, read-only) and the
+  "LLM call policy" panel, which reports per surface whether the level actually
+  reached the provider.
+
+**Fail-closed.** An unset value uses the documented default, but a malformed or
+out-of-range value THROWS a config error. A silent default is the failure mode
+this release removes.
+
+**Opt-in.** With no `DF_LLM_*` variable set, every surface keeps its previous
+behaviour exactly.
+
+**Deploy-time.** Policy is env-driven, not DB-backed: changing it is a deploy.
+The dynamic, DB-backed control is the R7.1 off-switch.
+
+**Deferred.** Applying the policy to the orchestrator requires converting
+`agent/agent.ts` to `defineDynamic`, because the orchestrator's LLM call executes
+inside the Eve runtime. That conversion is tracked in #217.
+
+Configuration (see `.env.example`): `DF_LLM_THINKING_LEVEL`, `DF_LLM_MAX_STEPS`,
+`DF_LLM_MODEL`.
+
 ## Resources
 
 - [Eve Documentation](https://eve.dev/docs)
