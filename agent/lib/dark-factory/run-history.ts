@@ -69,6 +69,13 @@ export interface RunSummary {
   latencyMs?: number;
   costUsd?: number;
   prUrl?: string;
+  /**
+   * Customer tenant this run is attributed to. Absent means UNASSIGNED — a
+   * legitimate state for historical runs recorded before attribution existed.
+   * Resolved ONCE at acceptance and never re-derived from the repository
+   * mapping, so reassigning a repository cannot rewrite history.
+   */
+  tenantId?: string;
 }
 
 /** Immutable, compact event record; no raw prompts or free-form issue content. */
@@ -326,6 +333,14 @@ function isTerminal(status: RunStatus): boolean {
   return TERMINAL_STATUSES.includes(status);
 }
 
+function optionalIdentifier(
+  value: string | undefined,
+  field: string,
+): string | undefined {
+  if (value === undefined) return undefined;
+  return identifier(value, field);
+}
+
 /** Validate and copy only canonical summary fields; unknown fields are discarded. */
 export function toRunSummary(input: Partial<RunSummary>): RunSummary {
   const runId = identifier(input.runId, "runId");
@@ -344,6 +359,7 @@ export function toRunSummary(input: Partial<RunSummary>): RunSummary {
   const latencyMs = optionalMeasurement(input.latencyMs, "latencyMs");
   const costUsd = optionalMeasurement(input.costUsd, "costUsd");
   const prUrl = optionalPrUrl(input.prUrl);
+  const tenantId = optionalIdentifier(input.tenantId, "tenantId");
 
   if (Date.parse(updatedAt) < Date.parse(createdAt)) {
     return invalid("updatedAt", updatedAt, "to be at or after createdAt");
@@ -374,6 +390,7 @@ export function toRunSummary(input: Partial<RunSummary>): RunSummary {
     updatedAt,
     ...(startedAt !== undefined ? { startedAt } : {}),
     ...(completedAt !== undefined ? { completedAt } : {}),
+    ...(tenantId !== undefined ? { tenantId } : {}),
     attemptCount,
     reviewCount,
     iterationCount,

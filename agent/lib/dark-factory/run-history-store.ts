@@ -22,6 +22,13 @@ export interface AcceptRunDelivery {
   repo: string;
   issue: number;
   receivedAt: string;
+  /**
+   * Customer tenant this run is attributed to. Absent means UNASSIGNED — a
+   * legitimate state for historical runs recorded before attribution
+   * existed. Resolved ONCE at acceptance; never re-derived, so reassigning
+   * the repository cannot rewrite a run's stored attribution.
+   */
+  tenantId?: string;
 }
 
 export type RunControlTransition = "abort" | "resume";
@@ -149,6 +156,7 @@ interface RunSummaryRow {
   latency_ms: number | null;
   cost_usd: number | null;
   pr_url: string | null;
+  tenant_id: string | null;
 }
 
 interface RunEventRow {
@@ -234,7 +242,8 @@ const SQLITE_SCHEMA = `
     fix_cycle_count INTEGER NOT NULL,
     latency_ms REAL,
     cost_usd REAL,
-    pr_url TEXT
+    pr_url TEXT,
+    tenant_id TEXT
   );
   CREATE INDEX IF NOT EXISTS df_run_summaries_page_idx
     ON df_run_summaries (created_at DESC, run_id DESC);
@@ -317,6 +326,7 @@ function rowToSummary(row: RunSummaryRow): RunSummary {
     ...(row.latency_ms !== null ? { latencyMs: row.latency_ms } : {}),
     ...(row.cost_usd !== null ? { costUsd: row.cost_usd } : {}),
     ...(row.pr_url !== null ? { prUrl: row.pr_url } : {}),
+    ...(row.tenant_id !== null ? { tenantId: row.tenant_id } : {}),
   });
 }
 
@@ -325,8 +335,9 @@ function writeSummary(db: DatabaseSync, summary: RunSummary): void {
     `INSERT INTO df_run_summaries (
        run_id, repo, issue, status, stage, created_at, updated_at,
        started_at, completed_at, attempt_count, review_count,
-       iteration_count, fix_cycle_count, latency_ms, cost_usd, pr_url
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       iteration_count, fix_cycle_count, latency_ms, cost_usd, pr_url,
+       tenant_id
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(run_id) DO UPDATE SET
        repo = excluded.repo,
        issue = excluded.issue,
@@ -360,6 +371,7 @@ function writeSummary(db: DatabaseSync, summary: RunSummary): void {
     summary.latencyMs ?? null,
     summary.costUsd ?? null,
     summary.prUrl ?? null,
+    summary.tenantId ?? null,
   );
 }
 
@@ -519,6 +531,12 @@ export class SqliteRunHistoryStore implements RunHistoryStore {
           "ALTER TABLE df_run_control_receipts ADD COLUMN completed INTEGER NOT NULL DEFAULT 0",
         );
       }
+      const summaryColumns = db
+        .prepare("PRAGMA table_info(df_run_summaries)")
+        .all() as { name: string }[];
+      if (!summaryColumns.some((column) => column.name === "tenant_id")) {
+        db.exec("ALTER TABLE df_run_summaries ADD COLUMN tenant_id TEXT");
+      }
       this.db = db;
       return db;
     } catch (error) {
@@ -620,6 +638,7 @@ export class SqliteRunHistoryStore implements RunHistoryStore {
           runId,
           repo: input.repo,
           issue: input.issue,
+          tenantId: input.tenantId,
           status: "queued",
           stage: "trigger",
           createdAt: createdAt.occurredAt,
