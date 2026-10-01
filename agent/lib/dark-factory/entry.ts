@@ -26,6 +26,8 @@ import type {
   RunControlDeliveryReceipt,
   RunHistoryStore,
 } from "./run-history-store";
+import { resolveRunTenant } from "./run-attribution";
+import type { TenantStore } from "./tenant-store";
 import type { ControlStore } from "./control";
 import { createPlatformAdapter } from "./platform";
 
@@ -58,6 +60,12 @@ export interface EntryDeps {
   runHistory: RunHistoryStore;
   /** Durable runtime controls; production callers must supply this fail-closed seam. */
   controlStore?: ControlStore;
+  /**
+   * Customer tenant registry (#213). OPT-IN: when absent, no attribution is
+   * written at all. A resolution failure degrades to unassigned rather than
+   * refusing the run — R1 RECORDS attribution, R2 refuses.
+   */
+  tenantStore?: TenantStore;
   /** GitHub X-GitHub-Delivery; dedup identity, never the run ID. */
   deliveryId: string;
   /** Injected transport for the session handoff (tests supply a recorder). */
@@ -397,7 +405,11 @@ export async function runDarkFactoryDispatch(
       return statusResult(false, "failed", error, { error });
     }
     if (factory.value?.paused) {
-      return statusResult(true, "held", "factory is paused; no new work was scheduled");
+      return statusResult(
+        true,
+        "held",
+        "factory is paused; no new work was scheduled",
+      );
     }
   }
 
@@ -726,6 +738,9 @@ export async function runDarkFactoryDispatch(
     repo: baseIntent.repo,
     issue: baseIntent.issue,
     receivedAt: now(),
+    // Resolved ONCE, here, and stored write-once on the run: a later
+    // repository reassignment must not rewrite this run's attribution.
+    tenantId: await resolveRunTenant(deps.tenantStore, baseIntent.repo),
   });
   if (!accepted.ok || !accepted.value) {
     const error = accepted.error ?? "run acceptance could not be persisted";
@@ -743,16 +758,26 @@ export async function runDarkFactoryDispatch(
       });
     }
     if (runControl.value?.stopped) {
-      return statusResult(true, "held", "this run was stopped; no work was handed off", {
-        runId: intent.runId,
-        runStatus: "aborted",
-      });
+      return statusResult(
+        true,
+        "held",
+        "this run was stopped; no work was handed off",
+        {
+          runId: intent.runId,
+          runStatus: "aborted",
+        },
+      );
     }
     if (runControl.value?.paused) {
-      return statusResult(true, "held", "this run is paused; no work was handed off", {
-        runId: intent.runId,
-        runStatus: accepted.value.status,
-      });
+      return statusResult(
+        true,
+        "held",
+        "this run is paused; no work was handed off",
+        {
+          runId: intent.runId,
+          runStatus: accepted.value.status,
+        },
+      );
     }
   }
   if (accepted.duplicate) {
