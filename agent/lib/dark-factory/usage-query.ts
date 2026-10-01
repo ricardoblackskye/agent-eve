@@ -66,18 +66,35 @@ function normalizeBound(
   return new Date(parsed).toISOString();
 }
 
+/**
+ * Normalise and validate a usage window.
+ *
+ * Shared by every usage report so the 400 semantics cannot drift between
+ * them: two copies would be two chances to disagree about what a valid
+ * window is.
+ */
+export function normalizeUsageWindow(params: {
+  from?: string;
+  to?: string;
+}): { from?: string; to?: string } {
+  const from = normalizeBound(params.from, "from");
+  const to = normalizeBound(params.to, "to");
+  if (from !== undefined && to !== undefined && from >= to) {
+    throw new InvalidUsageWindowError('"to" must be later than "from"');
+  }
+  return {
+    ...(from !== undefined ? { from } : {}),
+    ...(to !== undefined ? { to } : {}),
+  };
+}
+
 export async function queryUsage(
   store: UsageStore,
   params: UsageQueryParams = {},
 ): Promise<UsageQueryResult> {
-  let from: string | undefined;
-  let to: string | undefined;
+  let window: { from?: string; to?: string };
   try {
-    from = normalizeBound(params.from, "from");
-    to = normalizeBound(params.to, "to");
-    if (from !== undefined && to !== undefined && from >= to) {
-      throw new InvalidUsageWindowError('"to" must be later than "from"');
-    }
+    window = normalizeUsageWindow(params);
   } catch (error) {
     return {
       ok: false,
@@ -85,6 +102,7 @@ export async function queryUsage(
       error: error instanceof Error ? error.message : String(error),
     };
   }
+  const { from, to } = window;
 
   const read = await store.aggregate({
     ...(from !== undefined ? { from } : {}),
