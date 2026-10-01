@@ -152,7 +152,9 @@
     "sslmode",
     "actioned",
     "optimisation",
-    "recognises"
+    "recognises",
+    "GHSA",
+    "vcvr"
   ],
   "ignorePaths": [
     "node_modules/**",
