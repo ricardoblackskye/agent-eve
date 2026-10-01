@@ -149,7 +149,8 @@
     "pooler",
     "sslmode",
     "actioned",
-    "optimisation"
+    "optimisation",
+    "recognises"
   ],
   "ignorePaths": [
     "node_modules/**",
