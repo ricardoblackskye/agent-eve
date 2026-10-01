@@ -36,6 +36,8 @@ export interface UsageQuery {
   to?: string;
   runId?: string;
   model?: string;
+  /** Restrict to a single tenant. Absent means no tenant filter. */
+  tenantId?: string;
 }
 
 export interface UsageModelTotals {
@@ -59,6 +61,23 @@ export interface UsageRunTotals {
 }
 
 /**
+ * Totals for one tenant bucket.
+ *
+ * `tenantId` is ABSENT for the unassigned bucket: that is a genuine "no
+ * tenant", never a placeholder id that could collide with a real tenant.
+ * Every sum stays absent unless something was actually measured.
+ */
+export interface UsageTenantTotals {
+  tenantId?: string;
+  calls: number;
+  tokensIn?: number;
+  tokensOut?: number;
+  costUsd?: number;
+  /** Events in this bucket that carried no measurement at all. */
+  unmeasured: number;
+}
+
+/**
  * Aggregated usage for a window.
  *
  * Every sum is OPTIONAL: a sum is present only when at least one event carried
@@ -76,6 +95,13 @@ export interface UsageAggregate {
   byModel: UsageModelTotals[];
   byDay: UsageDayTotals[];
   byRun: UsageRunTotals[];
+  /** Attributed tenants only. Unassigned usage is NOT in here. */
+  byTenant: UsageTenantTotals[];
+  /**
+   * Usage carrying no tenant. Its own bucket, never folded into a
+   * customer's total: unattributed spend is not any customer's spend.
+   */
+  unassigned: UsageTenantTotals;
   unmeasured: number;
 }
 
@@ -97,6 +123,7 @@ interface Accumulator {
   hasTokensOut: boolean;
   hasCost: boolean;
   hasDuration: boolean;
+  unmeasured: number;
 }
 
 function newAccumulator(): Accumulator {
@@ -110,11 +137,13 @@ function newAccumulator(): Accumulator {
     hasTokensOut: false,
     hasCost: false,
     hasDuration: false,
+    unmeasured: 0,
   };
 }
 
 function addToAccumulator(acc: Accumulator, event: UsageEvent): void {
   acc.calls += 1;
+  if (isUnmeasured(event)) acc.unmeasured += 1;
   if (event.tokensIn !== undefined) {
     acc.tokensIn += event.tokensIn;
     acc.hasTokensIn = true;
@@ -165,6 +194,8 @@ export function summarizeUsage(
     if (to !== undefined && event.ts >= to) return false;
     if (query.runId !== undefined && event.runId !== query.runId) return false;
     if (query.model !== undefined && event.model !== query.model) return false;
+    if (query.tenantId !== undefined && event.tenantId !== query.tenantId)
+      return false;
     return true;
   });
 
@@ -172,11 +203,19 @@ export function summarizeUsage(
   const modelSums = new Map<string, Accumulator>();
   const daySums = new Map<string, Accumulator>();
   const runSums = new Map<string, Accumulator>();
-  let unmeasured = 0;
+  const tenantSums = new Map<string, Accumulator>();
+  const unassignedAcc = newAccumulator();
 
   for (const event of selected) {
     addToAccumulator(totalAcc, event);
-    if (isUnmeasured(event)) unmeasured += 1;
+
+    if (event.tenantId === undefined) {
+      addToAccumulator(unassignedAcc, event);
+    } else {
+      const tenantSum = tenantSums.get(event.tenantId) ?? newAccumulator();
+      addToAccumulator(tenantSum, event);
+      tenantSums.set(event.tenantId, tenantSum);
+    }
 
     const modelSum = modelSums.get(event.model) ?? newAccumulator();
     addToAccumulator(modelSum, event);
@@ -224,7 +263,37 @@ export function summarizeUsage(
     })
     .sort((left, right) => left.runId.localeCompare(right.runId));
 
-  return { totals, byModel, byDay, byRun, unmeasured };
+  const byTenant: UsageTenantTotals[] = [...tenantSums.entries()]
+    .map(([tenantId, acc]) => tenantEntry(tenantId, acc))
+    .sort((left, right) =>
+      (left.tenantId ?? "").localeCompare(right.tenantId ?? ""),
+    );
+
+  return {
+    totals,
+    byModel,
+    byDay,
+    byRun,
+    byTenant,
+    unassigned: tenantEntry(undefined, unassignedAcc),
+    unmeasured: totalAcc.unmeasured,
+  };
+}
+
+/** Shape one tenant bucket, keeping every unmeasured sum ABSENT. */
+function tenantEntry(
+  tenantId: string | undefined,
+  acc: Accumulator,
+): UsageTenantTotals {
+  const entry: UsageTenantTotals = {
+    ...(tenantId !== undefined ? { tenantId } : {}),
+    calls: acc.calls,
+    unmeasured: acc.unmeasured,
+  };
+  if (acc.hasTokensIn) entry.tokensIn = acc.tokensIn;
+  if (acc.hasTokensOut) entry.tokensOut = acc.tokensOut;
+  if (acc.hasCost) entry.costUsd = acc.costUsd;
+  return entry;
 }
 
 /** In-process ledger: the default when no external driver is configured. */

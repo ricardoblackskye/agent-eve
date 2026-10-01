@@ -14,7 +14,8 @@
     "test": "vitest run",
     "eve:build": "eve build",
     "typecheck": "tsc --noEmit",
-    "operator": "tsx scripts/self-improve-operator.ts"
+    "operator": "tsx scripts/self-improve-operator.ts",
+    "seed:tenants": "tsx scripts/seed-tenant-assignments.ts"
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.45",

@@ -18,6 +18,7 @@ import type {
   UsageModelTotals,
   UsageRunTotals,
   UsageStore,
+  UsageTenantTotals,
 } from "./usage-store";
 
 export interface UsageReport {
@@ -29,6 +30,13 @@ export interface UsageReport {
   byModel: UsageModelTotals[];
   byDay: UsageDayTotals[];
   byRun: UsageRunTotals[];
+  /** Attributed tenants only. Unassigned usage is NOT in here. */
+  byTenant: UsageTenantTotals[];
+  /**
+   * Usage carrying no tenant. Its own bucket, never folded into a
+   * customer's total: unattributed spend is not any customer's spend.
+   */
+  unassigned: UsageTenantTotals;
   /** Events carrying no measurement at all — shown as `—`, never `0`. */
   unmeasured: number;
 }
@@ -38,6 +46,8 @@ export interface UsageQueryParams {
   to?: string;
   runId?: string;
   model?: string;
+  /** Restrict to a single tenant. Absent means no tenant filter. */
+  tenantId?: string;
 }
 
 export type UsageQueryResult =
@@ -66,18 +76,35 @@ function normalizeBound(
   return new Date(parsed).toISOString();
 }
 
+/**
+ * Normalise and validate a usage window.
+ *
+ * Shared by every usage report so the 400 semantics cannot drift between
+ * them: two copies would be two chances to disagree about what a valid
+ * window is.
+ */
+export function normalizeUsageWindow(params: {
+  from?: string;
+  to?: string;
+}): { from?: string; to?: string } {
+  const from = normalizeBound(params.from, "from");
+  const to = normalizeBound(params.to, "to");
+  if (from !== undefined && to !== undefined && from >= to) {
+    throw new InvalidUsageWindowError('"to" must be later than "from"');
+  }
+  return {
+    ...(from !== undefined ? { from } : {}),
+    ...(to !== undefined ? { to } : {}),
+  };
+}
+
 export async function queryUsage(
   store: UsageStore,
   params: UsageQueryParams = {},
 ): Promise<UsageQueryResult> {
-  let from: string | undefined;
-  let to: string | undefined;
+  let window: { from?: string; to?: string };
   try {
-    from = normalizeBound(params.from, "from");
-    to = normalizeBound(params.to, "to");
-    if (from !== undefined && to !== undefined && from >= to) {
-      throw new InvalidUsageWindowError('"to" must be later than "from"');
-    }
+    window = normalizeUsageWindow(params);
   } catch (error) {
     return {
       ok: false,
@@ -85,12 +112,16 @@ export async function queryUsage(
       error: error instanceof Error ? error.message : String(error),
     };
   }
+  const { from, to } = window;
 
   const read = await store.aggregate({
     ...(from !== undefined ? { from } : {}),
     ...(to !== undefined ? { to } : {}),
     ...(params.runId !== undefined ? { runId: params.runId } : {}),
     ...(params.model !== undefined ? { model: params.model } : {}),
+    ...(params.tenantId !== undefined
+      ? { tenantId: params.tenantId }
+      : {}),
   });
 
   if (!read.ok || read.value === null) {
@@ -110,6 +141,8 @@ export async function queryUsage(
       byModel: read.value.byModel,
       byDay: read.value.byDay,
       byRun: read.value.byRun,
+      byTenant: read.value.byTenant,
+      unassigned: read.value.unassigned,
       unmeasured: read.value.unmeasured,
     },
   };

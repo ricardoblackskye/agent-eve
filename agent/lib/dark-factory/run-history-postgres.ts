@@ -50,6 +50,7 @@ interface RunSummaryRow {
   latency_ms: number | null;
   cost_usd: number | null;
   pr_url: string | null;
+  tenant_id: string | null;
 }
 
 interface RunEventRow {
@@ -89,7 +90,8 @@ const POSTGRES_SCHEMA = `
     fix_cycle_count BIGINT NOT NULL,
     latency_ms DOUBLE PRECISION,
     cost_usd DOUBLE PRECISION,
-    pr_url TEXT
+    pr_url TEXT,
+    tenant_id TEXT
   );
   CREATE INDEX IF NOT EXISTS df_run_summaries_page_idx
     ON df_run_summaries (created_at DESC, run_id DESC);
@@ -120,6 +122,7 @@ const POSTGRES_SCHEMA = `
       ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED
   );
   ALTER TABLE df_run_events ADD COLUMN IF NOT EXISTS finding_count BIGINT;
+  ALTER TABLE df_run_summaries ADD COLUMN IF NOT EXISTS tenant_id TEXT;
   ALTER TABLE df_run_events ADD COLUMN IF NOT EXISTS resolved_count BIGINT;
   ALTER TABLE df_run_events ADD COLUMN IF NOT EXISTS accepted_count BIGINT;
   CREATE INDEX IF NOT EXISTS df_run_events_page_idx
@@ -183,6 +186,7 @@ function rowToSummary(row: RunSummaryRow): RunSummary {
     ...(row.latency_ms !== null ? { latencyMs: Number(row.latency_ms) } : {}),
     ...(row.cost_usd !== null ? { costUsd: Number(row.cost_usd) } : {}),
     ...(row.pr_url !== null ? { prUrl: row.pr_url } : {}),
+    ...(row.tenant_id !== null ? { tenantId: row.tenant_id } : {}),
   });
 }
 
@@ -326,8 +330,9 @@ function insertSummary(
     `INSERT INTO df_run_summaries (
        run_id, repo, issue, status, stage, created_at, updated_at,
        started_at, completed_at, attempt_count, review_count,
-       iteration_count, fix_cycle_count, latency_ms, cost_usd, pr_url
-     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+       iteration_count, fix_cycle_count, latency_ms, cost_usd, pr_url,
+       tenant_id
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
     [
       summary.runId,
       summary.repo,
@@ -345,6 +350,7 @@ function insertSummary(
       summary.latencyMs ?? null,
       summary.costUsd ?? null,
       summary.prUrl ?? null,
+      summary.tenantId ?? null,
     ],
   );
 }
@@ -353,6 +359,8 @@ function updateSummary(
   client: PoolClient,
   summary: RunSummary,
 ): Promise<unknown> {
+  // tenant_id is deliberately NOT in this SET: attribution is write-once,
+  // resolved at acceptance. A later lifecycle event must never rewrite it.
   return client.query(
     `UPDATE df_run_summaries SET
        repo = $2, issue = $3, status = $4, stage = $5,
@@ -546,6 +554,7 @@ export class PostgresRunHistoryStore implements RunHistoryStore {
           runId,
           repo: input.repo,
           issue: input.issue,
+          tenantId: input.tenantId,
           status: "queued",
           stage: "trigger",
           createdAt: acceptedEvent.occurredAt,

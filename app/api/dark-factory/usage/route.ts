@@ -29,6 +29,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       to: params.get("to") ?? undefined,
       runId: params.get("runId") ?? undefined,
       model: params.get("model") ?? undefined,
+      tenantId: params.get("tenant") ?? undefined,
     });
 
     if (!outcome.ok) {

@@ -33,6 +33,7 @@ const SQLITE_SCHEMA = `
     tokens_out INTEGER,
     cost_usd REAL,
     duration_ms INTEGER,
+    tenant_id TEXT,
     ts TEXT NOT NULL
   );
   CREATE INDEX IF NOT EXISTS df_usage_events_ts_idx
@@ -52,6 +53,7 @@ interface UsageRow {
   tokens_out: number | null;
   cost_usd: number | null;
   duration_ms: number | null;
+  tenant_id: string | null;
   ts: string;
 }
 
@@ -67,6 +69,7 @@ function rowToEvent(row: UsageRow): UsageEvent {
     ...(row.tokens_out !== null ? { tokensOut: Number(row.tokens_out) } : {}),
     ...(row.cost_usd !== null ? { costUsd: Number(row.cost_usd) } : {}),
     ...(row.duration_ms !== null ? { durationMs: Number(row.duration_ms) } : {}),
+    ...(row.tenant_id !== null ? { tenantId: row.tenant_id } : {}),
   });
 }
 
@@ -111,8 +114,8 @@ export class SqliteUsageStore implements UsageStore {
       db.prepare(
         `INSERT INTO df_usage_events
            (event_id, run_id, pbi_id, task_type, model,
-            tokens_in, tokens_out, cost_usd, duration_ms, ts)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            tokens_in, tokens_out, cost_usd, duration_ms, tenant_id, ts)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         this.idFactory(),
         normalized.runId,
@@ -123,6 +126,7 @@ export class SqliteUsageStore implements UsageStore {
         normalized.tokensOut ?? null,
         normalized.costUsd ?? null,
         normalized.durationMs ?? null,
+        normalized.tenantId ?? null,
         normalized.ts,
       );
       return { ok: true, mode: "live", providerId: this.id, event: normalized };

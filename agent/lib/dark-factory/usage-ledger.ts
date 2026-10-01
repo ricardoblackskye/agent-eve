@@ -25,6 +25,12 @@ export interface UsageEvent {
   costUsd?: number;
   /** Wall-clock duration in ms, when it was measured. Absent = not measured. */
   durationMs?: number;
+  /**
+   * Customer tenant this usage is attributed to. Absent means UNASSIGNED — a
+   * genuine state for historical rows recorded before attribution existed, and
+   * deliberately distinct from "attributed to nobody".
+   */
+  tenantId?: string;
   /** ISO-8601 timestamp of the call/task. */
   ts: string;
 }
@@ -122,6 +128,13 @@ export function toUsageEvent(input: UsageEvent): UsageEvent {
       );
     }
     event.pbiId = input.pbiId;
+  }
+
+  if (input.tenantId !== undefined) {
+    // Validated as an identifier rather than as a UUID: the ledger is
+    // provider-neutral and must not depend on the tenant module's id format.
+    // The value itself comes from the registry, never from a caller's guess.
+    event.tenantId = validateIdentifier(input.tenantId, "tenantId");
   }
 
   const tokensIn = assertOptionalMeasurement(
