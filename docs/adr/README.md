@@ -52,3 +52,4 @@ Copy [`template.md`](template.md). One decision per file, about half a page:
 | [0007](0007-control-state-is-db-backed.md)            | Control state is DB-backed and fail-closed                  | Accepted |
 | [0008](0008-tenant-registry-is-ours-crm-is-bought.md) | The tenant registry is ours; the CRM is bought              | Accepted |
 | [0009](0009-tailwind-adopted-repo-wide.md)            | Tailwind is adopted repo-wide, as the single styling method | Accepted |
+| [0010](0010-documentation-is-a-docs-tree.md)          | Documentation is a docs/ tree served by server components   | Accepted |
