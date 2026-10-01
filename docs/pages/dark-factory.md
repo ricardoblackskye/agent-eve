@@ -1,0 +1,125 @@
+# Dark Factory (R1)
+
+The Dark Factory moves Eve from a stateless agent (input → output) to the
+manager of a delivery loop: it remembers what it is working on, dispatches CI
+failures back to a worker, and records the metrics that drive recursive
+self-improvement. R1 deliberately ships only the three foundation seams — no
+containers, no worker agents, no queue (those are releases R2/R3).
+
+All three live under `agent/lib/dark-factory/` and mirror the existing
+provider-seam pattern from `agent/lib/backlog-provider.ts`: a canonical,
+provider-agnostic payload → a provider interface → concrete adapters, with a
+default that refuses rather than silently degrading.
+
+| Seam                    | File          | Canonical payload  | R1 adapter                           | Default                                             |
+|-------------------------|---------------|--------------------|--------------------------------------|-----------------------------------------------------|
+| Execution memory (#134) | `state.ts`    | `ExecutionContext` | `SqliteStateAdapter` (`node:sqlite`) | `ConsoleStateProvider` — refuses (fail-closed)      |
+| Dispatch (#138)         | `dispatch.ts` | `DispatchEvent`    | `Dispatcher` over the state seam     | `console`-equivalent: throws on unconfigured driver |
+| Observability (#140)    | `metrics.ts`  | `TaskMetric`       | `InMemoryMetricsStore`               | in-memory; failed writes buffered                   |
+
+## Execution memory (#134)
+
+`ExecutionContext` carries exactly four fields — `issue`, `worker`, `lastTest`,
+`step` — normalised through `toExecutionContext`, which throws
+`InvalidExecutionContextError` when a required field is missing. The `StateStore`
+seam is a generic JSON key/value store (`save`/`get`, optional `close`) whose
+results reuse the `PublishResult` mode vocabulary: `live`, `dry-run`, `blocked`.
+A store outage is reported as `blocked` with an explicit "unreachable" error —
+never as a silent empty read — and a missing key is `ok: true` with a null value,
+so "not found" and "cannot read" stay distinguishable.
+
+`createStateStore(env)` is fail-closed: an unset `DF_STATE_DRIVER` returns the
+refusing console provider; `sqlite` requires `DF_STATE_DB_PATH`; anything else
+throws. A file-backed SQLite store satisfies the "external store" acceptance
+criterion with no dependency and no credentials, but a Vercel function's
+filesystem is ephemeral, so production persistence needs a Redis/pgvector
+adapter behind the same seam (later release).
+
+`DF_STATE_DB_PATH` is canonicalised with `path.resolve` before use, and when the
+optional `DF_STATE_DB_DIR` sandbox root is configured the store **refuses** any
+path that resolves outside it — the same fail-closed shape as
+`STORY_ALLOWED_REPOS`. The check is lexical (a symlink inside the root that points
+outside it is a filesystem/container concern, part of R2's worker privilege
+boundary), and with no sandbox configured the operator-trusted default applies,
+since an env var is configuration rather than request input.
+
+## Dispatch / self-correction (#138)
+
+`Dispatcher.dispatch(event)` reads the run's state record first. Any existing
+record — in flight or terminal — means the delivery is a duplicate, so the
+handler is never invoked twice and a re-delivered webhook cannot double-dispatch
+work. State is written through the state seam (`pending` → `retrying` →
+`succeeded`/`failed`), so retries survive a process restart.
+
+Retry is a pure function, `nextRetry(policy, failedAttempt)`, which returns the
+next attempt number and its exponential delay, or `null` once the budget is
+exhausted; `dispatch` then transitions the event to the terminal `failed` status
+instead of retrying forever. Each attempt emits a `dispatch.attempt` event to an
+observer that `dispatch` **awaits**, so a metrics sink cannot lose an event to a
+floating promise.
+
+## Observability (#140)
+
+`TaskMetric` is `{taskType, iterations, fixCycles, status}`. The ingestion
+interface is stable so components can grow new skills without changing it.
+`countFixCycles` counts real fail→fix pairs (an unmatched failure or an unmatched
+fix counts zero), `successRateByType` returns K/N rounded to two decimals (null
+for an unknown type), and `BufferedMetricsRecorder` retains and retries any
+record the backend rejected while returning `ok: false` — an unsaved metric is
+never reported as stored. `createDispatchObserver(store)` adapts the dispatch
+attempt stream into this store, so terminal dispatch outcomes become
+`{iterations: attempts, fixCycles: attempts - 1, status}`.
+
+## Worker environment + credential boundary (R2)
+
+R2 gives the factory hands without giving the sandbox a key to the building.
+
+- **`credentials.ts` (#142)** — a `CredentialBroker` holds the operator's token and
+  issues the worker an opaque **lease** (repo allow-list + TTL ≤ 60 min). The sandbox
+  receives the lease id and nothing else, so "MUST NOT deliver a broad PAT to any
+  worker sandbox" holds by construction — the token is a real ECMAScript `#private`
+  field, unreachable by property enumeration or `JSON.stringify`. Adjudication answers
+  200 / 403 / 401 over **real HTTP** (`POST /authorize`, loopback-bound); lease
+  **issuance is deliberately not routable**, because a sandbox must never be able to
+  mint its own credential.
+- **`worker-env.ts` (#135)** — a `WorkerProvider` seam
+  (`provision → pushContext → exec → destroy`) with a `local` default that reports
+  `isolated: false` and executes nothing. `withWorker` owns the lifecycle: it refuses
+  a repo outside `DF_WORKER_ALLOWED_REPOS` **before** provisioning (403, no side
+  effects), pushes the skeletal file map + PBI data before anything runs, and tears
+  the environment down on every path — success, thrown error, or failed context push —
+  revoking the lease alongside it.
+- **`createWorkerHandler`** adapts a dispatched CI event into a worker run and records
+  a `worker-env` task metric through the R1 observability seam. The default task is a
+  probe, because the Developer/Tester agents are R3.
+
+Honest limits: no live container isolation is exercised in R2 (no E2B/Modal key), so
+the default provider is a dry-run that never claims otherwise. The e2b/modal adapters
+plug into the same seam once credentials exist, and the credential source can be
+swapped to a GitHub App installation token without changing the broker's API.
+
+## Factory-level circuit breaker / cost guard (R3, #144)
+
+R3 adds the cross-task safety guard the recursive loop was missing: a **circuit
+breaker** that caps how much a single PBI may cost before a human is pulled in.
+
+- **`circuit-breaker.ts` (#144)** — a `CircuitBreaker` stateful guard. It tracks,
+  per `pbiId`, **cumulative worker-minutes** and **failed self-correct cycles**, and
+  trips (halts further work, emits a machine-readable `circuit-breaker-tripped`
+  event) on either of two independent thresholds:
+  - `DF_MAX_WORKER_MINUTES_PER_PBI` (default 60) — the PBI's total worker-task
+    duration crosses this budget.
+  - `DF_MAX_FAILED_SELFCORRECT` (default 3) — `N` CI-fail → re-dispatch → fail cycles
+    with no intervening success. A success resets the failure counter for that PBI.
+- The breaker is **independent of and additive to** the per-task retry/iteration
+  bounds in #138/#133: it reads the same worker-activity stream but never mutates
+  agent-internal state, and a tripped PBI stays halted so no further minutes are
+  counted or trips emitted.
+- **Wiring** — `createCircuitBreaker(env)` builds the guard from the env knobs
+  (fail-closed on malformed values, defaults 60 min / 3 failures);
+  `createWorkerActivityObserver(breaker)` adapts it into the worker-env sink so the
+  R2 handler records each run. Both thresholds, the trip-event shape, and the
+  fail-closed env contract are covered by `tests/dark-factory/circuit-breaker.test.ts`.
+
+The Developer (#133) and Tester (#136) agents plug into this seam in their own
+story branches; neither can run a worker task past a tripped PBI.
