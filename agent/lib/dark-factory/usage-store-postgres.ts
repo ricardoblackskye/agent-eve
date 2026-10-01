@@ -34,6 +34,7 @@ const SCHEMA = `
     tokens_out INTEGER,
     cost_usd DOUBLE PRECISION,
     duration_ms INTEGER,
+    tenant_id TEXT,
     ts TEXT NOT NULL
   );
   CREATE INDEX IF NOT EXISTS df_usage_events_ts_idx
@@ -53,6 +54,7 @@ interface UsageRow {
   tokens_out: number | null;
   cost_usd: number | null;
   duration_ms: number | null;
+  tenant_id: string | null;
   ts: string;
 }
 
@@ -67,6 +69,7 @@ function rowToEvent(row: UsageRow): UsageEvent {
     ...(row.tokens_out !== null ? { tokensOut: Number(row.tokens_out) } : {}),
     ...(row.cost_usd !== null ? { costUsd: Number(row.cost_usd) } : {}),
     ...(row.duration_ms !== null ? { durationMs: Number(row.duration_ms) } : {}),
+    ...(row.tenant_id !== null ? { tenantId: row.tenant_id } : {}),
   });
 }
 
@@ -117,8 +120,8 @@ export class PostgresUsageStore implements UsageStore {
       await pool.query(
         `INSERT INTO df_usage_events
            (event_id, run_id, pbi_id, task_type, model,
-            tokens_in, tokens_out, cost_usd, duration_ms, ts)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+            tokens_in, tokens_out, cost_usd, duration_ms, tenant_id, ts)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
         [
           this.idFactory(),
           normalized.runId,
@@ -129,6 +132,7 @@ export class PostgresUsageStore implements UsageStore {
           normalized.tokensOut ?? null,
           normalized.costUsd ?? null,
           normalized.durationMs ?? null,
+          normalized.tenantId ?? null,
           normalized.ts,
         ],
       );
@@ -166,7 +170,7 @@ export class PostgresUsageStore implements UsageStore {
 
       const { rows } = await pool.query<UsageRow>(
         `SELECT run_id, pbi_id, task_type, model,
-                tokens_in, tokens_out, cost_usd, duration_ms, ts
+                tokens_in, tokens_out, cost_usd, duration_ms, tenant_id, ts
            FROM df_usage_events${where}`,
         values,
       );
