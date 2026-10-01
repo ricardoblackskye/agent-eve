@@ -1,3 +1,53 @@
+/**
+ * Tailwind v4 (#233). The import MUST come first — CSS requires @import before
+ * other rules — and it pulls in Preflight, which resets margins, headings, lists
+ * and borders globally.
+ *
+ * This file's own `* { margin: 0; padding: 0; box-sizing: border-box }` reset
+ * below already covers most of what Preflight does, so Preflight is largely a
+ * no-op here. The exceptions are headings and lists, which this app previously
+ * inherited from the browser defaults and which Preflight *does* change. Those
+ * are restored explicitly underneath so no existing page shifts.
+ *
+ * Rules declared outside a layer in this file beat Tailwind's layered ones, so
+ * the existing plain-CSS selectors below keep winning where they overlap.
+ */
+@import "tailwindcss";
+
+/* Preflight sets h1-h6 { font-size: inherit; font-weight: inherit } and
+ * ul/ol { list-style: none }. Restore the browser defaults this app relied on,
+ * or every heading flattens to body text and every list loses its marker. */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-weight: bold;
+}
+h1 {
+  font-size: 2em;
+}
+h2 {
+  font-size: 1.5em;
+}
+h3 {
+  font-size: 1.17em;
+}
+h4 {
+  font-size: 1em;
+}
+h5 {
+  font-size: 0.83em;
+}
+h6 {
+  font-size: 0.67em;
+}
+ul,
+ol {
+  list-style: revert;
+}
+
 * {
   box-sizing: border-box;
   margin: 0;
