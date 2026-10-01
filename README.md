@@ -713,6 +713,7 @@ The workflow requires these GitHub Action secrets:
 
 - `OPENROUTER_API_KEY` — for CI evals against the local dev server
 - `EVE_EVAL_AUTH_TOKEN` — for production evals (same value as `EVE_API_KEY`)
+- `VERCEL_PROTECTION_BYPASS` — for the preview and production evals, whose targets sit behind Vercel Authentication. Copy it from Vercel → Project Settings → Deployment Protection → Protection Bypass for Automation. Without it the evals hit the auth wall and report "Failed to create the session" instead of exercising the app.
 
 ## Deployment
 

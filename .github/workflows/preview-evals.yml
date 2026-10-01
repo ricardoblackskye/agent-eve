@@ -44,6 +44,8 @@ jobs:
             else
               TARGET_URL="${TARGET_URL}?x-vercel-protection-bypass=${VERCEL_PROTECTION_BYPASS}"
             fi
+          else
+            echo "::warning::VERCEL_PROTECTION_BYPASS is empty, so these evals will hit the Vercel Authentication wall and report \"Failed to create the session\". Set the VERCEL_PROTECTION_BYPASS Actions secret from Vercel -> Project Settings -> Deployment Protection -> Protection Bypass for Automation."
           fi
           npx eve eval --strict --junit .eve/junit-preview.xml \
             --url "$TARGET_URL"

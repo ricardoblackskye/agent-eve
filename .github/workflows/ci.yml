@@ -167,9 +167,20 @@ jobs:
       - name: Run evals against production
         env:
           EVE_EVAL_AUTH_TOKEN: ${{ secrets.EVE_EVAL_AUTH_TOKEN }}
+          VERCEL_PROTECTION_BYPASS: ${{ secrets.VERCEL_PROTECTION_BYPASS }}
         run: |
+          TARGET_URL="https://agent-eve-gold.vercel.app"
+          if [ -n "$VERCEL_PROTECTION_BYPASS" ]; then
+            if [[ "$TARGET_URL" == *\?* ]]; then
+              TARGET_URL="${TARGET_URL}&x-vercel-protection-bypass=${VERCEL_PROTECTION_BYPASS}"
+            else
+              TARGET_URL="${TARGET_URL}?x-vercel-protection-bypass=${VERCEL_PROTECTION_BYPASS}"
+            fi
+          else
+            echo "::warning::VERCEL_PROTECTION_BYPASS is empty, so these evals will hit the Vercel Authentication wall and report \"Failed to create the session\". Set the VERCEL_PROTECTION_BYPASS Actions secret from Vercel -> Project Settings -> Deployment Protection -> Protection Bypass for Automation."
+          fi
           npx eve eval --strict --junit .eve/junit-production.xml \
-            --url https://agent-eve-gold.vercel.app
+            --url "$TARGET_URL"
       - name: Upload production eval artifacts
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
