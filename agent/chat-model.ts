@@ -27,12 +27,14 @@ const openrouter = createOpenAI({
 export function resolveChatModel(opts?: {
   unreachable?: boolean;
   fallback?: string;
+  /** Explicit model id; beats EVE_CHAT_MODEL. Used by the LLM policy (#208). */
+  modelId?: string;
 }): ReturnType<typeof openrouter.chat> | ReturnType<typeof mockModel> {
   const modelId = resolveModelId({
     primary: DEFAULT_MODEL_ID,
     fallback: opts?.fallback ?? FALLBACK_MODEL_ID,
     unreachable: opts?.unreachable,
-    envOverride: process.env.EVE_CHAT_MODEL,
+    envOverride: opts?.modelId ?? process.env.EVE_CHAT_MODEL,
   });
 
   if (!process.env.OPENROUTER_API_KEY) {
