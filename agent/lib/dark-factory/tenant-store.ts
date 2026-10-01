@@ -76,7 +76,7 @@ export interface TenantStore {
   close?(): void;
 }
 
-function validateTenantName(name: string): string {
+export function validateTenantName(name: string): string {
   if (typeof name !== "string") {
     throw new InvalidTenantError("tenant name must be a string");
   }
@@ -87,7 +87,7 @@ function validateTenantName(name: string): string {
   return trimmed;
 }
 
-function validateTenantStatus(status: TenantStatus): TenantStatus {
+export function validateTenantStatus(status: TenantStatus): TenantStatus {
   if (status !== "active" && status !== "inactive") {
     throw new InvalidTenantError(
       `tenant status must be active or inactive (received ${JSON.stringify(status)})`,
