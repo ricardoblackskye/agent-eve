@@ -16,10 +16,17 @@ function listPages(): DocPage[] {
     .readdirSync(PAGES_DIR)
     .filter((name) => name.endsWith(".md") && name !== "README.md")
     .sort()
-    .map((name) => {
+    .flatMap((name) => {
+      // Allowlist the slug before it reaches a URL. A file whose name falls
+      // outside [a-z0-9-] is skipped rather than rendered, so no filename-derived
+      // value can be reflected into an href (CodeQL: stored XSS via stored value).
+      const slug = name.replace(/\.md$/, "");
+      if (!/^[a-z0-9-]+$/.test(slug)) {
+        return [];
+      }
       const body = fs.readFileSync(path.join(PAGES_DIR, name), "utf8");
-      const title = /^#\s+(.+?)\s*$/m.exec(body)?.[1]?.trim() ?? name;
-      return { slug: name.replace(/\.md$/, ""), title };
+      const title = /^#\s+(.+?)\s*$/m.exec(body)?.[1]?.trim() ?? slug;
+      return [{ slug, title }];
     });
 }
 
@@ -37,7 +44,7 @@ export default function DocumentationIndex() {
       <ul className="documentation-index">
         {listPages().map((page) => (
           <li key={page.slug}>
-            <Link href={`/documentation/${page.slug}`}>{page.title}</Link>
+            <Link href={`/documentation/${encodeURIComponent(page.slug)}`}>{page.title}</Link>
           </li>
         ))}
       </ul>

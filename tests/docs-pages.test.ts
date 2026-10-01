@@ -67,6 +67,17 @@ describe("documentation tree (#234)", () => {
     expect(PAGES.length).toBeGreaterThanOrEqual(2);
   });
 
+  it("keeps every page filename URL-safe", () => {
+    // The index builds links from filenames. Slugs are allowlisted to [a-z0-9-]
+    // before reaching a URL (CodeQL: stored XSS via stored value), so a page
+    // whose name falls outside that set would be skipped rather than linked.
+    // Assert the invariant here so a bad filename fails the suite, not the app.
+    expect(PAGES.length).toBeGreaterThanOrEqual(2);
+    for (const name of PAGES) {
+      expect(name, `${name} must be a safe slug`).toMatch(/^[a-z0-9-]+\.md$/);
+    }
+  });
+
   it("links every page from the index (no orphan pages)", () => {
     expect(PAGES.length).toBeGreaterThanOrEqual(2);
     const orphans = PAGES.filter((name) => !INDEX.includes(name));
