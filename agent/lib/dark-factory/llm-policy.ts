@@ -122,3 +122,18 @@ export function isLlmPolicyConfigured(
     readVar(env, POLICY_MODEL_VAR) !== ""
   );
 }
+
+/**
+ * The step bound the POLICY supplies, or `fallback` when no policy is set.
+ *
+ * Callers apply precedence themselves — explicit per-surface `DF_MAX_*` beats
+ * this — but they must call it unconditionally, so a malformed policy fails
+ * closed even when an override is also present.
+ */
+export function resolvePolicyMaxSteps(
+  env: Record<string, string | undefined> = process.env,
+  fallback: number,
+): number {
+  if (!isLlmPolicyConfigured(env)) return fallback;
+  return resolveLlmPolicy(env).maxSteps;
+}

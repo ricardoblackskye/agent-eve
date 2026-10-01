@@ -18,6 +18,7 @@ import type {
 } from "./pr-writer";
 import type { ExecutionPlan } from "./plan-validator";
 import { toRunEvent, type RunEvent } from "./run-history";
+import { resolvePolicyMaxSteps } from "./llm-policy";
 import type { EventCursor, RunHistoryStore } from "./run-history-store";
 
 export class InvalidConfigurationError extends Error {
@@ -37,8 +38,11 @@ export const DEFAULT_MAX_REVIEW_ROUNDS = 3;
 export function resolveMaxReviewRounds(
   env: Record<string, string | undefined> = process.env,
 ): number {
+  // Resolve the policy FIRST when it is configured, so a malformed value fails
+  // closed even when an explicit per-surface override is also present (#208).
+  const policyMax = resolvePolicyMaxSteps(env, DEFAULT_MAX_REVIEW_ROUNDS);
   const raw = env.DF_MAX_REVIEW_ROUNDS?.trim();
-  if (!raw) return DEFAULT_MAX_REVIEW_ROUNDS;
+  if (!raw) return policyMax;
   if (!/^\d+$/.test(raw) || Number(raw) < 1) {
     throw new InvalidConfigurationError(
       `DF_MAX_REVIEW_ROUNDS must be a positive integer (digits only, received '${raw}').`,

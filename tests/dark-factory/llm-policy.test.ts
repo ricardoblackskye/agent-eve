@@ -6,6 +6,7 @@ import {
   isLlmPolicyConfigured,
   MAX_POLICY_STEPS,
   resolveLlmPolicy,
+  resolvePolicyMaxSteps,
   THINKING_LEVELS,
 } from "../../agent/lib/dark-factory/llm-policy";
 
@@ -47,9 +48,9 @@ describe("resolveLlmPolicy", () => {
 
   it("FAILS CLOSED on a malformed thinking level, never a silent default", () => {
     for (const bad of ["medium-high", "highish", "2", "true"]) {
-      expect(() =>
-        resolveLlmPolicy({ DF_LLM_THINKING_LEVEL: bad }),
-      ).toThrow(EnvConfigError);
+      expect(() => resolveLlmPolicy({ DF_LLM_THINKING_LEVEL: bad })).toThrow(
+        EnvConfigError,
+      );
     }
   });
 
@@ -90,9 +91,9 @@ describe("resolveLlmPolicy", () => {
     expect(() => resolveLlmPolicy({ DF_LLM_MAX_STEPS: "nope" })).toThrow(
       /DF_LLM_MAX_STEPS/,
     );
-    expect(() =>
-      resolveLlmPolicy({ DF_LLM_THINKING_LEVEL: "nope" }),
-    ).toThrow(/DF_LLM_THINKING_LEVEL/);
+    expect(() => resolveLlmPolicy({ DF_LLM_THINKING_LEVEL: "nope" })).toThrow(
+      /DF_LLM_THINKING_LEVEL/,
+    );
   });
 
   it("reports the config-error code so callers can catch it distinctly", () => {
@@ -120,5 +121,26 @@ describe("isLlmPolicyConfigured", () => {
     expect(
       isLlmPolicyConfigured({ DF_LLM_MODEL: "deepseek/deepseek-chat" }),
     ).toBe(true);
+  });
+});
+
+describe("resolvePolicyMaxSteps", () => {
+  it("returns the fallback when no policy is configured", () => {
+    expect(resolvePolicyMaxSteps({}, 10)).toBe(10);
+    expect(resolvePolicyMaxSteps({ DF_LLM_THINKING_LEVEL: "   " }, 3)).toBe(3);
+  });
+
+  it("returns the policy's step bound once configured", () => {
+    expect(resolvePolicyMaxSteps({ DF_LLM_MAX_STEPS: "8" }, 10)).toBe(8);
+    // A thinking level alone still activates the policy, using the default bound.
+    expect(resolvePolicyMaxSteps({ DF_LLM_THINKING_LEVEL: "high" }, 10)).toBe(
+      DEFAULT_MAX_STEPS,
+    );
+  });
+
+  it("fails closed on a malformed policy rather than returning the fallback", () => {
+    expect(() =>
+      resolvePolicyMaxSteps({ DF_LLM_MAX_STEPS: "many" }, 10),
+    ).toThrow(EnvConfigError);
   });
 });
