@@ -3,6 +3,7 @@ import {
   DEFAULT_MAX_STEPS,
   DEFAULT_THINKING_LEVEL,
   EnvConfigError,
+  isLlmPolicyConfigured,
   MAX_POLICY_STEPS,
   resolveLlmPolicy,
   THINKING_LEVELS,
@@ -102,5 +103,22 @@ describe("resolveLlmPolicy", () => {
       expect(error).toBeInstanceOf(EnvConfigError);
       expect((error as EnvConfigError).code).toBe("ERR_ENV_CONFIG");
     }
+  });
+});
+
+describe("isLlmPolicyConfigured", () => {
+  it("is false when no policy variable carries a value, so defaults apply", () => {
+    expect(isLlmPolicyConfigured({})).toBe(false);
+    expect(isLlmPolicyConfigured({ DF_LLM_THINKING_LEVEL: "   " })).toBe(false);
+    expect(isLlmPolicyConfigured({ DF_LLM_MAX_STEPS: "" })).toBe(false);
+    expect(isLlmPolicyConfigured({ DF_LLM_MODEL: "  " })).toBe(false);
+  });
+
+  it("is true when any policy variable is set", () => {
+    expect(isLlmPolicyConfigured({ DF_LLM_THINKING_LEVEL: "high" })).toBe(true);
+    expect(isLlmPolicyConfigured({ DF_LLM_MAX_STEPS: "5" })).toBe(true);
+    expect(
+      isLlmPolicyConfigured({ DF_LLM_MODEL: "deepseek/deepseek-chat" }),
+    ).toBe(true);
   });
 });

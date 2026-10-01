@@ -66,9 +66,7 @@ function resolveThinkingLevel(
  * reasoning that makes `"2.5"` a configuration error rather than a silent
  * truncation to 2.
  */
-function resolveMaxSteps(
-  env: Record<string, string | undefined>,
-): number {
+function resolveMaxSteps(env: Record<string, string | undefined>): number {
   const raw = readVar(env, POLICY_MAX_STEPS_VAR);
   if (raw === "") return DEFAULT_MAX_STEPS;
   if (!/^\d+$/.test(raw)) {
@@ -106,4 +104,21 @@ export function resolveLlmPolicy(
     maxSteps,
     ...(model !== undefined ? { model } : {}),
   };
+}
+
+/**
+ * Whether a policy has been configured at all.
+ *
+ * Callers use this to decide whether to change behaviour: with no policy set,
+ * every surface keeps its existing defaults, so enabling this feature cannot
+ * alter a deployment that has not opted in.
+ */
+export function isLlmPolicyConfigured(
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  return (
+    readVar(env, POLICY_THINKING_LEVEL_VAR) !== "" ||
+    readVar(env, POLICY_MAX_STEPS_VAR) !== "" ||
+    readVar(env, POLICY_MODEL_VAR) !== ""
+  );
 }
