@@ -2,6 +2,10 @@
 
 This document describes the architecture of the Agent Eve application.
 
+Design decisions and their rationale are recorded as Architecture Decision
+Records in [`docs/adr/`](docs/adr/README.md) — read those for *why* the system is
+shaped this way, and for the costs each choice accepted.
+
 ## System Overview
 
 ```mermaid
