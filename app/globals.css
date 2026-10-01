@@ -907,3 +907,29 @@ header {
     align-items: flex-start;
   }
 }
+
+/* Customer usage panel (#213, epic #212 R1): per-tenant reporting. */
+.df-tenant-select {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  font-size: 13px;
+}
+
+.df-tenant-select select {
+  padding: 3px 6px;
+  border: 1px solid #333;
+  border-radius: 4px;
+  background: #111;
+  color: inherit;
+  font: inherit;
+}
+
+/* Unattributed usage is not any customer's row — keep it visually distinct
+   so an operator never reads it as a customer's spend. */
+.df-tenant-unassigned th,
+.df-tenant-unassigned td {
+  opacity: 0.7;
+  font-style: italic;
+}
