@@ -42,6 +42,7 @@ import {
 import type { MetricsStore, TaskStatus } from "./metrics";
 import type { Capabilities } from "./skills";
 import type { ExecutionPlan } from "./plan-validator";
+import { resolvePolicyMaxSteps } from "./llm-policy";
 
 const execAsync = promisify(exec);
 
@@ -384,14 +385,21 @@ export interface IterationRecord {
   status: TaskStatus;
 }
 
+/** Default iteration cap when neither the policy nor an override is set. */
+const DEFAULT_MAX_ITERATIONS = 10;
+
 /**
- * Default iteration cap, resolved from DF_MAX_ITERATIONS (default 10).
+ * Default iteration cap, resolved from the LLM policy (#208) or
+ * DF_MAX_ITERATIONS, which wins when set.
  * Fail-closed: a value that is not a positive integer throws rather than
  * silently running unbounded.
  */
 function resolveMaxIterations(): number {
+  // Resolve the policy FIRST when it is configured, so a malformed value fails
+  // closed even when an explicit per-surface override is also present (#208).
+  const policyMax = resolvePolicyMaxSteps(process.env, DEFAULT_MAX_ITERATIONS);
   const raw = process.env.DF_MAX_ITERATIONS?.trim();
-  if (!raw) return 10;
+  if (!raw) return policyMax;
   // Digits only. `Number()` alone would happily accept "1e3" (1000) and
   // "0x10" (16), which are not what "positive integer, digits" means.
   if (!/^\d+$/.test(raw) || Number(raw) < 1) {

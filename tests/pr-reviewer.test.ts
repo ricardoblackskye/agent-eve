@@ -198,15 +198,19 @@ describe("PR Reviewer Agent - TDD Tests", () => {
       expect(content).toMatch(
         /const REVIEW_MODEL = process\.env\.PR_REVIEW_MODEL \|\| "deepseek\/deepseek-chat"/,
       );
-      // BOTH LLM call sites (first attempt + retry) must use the reviewed model.
+      // BOTH LLM call sites (first attempt + retry) must use the resolved model.
       // Scoped to the `postCompletion` calls rather than counting the literal
-      // across the whole file, so an unrelated use of the model NAME (e.g. the
+      // across the whole file, so an unrelated use of the model name (e.g. the
       // usage-ledger telemetry record, #209) cannot weaken this assertion.
       const llmCalls = content.split("await postCompletion(").slice(1);
       expect(llmCalls).toHaveLength(2);
       for (const call of llmCalls) {
-        expect(call).toMatch(/model: REVIEW_MODEL,/);
+        expect(call).toMatch(/model: REVIEW_POLICY\.model,/);
       }
+      // The policy is OPT-IN: with no DF_LLM_* set it resolves to REVIEW_MODEL.
+      expect(content).toMatch(
+        /resolveReviewRequestPolicy\(process\.env, REVIEW_MODEL\)/,
+      );
       // The project's reasoning model must no longer be wired into this script.
       expect(content).not.toMatch(/MODEL_NAME \|\| DEFAULT_MODEL_ID/);
     });

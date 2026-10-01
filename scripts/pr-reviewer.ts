@@ -7,6 +7,7 @@ import {
   settleReviewCall,
 } from "./pr-reviewer-budget";
 import { createReviewUsageStore, recordReviewUsage } from "./pr-reviewer-usage";
+import { resolveReviewRequestPolicy } from "./pr-reviewer-policy";
 import {
   isTransientModelError,
   parseRetryAfter,
@@ -400,6 +401,21 @@ const REVIEW_GOVERNOR = createReviewGovernor(process.env);
 // Usage recording is OPT-IN and BEST-EFFORT (#209): a ledger outage must never
 // fail the review. The store is null unless DF_USAGE_DRIVER names a real backend.
 const REVIEW_USAGE_STORE = createReviewUsageStore(process.env);
+// LLM call policy (#208) is OPT-IN. With no DF_LLM_* variable set, `legacy` is
+// true and the reviewer keeps its exact previous behaviour: PR_REVIEW_MODEL plus
+// a reasoning max_tokens cap. When the policy IS configured it supplies the model
+// and the reasoning shape instead.
+const REVIEW_POLICY = resolveReviewRequestPolicy(process.env, REVIEW_MODEL);
+// OpenRouter rejects a request carrying BOTH `reasoning.effort` and
+// `reasoning.max_tokens` with HTTP 400, so exactly one shape is ever sent:
+//   legacy          -> the cap (previous behaviour, unchanged)
+//   policy effort   -> the mapped effort
+//   policy off / degraded -> nothing at all
+const reasoningParams: Record<string, unknown> = REVIEW_POLICY.legacy
+  ? { reasoning: { max_tokens: REVIEW_REASONING_MAX_TOKENS } }
+  : REVIEW_POLICY.reasoning !== undefined
+    ? { reasoning: REVIEW_POLICY.reasoning }
+    : {};
 const REVIEW_RUN_ID =
   process.env.GITHUB_RUN_ID ?? `github:${repoOwner}/${repoName}:pr-${prNumber}`;
 let review: string;
@@ -428,7 +444,7 @@ try {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: REVIEW_MODEL,
+        model: REVIEW_POLICY.model,
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
           { role: "user", content: reviewPrompt },
@@ -439,7 +455,7 @@ try {
         // returns HTTP 400), so we send the cap: `effort` is only a hint the
         // model may exceed, and reasoning length is non-deterministic (0, ~5.5k,
         // ~17k tokens for the same diff). max_tokens must comfortably exceed it.
-        reasoning: { max_tokens: REVIEW_REASONING_MAX_TOKENS },
+        ...reasoningParams,
         max_tokens: REVIEW_MAX_TOKENS,
         ...(PROVIDER_SORT ? { provider: { sort: PROVIDER_SORT } } : {}),
       }),
@@ -490,7 +506,7 @@ try {
   // rather than being zero-filled.
   await recordReviewUsage(REVIEW_USAGE_STORE, {
     runId: REVIEW_RUN_ID,
-    model: REVIEW_MODEL,
+    model: REVIEW_POLICY.model,
     data: reviewUsageData,
     ...(reviewUsageStartedAt > 0
       ? { durationMs: Date.now() - reviewUsageStartedAt }
@@ -529,7 +545,7 @@ try {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: REVIEW_MODEL,
+          model: REVIEW_POLICY.model,
           messages: [
             { role: "system", content: SYSTEM_PROMPT },
             {
@@ -543,7 +559,7 @@ try {
             },
           ],
           temperature: 0.2,
-          reasoning: { max_tokens: REVIEW_REASONING_MAX_TOKENS },
+          ...reasoningParams,
           max_tokens: REVIEW_MAX_TOKENS,
           ...(PROVIDER_SORT ? { provider: { sort: PROVIDER_SORT } } : {}),
         }),
