@@ -21,7 +21,7 @@
     "@ai-sdk/openai": "^4.0.45",
     "@vercel/connect": "0.4.3",
     "ai": "^7.0.58",
-    "eve": "^0.44.0",
+    "eve": "^0.69.0",
     "google-auth-library": "^11.1.0",
     "jose": "^6.2.12",
     "mermaid": "^11.17.2",
