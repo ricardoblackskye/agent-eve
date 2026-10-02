@@ -7,11 +7,14 @@
 
 A dependabot group opened to bump `next` — which carried a critical security fix
 (remote code execution in `next/og` ImageResponse, tracked in PR #226) — along with
-`dompurify` and `undici`. Regenerating the lockfile also floated **`eve` from
-`^0.44.0` to `^0.69.0`: twenty-five minor versions**, because the spec range allowed
-it and the fresh resolution took the newest match.
+`dompurify` and `undici`. **Dependabot's bump commit also directly edited the `eve`
+spec in `package.json` from `^0.44.0` to `^0.69.0`** — twenty-five minor versions —
+even though the PR description listed only the three packages above and omitted
+`eve`, so the framework jump was invisible until failures surfaced. (It was not a
+lockfile float: a caret `^0.44.0` cannot resolve past `0.45.0`, so the spec itself
+was changed.)
 
-That single floated change produced two independent breakages, neither related to
+That single spec change produced two independent breakages, neither related to
 the security fix the PR existed to deliver:
 
 1. `EveEvalContext.reply` was removed, so `evals/smoke.eval.ts` failed to type-check.
