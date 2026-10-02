@@ -20,7 +20,7 @@ A PBI is what a run is trying to resolve; the circuit breaker caps how much a
 single PBI may cost.
 
 ### Tenant
-The customer/organisation that owns a run. Attribution to a tenant is
+The customer/organization that owns a run. Attribution to a tenant is
 [write-once](../../docs/adr/0001-tenant-attribution-is-write-once.md); the tenant
 registry is owned by the factory while CRM-style customer data is a bought system
 ([ADR 0008](../../docs/adr/0008-tenant-registry-is-ours-crm-is-bought.md)).

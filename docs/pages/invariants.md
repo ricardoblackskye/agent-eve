@@ -88,7 +88,7 @@ prior state does not match.
 ## Invariant: the worker holds a lease, never the operator token
 
 The worker sandbox receives an opaque lease ID and nothing else; the real token is
-a `#private` field unreachable by enumeration or serialisation, and lease issuance
+a `#private` field unreachable by enumeration or serialization, and lease issuance
 is not routable. **Rationale:** "MUST NOT deliver a broad PAT to any worker sandbox"
 holds by construction
 ([ADR 0004](../../docs/adr/0004-story-publish-is-fail-closed.md)). **Enforced by**

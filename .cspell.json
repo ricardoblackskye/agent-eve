@@ -156,7 +156,8 @@
     "GHSA",
     "basenames",
     "impls",
-    "deepdives"
+    "deepdives",
+    "adrs"
   ],
   "ignorePaths": [
     "node_modules/**",
