@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import Link from "next/link";
+import { listReferencePages } from "./reference/generators";
 
 /**
  * Documentation index (#234). A server component: the pages are read from disk at
@@ -43,6 +44,18 @@ export default function DocumentationIndex() {
       </p>
       <ul className="documentation-index">
         {listPages().map((page) => (
+          <li key={page.slug}>
+            <Link href={`/documentation/${encodeURIComponent(page.slug)}`}>{page.title}</Link>
+          </li>
+        ))}
+      </ul>
+      <h2>Generated reference</h2>
+      <p>
+        These pages are derived from the source of truth at build time (see ADR 0012) —
+        they update automatically when the code changes, so there is no copy to drift.
+      </p>
+      <ul className="documentation-index">
+        {listReferencePages().map((page) => (
           <li key={page.slug}>
             <Link href={`/documentation/${encodeURIComponent(page.slug)}`}>{page.title}</Link>
           </li>
