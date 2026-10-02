@@ -22,3 +22,8 @@ describes, and design decisions live as [Architecture Decision Records](../adr/R
 - [Cost and usage governance](flow-cost-governance.md)
 - [Tenant attribution and reporting](flow-tenant-attribution.md)
 - [Observability](flow-observability.md)
+
+## Glossary and invariants
+
+- [Glossary](glossary.md)
+- [Invariants](invariants.md)

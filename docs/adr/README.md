@@ -39,6 +39,17 @@ Copy [`template.md`](template.md). One decision per file, about half a page:
 - **Every record is linked below.** An orphan ADR is invisible;
   `tests/adr-integrity.test.ts` fails on one.
 
+## Part of the release Definition of Done
+
+Writing an ADR for each decision a release makes is part of that release's
+Definition of Done (introduced by #237). An ADR written at the moment of deciding
+is nearly free; a retrospective one is a reconstruction that loses the real
+trade-offs. For every release/PR: the plan file lists the ADRs the change will
+add; new decisions land as ADRs in the same change that makes them; and each
+accepted ADR is linked from this index (an orphan fails
+`tests/adr-integrity.test.ts`). Never edit an accepted ADR — if the decision
+changes, write a new one that supersedes it.
+
 ## Index
 
 | #                                                                 | Decision                                                         | Status   |
