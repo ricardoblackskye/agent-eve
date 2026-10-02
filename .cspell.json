@@ -155,7 +155,8 @@
     "recognises",
     "GHSA",
     "basenames",
-    "impls"
+    "impls",
+    "deepdives"
   ],
   "ignorePaths": [
     "node_modules/**",

@@ -13,3 +13,12 @@ describes, and design decisions live as [Architecture Decision Records](../adr/R
 - [Platform adapters (R6 foundation)](platform-adapters.md)
 - [Dark Factory (R1)](dark-factory.md)
 - [Dark Factory operations](dark-factory-operations.md)
+
+## Dark Factory flow deep-dives
+
+- [End-to-end run lifecycle](flow-run-lifecycle.md)
+- [Control plane and gates](flow-control-plane.md)
+- [Worker sandbox and credential boundary](flow-worker-sandbox.md)
+- [Cost and usage governance](flow-cost-governance.md)
+- [Tenant attribution and reporting](flow-tenant-attribution.md)
+- [Observability](flow-observability.md)
