@@ -157,7 +157,8 @@
     "basenames",
     "impls",
     "deepdives",
-    "adrs"
+    "adrs",
+    "importability"
   ],
   "ignorePaths": [
     "node_modules/**",

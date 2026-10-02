@@ -11,6 +11,10 @@ provider-seam pattern from `agent/lib/backlog-provider.ts`: a canonical,
 provider-agnostic payload → a provider interface → concrete adapters, with a
 default that refuses rather than silently degrading.
 
+For a per-module index of every file under `agent/lib/dark-factory/`, see the
+[Dark Factory module catalog](dark-factory-modules.md). Narrative flow walkthroughs
+live in the [flow deep-dives](flow-run-lifecycle.md).
+
 | Seam                    | File          | Canonical payload  | R1 adapter                           | Default                                             |
 |-------------------------|---------------|--------------------|--------------------------------------|-----------------------------------------------------|
 | Execution memory (#134) | `state.ts`    | `ExecutionContext` | `SqliteStateAdapter` (`node:sqlite`) | `ConsoleStateProvider` — refuses (fail-closed)      |

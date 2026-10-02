@@ -27,3 +27,7 @@ describes, and design decisions live as [Architecture Decision Records](../adr/R
 
 - [Glossary](glossary.md)
 - [Invariants](invariants.md)
+
+## Module catalog
+
+- [Dark Factory module catalog](dark-factory-modules.md)
