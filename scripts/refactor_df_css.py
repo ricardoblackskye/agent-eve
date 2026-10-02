@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """Mechanical refactor of app/globals.css: convert flat .df-* component classes
 to native CSS nesting (&). Behavior-preserving by construction — the #241 test
-(resolveRules bag) is the oracle; run `npx vitest run tests/css-nesting-migration.test.ts`
-after this script and it must stay green.
+(resolveRules bag) is the oracle; run
+`npx vitest run tests/css-nesting-migration.test.ts` after this script and it
+must stay green.
 
 Only consecutive, comma-free, single-selector .df-* rules that form a
 `base` + `base-suffix` chain are nested. Everything else (the two app-page
 styles, @media blocks, comments, .df-* rules with comma/descendant selectors)
 is emitted verbatim.
 """
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -122,7 +122,11 @@ def main():
             out.append(b)
             i += 1
     TARGET.write_text("".join(out), encoding="utf-8")
-    print(f"rewrote {TARGET} ({len(blocks)} top-level blocks; {sum(1 for _ in out if '&' in _)} nested groups emitted)")
+    nested = sum(1 for _ in out if "&" in _)
+    print(
+        f"rewrote {TARGET} ({len(blocks)} top-level blocks; "
+        f"{nested} nested groups emitted)"
+    )
 
 
 if __name__ == "__main__":
