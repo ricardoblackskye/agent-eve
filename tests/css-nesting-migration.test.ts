@@ -43,8 +43,8 @@ describe("CSS nesting migration (#241)", () => {
     expect(b).not.toContain(original);
   });
 
-  it("mutation: renaming a .df-* class is detected", () => {
-    const renamed = CSS.replace(/&-body\b/g, "&-bodyx");
+  it("mutation: a renamed .df-* class is detected", () => {
+    const renamed = CSS.replace(/&-body\b/g, "&-body-renamed");
     expect(bag(renamed)).not.toEqual(BASELINE);
   });
 });

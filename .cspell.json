@@ -158,7 +158,15 @@
     "impls",
     "deepdives",
     "adrs",
-    "importability"
+    "importability",
+    "Menlo",
+    "Consolas",
+    "minmax",
+    "groupable",
+    "csel",
+    "cdecl",
+    "endc",
+    "vitest"
   ],
   "ignorePaths": [
     "node_modules/**",
