@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { MermaidDiagram } from "../mermaid-diagram";
+import { getReferencePage, listReferencePages } from "../reference/generators";
 
 /**
  * One documentation page (#234). Reuses the markdown + Mermaid pipeline that
@@ -21,7 +22,8 @@ function slugs(): string[] {
 }
 
 export function generateStaticParams() {
-  return slugs().map((slug) => ({ slug }));
+  const derived = listReferencePages().map((p) => ({ slug: p.slug }));
+  return [...slugs().map((slug) => ({ slug })), ...derived];
 }
 
 export const dynamicParams = false;
@@ -35,8 +37,14 @@ export default async function DocumentationPage({
   if (!slug || !/^[a-z0-9-]+$/.test(slug)) notFound();
 
   const file = path.join(PAGES_DIR, `${slug}.md`);
-  if (!fs.existsSync(file)) notFound();
-  const content = fs.readFileSync(file, "utf8");
+  let content: string;
+  if (fs.existsSync(file)) {
+    content = fs.readFileSync(file, "utf8");
+  } else {
+    const page = getReferencePage(slug);
+    if (!page) notFound();
+    content = await page.generate();
+  }
 
   return (
     <div className="architecture-container">
