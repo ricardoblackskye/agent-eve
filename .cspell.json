@@ -152,7 +152,8 @@
     "sslmode",
     "actioned",
     "optimisation",
-    "recognises"
+    "recognises",
+    "GHSA"
   ],
   "ignorePaths": [
     "node_modules/**",
