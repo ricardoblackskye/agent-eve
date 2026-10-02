@@ -2,8 +2,8 @@
 
 This page follows **one Dark Factory run** from the moment a trigger is accepted
 to its terminal outcome. It is the narrative companion to the mechanic catalog in
-[`dark-factory.md`](../dark-factory.md) and the operation notes in
-[`dark-factory-operations.md`](../dark-factory-operations.md). Read those for the
+[`dark-factory.md`](dark-factory.md) and the operation notes in
+[`dark-factory-operations.md`](dark-factory-operations.md). Read those for the
 per-file detail; read this to see how the pieces hand off.
 
 ## 1. Acceptance
@@ -39,8 +39,8 @@ double-dispatch work. State is written through the state seam
 (`pending` → `retrying` → `succeeded`/`failed`) so retries survive a process
 restart. Retry is a pure function, `nextRetry`, which returns the next attempt and
 its exponential backoff or `null` once the budget is exhausted. The full route
-inventory is generated at
-[`/documentation/api-routes`](/documentation/api-routes).
+inventory is generated from `app/api/**/route.ts` — see
+[`app/documentation/reference/generators.ts`](../../app/documentation/reference/generators.ts).
 
 ## 4. Worker
 

@@ -60,7 +60,7 @@ list them.
 - **GREEN** — author the six pages so the test passes; update `README.md` TOC.
 - **REFACTOR** — where a flow page would re-state a mechanic already in
   `dark-factory.md`, replace the prose with a link to that section + the code/ADR, keeping
-  the two artefacts complementary, not duplicated.
+  keeping the two artifacts complementary, not duplicated.
 
 ## Files likely to change
 

@@ -36,8 +36,9 @@ thin adapter. Three route handlers expose it:
 - `GET /api/dark-factory/runs/{id}` — [`runs/[runId]/route.ts`](../../app/api/dark-factory/runs/[runId]/route.ts)
 - `GET /api/dark-factory/metrics` — [`metrics/route.ts`](../../app/api/dark-factory/metrics/route.ts)
 
-The full route inventory (with auth posture) is generated at
-[`/documentation/api-routes`](/documentation/api-routes). Viewer auth reads the
+The full route inventory (with auth posture) is generated from `app/api/**/route.ts` and
+`app/auth-gate.ts` — see
+[`app/documentation/reference/generators.ts`](../../app/documentation/reference/generators.ts). Viewer auth reads the
 `eve_session` cookie and verifies it with `AUTH_SESSION_SECRET`; a missing
 production secret fails closed to 401
 ([`viewer-auth.ts`](../../app/api/dark-factory/viewer-auth.ts)). Every response

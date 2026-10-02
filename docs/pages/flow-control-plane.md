@@ -22,8 +22,8 @@ against a store that may vanish is worse than no decision.
 Every control capability follows the provider-seam pattern
 ([ADR 0006](../../docs/adr/0006-provider-neutral-seams.md)): a canonical payload,
 a provider interface, and concrete adapters (`console` / `sqlite` / `postgres`)
-selected by `DF_*_DRIVER`. The full seam/adapter matrix is generated at
-[`/documentation/platform-seams`](/documentation/platform-seams). Picking the wrong
+selected by `DF_*_DRIVER`. The full seam/adapter matrix is generated from `agent/lib/dark-factory/**` — see
+[`app/documentation/reference/generators.ts`](../../app/documentation/reference/generators.ts). Picking the wrong
 driver fails closed, not open.
 
 ## Gated outcomes
