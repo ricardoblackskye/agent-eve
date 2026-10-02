@@ -35,7 +35,7 @@ describe("CSS nesting migration (#241)", () => {
   });
 
   it("mutation: dropping a .df-* rule's declarations is detected", () => {
-    const stripped = CSS.replace(/\.df-panel-body\s*\{[^}]*\}/, ".df-panel-body {}");
+    const stripped = CSS.replace(/&-body \{[^}]*\}/, "&-body {}");
     const b = bag(stripped);
     expect(b).not.toEqual(BASELINE);
     const original = BASELINE.find((x) => x.startsWith(".df-panel-body "));
@@ -44,7 +44,7 @@ describe("CSS nesting migration (#241)", () => {
   });
 
   it("mutation: renaming a .df-* class is detected", () => {
-    const renamed = CSS.replace(/\.df-panel-body\b/g, ".df-panel-bodyx");
+    const renamed = CSS.replace(/&-body\b/g, "&-bodyx");
     expect(bag(renamed)).not.toEqual(BASELINE);
   });
 });

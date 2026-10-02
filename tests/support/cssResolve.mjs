@@ -27,15 +27,19 @@ export function resolveRules(css) {
       .map((s) => s.trim())
       .filter(Boolean)
       .map((s) => resolveOne(s, parent));
-    const firstBrace = block.indexOf("{");
-    if (firstBrace === -1) {
+    // Split the base block into its own declarations and its nested children.
+    // A child rule begins on a new line with `&`; the original firstBrace split
+    // wrongly folded the first child's selector into the base's declarations
+    // once nesting was introduced.
+    const amp = block.search(/\n\s*&/);
+    if (amp === -1) {
       const decl = normalize(block);
       for (const r of resolved) rules.push([r, decl]);
       return;
     }
-    const ownDecl = normalize(block.slice(0, firstBrace));
+    const ownDecl = normalize(block.slice(0, amp));
     if (ownDecl) for (const r of resolved) rules.push([r, ownDecl]);
-    parse(block.slice(firstBrace), resolved[0]);
+    parse(block.slice(amp), resolved[0]);
   };
 
   const parse = (str, parent) => {
