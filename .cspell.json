@@ -153,8 +153,7 @@
     "actioned",
     "optimisation",
     "recognises",
-    "GHSA",
-    "vcvr"
+    "GHSA"
   ],
   "ignorePaths": [
     "node_modules/**",

@@ -41,16 +41,16 @@ Copy [`template.md`](template.md). One decision per file, about half a page:
 
 ## Index
 
-| #                                                         | Decision                                                    | Status   |
-|-----------------------------------------------------------|-------------------------------------------------------------|----------|
-| [0001](0001-tenant-attribution-is-write-once.md)          | Tenant attribution is write-once                            | Accepted |
-| [0002](0002-r1-records-r2-refuses.md)                     | R1 records and reports; R2 refuses                          | Accepted |
-| [0003](0003-unmeasured-is-never-zero.md)                  | An unmeasured value is never zero                           | Accepted |
-| [0004](0004-story-publish-is-fail-closed.md)              | Story publish is fail-closed                                | Accepted |
-| [0005](0005-sqlite-is-local-only.md)                      | SQLite is local-only                                        | Accepted |
-| [0006](0006-provider-neutral-seams.md)                    | Provider-neutral seams                                      | Accepted |
-| [0007](0007-control-state-is-db-backed.md)                | Control state is DB-backed and fail-closed                  | Accepted |
-| [0008](0008-tenant-registry-is-ours-crm-is-bought.md)     | The tenant registry is ours; the CRM is bought              | Accepted |
-| [0009](0009-tailwind-adopted-repo-wide.md)                | Tailwind is adopted repo-wide, as the single styling method | Accepted |
-| [0010](0010-documentation-is-a-docs-tree.md)              | Documentation is a docs/ tree served by server components   | Accepted |
-| [0011](0011-eval-assertions-use-the-framework-surface.md) | Eval assertions use the framework's assertion surface       | Accepted |
+| #                                                         | Decision                                                       | Status   |
+|-----------------------------------------------------------|----------------------------------------------------------------|----------|
+| [0001](0001-tenant-attribution-is-write-once.md)          | Tenant attribution is write-once                               | Accepted |
+| [0002](0002-r1-records-r2-refuses.md)                     | R1 records and reports; R2 refuses                             | Accepted |
+| [0003](0003-unmeasured-is-never-zero.md)                  | An unmeasured value is never zero                              | Accepted |
+| [0004](0004-story-publish-is-fail-closed.md)              | Story publish is fail-closed                                   | Accepted |
+| [0005](0005-sqlite-is-local-only.md)                      | SQLite is local-only                                           | Accepted |
+| [0006](0006-provider-neutral-seams.md)                    | Provider-neutral seams                                         | Accepted |
+| [0007](0007-control-state-is-db-backed.md)                | Control state is DB-backed and fail-closed                     | Accepted |
+| [0008](0008-tenant-registry-is-ours-crm-is-bought.md)     | The tenant registry is ours; the CRM is bought                 | Accepted |
+| [0009](0009-tailwind-adopted-repo-wide.md)                | Tailwind is adopted repo-wide, as the single styling method    | Accepted |
+| [0010](0010-documentation-is-a-docs-tree.md)              | Documentation is a docs/ tree served by server components      | Accepted |
+| [0011](0011-eve-is-pinned-and-upgrades-are-deliberate.md) | eve is pinned; upgrades are not absorbed into dependency bumps | Accepted |
