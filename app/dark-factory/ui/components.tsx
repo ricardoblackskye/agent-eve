@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { ReactNode } from "react";
 import type {
   RunTrendPoint,
@@ -211,12 +212,18 @@ export function RunTable({
   error = null,
   selectedRunId,
   onSelect,
+  hrefForRun,
 }: {
   rows: TableRow[];
   loading?: boolean;
   error?: string | null;
   selectedRunId?: string;
   onSelect?: (runId: string) => void;
+  /**
+   * When given, each run id renders as a link to its detail route — so the row
+   * is reachable by keyboard as well as by click.
+   */
+  hrefForRun?: (runId: string) => string;
 }): ReactNode {
   if (loading) return <StatePanel state="loading" message="Loading runs…" />;
   if (error) return <StatePanel state="error" message={error} />;
@@ -244,7 +251,15 @@ export function RunTable({
             key={row.runId}
             onClick={onSelect ? () => onSelect(row.runId) : undefined}
           >
-            <td className="df-run-id">{row.runId}</td>
+            <td className="df-run-id">
+              {hrefForRun ? (
+                <Link className="df-run-id" href={hrefForRun(row.runId)}>
+                  {row.runId}
+                </Link>
+              ) : (
+                row.runId
+              )}
+            </td>
             <td>{`${row.issueLabel} · ${row.repo}`}</td>
             <td>
               <StatusPill category={row.category} label={row.status} />
@@ -258,32 +273,6 @@ export function RunTable({
         ))}
       </tbody>
     </table>
-  );
-}
-
-export function SelectedRunPreview({
-  row,
-}: {
-  row: TableRow | null;
-}): ReactNode {
-  if (!row) {
-    return <StatePanel state="empty" message="Select a run to preview it" />;
-  }
-  return (
-    <div className="df-preview">
-      <div className="df-preview-id">{`${row.runId} · ${row.status}`}</div>
-      <h3>{`${row.issueLabel} · ${row.repo}`}</h3>
-      <div className="df-preview-grid">
-        <MetricTile label="Elapsed" value={row.elapsedLabel} />
-        <MetricTile label="Attempts" value={String(row.attemptCount)} />
-        <MetricTile label="Cost" value={row.costLabel} />
-      </div>
-      {row.prUrl ? (
-        <a href={row.prUrl} target="_blank" rel="noreferrer">
-          Pull request ↗
-        </a>
-      ) : null}
-    </div>
   );
 }
 

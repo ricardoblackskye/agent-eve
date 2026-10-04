@@ -1,11 +1,12 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import type {
   RunStatus,
   RunSummary,
 } from "../../../agent/lib/dark-factory/run-history";
-import { RunTable, SelectedRunPreview, StatePanel } from "../ui/components";
+import { RunTable, StatePanel } from "../ui/components";
 import { DEFAULT_POLL_INTERVAL_MS, useRunQuery } from "../ui/use-run-query";
 import { filterRows, toQueryParams, toTableRows } from "../ui/view-model";
 
@@ -28,11 +29,16 @@ const STAGE_OPTIONS = [
   "terminal",
 ];
 
+/** The detail route for a run; both the row link and the row click use it. */
+function runDetailHref(runId: string): string {
+  return `/dark-factory/runs/${runId}`;
+}
+
 export default function DarkFactoryRunsPage() {
+  const router = useRouter();
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("any");
   const [stage, setStage] = useState("any");
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
 
   const path = useMemo(() => {
     const params = toQueryParams({
@@ -54,7 +60,6 @@ export default function DarkFactoryRunsPage() {
       }),
     [runs.data, search, stage],
   );
-  const selectedRow = rows.find((row) => row.runId === selectedRunId) ?? null;
 
   if (runs.error === "Authentication required") {
     return (
@@ -67,7 +72,7 @@ export default function DarkFactoryRunsPage() {
       <div className="df-head">
         <div>
           <h1>Execution ledger</h1>
-          <p>Dense operator view · select a row to inspect a run</p>
+          <p>Dense operator view · select a row to open its run detail</p>
         </div>
         <div className="df-actions">
           <button className="df-btn" type="button" onClick={runs.refresh}>
@@ -108,24 +113,13 @@ export default function DarkFactoryRunsPage() {
         <small>{`${rows.length} RECORDS`}</small>
       </div>
 
-      <div className="df-table-pane">
-        <RunTable
-          rows={rows}
-          loading={runs.loading && !runs.data}
-          error={runs.error}
-          selectedRunId={selectedRunId ?? undefined}
-          onSelect={setSelectedRunId}
-        />
-        <aside className="df-panel">
-          <div className="df-panel-head">
-            <strong>SELECTED RUN</strong>
-            <span>PREVIEW</span>
-          </div>
-          <div className="df-panel-body">
-            <SelectedRunPreview row={selectedRow} />
-          </div>
-        </aside>
-      </div>
+      <RunTable
+        rows={rows}
+        loading={runs.loading && !runs.data}
+        error={runs.error}
+        hrefForRun={runDetailHref}
+        onSelect={(runId) => router.push(runDetailHref(runId))}
+      />
     </div>
   );
 }

@@ -6,6 +6,7 @@ import type { PersistedRunEvent } from "../../../../agent/lib/dark-factory/run-h
 import {
   EventTimeline,
   MeasuredMetrics,
+  PanelHead,
   RunDetailPanel,
   StatePanel,
   WorkerCheckpoints,
@@ -52,7 +53,10 @@ export default function DarkFactoryRunDetailPage() {
   return (
     <div className="df-view">
       <section className="df-panel df-control-card">
-        <div className="df-panel-head"><strong>RUN CONTROL</strong><span>COOPERATIVE PAUSE · TERMINAL STOP</span></div>
+        <PanelHead
+          title="RUN CONTROL"
+          badges={["COOPERATIVE PAUSE", "TERMINAL STOP"]}
+        />
         <div className="df-panel-body">
           <ControlPanel
             loading={control.loading}
@@ -62,36 +66,32 @@ export default function DarkFactoryRunDetailPage() {
             factory={control.data?.factory}
             runId={runId}
             run={control.data?.run}
-            onAction={(action, scope) => { void control.act(action, scope); }}
+            onAction={(action, scope) => {
+              void control.act(action, scope);
+            }}
           />
         </div>
       </section>
       <RunDetailPanel summary={run.data.summary} view={view} />
       <div className="df-detail-grid">
         <section className="df-panel">
-          <div className="df-panel-head">
-            <strong>EVENT STREAM</strong>
-            <span>OLDEST → NEWEST</span>
-          </div>
+          <PanelHead title="EVENT STREAM" badges={["OLDEST → NEWEST"]} />
           <div className="df-panel-body">
             <EventTimeline entries={view.timeline} />
           </div>
         </section>
         <div className="df-stack">
           <section className="df-panel">
-            <div className="df-panel-head">
-              <strong>WORKER CHECKPOINTS</strong>
-              <span>DISPATCH → TERMINAL</span>
-            </div>
+            <PanelHead
+              title="WORKER CHECKPOINTS"
+              badges={["DISPATCH → TERMINAL"]}
+            />
             <div className="df-panel-body">
               <WorkerCheckpoints checkpoints={view.checkpoints} />
             </div>
           </section>
           <section className="df-panel">
-            <div className="df-panel-head">
-              <strong>MEASURED METRICS</strong>
-              <span>NO INFERRED ZEROS</span>
-            </div>
+            <PanelHead title="MEASURED METRICS" badges={["NO INFERRED ZEROS"]} />
             <div className="df-panel-body">
               <MeasuredMetrics metrics={view.metrics} />
             </div>
