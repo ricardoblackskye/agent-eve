@@ -166,7 +166,8 @@
     "csel",
     "cdecl",
     "endc",
-    "vitest"
+    "vitest",
+    "prereqs"
   ],
   "ignorePaths": [
     "node_modules/**",
