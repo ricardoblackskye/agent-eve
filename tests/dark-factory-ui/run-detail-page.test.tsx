@@ -94,4 +94,17 @@ describe("Dark Factory run detail page", () => {
     );
     expect(container.textContent).toContain("owner/repo#198");
   });
+
+  it("links back to the run list, before the directive chips", async () => {
+    const { container } = render(<DarkFactoryRunDetailPage />);
+    await waitFor(() =>
+      expect(container.querySelectorAll(".df-chip").length).toBeGreaterThan(0),
+    );
+    const back = container.querySelector('a[href="/dark-factory/runs"]');
+    expect(back?.textContent).toContain("Back to runs");
+    const head = back?.closest(".df-panel-head");
+    expect(head).toBeTruthy();
+    const ordered = [...(head as Element).querySelectorAll("a, .df-chip")];
+    expect(ordered[0]).toBe(back);
+  });
 });

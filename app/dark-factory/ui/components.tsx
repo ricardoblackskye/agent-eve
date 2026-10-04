@@ -44,29 +44,41 @@ export function StatusPill({
 export function PanelHead({
   title,
   badges = [],
+  leading,
   action,
 }: {
   title: string;
   badges?: string[];
+  /**
+   * Optional control rendered at the right, immediately BEFORE the badge
+   * chips (e.g. a "Back to runs" link).
+   */
+  leading?: ReactNode;
   /**
    * Optional trailing control (e.g. an "ALL RUNS" link). Rendered after the
    * badge chips.
    */
   action?: ReactNode;
 }): ReactNode {
+  const hasRight = Boolean(leading || badges.length > 0 || action);
   return (
     <div className="df-panel-head">
       <strong>{title}</strong>
-      {badges.length > 0 ? (
-        <div className="df-chips">
-          {badges.map((badge) => (
-            <span className="df-chip" key={badge}>
-              {badge}
-            </span>
-          ))}
+      {hasRight ? (
+        <div className="df-head-right">
+          {leading}
+          {badges.length > 0 ? (
+            <div className="df-chips">
+              {badges.map((badge) => (
+                <span className="df-chip" key={badge}>
+                  {badge}
+                </span>
+              ))}
+            </div>
+          ) : null}
+          {action}
         </div>
       ) : null}
-      {action}
     </div>
   );
 }

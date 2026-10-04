@@ -723,6 +723,14 @@ ol {
   white-space: nowrap;
 }
 
+/* Right-hand cluster of a panel head: an optional leading control, the badge
+   chips, and an optional trailing action. */
+.df-head-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 /* Non-blocking error banner (#205): keep the board visible on a transient
    poll failure instead of blanking it. */
 .df-banner {

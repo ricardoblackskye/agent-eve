@@ -1,6 +1,7 @@
 "use client";
 
 import { useParams } from "next/navigation";
+import Link from "next/link";
 import type { RunSummary } from "../../../../agent/lib/dark-factory/run-history";
 import type { PersistedRunEvent } from "../../../../agent/lib/dark-factory/run-history-store";
 import {
@@ -54,9 +55,14 @@ export default function DarkFactoryRunDetailPage() {
     <div className="df-view">
       <section className="df-panel df-control-card">
         <PanelHead
-          title="RUN CONTROL"
-          badges={["COOPERATIVE PAUSE", "TERMINAL STOP"]}
-        />
+                  title="RUN CONTROL"
+                  leading={
+                    <Link className="df-btn" href="/dark-factory/runs">
+                      ← Back to runs
+                    </Link>
+                  }
+                  badges={["COOPERATIVE PAUSE", "TERMINAL STOP"]}
+                />
         <div className="df-panel-body">
           <ControlPanel
             loading={control.loading}

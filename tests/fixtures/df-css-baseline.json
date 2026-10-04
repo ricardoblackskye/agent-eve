@@ -76,6 +76,7 @@
   ".df-head => flex-direction: column; align-items: flex-start;",
   ".df-head h1 => font-size: 20px; margin: 0;",
   ".df-head p => font-size: 11px; color: #8993a0; margin: 4px 0 0;",
+  ".df-head-right => display: flex; align-items: center; gap: 10px;",
   ".df-kpi => background: #15191f; border: 1px solid #2a3039; border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 4px;",
   ".df-kpi-hint => font-size: 11px; color: #5e6875;",
   ".df-kpi-label => font-size: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: #8993a0; letter-spacing: 0.06em;",
