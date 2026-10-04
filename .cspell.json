@@ -167,7 +167,9 @@
     "cdecl",
     "endc",
     "vitest",
-    "prereqs"
+    "prereqs",
+    "nowrap",
+    "nums"
   ],
   "ignorePaths": [
     "node_modules/**",

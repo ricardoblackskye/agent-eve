@@ -24,14 +24,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   } catch {
     // Fail-closed on a misconfigured registry (e.g. an unknown driver) rather
     // than serving an empty list that looks like "no customers exist".
-    return serviceUnavailable();
+    return serviceUnavailable("Customer tenants are unavailable");
   }
 
   try {
     const tenants = await store.listTenants();
-    if (!tenants.ok) return serviceUnavailable();
+    if (!tenants.ok) return serviceUnavailable("Customer tenants are unavailable");
     const assignments = await store.listRepoAssignments();
-    if (!assignments.ok) return serviceUnavailable();
+    if (!assignments.ok) return serviceUnavailable("Customer tenants are unavailable");
     return okJson({
       tenants: tenants.value,
       assignments: assignments.value,

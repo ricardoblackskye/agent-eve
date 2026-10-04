@@ -1102,6 +1102,21 @@ and clears only the known Dark Factory tables (see ADR 0013).
 Point it at the test project with the same `DF_*_DRIVER=postgres` +
 `DF_*_DATABASE_URL` env the app uses (Session Pooler URI, `?sslmode=no-verify`).
 
+### The Overview board (`/dark-factory`)
+
+The board reads the **same stores live** — there is no mock data. Each panel
+calls its store provider (`createRunHistoryStore`, `createControlStore`,
+`createCostBudgetStore`, `createUsageStore`, `createTenantStore`) and renders
+what the database actually holds, so the fixtures above show up as soon as the
+app's environment points at the same database (the `DF_*_DRIVER` /
+`DF_*_DATABASE_URL` values). Give the app the same vars as the seed — for a
+local run, put them in `.env.local`.
+
+A panel whose store is **not configured** (or is unavailable) reports
+"<store> is unavailable" with its own message; it never falls back to fabricated
+or stale numbers. A transient read failure keeps the last known values on screen
+and shows a banner instead of blanking the page.
+
 ## Resources
 
 - [Eve Documentation](https://eve.dev/docs)

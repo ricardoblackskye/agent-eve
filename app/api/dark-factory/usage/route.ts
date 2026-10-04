@@ -35,7 +35,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     if (!outcome.ok) {
       return outcome.status === 400
         ? badRequest(outcome.error)
-        : serviceUnavailable();
+        : serviceUnavailable("Usage ledger is unavailable");
     }
     return okJson({ report: outcome.report });
   } finally {

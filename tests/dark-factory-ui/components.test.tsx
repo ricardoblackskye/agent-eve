@@ -6,6 +6,7 @@ import {
   KpiTiles,
   MeasuredMetrics,
   OutcomeMix,
+  PanelHead,
   RecentRunsList,
   ResourceSnapshot,
   RunDetailPanel,
@@ -139,7 +140,7 @@ describe("overview components", () => {
     expect(values).toContain("07");
   });
 
-  it("renders the outcome mix legend with percentages", () => {
+  it("renders the outcome mix as a padded table", () => {
     const { total, segments } = toOutcomeMix([
       { status: "succeeded", count: 23 },
       { status: "running", count: 6 },
@@ -149,7 +150,8 @@ describe("overview components", () => {
     const { container } = render(
       <OutcomeMix total={total} segments={segments} />,
     );
-    expect(container.querySelectorAll(".df-mix-item")).toHaveLength(4);
+    expect(container.querySelector("table.df-mix-table")).toBeTruthy();
+    expect(container.querySelectorAll(".df-mix-row")).toHaveLength(4);
     expect(container.textContent).toContain("58%");
   });
 
@@ -185,6 +187,22 @@ describe("overview components", () => {
     expect(container.querySelectorAll(".df-recent-row")).toHaveLength(1);
     const empty = render(<RecentRunsList rows={[]} />);
     expect(empty.container.querySelector(".df-state-empty")).toBeTruthy();
+  });
+});
+
+describe("panel head", () => {
+  it("renders role badges as separate, spaced chips", () => {
+    const { container } = render(
+      <PanelHead title="LLM USAGE" badges={["OPERATOR ONLY", "READ ONLY"]} />,
+    );
+    expect(container.querySelector(".df-panel-head strong")?.textContent).toBe(
+      "LLM USAGE",
+    );
+    const chips = [...container.querySelectorAll(".df-chip")];
+    expect(chips.map((chip) => chip.textContent)).toEqual([
+      "OPERATOR ONLY",
+      "READ ONLY",
+    ]);
   });
 });
 

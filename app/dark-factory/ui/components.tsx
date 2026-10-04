@@ -40,6 +40,36 @@ export function StatusPill({
   return <span className={`df-pill df-pill-${category}`}>{label}</span>;
 }
 
+export function PanelHead({
+  title,
+  badges = [],
+  action,
+}: {
+  title: string;
+  badges?: string[];
+  /**
+   * Optional trailing control (e.g. an "ALL RUNS" link). Rendered after the
+   * badge chips.
+   */
+  action?: ReactNode;
+}): ReactNode {
+  return (
+    <div className="df-panel-head">
+      <strong>{title}</strong>
+      {badges.length > 0 ? (
+        <div className="df-chips">
+          {badges.map((badge) => (
+            <span className="df-chip" key={badge}>
+              {badge}
+            </span>
+          ))}
+        </div>
+      ) : null}
+      {action}
+    </div>
+  );
+}
+
 export function MetricTile({
   label,
   value,
@@ -80,14 +110,24 @@ export function OutcomeMix({
     return <StatePanel state="empty" message="No outcomes yet" />;
   }
   return (
-    <div className="df-mix">
-      {segments.map((segment) => (
-        <span className={`df-mix-item df-mix-${segment.key}`} key={segment.key}>
-          <b>{`${segment.percent}% · ${segment.count}`}</b>
-          {segment.label}
-        </span>
-      ))}
-    </div>
+    <table className="df-table df-mix-table">
+      <thead>
+        <tr>
+          <th scope="col">Outcome</th>
+          <th scope="col">Count</th>
+          <th scope="col">Share</th>
+        </tr>
+      </thead>
+      <tbody>
+        {segments.map((segment) => (
+          <tr className={`df-mix-row df-mix-${segment.key}`} key={segment.key}>
+            <th scope="row">{segment.label}</th>
+            <td>{segment.count}</td>
+            <td>{`${segment.percent}%`}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
 

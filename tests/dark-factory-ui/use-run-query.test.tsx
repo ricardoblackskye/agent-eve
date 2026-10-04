@@ -68,6 +68,20 @@ describe("useRunQuery", () => {
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
+  it("surfaces the server error message on a 503 body", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValue(
+        jsonResponse({ error: "Usage ledger is unavailable" }, 503),
+      );
+    const { result } = renderHook(() =>
+      useRunQuery("/api/dark-factory/usage", { fetcher, intervalMs: 0 }),
+    );
+    await waitFor(() => expect(result.current.error).not.toBeNull());
+    expect(result.current.error).toBe("Usage ledger is unavailable");
+    expect(result.current.data).toBeNull();
+  });
+
   it("polls on the configured interval", async () => {
     const fetcher = vi.fn().mockResolvedValue(jsonResponse({ n: 1 }));
     renderHook(() => useRunQuery("/x", { fetcher, intervalMs: 20 }));

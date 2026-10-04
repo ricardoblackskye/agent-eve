@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { readErrorMessage } from "./use-run-query";
 import type {
   ControlAction,
   ControlEvent,
@@ -59,7 +60,7 @@ export function useFactoryControl(options: {
       } else if (!response.ok) {
         setUnauthenticated(false);
         setData(null);
-        setError(`Request failed with status ${response.status}`);
+        setError(await readErrorMessage(response));
       } else {
         const body = (await response.json()) as ControlSnapshot;
         if (!mounted.current) return;
@@ -95,7 +96,7 @@ export function useFactoryControl(options: {
           return;
         }
         if (!response.ok) {
-          setError(`Request failed with status ${response.status}`);
+          setError(await readErrorMessage(response));
           return;
         }
         await refresh();

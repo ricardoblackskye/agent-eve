@@ -51,6 +51,31 @@ export interface TableRow {
   prUrl?: string;
 }
 
+export interface OverviewErrorInput {
+  metricsError: string | null;
+  metricsHasData: boolean;
+  runsError: string | null;
+  runsHasData: boolean;
+}
+
+export interface OverviewErrorState {
+  /** Rendered full-page only when NO data is available to keep on screen. */
+  blocking: string | null;
+  /** Rendered as a non-blocking banner while the last-good data stays. */
+  banner: string | null;
+}
+
+export function resolveOverviewError(
+  input: OverviewErrorInput,
+): OverviewErrorState {
+  const error = input.metricsError ?? input.runsError;
+  if (!error) return { blocking: null, banner: null };
+  const hasData = input.metricsHasData || input.runsHasData;
+  return hasData
+    ? { blocking: null, banner: error }
+    : { blocking: error, banner: null };
+}
+
 export interface TimelineEntry {
   key: string;
   time: string;

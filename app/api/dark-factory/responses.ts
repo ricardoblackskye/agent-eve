@@ -26,9 +26,11 @@ export function notFound(error = "Run not found"): NextResponse {
   );
 }
 
-export function serviceUnavailable(): NextResponse {
+export function serviceUnavailable(
+  error = "Run history is unavailable",
+): NextResponse {
   return NextResponse.json(
-    { error: "Run history is unavailable" },
+    { error },
     { status: 503, headers: NO_STORE_HEADERS },
   );
 }

@@ -17,6 +17,17 @@ describe("useFactoryControl", () => {
     expect(result.current.data).toBeNull();
   });
 
+  it("surfaces the server error message on a 503 body", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValue(response({ error: "Control state is unavailable" }, 503));
+    const { result } = renderHook(() =>
+      useFactoryControl({ intervalMs: 0, fetcher }),
+    );
+    await waitFor(() => expect(result.current.error).not.toBeNull());
+    expect(result.current.error).toBe("Control state is unavailable");
+  });
+
   it("posts the selected pause action and refreshes state", async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(response(snapshot))
