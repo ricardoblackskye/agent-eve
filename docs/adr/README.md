@@ -66,3 +66,4 @@ changes, write a new one that supersedes it.
 | [0010](0010-documentation-is-a-docs-tree.md)                      | Documentation is a docs/ tree served by server components        | Accepted |
 | [0011](0011-eve-is-pinned-and-upgrades-are-deliberate.md)         | eve is pinned; upgrades are not absorbed into dependency bumps   | Accepted |
 | [0012](0012-docs-reference-pages-are-generated-at-render-time.md) | Docs reference pages are generated at render time, not committed | Accepted |
+| [0013](0013-test-data-is-seeded-through-the-store-seam.md)        | Test data is seeded through the store seam                       | Accepted |

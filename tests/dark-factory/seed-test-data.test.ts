@@ -57,7 +57,7 @@ afterEach(() => {
 async function snapshot(): Promise<Record<string, number>> {
   const tenants = await stores.tenant.listTenants();
   const assignments = await stores.tenant.listRepoAssignments();
-  const runs = await stores.runHistory.listRuns({ limit: 200 });
+  const runs = await stores.runHistory.listRuns({ limit: 100 });
   const usage = await stores.usage.aggregate({});
   const budgets = await stores.cost.listBudgets();
   return {

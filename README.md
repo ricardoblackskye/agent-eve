@@ -1080,6 +1080,28 @@ Configuration (see `.env.example`): `DF_TENANT_DRIVER` (`console` | `sqlite` |
 `postgres`), `DF_TENANT_DB_PATH`, `DF_TENANT_DATABASE_URL`, and the optional
 `DF_TENANT_TEST_DATABASE_URL`, which gates the Postgres integration tests.
 
+### Test data for local/dev and the Postgres test project
+
+Populate every Dark Factory store with deterministic, re-runnable fixtures:
+
+```bash
+npm run seed:test-data -- --all
+npm run seed:test-data -- --scenario=happy-path --scenario=unmeasured
+npm run seed:test-data -- --all --reset        # clear test tables, then reseed
+npm run seed:test-data -- --all --dry-run      # report only, write nothing
+```
+
+Scenarios: `happy-path`, `multi-tenant`, `unassigned`, `unmeasured`,
+`over-budget`, `mixed-status`, `control`, `empty`. The seed drives the store
+seam only (never raw SQL for inserts), so it behaves identically on sqlite and
+Postgres and honours every invariant (unmeasured stays absent; attribution is
+write-once). It is deterministic — a re-run is an idempotent no-op. `--reset` is
+fail-closed: it refuses under `NODE_ENV=production` or a preview/production stage
+and clears only the known Dark Factory tables (see ADR 0013).
+
+Point it at the test project with the same `DF_*_DRIVER=postgres` +
+`DF_*_DATABASE_URL` env the app uses (Session Pooler URI, `?sslmode=no-verify`).
+
 ## Resources
 
 - [Eve Documentation](https://eve.dev/docs)
