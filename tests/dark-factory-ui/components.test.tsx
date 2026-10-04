@@ -122,6 +122,20 @@ describe("run states", () => {
     );
     expect(container.querySelectorAll(".df-table-row")).toHaveLength(3);
   });
+
+  it("links each run id to its detail route when hrefForRun is given", () => {
+    const { container } = render(
+      <RunTable
+        rows={rows}
+        loading={false}
+        error={null}
+        hrefForRun={(runId) => `/dark-factory/runs/${runId}`}
+      />,
+    );
+    const link = container.querySelector("a.df-run-id");
+    expect(link?.getAttribute("href")).toBe("/dark-factory/runs/df-active");
+    expect(container.querySelectorAll("a.df-run-id")).toHaveLength(3);
+  });
 });
 
 describe("overview components", () => {
