@@ -9,10 +9,10 @@ export default function DarkFactoryLayout({
       <aside className="df-rail" aria-label="Board navigation">
         <div className="df-mark">DF</div>
         <Link className="df-rail-link" href="/dark-factory" title="Overview">
-          O
+          Overview
         </Link>
         <Link className="df-rail-link" href="/dark-factory/runs" title="Runs">
-          R
+          Runs
         </Link>
       </aside>
       <div className="df-main">

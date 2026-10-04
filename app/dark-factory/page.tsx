@@ -8,6 +8,7 @@ import type {
 import {
   KpiTiles,
   OutcomeMix,
+  PanelHead,
   RecentRunsList,
   ResourceSnapshot,
   StatePanel,
@@ -21,6 +22,7 @@ import { UsagePanelContainer } from "./ui/usage-panel";
 import { TenantUsagePanelContainer } from "./ui/tenant-usage-panel";
 import { LlmPolicyPanelContainer } from "./ui/llm-policy-panel";
 import {
+  resolveOverviewError,
   toKpiTiles,
   toOutcomeMix,
   toResourceSnapshot,
@@ -48,9 +50,16 @@ export default function DarkFactoryOverviewPage() {
     );
   }
 
-  const error = metrics.error ?? runs.error;
-  if (error) {
-    return <StatePanel state="error" message={error} />;
+  // A transient poll failure must not blank a board that already has data: keep
+  // the last-good tiles on screen and surface the failure as a banner instead.
+  const overviewError = resolveOverviewError({
+    metricsError: metrics.error,
+    metricsHasData: metrics.data !== null,
+    runsError: runs.error,
+    runsHasData: runs.data !== null,
+  });
+  if (overviewError.blocking) {
+    return <StatePanel state="error" message={overviewError.blocking} />;
   }
 
   if (metrics.loading && !metrics.data) {
@@ -85,8 +94,14 @@ export default function DarkFactoryOverviewPage() {
         </div>
       </div>
 
+      {overviewError.banner ? (
+        <p className="df-banner" role="alert">
+          {`Showing last known state — ${overviewError.banner}`}
+        </p>
+      ) : null}
+
       <section className="df-panel df-control-card">
-        <div className="df-panel-head"><strong>LIVE CONTROL</strong><span>OPERATOR OFF-SWITCH</span></div>
+        <PanelHead title="LIVE CONTROL" badges={["OPERATOR OFF-SWITCH"]} />
         <div className="df-panel-body">
           <ControlPanel
             loading={control.loading}
@@ -94,46 +109,45 @@ export default function DarkFactoryOverviewPage() {
             unauthenticated={control.unauthenticated}
             pending={control.pending}
             factory={control.data?.factory}
-            onAction={(action, scope) => { void control.act(action, scope); }}
+            onAction={(action, scope) => {
+              void control.act(action, scope);
+            }}
           />
         </div>
       </section>
 
       <section className="df-panel">
-        <div className="df-panel-head">
-          <strong>LLM COST BUDGETS</strong>
-          <span>OPERATOR ONLY · READ ONLY</span>
-        </div>
+        <PanelHead
+          title="LLM COST BUDGETS"
+          badges={["OPERATOR ONLY", "READ ONLY"]}
+        />
         <div className="df-panel-body">
           <CostBudgetsPanel />
         </div>
       </section>
 
       <section className="df-panel">
-        <div className="df-panel-head">
-          <strong>LLM USAGE</strong>
-          <span>OPERATOR ONLY · READ ONLY</span>
-        </div>
+        <PanelHead title="LLM USAGE" badges={["OPERATOR ONLY", "READ ONLY"]} />
         <div className="df-panel-body">
           <UsagePanelContainer />
         </div>
       </section>
 
       <section className="df-panel">
-        <div className="df-panel-head">
-          <strong>CUSTOMER USAGE</strong>
-          <span>OPERATOR ONLY · READ ONLY</span>
-        </div>
+        <PanelHead
+          title="CUSTOMER USAGE"
+          badges={["OPERATOR ONLY", "READ ONLY"]}
+        />
         <div className="df-panel-body">
           <TenantUsagePanelContainer />
         </div>
       </section>
 
       <section className="df-panel">
-        <div className="df-panel-head">
-          <strong>LLM CALL POLICY</strong>
-          <span>OPERATOR ONLY · READ ONLY · DEPLOY-TIME</span>
-        </div>
+        <PanelHead
+          title="LLM CALL POLICY"
+          badges={["OPERATOR ONLY", "READ ONLY", "DEPLOY-TIME"]}
+        />
         <div className="df-panel-body">
           <LlmPolicyPanelContainer />
         </div>
@@ -144,39 +158,33 @@ export default function DarkFactoryOverviewPage() {
       <div className="df-grid">
         <div className="df-stack">
           <section className="df-panel">
-            <div className="df-panel-head">
-              <strong>OUTCOME MIX</strong>
-            </div>
+            <PanelHead title="OUTCOME MIX" />
             <div className="df-panel-body">
               <OutcomeMix total={mix.total} segments={mix.segments} />
             </div>
           </section>
           <section className="df-panel">
-            <div className="df-panel-head">
-              <strong>RESOURCE SNAPSHOT</strong>
-              <span>MEASURED ONLY</span>
-            </div>
+            <PanelHead title="RESOURCE SNAPSHOT" badges={["MEASURED ONLY"]} />
             <div className="df-panel-body">
               <ResourceSnapshot snapshot={snapshot} />
             </div>
           </section>
           <section className="df-panel">
-            <div className="df-panel-head">
-              <strong>OUTCOME TREND</strong>
-              <span>TERMINAL BY DAY</span>
-            </div>
+            <PanelHead title="OUTCOME TREND" badges={["TERMINAL BY DAY"]} />
             <div className="df-panel-body">
               <TrendChart points={metrics.data?.metrics.trend ?? []} />
             </div>
           </section>
         </div>
         <section className="df-panel">
-          <div className="df-panel-head">
-            <strong>RECENT EXECUTIONS</strong>
-            <Link className="df-btn" href="/dark-factory/runs">
-              ALL RUNS →
-            </Link>
-          </div>
+          <PanelHead
+            title="RECENT EXECUTIONS"
+            action={
+              <Link className="df-btn" href="/dark-factory/runs">
+                ALL RUNS →
+              </Link>
+            }
+          />
           <div className="df-panel-body">
             <RecentRunsList rows={recentRows} />
           </div>

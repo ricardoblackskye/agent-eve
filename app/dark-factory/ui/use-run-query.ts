@@ -19,11 +19,29 @@ export interface UseRunQueryOptions {
 export const DEFAULT_POLL_INTERVAL_MS = 60_000;
 
 /**
+ * Prefer the server's own `{ error }` message — a store-specific 503 explains
+ * itself ("Cost budgets are unavailable") — and fall back to the status text
+ * only when the body is absent or opaque.
+ */
+export async function readErrorMessage(response: Response): Promise<string> {
+  try {
+    const body = (await response.json()) as { error?: unknown };
+    if (body && typeof body.error === "string" && body.error.trim() !== "") {
+      return body.error;
+    }
+  } catch {
+    // No JSON body — fall through to the status text.
+  }
+  return `Request failed with status ${response.status}`;
+}
+
+/**
  * Reads a Dark Factory read-API path, exposes loading/error/data, refreshes on
  * demand, and polls on an interval. The response is never cached: a 401 yields
  * an explicit error so the board can withhold data from an unauthenticated
  * viewer.
  */
+
 export function useRunQuery<T>(
   path: string | null,
   options: UseRunQueryOptions = {},
@@ -49,7 +67,7 @@ export function useRunQuery<T>(
         setError("Authentication required");
         setData(null);
       } else if (!response.ok) {
-        setError(`Request failed with status ${response.status}`);
+        setError(await readErrorMessage(response));
         setData(null);
       } else {
         const body = (await response.json()) as T;

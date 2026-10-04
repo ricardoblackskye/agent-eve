@@ -209,7 +209,7 @@ ol {
 }.df-app {
   min-height: 100vh;
   display: grid;
-  grid-template-columns: 58px 1fr;
+  grid-template-columns: 104px 1fr;
   background: #0b0d10;
   color: #e4e8ed;
 }.df-rail {
@@ -231,11 +231,14 @@ ol {
   font-weight: 800;
   background: #201910;
   margin-bottom: 15px;
-}.df-rail-link {
-  width: 38px;
-  height: 38px;
+  }
+  .df-rail-link {
+  width: 100%;
+  min-height: 30px;
+  padding: 7px 8px;
   display: grid;
   place-items: center;
+  text-align: center;
   color: #8993a0;
   border: 1px solid transparent;
   border-radius: 8px;
@@ -729,4 +732,125 @@ ol {
 .df-tenant-unassigned td {
   opacity: 0.7;
   font-style: italic;
+}
+
+/* Panel-head role badges (#205): separate, spaced chips rather than one
+   run-together string. */
+.df-chips {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.df-chip {
+  padding: 2px 8px;
+  border: 1px solid #2a3039;
+  border-radius: 999px;
+  color: #8993a0;
+  font-size: 9px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+
+/* Non-blocking error banner (#205): keep the board visible on a transient
+   poll failure instead of blanking it. */
+.df-banner {
+  margin: 0;
+  padding: 9px 12px;
+  border: 1px solid #5d442c;
+  border-radius: 8px;
+  background: #201910;
+  color: #ffb454;
+  font-size: 12px;
+}
+
+/* Outcome mix as a padded table (#205). */
+.df-mix-table {
+  width: 100%;
+}
+.df-mix-table td {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* LLM cost budgets + LLM call policy panels (#205): these shipped with no
+   styles at all, so the tables rendered untidily. */
+.df-cost-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.df-cost-head,
+.df-policy-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.df-cost-head h2,
+.df-policy-head h2 {
+  margin: 0;
+  color: #8993a0;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.df-cost-table,
+.df-policy-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.df-cost-table th,
+.df-cost-table td,
+.df-policy-table th,
+.df-policy-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid #20252d;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.df-cost-table thead th,
+.df-policy-table thead th {
+  color: #8993a0;
+  font-size: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border-bottom: 1px solid #2a3039;
+}
+.df-cost-table th:first-child,
+.df-cost-table td:first-child,
+.df-policy-table th:first-child,
+.df-policy-table td:first-child {
+  text-align: left;
+}
+.df-policy-table caption {
+  padding-bottom: 6px;
+  text-align: left;
+  color: #8993a0;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.df-policy-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  margin: 0 0 12px;
+}
+.df-policy-summary dt {
+  color: #5e6875;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.df-policy-summary dd {
+  margin: 0;
+  font-size: 13px;
+}
+.df-policy-note {
+  margin: 8px 0 0;
+  color: #d0a15a;
+  font-size: 11px;
 }
