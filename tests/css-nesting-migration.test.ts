@@ -1,15 +1,12 @@
 /**
- * CSS nesting migration (#241) — drift guard.
+ * CSS drift guard for the shared `.df-*` component classes in `app/globals.css`.
  *
- * The #241 refactor converts the shared `.df-*` component classes in
- * `app/globals.css` from flat selectors to native CSS `&` nesting. It must be
- * mechanical and behavior-preserving: the *resolved* stylesheet (selectors +
- * their declaration blocks) is unchanged.
- *
- * This test locks that contract. `resolveRules` expands `&` nesting to flat
- * selectors; the bag of `selector => declarations` must equal the committed
- * baseline generated from the pre-refactor file. The mutation tests prove the
- * guard fires (non-vacuous) — it is not a vacuous pass.
+ * These classes are written FLAT. They were briefly written with `&-suffix`
+ * nesting, but that is SCSS syntax, not valid CSS nesting: Lightning CSS
+ * (Tailwind v4) parses `&-body` as a type selector `-body` and emits the invalid
+ * `-body.df-panel`, so the rule never matches — which is why the dashboard tiles
+ * had no padding (#205). The resolved `selector => declarations` bag must equal
+ * the committed baseline; the mutation tests prove the guard is non-vacuous.
  */
 // @ts-ignore - plain JS module, no type declarations needed
 import { resolveRules } from "./support/cssResolve.mjs";
@@ -35,7 +32,10 @@ describe("CSS nesting migration (#241)", () => {
   });
 
   it("mutation: dropping a .df-* rule's declarations is detected", () => {
-    const stripped = CSS.replace(/&-body \{[^}]*\}/, "&-body {}");
+    const stripped = CSS.replace(
+      /\.df-panel-body\s*\{[^}]*\}/,
+      ".df-panel-body {}",
+    );
     const b = bag(stripped);
     expect(b).not.toEqual(BASELINE);
     const original = BASELINE.find((x) => x.startsWith(".df-panel-body "));
@@ -44,7 +44,7 @@ describe("CSS nesting migration (#241)", () => {
   });
 
   it("mutation: a renamed .df-* class is detected", () => {
-    const renamed = CSS.replace(/&-body\b/g, "&-body-renamed");
+    const renamed = CSS.replace(/\.df-panel-body\b/g, ".df-panel-body-renamed");
     expect(bag(renamed)).not.toEqual(BASELINE);
   });
 });

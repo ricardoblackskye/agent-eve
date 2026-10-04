@@ -321,21 +321,21 @@ ol {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  &-label {
+}
+.df-kpi-label{
     font-size: 10px;
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     color: #8993a0;
     letter-spacing: 0.06em;
   }
-  &-value {
+.df-kpi-value{
     font-size: 26px;
     font-weight: 700;
   }
-  &-hint {
+.df-kpi-hint{
     font-size: 11px;
     color: #5e6875;
   }
-}
 .df-grid {
   display: grid;
   grid-template-columns: 1.1fr 1.4fr;
@@ -349,7 +349,8 @@ ol {
   border: 1px solid #2a3039;
   border-radius: 10px;
   overflow: hidden;
-  &-head {
+}
+.df-panel-head{
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -359,77 +360,77 @@ ol {
     letter-spacing: 0.06em;
     color: #8993a0;
   }
-  &-head strong {
+.df-panel-head strong{
     color: #e4e8ed;
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   }
-  &-body {
+.df-panel-body{
     padding: 14px;
   }
-}
 .df-mix {
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
-  &-item {
+}
+.df-mix-item{
     display: flex;
     align-items: center;
     gap: 7px;
     font-size: 12px;
     color: #8993a0;
   }
-  &-item b {
+.df-mix-item b{
     color: #e4e8ed;
   }
-  &-completed b {
+.df-mix-completed b{
     color: #6ad6a4;
   }
-  &-active b {
+.df-mix-active b{
     color: #77b7ff;
   }
-  &-blocked b {
+.df-mix-blocked b{
     color: #f1cf70;
   }
-  &-failed b {
+.df-mix-failed b{
     color: #ff7883;
   }
-}
 .df-trend {
   display: flex;
   align-items: flex-end;
   gap: 6px;
   height: 90px;
-  &-bar {
+}
+.df-trend-bar{
     flex: 1;
     min-width: 8px;
     min-height: 4px;
     background: #77b7ff;
     border-radius: 3px 3px 0 0;
   }
-}
 .df-snapshot {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 10px;
-  &-item {
+}
+.df-snapshot-item{
     display: flex;
     flex-direction: column;
     gap: 3px;
   }
-  &-item small {
+.df-snapshot-item small{
     font-size: 10px;
     color: #5e6875;
     text-transform: uppercase;
     letter-spacing: 0.05em;
   }
-  &-item b {
+.df-snapshot-item b{
     font-size: 15px;
   }
-}
 .df-recent {
   display: flex;
   flex-direction: column;
-  &-row {
+}
+.df-recent-row{
     display: grid;
     grid-template-columns: 76px 1fr auto;
     align-items: center;
@@ -437,10 +438,9 @@ ol {
     padding: 9px 0;
     border-bottom: 1px solid #20252d;
   }
-  &-row:last-child {
+.df-recent-row:last-child{
     border-bottom: none;
   }
-}
 .df-run-id {
   font-size: 11px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -464,23 +464,23 @@ ol {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  &-active {
+}
+.df-pill-active{
     background: #172b40;
     color: #77b7ff;
   }
-  &-blocked {
+.df-pill-blocked{
     background: #392f1a;
     color: #f1cf70;
   }
-  &-completed {
+.df-pill-completed{
     background: #143126;
     color: #6ad6a4;
   }
-  &-failed {
+.df-pill-failed{
     background: #3b1f24;
     color: #ff7883;
   }
-}
 .df-filters {
   display: flex;
   flex-wrap: wrap;
@@ -531,12 +531,12 @@ ol {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  &-id {
+}
+.df-preview-id{
     font-size: 10px;
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     color: #8993a0;
   }
-}
 .df-preview h3 {
   margin: 0;
   font-size: 14px;
@@ -574,12 +574,12 @@ ol {
   border: 1px solid #2a3039;
   border-radius: 10px;
   padding: 14px;
-  &-id {
+}
+.df-detail-id{
     font-size: 10px;
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     color: #8993a0;
   }
-}
 .df-detail h2 {
   margin: 4px 0 8px;
   font-size: 18px;
@@ -602,21 +602,21 @@ ol {
   display: grid;
   grid-template-columns: 66px 1fr;
   gap: 10px;
-  &-time {
+}
+.df-event-time{
     font-size: 11px;
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     color: #5e6875;
   }
-  &-body strong {
+.df-event-body strong{
     font-size: 13px;
     display: block;
   }
-  &-body p {
+.df-event-body p{
     margin: 2px 0 0;
     font-size: 11px;
     color: #8993a0;
   }
-}
 .df-checkpoints {
   display: flex;
   flex-wrap: wrap;
@@ -635,15 +635,15 @@ ol {
   border-radius: 10px;
   color: #8993a0;
   background: #13171c;
-  &-error {
+}
+.df-state-error{
     color: #ff7883;
     border-color: #3b1f24;
   }
-  &-auth {
+.df-state-auth{
     color: #f1cf70;
     border-color: #392f1a;
   }
-}
 .df-control-card {
   margin-bottom: 16px;
 }.df-control-panel {
