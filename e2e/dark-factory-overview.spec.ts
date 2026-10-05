@@ -21,7 +21,9 @@ test.describe("Dark Factory overview styling", () => {
 
     // The bug was "no styles at all", so assert the computed properties that
     // prove the rule now applies — padding, right-aligned numerals, uppercase head.
-    const cell = table.locator("tbody td").first();
+    // A VALUE cell — not the first column, which is the label column and is
+    // left-aligned so it lines up with its own heading.
+    const cell = table.locator("tbody td").nth(1);
     const style = await cell.evaluate((node) => {
       const computed = getComputedStyle(node);
       return {
