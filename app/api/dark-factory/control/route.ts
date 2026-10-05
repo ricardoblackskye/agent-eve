@@ -5,8 +5,8 @@ import {
   type ControlScope,
 } from "../../../../agent/lib/dark-factory/control";
 import { performControlAction } from "../../../../agent/lib/dark-factory/control-service";
-import { getViewerSession } from "../viewer-auth";
-import { badRequest, NO_STORE_HEADERS, okJson, unauthorized } from "../responses";
+import { guardOperator } from "../guard";
+import { badRequest, NO_STORE_HEADERS, okJson } from "../responses";
 
 function unavailable(): NextResponse {
   return NextResponse.json(
@@ -24,8 +24,8 @@ function isScope(value: unknown): value is ControlScope {
 }
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const viewer = await getViewerSession(request);
-  if (!viewer) return unauthorized();
+  const guard = await guardOperator(request);
+  if (!guard.ok) return guard.response;
 
   let store;
   try {
@@ -49,8 +49,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  const viewer = await getViewerSession(request);
-  if (!viewer) return unauthorized();
+  const guard = await guardOperator(request);
+  if (!guard.ok) return guard.response;
 
   let body: unknown;
   try {
@@ -62,7 +62,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return badRequest("Expected a JSON control action object.");
   }
   const raw = body as Record<string, unknown>;
-  if (!isAction(raw.action)) return badRequest("action must be pause, resume, or stop.");
+  if (!isAction(raw.action))
+    return badRequest("action must be pause, resume, or stop.");
   if (!isScope(raw.scope)) return badRequest("scope must be factory or run.");
   if (raw.runId !== undefined && typeof raw.runId !== "string") {
     return badRequest("runId must be a string.");
@@ -77,7 +78,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const result = await performControlAction(store, {
       action: raw.action,
       scope: raw.scope,
-      actor: viewer.email,
+      actor: guard.viewer.email,
       ...(typeof raw.runId === "string" ? { runId: raw.runId } : {}),
       ...(typeof raw.reason === "string" ? { reason: raw.reason } : {}),
     });
@@ -86,7 +87,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         ? badRequest(result.error)
         : unavailable();
     }
-    return okJson({ status: result.status, state: result.state, duplicate: result.duplicate });
+    return okJson({
+      status: result.status,
+      state: result.state,
+      duplicate: result.duplicate,
+    });
   } catch {
     return unavailable();
   } finally {

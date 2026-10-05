@@ -1,8 +1,21 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createSessionToken,
   SESSION_COOKIE_NAME,
 } from "../../app/auth-session";
+// These routes resolve role and tenant per request (#215). The guard is mocked
+// so the test keeps its real session check but needs no membership store.
+vi.mock("../../app/api/dark-factory/guard", async () => {
+  const auth = await import("../../app/api/dark-factory/viewer-auth");
+  const { unauthorized } = await import("../../app/api/dark-factory/responses");
+  const viewer = { email: "operator@example.test", role: "operator" as const };
+  const resolve = async (request: Request) => {
+    const session = await auth.getViewerSession(request);
+    return session ? { ok: true, viewer } : { ok: false, response: unauthorized() };
+  };
+  return { guardViewer: resolve, guardOperator: resolve };
+});
+
 import * as route from "../../app/api/dark-factory/llm-policy/route";
 
 const secret = "test-llm-policy-session";

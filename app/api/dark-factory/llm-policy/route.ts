@@ -7,8 +7,8 @@ import {
 } from "../../../../agent/model-config";
 import { EnvConfigError } from "../../../../agent/lib/dark-factory/llm-policy";
 import { buildLlmPolicyReport } from "../../../../agent/lib/dark-factory/llm-policy-query";
-import { getViewerSession } from "../viewer-auth";
-import { badRequest, okJson, unauthorized } from "../responses";
+import { guardOperator } from "../guard";
+import { badRequest, okJson } from "../responses";
 
 /** Matches `scripts/pr-reviewer.ts`; the reviewer keeps its own model default. */
 const PR_REVIEW_FALLBACK_MODEL = "deepseek/deepseek-chat";
@@ -21,8 +21,8 @@ const PR_REVIEW_FALLBACK_MODEL = "deepseek/deepseek-chat";
  * It exposes no secret: only the policy values and the resolved model ids.
  */
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const viewer = await getViewerSession(request);
-  if (!viewer) return unauthorized();
+  const guard = await guardOperator(request);
+  if (!guard.ok) return guard.response;
 
   const env = process.env;
   // Use the real resolver so the report matches what the orchestrator does,

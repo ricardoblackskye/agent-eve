@@ -1,7 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { createTenantStore } from "../../../../agent/lib/dark-factory/tenant-store-provider";
-import { getViewerSession } from "../viewer-auth";
-import { okJson, serviceUnavailable, unauthorized } from "../responses";
+import { guardOperator } from "../guard";
+import { okJson, serviceUnavailable } from "../responses";
 
 /**
  * Operator-only, read-only view of the customer tenant registry (#213, epic #212 R1).
@@ -15,8 +15,8 @@ import { okJson, serviceUnavailable, unauthorized } from "../responses";
  * Counts and identifiers only: no issue text, no prompt or completion content.
  */
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const viewer = await getViewerSession(request);
-  if (!viewer) return unauthorized();
+  const guard = await guardOperator(request);
+  if (!guard.ok) return guard.response;
 
   let store;
   try {
@@ -29,9 +29,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   try {
     const tenants = await store.listTenants();
-    if (!tenants.ok) return serviceUnavailable("Customer tenants are unavailable");
+    if (!tenants.ok)
+      return serviceUnavailable("Customer tenants are unavailable");
     const assignments = await store.listRepoAssignments();
-    if (!assignments.ok) return serviceUnavailable("Customer tenants are unavailable");
+    if (!assignments.ok)
+      return serviceUnavailable("Customer tenants are unavailable");
     return okJson({
       tenants: tenants.value,
       assignments: assignments.value,

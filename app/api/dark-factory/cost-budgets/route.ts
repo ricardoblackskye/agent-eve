@@ -1,13 +1,8 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { createCostBudgetStore } from "../../../../agent/lib/dark-factory/cost-budget-store";
 import { queryCostBudgets } from "../../../../agent/lib/dark-factory/cost-budget-query";
-import { getViewerSession } from "../viewer-auth";
-import {
-  badRequest,
-  okJson,
-  serviceUnavailable,
-  unauthorized,
-} from "../responses";
+import { guardOperator } from "../guard";
+import { badRequest, okJson, serviceUnavailable } from "../responses";
 
 /**
  * Operator-only, read-only view of the LLM cost budgets. Reuses the shared
@@ -15,8 +10,8 @@ import {
  * prompt/completion content.
  */
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const viewer = await getViewerSession(request);
-  if (!viewer) return unauthorized();
+  const guard = await guardOperator(request);
+  if (!guard.ok) return guard.response;
 
   const store = createCostBudgetStore();
   try {
