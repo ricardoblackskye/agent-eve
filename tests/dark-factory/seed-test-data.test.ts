@@ -15,6 +15,7 @@ import { InMemoryUsageStore } from "../../agent/lib/dark-factory/usage-store";
 import { InMemoryCostBudgetProvider } from "../../agent/lib/dark-factory/cost-budget-store";
 import { SqliteRunHistoryStore } from "../../agent/lib/dark-factory/run-history-store";
 import { createControlStore } from "../../agent/lib/dark-factory/control";
+import { InMemoryMembershipProvider } from "../../agent/lib/dark-factory/membership-store";
 import {
   SCENARIOS,
   parseArgs,
@@ -33,7 +34,8 @@ function closeStores(s: SeedStores): void {
   s.cost.close?.();
   s.runHistory.close();
   s.control.close?.();
-}
+    s.membership.close?.();
+  }
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "df-seed-"));
@@ -43,10 +45,11 @@ beforeEach(() => {
     cost: new InMemoryCostBudgetProvider(),
     runHistory: new SqliteRunHistoryStore(join(dir, "runs.sqlite")),
     control: createControlStore({
-      DF_CONTROL_DRIVER: "sqlite",
-      DF_CONTROL_DB_PATH: join(dir, "control.sqlite"),
-    }),
-  };
+          DF_CONTROL_DRIVER: "sqlite",
+          DF_CONTROL_DB_PATH: join(dir, "control.sqlite"),
+        }),
+        membership: new InMemoryMembershipProvider(),
+      };
 });
 
 afterEach(() => {

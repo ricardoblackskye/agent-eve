@@ -16,7 +16,8 @@
     "typecheck": "tsc --noEmit",
     "operator": "tsx scripts/self-improve-operator.ts",
     "seed:tenants": "tsx scripts/seed-tenant-assignments.ts",
-    "seed:test-data": "tsx scripts/seed-test-data.ts"
+    "seed:test-data": "tsx scripts/seed-test-data.ts",
+    "df:membership": "tsx scripts/df-membership.ts"
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.45",

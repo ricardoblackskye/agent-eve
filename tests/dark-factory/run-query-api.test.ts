@@ -17,10 +17,42 @@ import type {
 } from "../../agent/lib/dark-factory/run-history";
 
 const storeHolder = vi.hoisted(() => ({ store: null as any }));
+const OPERATOR_VIEWER = {
+  ok: true,
+  viewer: { email: "viewer@example.com", role: "operator" },
+} as any;
+
+const viewerHolder = vi.hoisted(() => ({
+  resolution: {
+    ok: true,
+    viewer: { email: "viewer@example.com", role: "operator" },
+  } as any,
+}));
 
 vi.mock("../../agent/lib/dark-factory/run-history-provider", () => ({
   createRunHistoryStore: () => storeHolder.store,
 }));
+
+// The route's auth seam is mocked so these tests stay about routing and scope.
+// The real session check still runs, so the 401 cases stay honest; a test can
+// swap `viewerHolder.resolution` to exercise an operator or a scoped customer.
+vi.mock("../../app/api/dark-factory/viewer", async () => {
+  const auth = await import("../../app/api/dark-factory/viewer-auth");
+  return {
+    resolveViewer: async (request: Request) => {
+      const session = await auth.getViewerSession(request);
+      if (!session)
+        return { ok: false, status: 401, error: "Not authenticated." };
+      return viewerHolder.resolution;
+    },
+  };
+});
+
+// Every test starts as an unscoped operator; a test that needs a customer swaps
+// the resolution and this puts it back.
+afterEach(() => {
+  viewerHolder.resolution = OPERATOR_VIEWER;
+});
 
 const SESSION_SECRET = "test-session-secret";
 
@@ -378,5 +410,87 @@ describe("Dark Factory run query API", () => {
       buildRequest("https://eve.local/api/dark-factory/metrics") as any,
     );
     expect(response.status).toBe(401);
+  });
+
+  it("GET /runs scopes a customer to their own tenant", async () => {
+    const tenantA = "11111111-2222-4333-8444-555555555555";
+    const tenantB = "66666666-7777-4888-8999-000000000000";
+    viewerHolder.resolution = {
+      ok: true,
+      viewer: {
+        email: "customer@example.com",
+        role: "customer",
+        tenantId: tenantA,
+      },
+    };
+    storeHolder.store = makeStore({
+      listRuns: async () => ({
+        ok: true,
+        mode: "live",
+        providerId: "fake",
+        value: {
+          items: [
+            sampleSummary({ runId: "run-mine", tenantId: tenantA }),
+            sampleSummary({ runId: "run-theirs", tenantId: tenantB }),
+          ],
+        },
+      }),
+    });
+    const response = await listRoute.GET(
+      buildRequest("https://eve.local/api/dark-factory/runs", {
+        cookie: authCookie(),
+      }) as any,
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.runs.map((row: { runId: string }) => row.runId)).toEqual([
+      "run-mine",
+    ]);
+  });
+
+  it("GET /runs/[runId] hides another tenant's run from a customer", async () => {
+    viewerHolder.resolution = {
+      ok: true,
+      viewer: {
+        email: "customer@example.com",
+        role: "customer",
+        tenantId: "11111111-2222-4333-8444-555555555555",
+      },
+    };
+    storeHolder.store = makeStore({
+      getRun: async () => ({
+        ok: true,
+        mode: "live",
+        providerId: "fake",
+        value: sampleSummary({
+          runId: "run-theirs",
+          tenantId: "66666666-7777-4888-8999-000000000000",
+        }),
+      }),
+    });
+    const response = await detailRoute.GET(
+      buildRequest("https://eve.local/api/dark-factory/runs/run-theirs", {
+        cookie: authCookie(),
+      }) as any,
+      { params: Promise.resolve({ runId: "run-theirs" }) },
+    );
+    expect(response.status).toBe(404);
+  });
+
+  it("GET /metrics returns 403 for a customer", async () => {
+    viewerHolder.resolution = {
+      ok: true,
+      viewer: {
+        email: "customer@example.com",
+        role: "customer",
+        tenantId: "11111111-2222-4333-8444-555555555555",
+      },
+    };
+    const response = await metricsRoute.GET(
+      buildRequest("https://eve.local/api/dark-factory/metrics", {
+        cookie: authCookie(),
+      }) as any,
+    );
+    expect(response.status).toBe(403);
   });
 });

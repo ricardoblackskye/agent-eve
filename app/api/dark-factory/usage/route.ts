@@ -1,13 +1,8 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { createUsageStore } from "../../../../agent/lib/dark-factory/usage-store-provider";
 import { queryUsage } from "../../../../agent/lib/dark-factory/usage-query";
-import { getViewerSession } from "../viewer-auth";
-import {
-  badRequest,
-  okJson,
-  serviceUnavailable,
-  unauthorized,
-} from "../responses";
+import { guardViewer } from "../guard";
+import { badRequest, okJson, serviceUnavailable } from "../responses";
 
 /**
  * Operator-only, read-only view of the LLM usage ledger (#209).
@@ -18,18 +13,24 @@ import {
  * (operational), so an operator is not sent hunting for the wrong problem.
  */
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const viewer = await getViewerSession(request);
-  if (!viewer) return unauthorized();
+  const guard = await guardViewer(request);
+  if (!guard.ok) return guard.response;
 
   const store = createUsageStore();
   try {
     const params = new URL(request.url).searchParams;
+    // A customer is pinned to their own tenant; a supplied `tenant` is a filter
+    // for an operator only, never a way to widen a customer's view.
+    const tenantId =
+      guard.viewer.role === "operator"
+        ? (params.get("tenant") ?? undefined)
+        : guard.viewer.tenantId;
     const outcome = await queryUsage(store, {
       from: params.get("from") ?? undefined,
       to: params.get("to") ?? undefined,
       runId: params.get("runId") ?? undefined,
       model: params.get("model") ?? undefined,
-      tenantId: params.get("tenant") ?? undefined,
+      tenantId,
     });
 
     if (!outcome.ok) {

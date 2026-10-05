@@ -12,9 +12,38 @@ import {
   type RunCursor,
   type RunHistoryStore,
 } from "./run-history-store";
+import type { MembershipRole } from "./membership";
 
 export const DEFAULT_PAGE_SIZE = 25;
 export const MAX_PAGE_SIZE = 100;
+
+/**
+ * How many store pages a scoped (customer) list may walk to fill one page.
+ * Scope filtering happens in the query layer, so a page can come back sparse
+ * when other tenants' runs are interleaved; the bound keeps the walk finite.
+ */
+export const MAX_SCOPE_FILL_PAGES = 10;
+
+/** The tenant scope resolved for a request. An operator is unscoped. */
+export interface RunScope {
+  role: MembershipRole;
+  /** Present for a customer; absent for an operator (who sees every tenant). */
+  tenantId?: string;
+}
+
+/**
+ * A run is visible to an operator always, and to a customer only when the run's
+ * write-once tenant attribution matches the customer's tenant. Fail-closed: a
+ * customer with no tenant, and a run with no attribution, are never visible.
+ */
+export function isRunVisible(
+  scope: RunScope,
+  summary: Pick<RunSummary, "tenantId">,
+): boolean {
+  if (scope.role === "operator") return true;
+  if (scope.tenantId === undefined) return false;
+  return summary.tenantId === scope.tenantId;
+}
 
 /**
  * Opaque, URL-safe pagination cursor codec. The public API never exposes the
@@ -231,52 +260,75 @@ export type RunDetailOutcome =
 
 export type RunMetricsOutcome =
   | { ok: true; metrics: RunMetrics }
-  | { ok: false; status: 400 | 503; error: string };
+  | { ok: false; status: 400 | 403 | 503; error: string };
 
 export async function queryRunList(
   store: RunHistoryStore,
   request: RunListRequest,
+  scope: RunScope = { role: "operator" },
 ): Promise<RunListOutcome> {
-  const result = await store.listRuns({
-    repo: request.repo,
-    issue: request.issue,
-    statuses: request.statuses,
-    from: request.from,
-    to: request.to,
-    limit: request.limit,
-    cursor: request.cursor,
-  });
-  if (!result.ok)
-    return { ok: false, status: 503, error: "run history is unavailable" };
-  const page = result.value;
-  if (!page)
-    return { ok: false, status: 503, error: "run history is unavailable" };
-  return {
-    ok: true,
-    runs: page.items,
-    nextCursor: page.nextCursor ? encodeListCursor(page.nextCursor) : null,
-  };
+  const visible = (items: RunSummary[]): RunSummary[] =>
+    scope.role === "operator"
+      ? items
+      : items.filter((item) => isRunVisible(scope, item));
+
+  const runs: RunSummary[] = [];
+  let cursor = request.cursor;
+  let nextCursor: string | null = null;
+
+  // An unscoped (operator) read is a single pass: the store's page is already
+  // authoritative, and looping could duplicate rows across pages. Only a scoped
+  // read walks further, because other tenants' runs are filtered out and a page
+  // can come back sparse. The walk can under-fill, never over-share: only
+  // visible runs are ever returned.
+  const passes = scope.role === "operator" ? 1 : MAX_SCOPE_FILL_PAGES;
+  for (let page = 0; page < passes; page += 1) {
+    const result = await store.listRuns({
+      repo: request.repo,
+      issue: request.issue,
+      statuses: request.statuses,
+      from: request.from,
+      to: request.to,
+      limit: request.limit,
+      cursor,
+    });
+    if (!result.ok || !result.value)
+      return { ok: false, status: 503, error: "run history is unavailable" };
+
+    runs.push(...visible(result.value.items));
+    nextCursor = result.value.nextCursor
+      ? encodeListCursor(result.value.nextCursor)
+      : null;
+    if (runs.length >= request.limit || !result.value.nextCursor) break;
+    cursor = result.value.nextCursor;
+  }
+
+  return { ok: true, runs: runs.slice(0, request.limit), nextCursor };
 }
 
 export async function queryRunListFromParams(
   store: RunHistoryStore,
   params: RunListParams,
+  scope: RunScope = { role: "operator" },
 ): Promise<RunListOutcome> {
   const validation = validateRunListParams(params);
   if (!validation.ok)
     return { ok: false, status: 400, error: validation.error };
-  return queryRunList(store, validation.value);
+  return queryRunList(store, validation.value, scope);
 }
 
 export async function queryRunDetail(
   store: RunHistoryStore,
   runId: string,
   request: RunEventRequest,
+  scope: RunScope = { role: "operator" },
 ): Promise<RunDetailOutcome> {
   const summaryResult = await store.getRun(runId);
   if (!summaryResult.ok)
     return { ok: false, status: 503, error: "run history is unavailable" };
-  if (summaryResult.value === null)
+  // A run outside the caller's scope is reported as absent, so the response
+  // never confirms that another tenant's run exists.
+  if (summaryResult.value === null || !isRunVisible(scope, summaryResult.value))
     return { ok: false, status: 404, error: "run not found" };
 
   const eventsResult = await store.listRunEvents(runId, {
@@ -303,11 +355,12 @@ export async function queryRunDetailFromParams(
   store: RunHistoryStore,
   runId: string,
   params: RunEventParams,
+  scope: RunScope = { role: "operator" },
 ): Promise<RunDetailOutcome> {
   const validation = validateRunEventParams(params);
   if (!validation.ok)
     return { ok: false, status: 400, error: validation.error };
-  return queryRunDetail(store, runId, validation.value);
+  return queryRunDetail(store, runId, validation.value, scope);
 }
 
 export async function queryRunMetrics(
@@ -326,9 +379,14 @@ export async function queryRunMetrics(
 export async function queryRunMetricsFromParams(
   store: RunHistoryStore,
   params: RunMetricsParams,
+  scope: RunScope = { role: "operator" },
 ): Promise<RunMetricsOutcome> {
   const validation = validateRunMetricsParams(params);
   if (!validation.ok)
     return { ok: false, status: 400, error: validation.error };
+  // Run metrics are a factory-wide aggregate with no tenant dimension yet, so a
+  // customer is refused rather than shown a figure that spans every tenant.
+  if (scope.role !== "operator")
+    return { ok: false, status: 403, error: "run metrics are operator-only" };
   return queryRunMetrics(store, validation.value);
 }

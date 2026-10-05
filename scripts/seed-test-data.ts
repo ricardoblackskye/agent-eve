@@ -23,7 +23,10 @@ import type { TenantStore } from "../agent/lib/dark-factory/tenant-store";
 import { createTenantStore } from "../agent/lib/dark-factory/tenant-store-provider";
 import type { UsageStore } from "../agent/lib/dark-factory/usage-store";
 import { createUsageStore } from "../agent/lib/dark-factory/usage-store-provider";
-import { toUsageEvent, type UsageEvent } from "../agent/lib/dark-factory/usage-ledger";
+import {
+  toUsageEvent,
+  type UsageEvent,
+} from "../agent/lib/dark-factory/usage-ledger";
 import type { CostBudgetStore } from "../agent/lib/dark-factory/cost-budget-store";
 import { createCostBudgetStore } from "../agent/lib/dark-factory/cost-budget-store";
 import type { CostCategory } from "../agent/lib/dark-factory/cost-budget";
@@ -32,6 +35,10 @@ import { createRunHistoryStore } from "../agent/lib/dark-factory/run-history-pro
 import type { RunStatus } from "../agent/lib/dark-factory/run-history";
 import type { ControlStore } from "../agent/lib/dark-factory/control";
 import { createControlStore } from "../agent/lib/dark-factory/control";
+import type { MembershipStore } from "../agent/lib/dark-factory/membership-store";
+import { createMembershipStore } from "../agent/lib/dark-factory/membership-store";
+import type { MembershipInput } from "../agent/lib/dark-factory/membership";
+import { loadLocalEnv } from "./load-env";
 
 export const SCENARIOS = [
   "happy-path",
@@ -52,6 +59,7 @@ export interface SeedStores {
   cost: CostBudgetStore;
   runHistory: RunHistoryStore;
   control: ControlStore;
+  membership: MembershipStore;
 }
 
 export interface SeedOptions {
@@ -75,8 +83,7 @@ export interface SeedReport {
 }
 
 export type SeedResult =
-  | { ok: true; report: SeedReport }
-  | { ok: false; error: string };
+  { ok: true; report: SeedReport } | { ok: false; error: string };
 
 /** A fixed instant so re-runs produce byte-identical data. */
 const SEED_TS = "2026-01-15T09:00:00.000Z";
@@ -145,6 +152,7 @@ export function buildStores(
     cost: createCostBudgetStore(env),
     runHistory: createRunHistoryStore(env),
     control: createControlStore(env),
+    membership: createMembershipStore(env),
   };
 }
 
@@ -197,7 +205,9 @@ async function ensureRun(
     ...(input.tenantId ? { tenantId: input.tenantId } : {}),
   });
   if (!accepted.ok) {
-    throw new Error(`acceptDelivery(${input.deliveryId}) failed: ${accepted.error}`);
+    throw new Error(
+      `acceptDelivery(${input.deliveryId}) failed: ${accepted.error}`,
+    );
   }
   const runId = accepted.value?.runId ?? "";
   const created = accepted.duplicate !== true;
@@ -206,10 +216,22 @@ async function ensureRun(
   if (status !== "queued" && created) {
     const transition =
       status === "running"
-        ? { type: "dispatch.started" as const, stage: "dispatch" as const, status }
+        ? {
+            type: "dispatch.started" as const,
+            stage: "dispatch" as const,
+            status,
+          }
         : status === "blocked"
-          ? { type: "worker.question" as const, stage: "worker" as const, status }
-          : { type: "run.terminal" as const, stage: "terminal" as const, status };
+          ? {
+              type: "worker.question" as const,
+              stage: "worker" as const,
+              status,
+            }
+          : {
+              type: "run.terminal" as const,
+              stage: "terminal" as const,
+              status,
+            };
     const event = await store.appendEvent({
       eventId: `${input.deliveryId}-${status}`,
       runId,
@@ -219,16 +241,22 @@ async function ensureRun(
       status: transition.status,
     });
     if (!event.ok) {
-      throw new Error(`appendEvent(${input.deliveryId}) failed: ${event.error}`);
+      throw new Error(
+        `appendEvent(${input.deliveryId}) failed: ${event.error}`,
+      );
     }
   }
   return { runId, created };
 }
 
-async function seedUsage(store: UsageStore, events: UsageEvent[]): Promise<void> {
+async function seedUsage(
+  store: UsageStore,
+  events: UsageEvent[],
+): Promise<void> {
   for (const event of events) {
     const res = await store.record(event);
-    if (!res.ok) throw new Error(`usage.record failed: ${res.error ?? "unknown"}`);
+    if (!res.ok)
+      throw new Error(`usage.record failed: ${res.error ?? "unknown"}`);
   }
 }
 
@@ -239,7 +267,29 @@ async function ensureBudget(
   capUsd: number,
 ): Promise<void> {
   const res = await store.ensureBudget(period, category, capUsd);
-  if (!res.ok) throw new Error(`ensureBudget(${category}) failed: ${res.error ?? "unknown"}`);
+  if (!res.ok)
+    throw new Error(
+      `ensureBudget(${category}) failed: ${res.error ?? "unknown"}`,
+    );
+}
+
+/** Idempotent: a membership that already exists is left exactly as it is. */
+async function ensureMember(
+  store: MembershipStore,
+  input: MembershipInput,
+): Promise<boolean> {
+  const existing = await store.getMembership(input.email);
+  if (!existing.ok) {
+    throw new Error(`getMembership(${input.email}) failed: ${existing.error}`);
+  }
+  if (existing.value) return false;
+  const written = await store.upsertMembership(input);
+  if (!written.ok) {
+    throw new Error(
+      `upsertMembership(${input.email}) failed: ${written.error}`,
+    );
+  }
+  return true;
 }
 
 async function measuredUsage(
@@ -269,7 +319,11 @@ async function measuredUsage(
 // ---------------------------------------------------------------------------
 
 async function scenarioHappyPath(s: SeedStores): Promise<boolean> {
-  const tenantId = await ensureTenant(s.tenant, "seed-happy", "Seed Happy Path");
+  const tenantId = await ensureTenant(
+    s.tenant,
+    "seed-happy",
+    "Seed Happy Path",
+  );
   await ensureRepo(s.tenant, "seed-org/happy-repo", tenantId);
 
   const ok = await ensureRun(s.runHistory, {
@@ -301,9 +355,29 @@ async function scenarioMultiTenant(s: SeedStores): Promise<boolean> {
     ["seed-gamma", "Seed Gamma", "seed-org/gamma"],
   ];
   let created = false;
+  // One unscoped operator, so the operator-only surfaces have a caller.
+  if (
+    await ensureMember(s.membership, {
+      email: "seed-operator@example.com",
+      role: "operator",
+    })
+  ) {
+    created = true;
+  }
   for (const [slug, name, repo] of tenants) {
     const tenantId = await ensureTenant(s.tenant, slug, name);
     await ensureRepo(s.tenant, repo, tenantId);
+    // A customer membership per tenant, so the role and tenant-scope paths have
+    // data to exercise (#215).
+    if (
+      await ensureMember(s.membership, {
+        email: `${slug}@example.com`,
+        role: "customer",
+        tenantId,
+      })
+    ) {
+      created = true;
+    }
     const run = await ensureRun(s.runHistory, {
       deliveryId: `seed-${slug}-1`,
       repo,
@@ -359,7 +433,8 @@ async function scenarioOverBudget(s: SeedStores): Promise<boolean> {
   const cap = 10;
   await ensureBudget(s.cost, SEED_BUDGET_PERIOD, "tester", cap);
   const budgets = await s.cost.listBudgets(SEED_BUDGET_PERIOD);
-  if (!budgets.ok) throw new Error(`listBudgets failed: ${budgets.error ?? "unknown"}`);
+  if (!budgets.ok)
+    throw new Error(`listBudgets failed: ${budgets.error ?? "unknown"}`);
   const existing = budgets.value.find((b) => b.category === "tester");
   if ((existing?.reservedUsd ?? 0) > 0) return false; // already reserved
 
@@ -399,7 +474,8 @@ async function scenarioControl(s: SeedStores): Promise<boolean> {
     actor: SEED_ACTOR,
     reason: "test data",
   });
-  if (!factory.ok) throw new Error(`writeFactory failed: ${factory.error ?? "unknown"}`);
+  if (!factory.ok)
+    throw new Error(`writeFactory failed: ${factory.error ?? "unknown"}`);
 
   const run = await s.control.writeRun("seed-run-control", {
     paused: true,
@@ -423,7 +499,9 @@ async function scenarioControl(s: SeedStores): Promise<boolean> {
       reason: "test data",
     });
     if (!appended.ok) {
-      throw new Error(`appendEvent(control) failed: ${appended.error ?? "unknown"}`);
+      throw new Error(
+        `appendEvent(control) failed: ${appended.error ?? "unknown"}`,
+      );
     }
     return true;
   }
@@ -435,16 +513,17 @@ async function scenarioEmpty(): Promise<boolean> {
   return false;
 }
 
-const SCENARIO_FNS: Record<ScenarioName, (s: SeedStores) => Promise<boolean>> = {
-  "happy-path": scenarioHappyPath,
-  "multi-tenant": scenarioMultiTenant,
-  unassigned: scenarioUnassigned,
-  unmeasured: scenarioUnmeasured,
-  "over-budget": scenarioOverBudget,
-  "mixed-status": scenarioMixedStatus,
-  control: scenarioControl,
-  empty: scenarioEmpty,
-};
+const SCENARIO_FNS: Record<ScenarioName, (s: SeedStores) => Promise<boolean>> =
+  {
+    "happy-path": scenarioHappyPath,
+    "multi-tenant": scenarioMultiTenant,
+    unassigned: scenarioUnassigned,
+    unmeasured: scenarioUnmeasured,
+    "over-budget": scenarioOverBudget,
+    "mixed-status": scenarioMixedStatus,
+    control: scenarioControl,
+    empty: scenarioEmpty,
+  };
 
 export async function runSeed(
   stores: SeedStores,
@@ -470,7 +549,11 @@ export async function runSeed(
   }
   return {
     ok: true,
-    report: { outcomes, reset: options.reset === true, dryRun: options.dryRun === true },
+    report: {
+      outcomes,
+      reset: options.reset === true,
+      dryRun: options.dryRun === true,
+    },
   };
 }
 
@@ -489,6 +572,7 @@ const STORE_TABLES: Record<keyof SeedStores, string[]> = {
     "df_run_summaries",
   ],
   control: ["df_control_events", "df_run_control", "df_factory_control"],
+  membership: ["df_tenant_members"],
 };
 
 interface ResetTarget {
@@ -529,6 +613,12 @@ function resetTargets(
       connectionString:
         (env.DF_CONTROL_DATABASE_URL ?? "").trim() || fallback || undefined,
     },
+    membership: {
+      driver: (env.DF_MEMBERSHIP_DRIVER ?? "").trim().toLowerCase(),
+      sqlitePath: (env.DF_MEMBERSHIP_DATABASE_PATH ?? "").trim() || undefined,
+      connectionString:
+        (env.DF_MEMBERSHIP_DATABASE_URL ?? "").trim() || fallback || undefined,
+    },
   };
 }
 
@@ -560,7 +650,10 @@ function deleteSqlite(path: string, tables: string[]): number {
   return cleared;
 }
 
-async function deletePostgres(connectionString: string, tables: string[]): Promise<number> {
+async function deletePostgres(
+  connectionString: string,
+  tables: string[],
+): Promise<number> {
   const client = new Client({ connectionString });
   let cleared = 0;
   try {
@@ -616,6 +709,11 @@ export async function resetTestData(
 }
 
 async function main(): Promise<number> {
+  // The app reads .env.local; a bare tsx run would not, so without this the
+  // seed and the app can disagree about which store — and which database — is
+  // in play. Shell-exported values still win.
+  loadLocalEnv();
+
   const parsed = parseArgs(process.argv.slice(2));
   if ("error" in parsed) {
     console.error(`seed-test-data: ${parsed.error}`);
@@ -657,6 +755,7 @@ async function main(): Promise<number> {
     stores.cost.close?.();
     await stores.runHistory.close();
     await stores.control.close?.();
+    await stores.membership.close?.();
   }
 }
 
