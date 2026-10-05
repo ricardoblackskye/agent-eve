@@ -1,6 +1,6 @@
 # Dark Factory overview page — styling refinement (issue #258)
 
-- Issue: [#258](https://github.com/ricardoblackskye/agent-eve/issues/258) — Dark Factory Overview page updates
+- Issue: #258 — Dark Factory Overview page updates
 - Branch: `feat/df-overview-styling-258` (off `main` `1695049`)
 - Delivery: one PR (four small UI defects, one surface)
 - Status: **plan only — no code written yet**
