@@ -42,14 +42,14 @@ every request**, never from a caller-supplied tenant id.
 
 ## Legs (dependency order)
 
-| Leg | Issue | Outcome                                                                                                                            | Proposed sub-branch (if split)           |
-|-----|-------|------------------------------------------------------------------------------------------------------------------------------------|------------------------------------------|
-| 0   | #215  | Membership model and store seam plus `db/migrations/008_df_tenant_members.sql` with RLS                                            | `feat/df-tenant-access-212c0-membership` |
-| 1   | #215  | `resolveViewer` — session email to `{role, tenantId}` per request, fail-closed                                                     | `feat/df-tenant-access-212c1-resolve`    |
-| 2   | #215  | Tenant filter in the query layer: run list and events, usage, budgets                                                              | `feat/df-tenant-access-212c2-scope`      |
-| 3   | #215  | Route enforcement: cross-tenant denied for tenant and repo filters, guessed run ids, event endpoints, tampered or replayed cursors | `feat/df-tenant-access-212c3-routes`     |
-| 4   | #215  | Role capabilities: a customer cannot alter assignment, membership or budget                                                        | `feat/df-tenant-access-212c4-roles`      |
-| 5   | #215  | Customer and operator UI, with empty, loading and error states and responsive tests, without cross-tenant leakage                  | `feat/df-tenant-access-212c5-ui`         |
+| Leg | Issue | Outcome                                                                                                                                               | Proposed sub-branch (if split)           |
+|-----|-------|-------------------------------------------------------------------------------------------------------------------------------------------------------|------------------------------------------|
+| 0   | #215  | Membership model and store seam, `db/migrations/008_df_tenant_members.sql` with RLS, an operator CLI (`scripts/df-membership.ts`) and a seed scenario | `feat/df-tenant-access-212c0-membership` |
+| 1   | #215  | `resolveViewer` — session email to `{role, tenantId}` per request, fail-closed                                                                        | `feat/df-tenant-access-212c1-resolve`    |
+| 2   | #215  | Tenant filter in the query layer: run list and events, usage, budgets                                                                                 | `feat/df-tenant-access-212c2-scope`      |
+| 3   | #215  | Route enforcement: cross-tenant denied for tenant and repo filters, guessed run ids, event endpoints, tampered or replayed cursors                    | `feat/df-tenant-access-212c3-routes`     |
+| 4   | #215  | Role capabilities: a customer cannot alter assignment, membership or budget                                                                           | `feat/df-tenant-access-212c4-roles`      |
+| 5   | #215  | Customer and operator UI, with empty, loading and error states and responsive tests, without cross-tenant leakage                                     | `feat/df-tenant-access-212c5-ui`         |
 
 ## Release split — please choose
 
@@ -79,10 +79,9 @@ every request**, never from a caller-supplied tenant id.
 Customer self-service onboarding, membership administration UI, budget editing, invoices, and
 separate per-customer deployments.
 
-## Open questions
+## Decisions (confirmed by the operator)
 
-1. Release split — option A or option B?
-2. How is a customer's first membership created: an operator CLI script, a seed scenario, or
-   both? (The issue says operator-managed; a script plus a local seed is the natural pair.)
-3. Should the customer view be a separate route (`/dark-factory/me`) or the same page rendered
-   read-only by role?
+1. **Release split: option A** — one PR, six legs, closing #215 and #212.
+2. **Membership creation: both** — an operator CLI script (`scripts/df-membership.ts`) plus a
+   seed scenario for local and dev.
+3. **Customer view: a new route** (`/dark-factory/me`), separate from the operator dashboard.
