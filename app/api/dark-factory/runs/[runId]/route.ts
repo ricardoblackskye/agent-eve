@@ -4,9 +4,10 @@ import {
   queryRunDetailFromParams,
   type RunEventParams,
 } from "../../../../../agent/lib/dark-factory/run-query";
-import { getViewerSession } from "../../viewer-auth";
+import { resolveViewer } from "../../viewer";
 import {
   badRequest,
+  forbidden,
   notFound,
   okJson,
   serviceUnavailable,
@@ -24,8 +25,10 @@ export async function GET(
   request: NextRequest,
   context: { params: Promise<{ runId: string }> },
 ): Promise<NextResponse> {
-  const viewer = await getViewerSession(request);
-  if (!viewer) return unauthorized();
+  const resolved = await resolveViewer(request);
+  if (!resolved.ok) {
+    return resolved.status === 401 ? unauthorized() : forbidden(resolved.error);
+  }
 
   const { runId } = await context.params;
   const store = createRunHistoryStore();
@@ -34,6 +37,7 @@ export async function GET(
       store,
       runId,
       eventParamsFromSearch(new URL(request.url).searchParams),
+      resolved.viewer,
     );
     if (!outcome.ok) {
       if (outcome.status === 404) return notFound();

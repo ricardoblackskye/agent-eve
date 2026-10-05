@@ -4,9 +4,10 @@ import {
   queryRunMetricsFromParams,
   type RunMetricsParams,
 } from "../../../../agent/lib/dark-factory/run-query";
-import { getViewerSession } from "../viewer-auth";
+import { resolveViewer } from "../viewer";
 import {
   badRequest,
+  forbidden,
   okJson,
   serviceUnavailable,
   unauthorized,
@@ -21,16 +22,20 @@ function metricsParamsFromSearch(search: URLSearchParams): RunMetricsParams {
 }
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const viewer = await getViewerSession(request);
-  if (!viewer) return unauthorized();
+  const resolved = await resolveViewer(request);
+  if (!resolved.ok) {
+    return resolved.status === 401 ? unauthorized() : forbidden(resolved.error);
+  }
 
   const store = createRunHistoryStore();
   try {
     const outcome = await queryRunMetricsFromParams(
       store,
       metricsParamsFromSearch(new URL(request.url).searchParams),
+      resolved.viewer,
     );
     if (!outcome.ok) {
+      if (outcome.status === 403) return forbidden(outcome.error);
       return outcome.status === 400
         ? badRequest(outcome.error)
         : serviceUnavailable();

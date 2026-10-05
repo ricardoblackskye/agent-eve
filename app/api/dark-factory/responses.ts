@@ -19,6 +19,13 @@ export function badRequest(error: string): NextResponse {
   );
 }
 
+export function forbidden(error = "Forbidden"): NextResponse {
+  return NextResponse.json(
+    { error },
+    { status: 403, headers: NO_STORE_HEADERS },
+  );
+}
+
 export function notFound(error = "Run not found"): NextResponse {
   return NextResponse.json(
     { error },
