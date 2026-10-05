@@ -6,6 +6,10 @@
  * schema is also shipped as a source-controlled migration
  * (`db/migrations/001_df_cost_budgets.sql`); `ensureSchema` keeps local and
  * integration runs working without a separate migrate step.
+ *
+ * Tenant dimension (#229): `tenant_id` is NULL for the global budget and set
+ * for a tenant's. The two never share a row, so the global operator panel and
+ * each customer's cap stay independent.
  */
 
 import type { Pool, PoolClient } from "pg";
@@ -28,6 +32,7 @@ const SCHEMA = `
     budget_id TEXT PRIMARY KEY,
     period TEXT NOT NULL,
     category TEXT NOT NULL,
+    tenant_id TEXT,
     cap_usd DOUBLE PRECISION NOT NULL,
     spent_usd DOUBLE PRECISION NOT NULL DEFAULT 0,
     reserved_usd DOUBLE PRECISION NOT NULL DEFAULT 0,
@@ -36,6 +41,8 @@ const SCHEMA = `
   );
   CREATE INDEX IF NOT EXISTS df_cost_budgets_period_category_idx
     ON df_cost_budgets (period, category);
+  CREATE INDEX IF NOT EXISTS df_cost_budgets_tenant_idx
+    ON df_cost_budgets (tenant_id, period, category);
   CREATE TABLE IF NOT EXISTS df_cost_reservations (
     reservation_id TEXT PRIMARY KEY,
     budget_id TEXT NOT NULL REFERENCES df_cost_budgets(budget_id) ON DELETE CASCADE,
@@ -45,10 +52,14 @@ const SCHEMA = `
   );
 `;
 
+const COLUMNS =
+  "budget_id, period, category, tenant_id, cap_usd, spent_usd, reserved_usd, call_count";
+
 interface BudgetRow {
   budget_id: string;
   period: string;
   category: string;
+  tenant_id: string | null;
   cap_usd: number;
   spent_usd: number;
   reserved_usd: number;
@@ -70,6 +81,7 @@ function rowToBudget(row: BudgetRow): CostBudget {
     spentUsd: Number(row.spent_usd),
     reservedUsd: Number(row.reserved_usd),
     callCount: Number(row.call_count),
+    ...(row.tenant_id ? { tenantId: row.tenant_id } : {}),
   };
 }
 
@@ -133,17 +145,40 @@ export class PostgresCostBudgetAdapter implements CostBudgetStore {
     return `Cost budget store ${verb} failed: ${error instanceof Error ? error.message : String(error)}`;
   }
 
+  /** The GLOBAL (tenant-less) budgets. Tenant rows are never included. */
   async listBudgets(period?: string): Promise<CostBudgetStoreReadResult> {
     try {
       await this.ensureSchema();
       const pool = await this.pool();
       const { rows } = period
         ? await pool.query<BudgetRow>(
-            "SELECT budget_id, period, category, cap_usd, spent_usd, reserved_usd, call_count FROM df_cost_budgets WHERE period = $1 ORDER BY category",
+            `SELECT ${COLUMNS} FROM df_cost_budgets WHERE tenant_id IS NULL AND period = $1 ORDER BY category`,
             [period],
           )
         : await pool.query<BudgetRow>(
-            "SELECT budget_id, period, category, cap_usd, spent_usd, reserved_usd, call_count FROM df_cost_budgets ORDER BY period, category",
+            `SELECT ${COLUMNS} FROM df_cost_budgets WHERE tenant_id IS NULL ORDER BY period, category`,
+          );
+      return { ok: true, mode: "live", providerId: this.id, value: rows.map(rowToBudget) };
+    } catch (error) {
+      return { ok: false, mode: "blocked", providerId: this.id, value: [], error: this.failed(error, "read") };
+    }
+  }
+
+  async listTenantBudgets(
+    tenantId: string,
+    period?: string,
+  ): Promise<CostBudgetStoreReadResult> {
+    try {
+      await this.ensureSchema();
+      const pool = await this.pool();
+      const { rows } = period
+        ? await pool.query<BudgetRow>(
+            `SELECT ${COLUMNS} FROM df_cost_budgets WHERE tenant_id = $1 AND period = $2 ORDER BY category`,
+            [tenantId, period],
+          )
+        : await pool.query<BudgetRow>(
+            `SELECT ${COLUMNS} FROM df_cost_budgets WHERE tenant_id = $1 ORDER BY period, category`,
+            [tenantId],
           );
       return { ok: true, mode: "live", providerId: this.id, value: rows.map(rowToBudget) };
     } catch (error) {
@@ -155,6 +190,7 @@ export class PostgresCostBudgetAdapter implements CostBudgetStore {
     period: string,
     category: CostCategory,
     capUsd: number,
+    tenantId?: string,
   ): Promise<CostBudgetStoreEnsureResult> {
     if (!isCostCategory(category)) {
       return { ok: false, mode: "blocked", providerId: this.id, error: "Unknown cost category." };
@@ -163,10 +199,17 @@ export class PostgresCostBudgetAdapter implements CostBudgetStore {
       await this.ensureSchema();
       const pool = await this.pool();
       await pool.query(
-        `INSERT INTO df_cost_budgets (budget_id, period, category, cap_usd, spent_usd, reserved_usd, call_count, updated_at)
-         VALUES ($1, $2, $3, $4, 0, 0, 0, $5)
+        `INSERT INTO df_cost_budgets (budget_id, period, category, tenant_id, cap_usd, spent_usd, reserved_usd, call_count, updated_at)
+         VALUES ($1, $2, $3, $4, $5, 0, 0, 0, $6)
          ON CONFLICT (budget_id) DO NOTHING`,
-        [costBudgetId(period, category), period, category, Math.max(0, capUsd), new Date().toISOString()],
+        [
+          costBudgetId(period, category, tenantId),
+          period,
+          category,
+          tenantId ?? null,
+          Math.max(0, capUsd),
+          new Date().toISOString(),
+        ],
       );
       return { ok: true, mode: "live", providerId: this.id };
     } catch (error) {
@@ -178,6 +221,7 @@ export class PostgresCostBudgetAdapter implements CostBudgetStore {
     period: string,
     category: CostCategory,
     estimatedUsd: number,
+    tenantId?: string,
   ): Promise<CostBudgetStoreReserveResult> {
     if (!Number.isFinite(estimatedUsd) || estimatedUsd < 0) {
       return {
@@ -187,11 +231,11 @@ export class PostgresCostBudgetAdapter implements CostBudgetStore {
         error: "Reservation estimate must be a non-negative finite number.",
       };
     }
-    const id = costBudgetId(period, category);
+    const id = costBudgetId(period, category, tenantId);
     try {
       return await this.transaction(async (client) => {
         const { rows } = await client.query<BudgetRow>(
-          "SELECT budget_id, period, category, cap_usd, spent_usd, reserved_usd, call_count FROM df_cost_budgets WHERE budget_id = $1 FOR UPDATE",
+          `SELECT ${COLUMNS} FROM df_cost_budgets WHERE budget_id = $1 FOR UPDATE`,
           [id],
         );
         const row = rows[0];

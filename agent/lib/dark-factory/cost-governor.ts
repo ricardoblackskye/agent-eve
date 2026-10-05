@@ -45,6 +45,11 @@ export interface CostGovernorAdmitInput {
   model: string | null | undefined;
   inputTokens: number;
   outputTokens: number;
+  /**
+   * The attributed customer tenant (#229). Absent governs the GLOBAL budget;
+   * present governs that tenant's operator-provisioned budget.
+   */
+  tenantId?: string;
 }
 
 export interface CostGovernorSettleResult {
@@ -105,17 +110,27 @@ export function createCostGovernor(
       }
       const estimatedUsd = estimateCost(input.model, input.inputTokens, input.outputTokens);
 
-      const ensured = await store.ensureBudget(period, input.category, cap);
-      if (!ensured.ok) {
-        return {
-          admitted: false,
-          reason: "budget_unavailable",
-          period,
-          error: ensured.error ?? "Cost budget store is unavailable.",
-        };
+      // The GLOBAL budget is materialized from the env caps. A TENANT budget is
+      // operator-provisioned: an unprovisioned tenant is refused, never
+      // auto-created, so a missing tenant cap cannot silently fail open.
+      if (!input.tenantId) {
+        const ensured = await store.ensureBudget(period, input.category, cap);
+        if (!ensured.ok) {
+          return {
+            admitted: false,
+            reason: "budget_unavailable",
+            period,
+            error: ensured.error ?? "Cost budget store is unavailable.",
+          };
+        }
       }
 
-      const reserved = await store.reserve(period, input.category, estimatedUsd);
+      const reserved = await store.reserve(
+        period,
+        input.category,
+        estimatedUsd,
+        input.tenantId,
+      );
       if (!reserved.ok || !reserved.reservationId) {
         const exceeded = /exceed/i.test(reserved.error ?? "");
         return {

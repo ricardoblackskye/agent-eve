@@ -43,6 +43,11 @@ export interface CostBudget {
    * Optional so callers that only read cap/spent stay valid.
    */
   reservedUsd?: number;
+  /**
+   * Present only on a TENANT-scoped budget. Absent means the global,
+   * non-tenant budget (#229) — the two are distinct rows, never merged.
+   */
+  tenantId?: string;
 }
 
 /**
@@ -65,11 +70,14 @@ export function isCostBudget(
   if (typeof v.callCount !== "number" || !Number.isInteger(v.callCount)) return false;
   if (v.callCount < 0) return false;
   if (v.reservedUsd !== undefined) {
-    if (typeof v.reservedUsd !== "number" || !Number.isFinite(v.reservedUsd)) return false;
-    if (v.reservedUsd < 0) return false;
+      if (typeof v.reservedUsd !== "number" || !Number.isFinite(v.reservedUsd)) return false;
+      if (v.reservedUsd < 0) return false;
+    }
+    if (v.tenantId !== undefined) {
+      if (typeof v.tenantId !== "string" || v.tenantId.trim() === "") return false;
+    }
+    return true;
   }
-  return true;
-}
 
 /** Name of the env var holding the unsecured cost-unit price table. */
 const DF_MODEL_PRICE_PREFIX = "DF_MODEL_PRICE_";
