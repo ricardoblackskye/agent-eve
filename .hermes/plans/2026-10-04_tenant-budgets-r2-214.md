@@ -33,14 +33,14 @@ store-unavailable and unpriced states visible to the operator.
 
 ## Legs (dependency order)
 
-| Leg | Issue | Outcome | Proposed sub-branch (if split) |
-|---|---|---|---|
-| 0 | #211 | RLS on the four `df_run_*` tables + source-controlled DB scripts | `feat/df-run-rls-211` |
-| 1 | #229 | Tenant-scoped budget model + store; concurrency proven | `feat/df-tenant-budgets-212b1` |
-| 2 | #230 | Enforcement on orchestrator + PR-review; tenant-attributable refusal | `feat/df-tenant-budgets-212b2-surfaces` |
-| 3 | #218 | Worker-side reserve/settle client (opt-in; adjudicated) | `feat/df-tenant-budgets-212b3-worker` |
-| 4 | #231 | Per-tenant budget state in run outcome + operator UI | `feat/df-tenant-budgets-212b4-ui` |
-| 5 | #219 | Postgres integration coverage in CI | `feat/df-tenant-budgets-212b5-pg-ci` |
+| Leg | Issue | Outcome                                                              | Proposed sub-branch (if split)          |
+|-----|-------|----------------------------------------------------------------------|-----------------------------------------|
+| 0   | #211  | RLS on the four `df_run_*` tables + source-controlled DB scripts     | `feat/df-run-rls-211`                   |
+| 1   | #229  | Tenant-scoped budget model + store; concurrency proven               | `feat/df-tenant-budgets-212b1`          |
+| 2   | #230  | Enforcement on orchestrator + PR-review; tenant-attributable refusal | `feat/df-tenant-budgets-212b2-surfaces` |
+| 3   | #218  | Worker-side reserve/settle client (opt-in; adjudicated)              | `feat/df-tenant-budgets-212b3-worker`   |
+| 4   | #231  | Per-tenant budget state in run outcome + operator UI                 | `feat/df-tenant-budgets-212b4-ui`       |
+| 5   | #219  | Postgres integration coverage in CI                                  | `feat/df-tenant-budgets-212b5-pg-ci`    |
 
 All legs land on the single release branch `feat/df-tenant-budgets-212b` as separate reviewable commits.
 

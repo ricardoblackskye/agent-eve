@@ -1,3 +1,4 @@
+<!-- markdownlint-disable MD013 MD049 -->
 # Dark Factory module catalog
 
 > The authoritative index of every module under `agent/lib/dark-factory/`. Each

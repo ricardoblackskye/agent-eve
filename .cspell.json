@@ -170,7 +170,10 @@
     "vitest",
     "prereqs",
     "nowrap",
-    "nums"
+    "nums",
+    "darkfactory",
+    "isready",
+    "idempotently"
   ],
   "ignorePaths": [
     "node_modules/**",
