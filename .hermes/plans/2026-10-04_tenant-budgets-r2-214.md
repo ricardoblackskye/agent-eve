@@ -6,6 +6,10 @@
 - Delivery: **one release PR** closing #229, #230, #231, #218, #219 and #214 (plus #211 — see Leg 0).
   **#212 stays open**: R3 (#215, tenant-scoped customer access) still follows.
 
+**Status (implemented):** all five legs + #211 are done, each RED→GREEN, plus ADRs 0014/0015.
+Full suite **1721 passed / 23 skipped** (the 23 are the gated Postgres integration tests, now run in CI);
+`tsc` clean; doc-drift + ADR-integrity guards green. Branch `feat/df-tenant-budgets-212b` pushed.
+
 ## Goal
 
 Prevent a customer tenant from exceeding its configured monthly LLM-spend cap —
@@ -121,11 +125,12 @@ The requested "database scripts folder" already exists as `db/migrations/`.
 
 ## ADRs (part of this release's Definition of Done)
 
-- **ADR 0014 — tenant-scoped budget reservations and unresolved-reservation semantics.** Why the tenant is
-  part of the budget key; why an unmeasured call retains a conservative unresolved reservation instead of
-  releasing it; the fail-closed posture.
-- **ADR 0015 — RLS on the run-history tables** (if Leg 0 lands here): why those four tables get RLS and how
-  the service role is expected to bypass it.
+- **ADR 0014 — tenant budgets are a dimension of the existing budget store** (#229): `tenantId` added as an
+  OPTIONAL additive field on `CostBudget` and the store; a NEW `listTenantBudgets` keeps the global panel/API
+  untouched.
+- **ADR 0015 — an unprovisioned tenant is refused, never auto-provisioned** (#230): the governance seam refuses
+  an unprovisioned customer with `tenant_unconfigured` rather than inventing a cap. (RLS on the run-history
+  tables shipped as `db/migrations/006_df_rls_coverage.sql` in Leg 0 without a separate ADR.)
 - Update `docs/adr/README.md` (an orphan ADR fails the drift guard).
 
 ## Validation
