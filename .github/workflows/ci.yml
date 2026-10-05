@@ -142,12 +142,27 @@ jobs:
       - run: npm ci
       - name: Install Playwright browser
         run: npx playwright install --with-deps chromium
+      - name: Grant the dev-mode operator a membership
+        env:
+          # The dark factory resolves the viewer's role from the membership store
+          # on EVERY request. Without a driver it is fail-closed and every read
+          # 403s, so the overview page would render its unavailable state instead
+          # of the panels this suite asserts on.
+          DF_MEMBERSHIP_DRIVER: sqlite
+          DF_MEMBERSHIP_DATABASE_PATH: .eve/membership.sqlite
+        run: |
+          mkdir -p .eve
+          npm run df:membership -- grant --email cuillinguy@gmail.com --role operator
       - name: Run browser tests
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           VERCEL_PROTECTION_BYPASS: ${{ secrets.VERCEL_PROTECTION_BYPASS }}
           # Dev-mode sign-in so the gated pages can be tested (fail-closed in production)
           AUTH_DEV_MODE: "1"
+          # The same membership store the grant above wrote, so the dev-mode
+          # operator resolves and the dark factory pages render.
+          DF_MEMBERSHIP_DRIVER: sqlite
+          DF_MEMBERSHIP_DATABASE_PATH: .eve/membership.sqlite
         run: npm run test:e2e
       - name: Upload Playwright artifacts
         if: always()

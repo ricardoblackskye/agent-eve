@@ -226,7 +226,7 @@ export function RecentRunsList({ rows }: { rows: TableRow[] }): ReactNode {
     // A real table with a header per column (#258). The previous flex/grid row
     // layout had no column headers at all, and a grid on a row cannot express
     // column alignment. `df-table` supplies the styling the run list already uses.
-    <table className="df-table">
+    <table className="df-table df-recent-table">
       <thead>
         <tr>
           <th scope="col">Run</th>

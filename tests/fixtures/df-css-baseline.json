@@ -138,6 +138,7 @@
   ".df-recent-row => display: grid; grid-template-columns: 76px 1fr auto; align-items: center; gap: 12px; padding: 9px 0; border-bottom: 1px solid #20252d;",
   ".df-recent-row:last-child => border-bottom: none;",
   ".df-recent-sub => font-size: 11px; color: #5e6875;",
+  ".df-recent-table .df-run-id => width: 1%; white-space: nowrap;",
   ".df-recent-title => font-size: 13px;",
   ".df-run-id => font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: #ffb454;",
   ".df-snapshot => display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;",

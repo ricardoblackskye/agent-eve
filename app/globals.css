@@ -865,6 +865,13 @@ ol {
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
+
+/* Recent executions (#258): the run id is a fixed-width label, so it must not
+   widen its column; the text columns take the remaining space. */
+.df-recent-table .df-run-id {
+  width: 1%;
+  white-space: nowrap;
+}
 .df-policy-summary {
   display: flex;
   flex-wrap: wrap;
