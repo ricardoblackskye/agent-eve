@@ -54,22 +54,37 @@ export interface CostBudgetStoreSettleResult {
 
 export interface CostBudgetStore {
   readonly id: string;
-  /** All budgets, or just those for one period (`YYYY-MM`). */
+  /**
+   * The GLOBAL (tenant-less) budgets, or just those for one period
+   * (`YYYY-MM`). Tenant-scoped rows are never included — see
+   * `listTenantBudgets` — so the existing operator panel is unchanged.
+   */
   listBudgets(period?: string): Promise<CostBudgetStoreReadResult>;
-  /** Create the cap row if absent; an existing row is left untouched. */
+  /** The budgets for ONE tenant, or just those for one period. */
+  listTenantBudgets(
+    tenantId: string,
+    period?: string,
+  ): Promise<CostBudgetStoreReadResult>;
+  /**
+   * Create the cap row if absent; an existing row is left untouched. An
+   * absent `tenantId` targets the global budget.
+   */
   ensureBudget(
     period: string,
     category: CostCategory,
     capUsd: number,
+    tenantId?: string,
   ): Promise<CostBudgetStoreEnsureResult>;
   /**
    * Atomically admit a call against `capUsd` or refuse it. On success the
-   * estimate is added to the reserved accumulator.
+   * estimate is added to the reserved accumulator. An absent `tenantId`
+   * reserves against the global budget; an unknown tenant refuses.
    */
   reserve(
     period: string,
     category: CostCategory,
     estimatedUsd: number,
+    tenantId?: string,
   ): Promise<CostBudgetStoreReserveResult>;
   /**
    * Reconcile a reservation with the actual cost. A `null` actual means the
@@ -93,6 +108,10 @@ export class ConsoleCostBudgetProvider implements CostBudgetStore {
     return { ok: false, mode: "blocked", providerId: this.id, value: [], error: NOT_CONFIGURED };
   }
 
+  async listTenantBudgets(): Promise<CostBudgetStoreReadResult> {
+    return { ok: false, mode: "blocked", providerId: this.id, value: [], error: NOT_CONFIGURED };
+  }
+
   async ensureBudget(): Promise<CostBudgetStoreEnsureResult> {
     return { ok: false, mode: "blocked", providerId: this.id, error: NOT_CONFIGURED };
   }
@@ -106,9 +125,15 @@ export class ConsoleCostBudgetProvider implements CostBudgetStore {
   }
 }
 
-/** `period|category`, the primary key of a budget row. */
-export function costBudgetId(period: string, category: CostCategory): string {
-  return `${period}|${category}`;
+/** `period|category` for the global budget, `tenant:<id>|period|category` for a tenant's. */
+export function costBudgetId(
+  period: string,
+  category: CostCategory,
+  tenantId?: string,
+): string {
+  return tenantId
+    ? `tenant:${tenantId}|${period}|${category}`
+    : `${period}|${category}`;
 }
 
 interface Reservation {
@@ -116,6 +141,8 @@ interface Reservation {
   category: CostCategory;
   estimatedUsd: number;
   settled: boolean;
+  /** Absent for a global reservation. */
+  tenantId?: string;
 }
 
 export class InMemoryCostBudgetProvider implements CostBudgetStore {
@@ -125,8 +152,29 @@ export class InMemoryCostBudgetProvider implements CostBudgetStore {
   private readonly reservations = new Map<string, Reservation>();
 
   async listBudgets(period?: string): Promise<CostBudgetStoreReadResult> {
+    return this.readBudgets(
+      (budget) =>
+        budget.tenantId === undefined &&
+        (period === undefined || budget.period === period),
+    );
+  }
+
+  async listTenantBudgets(
+    tenantId: string,
+    period?: string,
+  ): Promise<CostBudgetStoreReadResult> {
+    return this.readBudgets(
+      (budget) =>
+        budget.tenantId === tenantId &&
+        (period === undefined || budget.period === period),
+    );
+  }
+
+  private readBudgets(
+    match: (budget: CostBudget) => boolean,
+  ): CostBudgetStoreReadResult {
     const value = [...this.budgets.values()]
-      .filter((budget) => period === undefined || budget.period === period)
+      .filter(match)
       .map((budget) => ({ ...budget }));
     return { ok: true, mode: "live", providerId: this.id, value };
   }
@@ -135,8 +183,9 @@ export class InMemoryCostBudgetProvider implements CostBudgetStore {
     period: string,
     category: CostCategory,
     capUsd: number,
+    tenantId?: string,
   ): Promise<CostBudgetStoreEnsureResult> {
-    const id = costBudgetId(period, category);
+    const id = costBudgetId(period, category, tenantId);
     if (!this.budgets.has(id)) {
       this.budgets.set(id, {
         category,
@@ -145,6 +194,7 @@ export class InMemoryCostBudgetProvider implements CostBudgetStore {
         spentUsd: 0,
         callCount: 0,
         reservedUsd: 0,
+        ...(tenantId ? { tenantId } : {}),
       });
     }
     return { ok: true, mode: "live", providerId: this.id };
@@ -154,8 +204,10 @@ export class InMemoryCostBudgetProvider implements CostBudgetStore {
     period: string,
     category: CostCategory,
     estimatedUsd: number,
+    tenantId?: string,
   ): Promise<CostBudgetStoreReserveResult> {
-    const budget = this.budgets.get(costBudgetId(period, category));
+    const id = costBudgetId(period, category, tenantId);
+    const budget = this.budgets.get(id);
     if (!budget) {
       return {
         ok: false,
@@ -182,8 +234,14 @@ export class InMemoryCostBudgetProvider implements CostBudgetStore {
       };
     }
     const reservationId = `res-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    this.reservations.set(reservationId, { period, category, estimatedUsd, settled: false });
-    this.budgets.set(costBudgetId(period, category), {
+    this.reservations.set(reservationId, {
+      period,
+      category,
+      estimatedUsd,
+      settled: false,
+      ...(tenantId ? { tenantId } : {}),
+    });
+    this.budgets.set(id, {
       ...budget,
       reservedUsd: (budget.reservedUsd ?? 0) + estimatedUsd,
     });
@@ -202,7 +260,7 @@ export class InMemoryCostBudgetProvider implements CostBudgetStore {
     if (reservation.settled) {
       return { ok: true, mode: "live", providerId: this.id };
     }
-    const id = costBudgetId(reservation.period, reservation.category);
+    const id = costBudgetId(reservation.period, reservation.category, reservation.tenantId);
     const budget = this.budgets.get(id);
     if (!budget) {
       return { ok: false, mode: "blocked", providerId: this.id, error: "Budget row disappeared." };

@@ -1,3 +1,4 @@
+<!-- markdownlint-disable MD013 MD049 -->
 # Dark Factory module catalog
 
 > The authoritative index of every module under `agent/lib/dark-factory/`. Each
@@ -75,6 +76,26 @@ Dark Factory — cost-budget read query (#208 R1 task 7). Pure shaping for the o
 **Source:** [`agent/lib/dark-factory/cost-budget-query.ts`](../../agent/lib/dark-factory/cost-budget-query.ts)
 
 **Exports:** `CostBudgetQueryResult`, `CostBudgetReport`, `CostBudgetTotals`, `CostBudgetView`, `queryCostBudgets`
+
+## tenant-budget-query
+
+Dark Factory — per-tenant budget reporting (#231, epic #212 R2). Pure shaping for the operator dashboard: turns the tenant registry plus the tenant-scoped budget rows into a per-customer view. An absent measurement stays absent (the UI renders an em dash, never 0), and an unreadable store or an unconfigured customer is kept DISTINCT from zero spend. Counts only — no prompt or completion content.
+
+**Source:** [`agent/lib/dark-factory/tenant-budget-query.ts`](../../agent/lib/dark-factory/tenant-budget-query.ts)
+
+**Exports:** `TenantBudgetGroup`, `TenantBudgetReport`, `TenantBudgetReportInput`, `TenantBudgetView`, `buildTenantBudgetReport`
+
+**Decisions:** [ADR 0014](../../docs/adr/0014-tenant-budgets-are-a-dimension-of-the-store.md), [ADR 0015](../../docs/adr/0015-unprovisioned-tenant-is-refused-not-provisioned.md)
+
+## worker-cost-client
+
+Dark Factory — worker-side cost client (#218, epic #212 R2). The seam a Dark Factory WORKER uses to reserve a tenant cost before a long-running LLM task and reconcile it to the actual cost afterwards. A thin, opt-in client over the orchestrator governor + budget store; real wiring into the worker runtime is R3 (#215). The reservation carries the tenant, so settle lands on the tenant's own budget row; an unprovisioned tenant is refused.
+
+**Source:** [`agent/lib/dark-factory/worker-cost-client.ts`](../../agent/lib/dark-factory/worker-cost-client.ts)
+
+**Exports:** `WorkerCostClient`, `WorkerReserveInput`, `WorkerReserveResult`, `createWorkerCostClient`
+
+**Decisions:** [ADR 0015](../../docs/adr/0015-unprovisioned-tenant-is-refused-not-provisioned.md)
 
 ## cost-budget-store-postgres
 

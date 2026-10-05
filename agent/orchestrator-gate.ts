@@ -31,6 +31,11 @@ export interface OrchestratorGateInput {
   /** Upper-bound output tokens. */
   outputTokens?: number;
   /**
+   * The attributed customer tenant (#230). Absent governs the GLOBAL budget;
+   * present governs that tenant's operator-provisioned budget.
+   */
+  tenantId?: string;
+  /**
    * Injectable governor, for tests. Omit to build one from the environment;
    * pass `null` explicitly to disable gating regardless of configuration.
    */
@@ -65,10 +70,12 @@ export function createOrchestratorGate(
         model,
         inputTokens,
         outputTokens,
+        ...(input.tenantId ? { tenantId: input.tenantId } : {}),
       });
       if (!decision.admitted) {
+        const forTenant = input.tenantId ? ` for tenant '${input.tenantId}'` : "";
         throw new Error(
-          `orchestrator cost gate refused the call: ${decision.reason ?? "budget_unavailable"}`,
+          `orchestrator cost gate refused the call${forTenant}: ${decision.reason ?? "budget_unavailable"}`,
         );
       }
     },

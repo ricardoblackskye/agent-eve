@@ -67,3 +67,5 @@ changes, write a new one that supersedes it.
 | [0011](0011-eve-is-pinned-and-upgrades-are-deliberate.md)         | eve is pinned; upgrades are not absorbed into dependency bumps   | Accepted |
 | [0012](0012-docs-reference-pages-are-generated-at-render-time.md) | Docs reference pages are generated at render time, not committed | Accepted |
 | [0013](0013-test-data-is-seeded-through-the-store-seam.md)        | Test data is seeded through the store seam                       | Accepted |
+| [0014](0014-tenant-budgets-are-a-dimension-of-the-store.md)       | Tenant budgets are a dimension of the existing budget store      | Accepted |
+| [0015](0015-unprovisioned-tenant-is-refused-not-provisioned.md)   | An unprovisioned tenant is refused, never auto-provisioned       | Accepted |

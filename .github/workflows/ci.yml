@@ -36,6 +36,26 @@ jobs:
   test:
     name: Unit Tests
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          # Loopback-only, ephemeral container: trust auth avoids putting a
+          # password in the workflow (and a kics "password in URL" finding).
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_DB: darkfactory
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      # Provisions a disposable Postgres so the gated Dark Factory integration
+      # tests (#219 R2, #213) actually run in CI instead of being skipped.
+      DF_TENANT_TEST_DATABASE_URL: postgres://postgres@localhost:5432/darkfactory?sslmode=disable
+      DF_COST_BUDGET_TEST_DATABASE_URL: postgres://postgres@localhost:5432/darkfactory?sslmode=disable
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Setup Node.js ${{ env.NODE_VERSION }}

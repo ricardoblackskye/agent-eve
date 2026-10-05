@@ -20,6 +20,7 @@ import { ControlPanel } from "./ui/control-panel";
 import { CostBudgetsPanel } from "./ui/cost-budgets-panel";
 import { UsagePanelContainer } from "./ui/usage-panel";
 import { TenantUsagePanelContainer } from "./ui/tenant-usage-panel";
+import { TenantBudgetPanelContainer } from "./ui/tenant-budget-panel";
 import { LlmPolicyPanelContainer } from "./ui/llm-policy-panel";
 import {
   resolveOverviewError,
@@ -140,6 +141,7 @@ export default function DarkFactoryOverviewPage() {
         />
         <div className="df-panel-body">
           <TenantUsagePanelContainer />
+          <TenantBudgetPanelContainer />
         </div>
       </section>
 

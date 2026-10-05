@@ -4,6 +4,9 @@
  * Uses `node:sqlite` with `BEGIN IMMEDIATE` so the read-check-write of a
  * reservation is atomic against a concurrent writer. Rejected in deployed
  * environments by the factory (see `createCostBudgetStore`).
+ *
+ * Tenant dimension (#229): `tenant_id` is NULL for the global budget and set
+ * for a tenant's; the two never share a row.
  */
 
 import { DatabaseSync } from "node:sqlite";
@@ -26,12 +29,15 @@ const SCHEMA = `
     budget_id TEXT PRIMARY KEY,
     period TEXT NOT NULL,
     category TEXT NOT NULL,
+    tenant_id TEXT,
     cap_usd REAL NOT NULL,
     spent_usd REAL NOT NULL DEFAULT 0,
     reserved_usd REAL NOT NULL DEFAULT 0,
     call_count INTEGER NOT NULL DEFAULT 0,
     updated_at TEXT NOT NULL
   );
+  CREATE INDEX IF NOT EXISTS df_cost_budgets_tenant_idx
+    ON df_cost_budgets (tenant_id, period, category);
   CREATE TABLE IF NOT EXISTS df_cost_reservations (
     reservation_id TEXT PRIMARY KEY,
     budget_id TEXT NOT NULL REFERENCES df_cost_budgets(budget_id) ON DELETE CASCADE,
@@ -41,10 +47,14 @@ const SCHEMA = `
   );
 `;
 
+const COLUMNS =
+  "budget_id, period, category, tenant_id, cap_usd, spent_usd, reserved_usd, call_count";
+
 interface BudgetRow {
   budget_id: string;
   period: string;
   category: string;
+  tenant_id: string | null;
   cap_usd: number;
   spent_usd: number;
   reserved_usd: number;
@@ -66,6 +76,7 @@ function rowToBudget(row: BudgetRow): CostBudget {
     spentUsd: Number(row.spent_usd),
     reservedUsd: Number(row.reserved_usd),
     callCount: Number(row.call_count),
+    ...(row.tenant_id ? { tenantId: row.tenant_id } : {}),
   };
 }
 
@@ -94,6 +105,7 @@ export class SqliteCostBudgetAdapter implements CostBudgetStore {
     return error instanceof Error ? error.message : String(error);
   }
 
+  /** The GLOBAL (tenant-less) budgets. Tenant rows are never included. */
   async listBudgets(period?: string): Promise<CostBudgetStoreReadResult> {
     const db = this.handle();
     if (!db) {
@@ -104,14 +116,42 @@ export class SqliteCostBudgetAdapter implements CostBudgetStore {
         period
           ? db
               .prepare(
-                "SELECT budget_id, period, category, cap_usd, spent_usd, reserved_usd, call_count FROM df_cost_budgets WHERE period = ? ORDER BY category",
+                `SELECT ${COLUMNS} FROM df_cost_budgets WHERE tenant_id IS NULL AND period = ? ORDER BY category`,
               )
               .all(period)
           : db
               .prepare(
-                "SELECT budget_id, period, category, cap_usd, spent_usd, reserved_usd, call_count FROM df_cost_budgets ORDER BY period, category",
+                `SELECT ${COLUMNS} FROM df_cost_budgets WHERE tenant_id IS NULL ORDER BY period, category`,
               )
               .all()
+      ) as unknown as BudgetRow[];
+      return { ok: true, mode: "live", providerId: this.id, value: rows.map(rowToBudget) };
+    } catch (error) {
+      return { ok: false, mode: "blocked", providerId: this.id, value: [], error: `Cost budget store read failed: ${this.detail(error)}` };
+    }
+  }
+
+  async listTenantBudgets(
+    tenantId: string,
+    period?: string,
+  ): Promise<CostBudgetStoreReadResult> {
+    const db = this.handle();
+    if (!db) {
+      return { ok: false, mode: "blocked", providerId: this.id, value: [], error: `Cost budget store unreachable: ${this.openError}` };
+    }
+    try {
+      const rows = (
+        period
+          ? db
+              .prepare(
+                `SELECT ${COLUMNS} FROM df_cost_budgets WHERE tenant_id = ? AND period = ? ORDER BY category`,
+              )
+              .all(tenantId, period)
+          : db
+              .prepare(
+                `SELECT ${COLUMNS} FROM df_cost_budgets WHERE tenant_id = ? ORDER BY period, category`,
+              )
+              .all(tenantId)
       ) as unknown as BudgetRow[];
       return { ok: true, mode: "live", providerId: this.id, value: rows.map(rowToBudget) };
     } catch (error) {
@@ -123,6 +163,7 @@ export class SqliteCostBudgetAdapter implements CostBudgetStore {
     period: string,
     category: CostCategory,
     capUsd: number,
+    tenantId?: string,
   ): Promise<CostBudgetStoreEnsureResult> {
     if (!isCostCategory(category)) {
       return { ok: false, mode: "blocked", providerId: this.id, error: "Unknown cost category." };
@@ -133,10 +174,17 @@ export class SqliteCostBudgetAdapter implements CostBudgetStore {
     }
     try {
       db.prepare(
-        `INSERT INTO df_cost_budgets (budget_id, period, category, cap_usd, spent_usd, reserved_usd, call_count, updated_at)
-         VALUES (?, ?, ?, ?, 0, 0, 0, ?)
+        `INSERT INTO df_cost_budgets (budget_id, period, category, tenant_id, cap_usd, spent_usd, reserved_usd, call_count, updated_at)
+         VALUES (?, ?, ?, ?, ?, 0, 0, 0, ?)
          ON CONFLICT (budget_id) DO NOTHING`,
-      ).run(costBudgetId(period, category), period, category, Math.max(0, capUsd), new Date().toISOString());
+      ).run(
+        costBudgetId(period, category, tenantId),
+        period,
+        category,
+        tenantId ?? null,
+        Math.max(0, capUsd),
+        new Date().toISOString(),
+      );
       return { ok: true, mode: "live", providerId: this.id };
     } catch (error) {
       return { ok: false, mode: "blocked", providerId: this.id, error: `Cost budget store ensure failed: ${this.detail(error)}` };
@@ -147,6 +195,7 @@ export class SqliteCostBudgetAdapter implements CostBudgetStore {
     period: string,
     category: CostCategory,
     estimatedUsd: number,
+    tenantId?: string,
   ): Promise<CostBudgetStoreReserveResult> {
     if (!Number.isFinite(estimatedUsd) || estimatedUsd < 0) {
       return {
@@ -160,13 +209,11 @@ export class SqliteCostBudgetAdapter implements CostBudgetStore {
     if (!db) {
       return { ok: false, mode: "blocked", providerId: this.id, error: `Cost budget store unreachable: ${this.openError}` };
     }
-    const id = costBudgetId(period, category);
+    const id = costBudgetId(period, category, tenantId);
     try {
       db.exec("BEGIN IMMEDIATE");
       const row = db
-        .prepare(
-          "SELECT budget_id, period, category, cap_usd, spent_usd, reserved_usd, call_count FROM df_cost_budgets WHERE budget_id = ?",
-        )
+        .prepare(`SELECT ${COLUMNS} FROM df_cost_budgets WHERE budget_id = ?`)
         .get(id) as BudgetRow | undefined;
       if (!row) {
         db.exec("ROLLBACK");

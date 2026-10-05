@@ -56,4 +56,54 @@ integration("Postgres cost budget store (integration)", () => {
       await store.close();
     }
   });
+
+  it("provisions a tenant budget and reserves/settles it on Postgres", async () => {
+    const period = `tenant-${randomUUID().slice(0, 8)}`;
+    const tenantId = `tenant-int-${randomUUID().slice(0, 8)}`;
+    const store = new PostgresCostBudgetAdapter(databaseUrl!);
+    try {
+      const ensured = await store.ensureBudget(period, "orchestrator", 10, tenantId);
+      expect(ensured.ok).toBe(true);
+
+      const reserved = await store.reserve(period, "orchestrator", 0.001, tenantId);
+      expect(reserved.ok).toBe(true);
+      if (!reserved.ok) return;
+
+      const settled = await store.settle(reserved.reservationId!, 0.0005);
+      expect(settled.ok).toBe(true);
+
+      const [budget] = (await store.listTenantBudgets(tenantId, period)).value;
+      expect(budget.capUsd).toBe(10);
+      expect(budget.spentUsd).toBeCloseTo(0.0005);
+      expect(budget.reservedUsd).toBeCloseTo(0); // reconciled away on settle
+    } finally {
+      await store.close();
+    }
+  });
+
+  it("takes a row lock so concurrent tenant reservations cannot oversubscribe the cap", async () => {
+    // Cap 0.1, each reservation 0.02 => exactly 5 fit. Fire 12 concurrently:
+    // without the FOR UPDATE row lock a read-modify-write race would admit more.
+    const period = `conc-${randomUUID().slice(0, 8)}`;
+    const tenantId = `tenant-conc-${randomUUID().slice(0, 8)}`;
+    const store = new PostgresCostBudgetAdapter(databaseUrl!);
+    try {
+      const ensured = await store.ensureBudget(period, "pr-review", 0.1, tenantId);
+      expect(ensured.ok).toBe(true);
+
+      const results = await Promise.all(
+        Array.from({ length: 12 }, () =>
+          store.reserve(period, "pr-review", 0.02, tenantId),
+        ),
+      );
+      const admitted = results.filter((result) => result.ok).length;
+      expect(admitted).toBe(5);
+
+      for (const result of results) {
+        if (result.ok) await store.settle(result.reservationId!, 0.02);
+      }
+    } finally {
+      await store.close();
+    }
+  });
 });

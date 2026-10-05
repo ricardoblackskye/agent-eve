@@ -27,7 +27,8 @@ export type CostGovernorRefusal =
   | "not_configured"
   | "unpriced_model"
   | "budget_exceeded"
-  | "budget_unavailable";
+  | "budget_unavailable"
+  | "tenant_unconfigured";
 
 export interface CostGovernorDecision {
   admitted: boolean;
@@ -37,6 +38,11 @@ export interface CostGovernorDecision {
   period?: string;
   reason?: CostGovernorRefusal;
   error?: string;
+  /**
+   * Echoed when the decision was made for a tenant, so a refusal is
+   * attributable to the customer rather than a generic error (#230).
+   */
+  tenantId?: string;
 }
 
 export interface CostGovernorAdmitInput {
@@ -45,6 +51,11 @@ export interface CostGovernorAdmitInput {
   model: string | null | undefined;
   inputTokens: number;
   outputTokens: number;
+  /**
+   * The attributed customer tenant (#229). Absent governs the GLOBAL budget;
+   * present governs that tenant's operator-provisioned budget.
+   */
+  tenantId?: string;
 }
 
 export interface CostGovernorSettleResult {
@@ -105,28 +116,66 @@ export function createCostGovernor(
       }
       const estimatedUsd = estimateCost(input.model, input.inputTokens, input.outputTokens);
 
-      const ensured = await store.ensureBudget(period, input.category, cap);
-      if (!ensured.ok) {
-        return {
-          admitted: false,
-          reason: "budget_unavailable",
-          period,
-          error: ensured.error ?? "Cost budget store is unavailable.",
-        };
+      // A TENANT budget is operator-provisioned: an unprovisioned tenant is
+      // refused with its own reason, never auto-created, so a missing customer
+      // cap cannot silently fail open. The GLOBAL budget is materialized from
+      // the env caps, exactly as before.
+      if (input.tenantId) {
+        const existing = await store.listTenantBudgets(input.tenantId, period);
+        if (!existing.ok) {
+          return {
+            admitted: false,
+            reason: "budget_unavailable",
+            period,
+            tenantId: input.tenantId,
+            error: existing.error ?? "Cost budget store is unavailable.",
+          };
+        }
+        if (existing.value.length === 0) {
+          return {
+            admitted: false,
+            reason: "tenant_unconfigured",
+            period,
+            tenantId: input.tenantId,
+            error: `No budget is configured for tenant '${input.tenantId}' in ${period}.`,
+          };
+        }
+      } else {
+        const ensured = await store.ensureBudget(period, input.category, cap);
+        if (!ensured.ok) {
+          return {
+            admitted: false,
+            reason: "budget_unavailable",
+            period,
+            error: ensured.error ?? "Cost budget store is unavailable.",
+          };
+        }
       }
 
-      const reserved = await store.reserve(period, input.category, estimatedUsd);
+      const reserved = await store.reserve(
+        period,
+        input.category,
+        estimatedUsd,
+        input.tenantId,
+      );
       if (!reserved.ok || !reserved.reservationId) {
         const exceeded = /exceed/i.test(reserved.error ?? "");
         return {
           admitted: false,
           reason: exceeded ? "budget_exceeded" : "budget_unavailable",
           period,
+          ...(input.tenantId ? { tenantId: input.tenantId } : {}),
           error: reserved.error ?? "Cost budget reservation was refused.",
         };
       }
 
-      return { admitted: true, reservationId: reserved.reservationId, estimatedUsd, period };
+      return {
+        admitted: true,
+        reservationId: reserved.reservationId,
+        estimatedUsd,
+        period,
+        ...(input.tenantId ? { tenantId: input.tenantId } : {}),
+      };
     },
 
     async settle(
