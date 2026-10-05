@@ -88,7 +88,7 @@ because it carried a migration, a new store and an auth seam.)
 - `npx tsc --noEmit --incremental false` — clean.
 - `npm run build` (`DF_PLATFORM_PROVIDER=generic`) — the overview page still compiles.
 - Playwright: the overview page renders the table headers and an `svg` trend.
-- Local lint gate before every push: cspell@9.1.1 over changed files, markdown-table-formatter,
+- Local lint gate before every push: cspell 9.1.1 over changed files, markdown-table-formatter,
   prettier **only** on files that were prettier-clean on `main` (`globals.css` is NOT — hand-edit).
 
 ## Decisions (confirmed by the operator)
