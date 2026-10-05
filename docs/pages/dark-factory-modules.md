@@ -97,6 +97,38 @@ Dark Factory — worker-side cost client (#218, epic #212 R2). The seam a Dark F
 
 **Decisions:** [ADR 0015](../../docs/adr/0015-unprovisioned-tenant-is-refused-not-provisioned.md)
 
+## membership
+
+Dark Factory — customer membership model (#215, epic #212 R3). Binds a signed-in email to a role and, for a customer, to one tenant. It is the ONLY source of tenant scope: the session cookie carries an email and nothing else, so a role or tenant change (including revocation) takes effect on the next request. Operator-managed: customers never self-provision and never edit their scope.
+
+**Source:** [`agent/lib/dark-factory/membership.ts`](../../agent/lib/dark-factory/membership.ts)
+
+**Exports:** `InvalidMembershipError`, `Membership`, `MembershipInput`, `MembershipRole`, `MembershipStatus`, `isMembershipActive`, `membershipScope`, `normalizeEmail`, `validateMembership`
+
+## membership-store
+
+Dark Factory — membership store seam (#215, epic #212 R3). Provider-neutral: `console` is fail-closed, `sqlite` is local-only (refused in production), `postgres` is required in deployed environments, plus an in-memory provider for tests. Selected by `DF_MEMBERSHIP_DRIVER`.
+
+**Source:** [`agent/lib/dark-factory/membership-store.ts`](../../agent/lib/dark-factory/membership-store.ts)
+
+**Exports:** `ConsoleMembershipProvider`, `InMemoryMembershipProvider`, `MembershipStore`, `MembershipStoreConfigurationError`, `MembershipStoreListResult`, `MembershipStoreMode`, `MembershipStoreReadResult`, `MembershipStoreWriteResult`, `createMembershipStore`
+
+## membership-store-postgres
+
+Dark Factory — PostgreSQL membership store (#215). Standard `pg` only; no vendor SDK. The schema is also shipped as `db/migrations/008_df_tenant_members.sql` with RLS enabled and no public policies; the connection stays server-side.
+
+**Source:** [`agent/lib/dark-factory/membership-store-postgres.ts`](../../agent/lib/dark-factory/membership-store-postgres.ts)
+
+**Exports:** `PostgresMembershipStore`
+
+## membership-store-sqlite
+
+Dark Factory — SQLite membership store (local/test only). Uses `node:sqlite`; the factory refuses this driver in production, so it can never become the deployed source of scope.
+
+**Source:** [`agent/lib/dark-factory/membership-store-sqlite.ts`](../../agent/lib/dark-factory/membership-store-sqlite.ts)
+
+**Exports:** `SqliteMembershipStore`
+
 ## cost-budget-store-postgres
 
 Dark Factory — PostgreSQL cost budget adapter. Standard `pg` only; no vendor SDK. The reserve path takes a row lock on the budget so two concurrent calls cannot both be admitted past the cap. The schema is also shipped as a source-controlled migration (`db/migrations/001_df_cost_budgets.sql`); `ensureSchema` keeps local and integration runs working without a separate migrate step.
