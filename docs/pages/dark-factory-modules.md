@@ -76,6 +76,16 @@ Dark Factory — cost-budget read query (#208 R1 task 7). Pure shaping for the o
 
 **Exports:** `CostBudgetQueryResult`, `CostBudgetReport`, `CostBudgetTotals`, `CostBudgetView`, `queryCostBudgets`
 
+## tenant-budget-query
+
+Dark Factory — per-tenant budget reporting (#231, epic #212 R2). Pure shaping for the operator dashboard: turns the tenant registry plus the tenant-scoped budget rows into a per-customer view. An absent measurement stays absent (the UI renders an em dash, never 0), and an unreadable store or an unconfigured customer is kept DISTINCT from zero spend. Counts only — no prompt or completion content.
+
+**Source:** [`agent/lib/dark-factory/tenant-budget-query.ts`](../../agent/lib/dark-factory/tenant-budget-query.ts)
+
+**Exports:** `TenantBudgetGroup`, `TenantBudgetReport`, `TenantBudgetReportInput`, `TenantBudgetView`, `buildTenantBudgetReport`
+
+**Decisions:** [ADR 0014](../../docs/adr/0014-tenant-budgets-are-a-dimension-of-the-store.md), [ADR 0015](../../docs/adr/0015-unprovisioned-tenant-is-refused-not-provisioned.md)
+
 ## cost-budget-store-postgres
 
 Dark Factory — PostgreSQL cost budget adapter. Standard `pg` only; no vendor SDK. The reserve path takes a row lock on the budget so two concurrent calls cannot both be admitted past the cap. The schema is also shipped as a source-controlled migration (`db/migrations/001_df_cost_budgets.sql`); `ensureSchema` keeps local and integration runs working without a separate migrate step.
