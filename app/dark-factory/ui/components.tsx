@@ -149,22 +149,45 @@ export function TrendChart({ points }: { points: RunTrendPoint[] }): ReactNode {
   for (const point of points) {
     byDate.set(point.date, (byDate.get(point.date) ?? 0) + point.count);
   }
-  const bars = [...byDate.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-  if (bars.length === 0) {
+  const series = [...byDate.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  if (series.length === 0) {
     return <StatePanel state="empty" message="No terminal outcomes yet" />;
   }
-  const max = Math.max(...bars.map(([, count]) => count), 1);
+
+  // A line chart, not bars: with one or two dates the old flex bars stretched to
+  // fill the whole width and read as a single blue block. A viewBox makes the
+  // chart scale to any number of dates, including one (drawn as a lone marker).
+  const width = 320;
+  const height = 90;
+  const pad = 8;
+  const max = Math.max(...series.map(([, count]) => count), 1);
+  const step = series.length > 1 ? (width - pad * 2) / (series.length - 1) : 0;
+  const coords = series.map(([, count], index) => {
+    const x = series.length > 1 ? pad + index * step : width / 2;
+    const y = height - pad - (count / max) * (height - pad * 2);
+    return { x, y, date: series[index]?.[0] ?? "", count };
+  });
+  const line = coords
+    .map(({ x, y }) => `${x.toFixed(1)},${y.toFixed(1)}`)
+    .join(" ");
+
   return (
-    <div className="df-trend" role="img" aria-label="Outcome trend">
-      {bars.map(([date, count]) => (
-        <div
-          className="df-trend-bar"
-          key={date}
-          style={{ height: `${Math.round((count / max) * 100)}%` }}
-          title={`${date}: ${count}`}
-        />
+    <svg
+      className="df-trend-chart"
+      viewBox={`0 0 ${width} ${height}`}
+      preserveAspectRatio="none"
+      role="img"
+      aria-label="Outcome trend"
+    >
+      {coords.length > 1 ? (
+        <polyline className="df-trend-line" points={line} fill="none" />
+      ) : null}
+      {coords.map(({ x, y, date, count }) => (
+        <circle className="df-trend-point" key={date} cx={x} cy={y} r={2.5}>
+          <title>{`${date}: ${count}`}</title>
+        </circle>
       ))}
-    </div>
+    </svg>
   );
 }
 
@@ -200,21 +223,41 @@ export function RecentRunsList({ rows }: { rows: TableRow[] }): ReactNode {
     return <StatePanel state="empty" message="No recent runs" />;
   }
   return (
-    <div className="df-recent">
-      {rows.map((row) => (
-        <div className="df-recent-row" key={row.runId}>
-          <span className="df-run-id">{row.runId}</span>
-          <div className="df-recent-main">
-            <div className="df-recent-title">{`${row.issueLabel} · ${row.repo}`}</div>
-            <div className="df-recent-sub">{`${row.stage} · ${row.updatedLabel}`}</div>
-          </div>
-          <div className="df-recent-meta">
-            <StatusPill category={row.category} label={row.status} />
-            <span>{`${row.elapsedLabel} · ${row.costLabel}`}</span>
-          </div>
-        </div>
-      ))}
-    </div>
+    // A real table with a header per column (#258). The previous flex/grid row
+    // layout had no column headers at all, and a grid on a row cannot express
+    // column alignment. `df-table` supplies the styling the run list already uses.
+    <table className="df-table df-recent-table">
+      <thead>
+        <tr>
+          <th scope="col">Run</th>
+          <th scope="col">Issue</th>
+          <th scope="col">Repository</th>
+          <th scope="col">Stage</th>
+          <th scope="col">Updated</th>
+          <th scope="col">Status</th>
+          <th scope="col">Elapsed</th>
+          <th scope="col">Cost</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row) => (
+          <tr key={row.runId}>
+            <th scope="row" className="df-run-id">
+              {row.runId}
+            </th>
+            <td>{row.issueLabel}</td>
+            <td>{row.repo}</td>
+            <td>{row.stage}</td>
+            <td>{row.updatedLabel}</td>
+            <td>
+              <StatusPill category={row.category} label={row.status} />
+            </td>
+            <td>{row.elapsedLabel}</td>
+            <td>{row.costLabel}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
 

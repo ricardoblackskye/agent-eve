@@ -394,19 +394,23 @@ ol {
 .df-mix-failed b{
     color: #ff7883;
   }
-.df-trend {
-  display: flex;
-  align-items: flex-end;
-  gap: 6px;
+/* Outcome trend as a line chart (#258). It was a row of flex bars, which read as
+   a single blue block whenever the window held one or two dates. */
+.df-trend-chart {
+  display: block;
+  width: 100%;
   height: 90px;
 }
-.df-trend-bar{
-    flex: 1;
-    min-width: 8px;
-    min-height: 4px;
-    background: #77b7ff;
-    border-radius: 3px 3px 0 0;
-  }
+.df-trend-line {
+  stroke: #77b7ff;
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+.df-trend-point {
+  fill: #77b7ff;
+}
 .df-snapshot {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -751,6 +755,15 @@ ol {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
+/* Headings sit over their own values (#258). The first column is a label. */
+.df-mix-table thead th {
+  text-align: right;
+}
+.df-mix-table thead th:first-child,
+.df-mix-table tbody td:first-child,
+.df-mix-table tbody th:first-child {
+  text-align: left;
+}
 
 /* LLM cost budgets + LLM call policy panels (#205): these shipped with no
    styles at all, so the tables rendered untidily. */
@@ -811,6 +824,69 @@ ol {
   font-size: 10px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
+}
+
+/* LLM usage, customer usage and customer budget tables (#258): these shipped
+   with no styles at all, so they rendered untidily beside the cost and policy
+   tables. Columns are sized by their content: labels left, values right. */
+.df-usage-table,
+.df-budget-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  background: #15191f;
+  border: 1px solid #2a3039;
+  border-radius: 10px;
+  /* Deliberately NO `overflow: hidden` (unlike .df-table): these tables carry a
+     `<caption>`, which sits outside the table box and was clipped by it, so the
+     top of "Totals" / "By model" / "By day" / "By run" was cut off. */
+}
+.df-usage-table th,
+.df-usage-table td,
+.df-budget-table th,
+.df-budget-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid #20252d;
+}
+.df-usage-table thead th,
+.df-budget-table thead th {
+  /* Right-aligned so each heading sits over its own values (#258). The first
+     column is the label column and stays left, like its row headers. */
+  text-align: right;
+  color: #8993a0;
+  font-size: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  text-transform: uppercase;
+  border-bottom: 1px solid #2a3039;
+}
+.df-usage-table thead th:first-child,
+.df-budget-table thead th:first-child,
+.df-usage-table tbody td:first-child,
+.df-budget-table tbody td:first-child,
+.df-usage-table th[scope="row"],
+.df-budget-table th[scope="row"] {
+  text-align: left;
+  font-weight: normal;
+}
+.df-usage-table td,
+.df-budget-table td {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.df-usage-table caption,
+.df-budget-table caption {
+  padding-bottom: 6px;
+  text-align: left;
+  color: #8993a0;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* Recent executions (#258): the run id is a fixed-width label, so it must not
+   widen its column; the text columns take the remaining space. */
+.df-recent-table .df-run-id {
+  white-space: nowrap;
 }
 .df-policy-summary {
   display: flex;

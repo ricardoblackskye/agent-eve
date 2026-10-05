@@ -142,12 +142,51 @@ jobs:
       - run: npm ci
       - name: Install Playwright browser
         run: npx playwright install --with-deps chromium
+      - name: Seed the Dark Factory fixture
+        env:
+          # These suites assert on RENDERED panels, so the stores need rows:
+          # an empty store shows the panel's empty state instead. Everything
+          # lives in sqlite files under .eve/, so no real database is touched.
+          DF_TENANT_DRIVER: sqlite
+          DF_TENANT_DB_PATH: .eve/e2e-tenant.sqlite
+          DF_USAGE_DRIVER: sqlite
+          DF_USAGE_DB_PATH: .eve/e2e-usage.sqlite
+          DF_COST_BUDGET_DRIVER: sqlite
+          DF_COST_BUDGET_DB_PATH: .eve/e2e-cost.sqlite
+          DF_RUN_HISTORY_DRIVER: sqlite
+          DF_RUN_HISTORY_DB_PATH: .eve/e2e-runs.sqlite
+          DF_CONTROL_DRIVER: sqlite
+          DF_CONTROL_DB_PATH: .eve/e2e-control.sqlite
+          DF_MEMBERSHIP_DRIVER: sqlite
+          DF_MEMBERSHIP_DATABASE_PATH: .eve/e2e-membership.sqlite
+        run: |
+          mkdir -p .eve
+          npm run seed:test-data -- --all
+          # The dev-mode sign-in address must itself be a member: scope is
+          # resolved from the membership store on every request (#215).
+          npm run df:membership -- grant --email cuillinguy@gmail.com --role operator
       - name: Run browser tests
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           VERCEL_PROTECTION_BYPASS: ${{ secrets.VERCEL_PROTECTION_BYPASS }}
           # Dev-mode sign-in so the gated pages can be tested (fail-closed in production)
           AUTH_DEV_MODE: "1"
+          # The same fixture the seed step wrote, so the dev server reads the
+          # same rows and the dev-mode operator resolves (#215, #258).
+          #
+          # Deliberately WITHOUT DF_COST_BUDGET_DRIVER (or the control driver):
+          # configuring the budget store arms the orchestrator's cost gate,
+          # which then refuses every model call with `not_configured` until a
+          # global cap is provisioned (ADR 0015). That broke the chat specs,
+          # which exercise a real call through the proxy.
+          DF_TENANT_DRIVER: sqlite
+          DF_TENANT_DB_PATH: .eve/e2e-tenant.sqlite
+          DF_USAGE_DRIVER: sqlite
+          DF_USAGE_DB_PATH: .eve/e2e-usage.sqlite
+          DF_RUN_HISTORY_DRIVER: sqlite
+          DF_RUN_HISTORY_DB_PATH: .eve/e2e-runs.sqlite
+          DF_MEMBERSHIP_DRIVER: sqlite
+          DF_MEMBERSHIP_DATABASE_PATH: .eve/e2e-membership.sqlite
         run: npm run test:e2e
       - name: Upload Playwright artifacts
         if: always()
