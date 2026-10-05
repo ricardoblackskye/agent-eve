@@ -37,6 +37,24 @@ test.describe("Dark Factory overview styling", () => {
       "text-transform",
       "uppercase",
     );
+
+    // Every heading must sit over its OWN values. The reported bug was a
+    // left-aligned heading above right-aligned numbers, so assert the pairing
+    // column by column rather than trusting the rule.
+    const columns = await table.evaluate((node) => {
+      const heads = [...node.querySelectorAll("thead th")];
+      const row = node.querySelector("tbody tr");
+      const cells = row ? [...row.children] : [];
+      return heads.map((th, index) => ({
+        head: getComputedStyle(th).textAlign,
+        cell: cells[index] ? getComputedStyle(cells[index]).textAlign : null,
+      }));
+    });
+    expect(columns.length).toBeGreaterThan(0);
+    for (const column of columns) {
+      if (column.cell === null) continue;
+      expect(column.head).toBe(column.cell);
+    }
   });
 
   test("recent executions is a table with a header per column", async ({

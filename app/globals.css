@@ -755,6 +755,15 @@ ol {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
+/* Headings sit over their own values (#258). The first column is a label. */
+.df-mix-table thead th {
+  text-align: right;
+}
+.df-mix-table thead th:first-child,
+.df-mix-table tbody td:first-child,
+.df-mix-table tbody th:first-child {
+  text-align: left;
+}
 
 /* LLM cost budgets + LLM call policy panels (#205): these shipped with no
    styles at all, so the tables rendered untidily. */
@@ -839,13 +848,19 @@ ol {
 }
 .df-usage-table thead th,
 .df-budget-table thead th {
-  text-align: left;
+  /* Right-aligned so each heading sits over its own values (#258). The first
+     column is the label column and stays left, like its row headers. */
+  text-align: right;
   color: #8993a0;
   font-size: 10px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   text-transform: uppercase;
   border-bottom: 1px solid #2a3039;
 }
+.df-usage-table thead th:first-child,
+.df-budget-table thead th:first-child,
+.df-usage-table tbody td:first-child,
+.df-budget-table tbody td:first-child,
 .df-usage-table th[scope="row"],
 .df-budget-table th[scope="row"] {
   text-align: left;
@@ -869,7 +884,6 @@ ol {
 /* Recent executions (#258): the run id is a fixed-width label, so it must not
    widen its column; the text columns take the remaining space. */
 .df-recent-table .df-run-id {
-  width: 1%;
   white-space: nowrap;
 }
 .df-policy-summary {
