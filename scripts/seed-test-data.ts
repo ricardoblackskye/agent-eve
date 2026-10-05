@@ -371,7 +371,7 @@ async function scenarioMultiTenant(s: SeedStores): Promise<boolean> {
     // data to exercise (#215).
     if (
       await ensureMember(s.membership, {
-        email: `seed-${slug}@example.com`,
+        email: `${slug}@example.com`,
         role: "customer",
         tenantId,
       })
