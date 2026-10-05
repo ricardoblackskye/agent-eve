@@ -17,6 +17,7 @@
 
 import { validateMembership, type MembershipRole } from "../agent/lib/dark-factory/membership";
 import { createMembershipStore } from "../agent/lib/dark-factory/membership-store";
+import { loadLocalEnv } from "./load-env";
 
 const USAGE = `Usage:
   df:membership grant --email <address> --role <operator|customer> [--tenant <uuid>]
@@ -53,6 +54,11 @@ function requireFlag(flags: Record<string, string>, name: string): string {
 }
 
 async function main(): Promise<void> {
+  // The app reads .env.local; a bare tsx run would not, so without this the CLI
+  // and the app can disagree about which store — and which database — is in
+  // play. Shell-exported values still win.
+  loadLocalEnv();
+
   const { command, flags } = parseArgs(process.argv.slice(2));
   const store = createMembershipStore();
 

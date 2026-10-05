@@ -38,6 +38,7 @@ import { createControlStore } from "../agent/lib/dark-factory/control";
 import type { MembershipStore } from "../agent/lib/dark-factory/membership-store";
 import { createMembershipStore } from "../agent/lib/dark-factory/membership-store";
 import type { MembershipInput } from "../agent/lib/dark-factory/membership";
+import { loadLocalEnv } from "./load-env";
 
 export const SCENARIOS = [
   "happy-path",
@@ -708,6 +709,11 @@ export async function resetTestData(
 }
 
 async function main(): Promise<number> {
+  // The app reads .env.local; a bare tsx run would not, so without this the
+  // seed and the app can disagree about which store — and which database — is
+  // in play. Shell-exported values still win.
+  loadLocalEnv();
+
   const parsed = parseArgs(process.argv.slice(2));
   if ("error" in parsed) {
     console.error(`seed-test-data: ${parsed.error}`);
@@ -749,6 +755,7 @@ async function main(): Promise<number> {
     stores.cost.close?.();
     await stores.runHistory.close();
     await stores.control.close?.();
+    await stores.membership.close?.();
   }
 }
 

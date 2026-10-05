@@ -188,7 +188,7 @@ export function createMembershipStore(
       const url = env.DF_MEMBERSHIP_DATABASE_URL ?? env.DF_TENANT_DATABASE_URL;
       if (!url) {
         throw new MembershipStoreConfigurationError(
-          "DF_MEMBERSHIP_DRIVER=postgres requires DF_MEMBERSHIP_DATABASE_URL",
+          "DF_MEMBERSHIP_DRIVER=postgres requires DF_MEMBERSHIP_DATABASE_URL (or DF_TENANT_DATABASE_URL)",
         );
       }
       return new PostgresMembershipStore(url);
