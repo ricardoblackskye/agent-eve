@@ -176,7 +176,23 @@ describe("overview components", () => {
       { date: "2026-09-25", outcome: "succeeded" as const, count: 3 },
     ];
     const { container } = render(<TrendChart points={points} />);
-    expect(container.querySelectorAll(".df-trend-bar")).toHaveLength(2);
+    // Two distinct dates -> two markers joined by a line.
+    expect(container.querySelectorAll(".df-trend-point")).toHaveLength(2);
+    expect(container.querySelectorAll(".df-trend-line")).toHaveLength(1);
+    expect(container.querySelector("svg")?.getAttribute("role")).toBe("img");
+
+    // A single date is a lone marker, never a full-width block.
+    const single = render(
+      <TrendChart
+        points={[
+          { date: "2026-09-24", outcome: "succeeded" as const, count: 2 },
+        ]}
+      />,
+    );
+    expect(single.container.querySelectorAll(".df-trend-point")).toHaveLength(
+      1,
+    );
+    expect(single.container.querySelector(".df-trend-line")).toBeNull();
 
     const empty = render(<TrendChart points={[]} />);
     expect(empty.container.querySelector(".df-state-empty")).toBeTruthy();
@@ -198,7 +214,20 @@ describe("overview components", () => {
   it("renders recent runs and an empty state", () => {
     const rows = toTableRows([summary()], NOW);
     const { container } = render(<RecentRunsList rows={rows} />);
-    expect(container.querySelectorAll(".df-recent-row")).toHaveLength(1);
+    // A real table with a header per column (#258).
+    expect(container.querySelectorAll("table tbody tr")).toHaveLength(1);
+    expect(
+      [...container.querySelectorAll("thead th")].map((th) => th.textContent),
+    ).toEqual([
+      "Run",
+      "Issue",
+      "Repository",
+      "Stage",
+      "Updated",
+      "Status",
+      "Elapsed",
+      "Cost",
+    ]);
     const empty = render(<RecentRunsList rows={[]} />);
     expect(empty.container.querySelector(".df-state-empty")).toBeTruthy();
   });

@@ -91,19 +91,17 @@ because it carried a migration, a new store and an auth seam.)
 - Local lint gate before every push: cspell@9.1.1 over changed files, markdown-table-formatter,
   prettier **only** on files that were prettier-clean on `main` (`globals.css` is NOT — hand-edit).
 
-## Risks and open questions
+## Decisions (confirmed by the operator)
 
-1. **ADR 0009 says Tailwind is the single styling method**, yet this change adds plain CSS. The
-   dark-factory surface is entirely plain-CSS `df-*` classes and the #205 precedent is plain CSS, so
-   consistency wins here — but if you would rather move this page to Tailwind utilities, say so and
-   the plan changes shape. My recommendation: plain CSS now, and if the repo wants to converge on
-   Tailwind, that is a separate issue, not a styling bugfix.
-2. **How even is "even"?** For recent executions I read "columns should be even in width" as
-   `table-layout: fixed` with equal columns. If you meant "aligned consistently" (numerals right,
-   text left), that is a smaller change — tell me which.
-3. **The unstyled budget table** is in scope by my reading; say if you would rather leave it.
-4. **Color source.** The existing rules hard-code hex values (`#20252d`, `#8993a0`, `#77b7ff`). I
-   will match them exactly rather than introduce tokens, to avoid a visual shift elsewhere.
+1. **Match the existing convention** — plain CSS `df-*` classes in `app/globals.css`, mirroring the
+   #205 cost/policy table block. ADR 0009's Tailwind preference is not applied to this page.
+2. **Align consistently with the content**, not equal widths: text left, numerals right-aligned with
+   tabular numerals, natural column widths. Column headers are still required.
+3. **The unstyled budget table is in scope** — style `.df-budget-table` as well.
+4. **Match existing colors** — reuse the neighboring rules' hex values; introduce no tokens and
+   shift nothing else.
+
+Remaining risk: `app/globals.css` is prettier-dirty, so new rules are hand-added; never reformat it.
 
 ## Out of scope
 
