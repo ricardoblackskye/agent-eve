@@ -85,3 +85,18 @@ separate per-customer deployments.
 2. **Membership creation: both** — an operator CLI script (`scripts/df-membership.ts`) plus a
    seed scenario for local and dev.
 3. **Customer view: a new route** (`/dark-factory/me`), separate from the operator dashboard.
+
+## Status — all six legs implemented
+
+| Leg | Outcome                                                                                                                                | Where                                                                                                                                       |
+|-----|----------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------|
+| 0   | Membership model, provider-neutral store (console/memory/sqlite/postgres), migration 008 with RLS, an operator CLI and a seed scenario | `agent/lib/dark-factory/membership*.ts`, `db/migrations/008_df_tenant_members.sql`, `scripts/df-membership.ts`, `scripts/seed-test-data.ts` |
+| 1   | `resolveViewer` — session email to role and tenant on every request, fail-closed                                                       | `app/api/dark-factory/viewer.ts`                                                                                                            |
+| 2   | Tenant scope in the run query layer (bounded fill: a scoped page can under-fill, never over-share)                                     | `agent/lib/dark-factory/run-query.ts`                                                                                                       |
+| 3   | Route enforcement through one guard seam; a foreign run is a 404, not a 403                                                            | `app/api/dark-factory/guard.ts` and every read route                                                                                        |
+| 4   | Role capabilities: the tenant registry, the global budget ledger, control and the LLM policy are operator-only                         | `guardOperator`                                                                                                                             |
+| 5   | Customer view at `/dark-factory/me` — own runs, usage and budget, read only                                                            | `app/dark-factory/ui/customer-view.tsx`                                                                                                     |
+
+ADRs 0016 and 0017 are written and indexed. Two deliberate, fail-closed limitations: customer run
+metrics are refused rather than tenant-scoped (that aggregate has no tenant dimension yet), and
+run-list scope is filtered in the query layer rather than in the store's SQL.
