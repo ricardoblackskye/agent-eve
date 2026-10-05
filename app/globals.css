@@ -837,7 +837,9 @@ ol {
   background: #15191f;
   border: 1px solid #2a3039;
   border-radius: 10px;
-  overflow: hidden;
+  /* Deliberately NO `overflow: hidden` (unlike .df-table): these tables carry a
+     `<caption>`, which sits outside the table box and was clipped by it, so the
+     top of "Totals" / "By model" / "By day" / "By run" was cut off. */
 }
 .df-usage-table th,
 .df-usage-table td,

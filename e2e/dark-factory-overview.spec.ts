@@ -55,6 +55,14 @@ test.describe("Dark Factory overview styling", () => {
       if (column.cell === null) continue;
       expect(column.head).toBe(column.cell);
     }
+
+    // A captioned table must not clip its own caption. `overflow: hidden` on the
+    // table box cut the top off "Totals" / "By model" / "By day" / "By run",
+    // because a `<caption>` sits outside the table's box.
+    await expect(table.locator("caption").first()).toBeVisible();
+    expect(await table.evaluate((node) => getComputedStyle(node).overflow)).toBe(
+      "visible",
+    );
   });
 
   test("recent executions is a table with a header per column", async ({
