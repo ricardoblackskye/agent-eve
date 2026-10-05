@@ -69,6 +69,7 @@
     "shfmt",
     "vercel",
     "checkov",
+    "kics",
     "gitleaks",
     "youtube-content",
     "pgvector",
