@@ -18,6 +18,10 @@ export interface GovernedLlmCallOptions<T> {
   /** Upper-bound token estimate used for the pre-call reservation. */
   inputTokens: number;
   outputTokens: number;
+  /**
+   * The attributed customer tenant (#230). Absent governs the GLOBAL budget.
+   */
+  tenantId?: string;
   /** The real call. Invoked ONLY after the governor admits it. */
   run: () => Promise<T>;
   /** Measured cost from the result; `undefined` = unmeasured. */
@@ -36,6 +40,7 @@ export async function runGovernedLlmCall<T>(
     model: options.model,
     inputTokens: options.inputTokens,
     outputTokens: options.outputTokens,
+    ...(options.tenantId ? { tenantId: options.tenantId } : {}),
   });
 
   if (!decision.admitted || !decision.reservationId) {
