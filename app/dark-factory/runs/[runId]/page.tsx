@@ -20,7 +20,10 @@ import { toDetailView } from "../../ui/view-model";
 export default function DarkFactoryRunDetailPage() {
   const params = useParams<{ runId: string }>();
   const runId = typeof params?.runId === "string" ? params.runId : "";
-  const control = useFactoryControl({ runId, intervalMs: DEFAULT_POLL_INTERVAL_MS });
+  const control = useFactoryControl({
+    runId,
+    intervalMs: DEFAULT_POLL_INTERVAL_MS,
+  });
   const run = useRunQuery<{
     summary: RunSummary;
     events: PersistedRunEvent[];
@@ -55,14 +58,14 @@ export default function DarkFactoryRunDetailPage() {
     <div className="df-view">
       <section className="df-panel df-control-card">
         <PanelHead
-                  title="RUN CONTROL"
-                  leading={
-                    <Link className="df-btn" href="/dark-factory/runs">
-                      ← Back to runs
-                    </Link>
-                  }
-                  badges={["COOPERATIVE PAUSE", "TERMINAL STOP"]}
-                />
+          title="RUN CONTROL"
+          leading={
+            <Link className="df-btn" href="/dark-factory/runs">
+              ← Back to runs
+            </Link>
+          }
+          badges={["COOPERATIVE PAUSE", "TERMINAL STOP"]}
+        />
         <div className="df-panel-body">
           <ControlPanel
             loading={control.loading}
@@ -72,6 +75,7 @@ export default function DarkFactoryRunDetailPage() {
             factory={control.data?.factory}
             runId={runId}
             run={control.data?.run}
+            runStatus={run.data.summary.status}
             onAction={(action, scope) => {
               void control.act(action, scope);
             }}
@@ -97,7 +101,10 @@ export default function DarkFactoryRunDetailPage() {
             </div>
           </section>
           <section className="df-panel">
-            <PanelHead title="MEASURED METRICS" badges={["NO INFERRED ZEROS"]} />
+            <PanelHead
+              title="MEASURED METRICS"
+              badges={["NO INFERRED ZEROS"]}
+            />
             <div className="df-panel-body">
               <MeasuredMetrics metrics={view.metrics} />
             </div>
