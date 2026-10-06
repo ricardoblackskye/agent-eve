@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { useParams } = vi.hoisted(() => ({
@@ -106,5 +106,70 @@ describe("Dark Factory run detail page", () => {
     expect(head).toBeTruthy();
     const ordered = [...(head as Element).querySelectorAll("a, .df-chip")];
     expect(ordered[0]).toBe(back);
+  });
+
+  it("renders the run detail metric tiles from the summary", async () => {
+    const { container } = render(<DarkFactoryRunDetailPage />);
+    await waitFor(() => expect(container.textContent).toContain("Iterations"));
+    const text = container.textContent ?? "";
+    expect(text).toContain("Started");
+    expect(text).toContain("Elapsed");
+    expect(text).toContain("Attempts");
+    expect(text).toContain("Review round");
+    expect(text).toContain("Measured cost");
+    expect(text).toContain("Iterations");
+    expect(text).toContain("Fix cycles");
+  });
+
+  it("wires Resume run and Stop run to the control API", async () => {
+    const fetch = vi.fn((input: unknown) => {
+      const url = String(input);
+      if (url.includes("/api/dark-factory/control")) {
+        return Promise.resolve(
+          jsonResponse({
+            available: true,
+            factory: { paused: true, updatedAt: "2026-09-25T09:00:00.000Z" },
+            run: {
+              paused: true,
+              stopped: false,
+              updatedAt: "2026-09-25T09:00:00.000Z",
+            },
+            events: [],
+          }),
+        );
+      }
+      return Promise.resolve(
+        jsonResponse({ summary: SUMMARY, events: EVENTS }),
+      );
+    });
+    vi.stubGlobal("fetch", fetch);
+    const { container } = render(<DarkFactoryRunDetailPage />);
+    await waitFor(() =>
+      expect(
+        container.querySelector('[aria-label="Run controls"]'),
+      ).not.toBeNull(),
+    );
+    expect(screen.getByRole("button", { name: "Resume run" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Stop run" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Resume run" }));
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/dark-factory/control",
+        expect.objectContaining({
+          method: "POST",
+          body: expect.stringContaining('"action":"resume"'),
+        }),
+      ),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Stop run" }));
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/dark-factory/control",
+        expect.objectContaining({
+          method: "POST",
+          body: expect.stringContaining('"action":"stop"'),
+        }),
+      ),
+    );
   });
 });

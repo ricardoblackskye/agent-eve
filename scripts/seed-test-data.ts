@@ -88,6 +88,15 @@ export type SeedResult =
 /** A fixed instant so re-runs produce byte-identical data. */
 const SEED_TS = "2026-01-15T09:00:00.000Z";
 const SEED_PERIOD = "2026-01";
+/** Completion timestamp for terminal seed runs (Elapsed = 15 minutes). */
+const SEED_COMPLETED_TS = new Date(
+  Date.parse(SEED_TS) + 15 * 60 * 1000,
+).toISOString();
+/** Measured metrics surfaced on the Run Details page for seeded runs. */
+const SEED_ITERATION_COUNT = 7;
+const SEED_FIX_CYCLE_COUNT = 2;
+const SEED_LATENCY_MS = 15000;
+const SEED_COST_USD = 6.42;
 const SEED_BUDGET_PERIOD = "2026-02";
 const SEED_MODEL = "deepseek/deepseek-chat";
 const SEED_ACTOR = "seed:test-data";
@@ -214,35 +223,60 @@ async function ensureRun(
 
   const status = input.status ?? "queued";
   if (status !== "queued" && created) {
-    const transition =
-      status === "running"
-        ? {
-            type: "dispatch.started" as const,
-            stage: "dispatch" as const,
-            status,
-          }
-        : status === "blocked"
-          ? {
-              type: "worker.question" as const,
-              stage: "worker" as const,
-              status,
-            }
-          : {
-              type: "run.terminal" as const,
-              stage: "terminal" as const,
-              status,
-            };
-    const event = await store.appendEvent({
-      eventId: `${input.deliveryId}-${status}`,
+    // A non-queued run is a real lifecycle: every status starts with
+    // `dispatch.started` (which sets `startedAt` on the summary projection)
+    // before reaching its transition. Seeding the measured metrics on the
+    // terminating event exercises the SAME projection path the runtime uses
+    // (applyRunEvent -> df_run_summaries), so the Run Details page reads them
+    // exactly as it would from a live run.
+    const started = await store.appendEvent({
+      eventId: `${input.deliveryId}-started`,
       runId,
-      type: transition.type,
-      stage: transition.stage,
+      type: "dispatch.started",
+      stage: "dispatch",
       occurredAt: SEED_TS,
-      status: transition.status,
     });
-    if (!event.ok) {
+    if (!started.ok) {
       throw new Error(
-        `appendEvent(${input.deliveryId}) failed: ${event.error}`,
+        `appendEvent(${input.deliveryId}-started) failed: ${started.error}`,
+      );
+    }
+    if (status === "blocked") {
+      const blocked = await store.appendEvent({
+        eventId: `${input.deliveryId}-blocked`,
+        runId,
+        type: "worker.question",
+        stage: "worker",
+        occurredAt: SEED_TS,
+        status: "blocked",
+      });
+      if (!blocked.ok) {
+        throw new Error(
+          `appendEvent(${input.deliveryId}-blocked) failed: ${blocked.error}`,
+        );
+      }
+      return { runId, created };
+    }
+    if (status === "running") return { runId, created };
+    // Terminal (succeeded/failed): attach the detail metrics the page renders.
+    const terminal = await store.appendEvent({
+      eventId: `${input.deliveryId}-terminal`,
+      runId,
+      type: "run.terminal",
+      stage: "terminal",
+      occurredAt: SEED_COMPLETED_TS,
+      status,
+      attempt: 1,
+      reviewRound: 1,
+      iterationCount: SEED_ITERATION_COUNT,
+      fixCycleCount: SEED_FIX_CYCLE_COUNT,
+      latencyMs: SEED_LATENCY_MS,
+      costUsd: SEED_COST_USD,
+      prUrl: `https://github.com/${input.repo}/pull/${input.issue}`,
+    });
+    if (!terminal.ok) {
+      throw new Error(
+        `appendEvent(${input.deliveryId}-terminal) failed: ${terminal.error}`,
       );
     }
   }
