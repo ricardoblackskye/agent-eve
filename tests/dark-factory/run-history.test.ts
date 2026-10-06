@@ -49,7 +49,10 @@ describe("canonical run history records", () => {
   );
 
   it("keeps unmeasured latency and cost absent but preserves measured zero", () => {
-    const unmeasured = toRunSummary({ ...summary(), ignored: "drop-me" } as never);
+    const unmeasured = toRunSummary({
+      ...summary(),
+      ignored: "drop-me",
+    } as never);
     expect(unmeasured).not.toHaveProperty("latencyMs");
     expect(unmeasured).not.toHaveProperty("costUsd");
     expect(unmeasured).not.toHaveProperty("ignored");
@@ -72,9 +75,9 @@ describe("canonical run history records", () => {
     expect(() => toRunSummary({ ...summary(), attemptCount: -1 })).toThrow(
       /attemptCount/i,
     );
-    expect(() => toRunSummary({ ...summary(), createdAt: "yesterday" })).toThrow(
-      /createdAt/i,
-    );
+    expect(() =>
+      toRunSummary({ ...summary(), createdAt: "yesterday" }),
+    ).toThrow(/createdAt/i);
   });
 
   it("requires terminal timestamps but leaves blocked runs resumable", () => {
@@ -131,18 +134,16 @@ describe("canonical run history records", () => {
   });
 
   it("rejects incomplete or unsafe events", () => {
-    expect(() => toRunEvent({ ...event(), eventId: "" })).toThrow(
-      /eventId/i,
+    expect(() => toRunEvent({ ...event(), eventId: "" })).toThrow(/eventId/i);
+    expect(() => toRunEvent({ ...event(), type: "unknown" as never })).toThrow(
+      /type/i,
     );
-    expect(() =>
-      toRunEvent({ ...event(), type: "unknown" as never }),
-    ).toThrow(/type/i);
     expect(() => toRunEvent({ ...event(), costUsd: Number.NaN })).toThrow(
       /costUsd/i,
     );
-    expect(() => toRunEvent({ ...event(), prUrl: "javascript:alert(1)" })).toThrow(
-      /prUrl/i,
-    );
+    expect(() =>
+      toRunEvent({ ...event(), prUrl: "javascript:alert(1)" }),
+    ).toThrow(/prUrl/i);
   });
 
   it("projects resumable blocked state and preserves cumulative counters", async () => {
@@ -221,5 +222,49 @@ describe("canonical run history records", () => {
     expect(finished.completedAt).toBe(at);
     expect(finished.prUrl).toBe("https://github.com/owner/repo/pull/198");
     expect(() => apply(finished, event())).toThrow(/terminal/i);
+  });
+
+  describe("comment reference on worker.question events", () => {
+    it("preserves a github comment reference on a blocked worker.question event", () => {
+      const ref = {
+        provider: "github" as const,
+        id: 12345,
+        url: "https://github.com/owner/repo/issues/198#issuecomment-12345",
+      };
+      const evt = toRunEvent({
+        ...event("worker.question"),
+        status: "blocked",
+        commentReference: ref,
+      });
+      expect(evt).toMatchObject({ commentReference: ref });
+    });
+
+    it("rejects a commentReference with an unsupported provider", () => {
+      expect(() =>
+        toRunEvent({
+          ...event("worker.question"),
+          status: "blocked",
+          commentReference: {
+            provider: "gitlab" as never,
+            id: 1,
+            url: "https://gitlab.com/x/y#1",
+          },
+        }),
+      ).toThrow(/provider/i);
+    });
+
+    it("rejects a commentReference whose url is not a clean https URL without credentials", () => {
+      expect(() =>
+        toRunEvent({
+          ...event("worker.question"),
+          status: "blocked",
+          commentReference: {
+            provider: "github",
+            id: 1,
+            url: "javascript:alert(1)",
+          },
+        }),
+      ).toThrow(/commentReference/i);
+    });
   });
 });

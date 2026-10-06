@@ -125,6 +125,11 @@ export interface RunHistoryStore {
   ): Promise<RunHistoryWriteResult<RunControlDeliveryReceipt>>;
 
   appendEvent(event: RunEvent): Promise<RunHistoryWriteResult<RunSummary>>;
+  updateCommentReference(
+    runId: string,
+    eventId: string,
+    reference: RunEvent["commentReference"],
+  ): Promise<void>;
   getRun(runId: string): Promise<RunHistoryReadResult<RunSummary>>;
   listRuns(
     options?: RunListOptions,
@@ -177,6 +182,7 @@ interface RunEventRow {
   latency_ms: number | null;
   cost_usd: number | null;
   pr_url: string | null;
+  comment_reference: string | null;
 }
 
 function readSummary(db: DatabaseSync, runId: string): RunSummary | null {
@@ -184,6 +190,29 @@ function readSummary(db: DatabaseSync, runId: string): RunSummary | null {
     .prepare("SELECT * FROM df_run_summaries WHERE run_id = ?")
     .get(runId) as RunSummaryRow | undefined;
   return row ? rowToSummary(row) : null;
+}
+
+function readCommentRef(
+  value: string,
+): { provider: "github"; id: number; url: string } | undefined {
+  try {
+    const parsed = JSON.parse(value) as {
+      provider?: unknown;
+      id?: unknown;
+      url?: unknown;
+    };
+    if (
+      parsed &&
+      parsed.provider === "github" &&
+      typeof parsed.id === "number" &&
+      typeof parsed.url === "string"
+    ) {
+      return { provider: "github", id: parsed.id, url: parsed.url };
+    }
+  } catch {
+    // Malformed persisted reference: treat as absent rather than failing the read.
+  }
+  return undefined;
 }
 
 function rowToEvent(row: RunEventRow): PersistedRunEvent {
@@ -216,12 +245,21 @@ function rowToEvent(row: RunEventRow): PersistedRunEvent {
       ...(row.latency_ms !== null ? { latencyMs: row.latency_ms } : {}),
       ...(row.cost_usd !== null ? { costUsd: row.cost_usd } : {}),
       ...(row.pr_url !== null ? { prUrl: row.pr_url } : {}),
+      ...(row.comment_reference !== null && row.comment_reference !== undefined
+        ? { commentReference: readCommentRef(row.comment_reference) }
+        : {}),
     }),
   };
 }
 
 function sameEvent(left: RunEvent, right: RunEvent): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
+  // Ignore the external comment reference: it is derived from GitHub after the
+  // event is recorded, so it must not block an idempotent re-append on retry.
+  const strip = (e: RunEvent): RunEvent => ({
+    ...e,
+    commentReference: undefined,
+  });
+  return JSON.stringify(strip(left)) === JSON.stringify(strip(right));
 }
 
 const SQLITE_SCHEMA = `
@@ -269,6 +307,7 @@ const SQLITE_SCHEMA = `
     latency_ms REAL,
     cost_usd REAL,
     pr_url TEXT,
+    comment_reference TEXT,
     UNIQUE (run_id, event_id),
     FOREIGN KEY (run_id) REFERENCES df_run_summaries(run_id)
       ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED
@@ -375,13 +414,25 @@ function writeSummary(db: DatabaseSync, summary: RunSummary): void {
   );
 }
 
+function updateCommentReference(
+  db: DatabaseSync,
+  runId: string,
+  eventId: string,
+  reference: RunEvent["commentReference"],
+): void {
+  db.prepare(
+    `UPDATE df_run_events SET comment_reference = ? WHERE run_id = ? AND event_id = ?`,
+  ).run(reference ? JSON.stringify(reference) : null, runId, eventId);
+}
+
 function writeEvent(db: DatabaseSync, event: RunEvent): void {
   db.prepare(
     `INSERT INTO df_run_events (
        run_id, event_id, type, stage, occurred_at, status, attempt,
        review_round, iteration_count, fix_cycle_count, finding_count,
-       resolved_count, accepted_count, latency_ms, cost_usd, pr_url
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       resolved_count, accepted_count, latency_ms, cost_usd, pr_url,
+       comment_reference
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     event.runId,
     event.eventId,
@@ -399,6 +450,7 @@ function writeEvent(db: DatabaseSync, event: RunEvent): void {
     event.latencyMs ?? null,
     event.costUsd ?? null,
     event.prUrl ?? null,
+    event.commentReference ? JSON.stringify(event.commentReference) : null,
   );
 }
 
@@ -536,6 +588,12 @@ export class SqliteRunHistoryStore implements RunHistoryStore {
         .all() as { name: string }[];
       if (!summaryColumns.some((column) => column.name === "tenant_id")) {
         db.exec("ALTER TABLE df_run_summaries ADD COLUMN tenant_id TEXT");
+      }
+      const eventColumns = db
+        .prepare("PRAGMA table_info(df_run_events)")
+        .all() as { name: string }[];
+      if (!eventColumns.some((column) => column.name === "comment_reference")) {
+        db.exec("ALTER TABLE df_run_events ADD COLUMN comment_reference TEXT");
       }
       this.db = db;
       return db;
@@ -946,6 +1004,17 @@ export class SqliteRunHistoryStore implements RunHistoryStore {
     } catch (error) {
       return blocked(this.id, error);
     }
+  }
+
+  async updateCommentReference(
+    runId: string,
+    eventId: string,
+    reference: RunEvent["commentReference"],
+  ): Promise<void> {
+    const db = this.handle();
+    if (!db)
+      throw new Error(`SQLite run history is unavailable at '${this.path}'.`);
+    updateCommentReference(db, runId, eventId, reference);
   }
 
   async getRun(runId: string): Promise<RunHistoryReadResult<RunSummary>> {

@@ -280,6 +280,33 @@ describe("toDetailView", () => {
     expect(view.timeline[0].type).toBe("custom.thing");
     expect(view.timeline[0].label).toBe("custom.thing");
   });
+
+  it("surfaces the posted comment URL on a worker.question timeline entry", () => {
+    const view = toDetailView({
+      summary: summary(),
+      events: [
+        event({
+          sequence: 1,
+          type: "worker.question",
+          stage: "worker",
+          status: "blocked",
+          commentReference: {
+            provider: "github" as const,
+            id: 5001,
+            url: "https://github.com/owner/repo/issues/198#issuecomment-5001",
+          },
+        }),
+      ],
+    });
+    const question = view.timeline.find((t) => t.type === "worker.question");
+    expect(question).toBeDefined();
+    expect(question!.commentUrl).toBe(
+      "https://github.com/owner/repo/issues/198#issuecomment-5001",
+    );
+    // And a plain progress event carries no comment URL.
+    const progress = view.timeline.find((t) => t.type === "worker.progress");
+    expect(progress?.commentUrl).toBeUndefined();
+  });
 });
 
 describe("toQueryParams", () => {

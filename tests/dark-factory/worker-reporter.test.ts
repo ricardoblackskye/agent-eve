@@ -227,10 +227,7 @@ describe("#162 cycle 3-4: the default is console and writes NOTHING", () => {
     });
     const runId = accepted.value?.runId;
     if (!runId) throw new Error("run acceptance returned no runId");
-    const reporter = createWorkerReporter(
-      {},
-      { runHistory: history },
-    );
+    const reporter = createWorkerReporter({}, { runHistory: history });
     const message = msg({
       runId,
       attempt: 2,
@@ -243,7 +240,10 @@ describe("#162 cycle 3-4: the default is console and writes NOTHING", () => {
     const summary = await history.getRun(runId);
     const events = await history.listRunEvents(runId);
 
-    expect(summary.value).toMatchObject({ status: "running", iterationCount: 2 });
+    expect(summary.value).toMatchObject({
+      status: "running",
+      iterationCount: 2,
+    });
     expect(events.value?.items.map((item) => item.event.type)).toEqual([
       "run.accepted",
       "worker.progress",
@@ -261,10 +261,7 @@ describe("#162 cycle 3-4: the default is console and writes NOTHING", () => {
     });
     const runId = accepted.value?.runId;
     if (!runId) throw new Error("run acceptance returned no runId");
-    const reporter = createWorkerReporter(
-      {},
-      { runHistory: history },
-    );
+    const reporter = createWorkerReporter({}, { runHistory: history });
     const result = await reporter.report(
       msg({
         runId,
@@ -457,5 +454,175 @@ describe("#162 cycle 14-15: attribution and the credential boundary", () => {
     for (const key of ["GH_STORY_TOKEN", "GH_RELEASE_TOKEN", "GITHUB_TOKEN"]) {
       expect(ALLOWED_ENV_KEYS.has(key)).toBe(false);
     }
+  });
+});
+
+describe("GitHubCommentReporter comment URL", () => {
+  it("returns the canonical web URL of the posted comment", async () => {
+    const { subject, calls } = makeReporter();
+    const message = msg({
+      kind: "question",
+      question: "Which branch targets this?",
+      eventId: "q1",
+      occurredAt: "2026-09-24T12:01:00.000Z",
+    });
+    const res = await subject.report(message);
+    expect(res.ok).toBe(true);
+    expect(res.commentId).toBeGreaterThan(0);
+    expect(res.commentUrl).toBe(
+      `https://github.com/ricardoblackskye/agent-eve/issues/${message.issue}#issuecomment-${res.commentId}`,
+    );
+    expect(calls.length).toBe(1);
+  });
+
+  it("returns the comment URL when editing an existing comment", async () => {
+    const { subject } = makeReporter();
+    await subject.report(
+      msg({
+        kind: "question",
+        question: "First",
+        eventId: "q1",
+        occurredAt: "2026-09-24T12:01:00.000Z",
+      }),
+    );
+    const message = msg({
+      kind: "question",
+      question: "Second",
+      eventId: "q2",
+      occurredAt: "2026-09-24T12:02:00.000Z",
+    });
+    const second = await subject.report(message);
+    expect(second.edited).toBe(true);
+    expect(second.commentUrl).toBe(
+      `https://github.com/ricardoblackskye/agent-eve/issues/${message.issue}#issuecomment-${second.commentId}`,
+    );
+  });
+});
+
+describe("RunHistoryWorkerReporter propagates the posted comment reference", () => {
+  it("records the posted GitHub comment as a reference on the blocked worker.question event", async () => {
+    const history = new SqliteRunHistoryStore(":memory:", () => "q-run-t2");
+    const accepted = await history.acceptDelivery({
+      deliveryId: "qt2",
+      repo: "ricardoblackskye/agent-eve",
+      issue: 260,
+      receivedAt: "2026-09-24T12:00:00.000Z",
+    });
+    const runId = accepted.value?.runId;
+    expect(runId).toBeTruthy();
+    const store = new MemoryStore();
+    const { impl, calls } = fakeFetch();
+    const reporter = createWorkerReporter(
+      {
+        DF_REPORTER_PROVIDER: "github",
+        GH_STORY_TOKEN: TOKEN,
+        DF_WORKER_ALLOWED_REPOS: "ricardoblackskye/agent-eve",
+      },
+      { store, runHistory: history, fetchImpl: impl },
+    );
+    const message = msg({
+      runId: runId!,
+      kind: "question",
+      question: "Which branch targets this?",
+      eventId: "q1",
+      occurredAt: "2026-09-24T12:01:00.000Z",
+      issue: 260,
+    });
+    const result = await reporter.report(message);
+    expect(result.ok).toBe(true);
+    expect(calls.length).toBe(1);
+    const events = (await history.listRunEvents(runId!)).value?.items ?? [];
+    const question = events.find((e) => e.event.type === "worker.question");
+    expect(question).toBeDefined();
+    expect(question!.event.status).toBe("blocked");
+    expect(question!.event.commentReference).toMatchObject({
+      provider: "github",
+      id: 5001,
+      url: "https://github.com/ricardoblackskye/agent-eve/issues/260#issuecomment-5001",
+    });
+  });
+});
+
+describe("RunHistoryWorkerReporter fail-closed and idempotent (#260)", () => {
+  it("records the run blocked even when the GitHub post is refused", async () => {
+    const history = new SqliteRunHistoryStore(":memory:", () => "fc-run");
+    const accepted = await history.acceptDelivery({
+      deliveryId: "fc",
+      repo: "ricardoblackskye/agent-eve",
+      issue: 260,
+      receivedAt: "2026-09-24T12:00:00.000Z",
+    });
+    const runId = accepted.value?.runId;
+    expect(runId).toBeTruthy();
+    const store = new MemoryStore();
+    const { impl } = fakeFetch();
+    const reporter = createWorkerReporter(
+      {
+        DF_REPORTER_PROVIDER: "github",
+        GH_STORY_TOKEN: TOKEN,
+        DF_WORKER_ALLOWED_REPOS: "some-other/repo",
+      },
+      { store, runHistory: history, fetchImpl: impl },
+    );
+    const result = await reporter.report(
+      msg({
+        runId: runId!,
+        kind: "question",
+        question: "Which branch?",
+        eventId: "q1",
+        occurredAt: "2026-09-24T12:01:00.000Z",
+        issue: 260,
+      }),
+    );
+    expect(result.ok).toBe(false);
+    // Fail-closed: the run is recorded as blocked regardless of the post result.
+    const summary = await history.getRun(runId!);
+    expect(summary.value).toMatchObject({ status: "blocked", stage: "worker" });
+    const events = (await history.listRunEvents(runId!)).value?.items ?? [];
+    const question = events.find((e) => e.event.type === "worker.question");
+    expect(question).toBeDefined();
+    expect(question!.event.commentReference).toBeUndefined();
+  });
+
+  it("is idempotent when the same worker.question is reported again", async () => {
+    const history = new SqliteRunHistoryStore(":memory:", () => "idem-run");
+    const accepted = await history.acceptDelivery({
+      deliveryId: "idem",
+      repo: "ricardoblackskye/agent-eve",
+      issue: 260,
+      receivedAt: "2026-09-24T12:00:00.000Z",
+    });
+    const runId = accepted.value?.runId;
+    expect(runId).toBeTruthy();
+    const store = new MemoryStore();
+    const { impl, calls } = fakeFetch();
+    const reporter = createWorkerReporter(
+      {
+        DF_REPORTER_PROVIDER: "github",
+        GH_STORY_TOKEN: TOKEN,
+        DF_WORKER_ALLOWED_REPOS: "ricardoblackskye/agent-eve",
+      },
+      { store, runHistory: history, fetchImpl: impl },
+    );
+    const message = msg({
+      runId: runId!,
+      kind: "question",
+      question: "Which branch?",
+      eventId: "q1",
+      occurredAt: "2026-09-24T12:01:00.000Z",
+      issue: 260,
+    });
+    await expect(reporter.report(message)).resolves.toBeDefined();
+    await expect(reporter.report(message)).resolves.toBeDefined();
+    const events = (await history.listRunEvents(runId!)).value?.items ?? [];
+    const questions = events.filter((e) => e.event.type === "worker.question");
+    expect(questions).toHaveLength(1);
+    expect(questions[0].event.commentReference).toMatchObject({
+      provider: "github",
+      id: 5001,
+      url: "https://github.com/ricardoblackskye/agent-eve/issues/260#issuecomment-5001",
+    });
+    // One POST, then one EDIT (patch) on the retry — not two POSTs.
+    expect(calls.filter((c) => c.method === "POST")).toHaveLength(1);
   });
 });

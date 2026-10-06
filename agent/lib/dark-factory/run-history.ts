@@ -98,6 +98,12 @@ export interface RunEvent {
   latencyMs?: number;
   costUsd?: number;
   prUrl?: string;
+  /**
+   * Reference to the external comment (e.g. a GitHub issue comment) that is
+   * the system of record for this event's question/blocker. Carried only on
+   * `worker.question` events; the ledger stores the reference, never the text.
+   */
+  commentReference?: CommentReference;
 }
 
 export class InvalidRunRecordError extends Error {
@@ -305,10 +311,11 @@ function optionalMeasurement(
   return value;
 }
 
-function optionalPrUrl(value: unknown): string | undefined {
-  if (value === undefined) return undefined;
+type CommentReference = { provider: "github"; id: number; url: string };
+
+function httpUrl(value: unknown, field: string): string {
   if (typeof value !== "string" || value.trim() === "") {
-    return invalid("prUrl", value, "to be an HTTP(S) URL when present");
+    return invalid(field, value, "to be an HTTP(S) URL without credentials");
   }
   try {
     const parsed = new URL(value);
@@ -317,16 +324,40 @@ function optionalPrUrl(value: unknown): string | undefined {
       parsed.username !== "" ||
       parsed.password !== ""
     ) {
-      return invalid(
-        "prUrl",
-        value,
-        "to be an HTTP(S) URL without credentials",
-      );
+      return invalid(field, value, "to be an HTTP(S) URL without credentials");
     }
     return parsed.toString();
   } catch {
-    return invalid("prUrl", value, "to be an HTTP(S) URL when present");
+    return invalid(field, value, "to be an HTTP(S) URL without credentials");
   }
+}
+
+function optionalPrUrl(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  return httpUrl(value, "prUrl");
+}
+
+function commentReference(value: unknown): CommentReference {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return invalid(
+      "commentReference",
+      value,
+      "to be a github comment reference",
+    );
+  }
+  const obj = value as { provider?: unknown; id?: unknown; url?: unknown };
+  if (obj.provider !== "github") {
+    return invalid("commentReference.provider", obj.provider, 'to be "github"');
+  }
+  const id = positiveInteger(obj.id, "commentReference.id");
+  const url = httpUrl(obj.url, "commentReference.url");
+  return { provider: "github", id, url };
+}
+
+function optionalCommentReference(
+  value: unknown,
+): CommentReference | undefined {
+  return value === undefined ? undefined : commentReference(value);
 }
 
 function isTerminal(status: RunStatus): boolean {
@@ -422,6 +453,7 @@ export function toRunEvent(input: Partial<RunEvent>): RunEvent {
   const latencyMs = optionalMeasurement(input.latencyMs, "latencyMs");
   const costUsd = optionalMeasurement(input.costUsd, "costUsd");
   const prUrl = optionalPrUrl(input.prUrl);
+  const commentReference = optionalCommentReference(input.commentReference);
 
   if (type === "run.accepted" && status !== "queued") {
     return invalid("status", status, 'to be "queued" for run.accepted');
@@ -497,6 +529,7 @@ export function toRunEvent(input: Partial<RunEvent>): RunEvent {
     ...(latencyMs !== undefined ? { latencyMs } : {}),
     ...(costUsd !== undefined ? { costUsd } : {}),
     ...(prUrl !== undefined ? { prUrl } : {}),
+    ...(commentReference !== undefined ? { commentReference } : {}),
   };
 }
 

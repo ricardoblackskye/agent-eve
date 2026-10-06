@@ -11,35 +11,46 @@
  *
  * Rules declared outside a layer in this file beat Tailwind's layered ones, so
  * the existing plain-CSS selectors below keep winning where they overlap.
- */@import "tailwindcss";/* Preflight sets h1-h6 { font-size: inherit; font-weight: inherit } and
+ */
+@import "tailwindcss"; /* Preflight sets h1-h6 { font-size: inherit; font-weight: inherit } and
  * ul/ol { list-style: none }. Restore the browser defaults this app relied on,
- * or every heading flattens to body text and every list loses its marker. */h1,
+ * or every heading flattens to body text and every list loses its marker. */
+h1,
 h2,
 h3,
 h4,
 h5,
 h6 {
   font-weight: bold;
-}h1 {
+}
+h1 {
   font-size: 2em;
-}h2 {
+}
+h2 {
   font-size: 1.5em;
-}h3 {
+}
+h3 {
   font-size: 1.17em;
-}h4 {
+}
+h4 {
   font-size: 1em;
-}h5 {
+}
+h5 {
   font-size: 0.83em;
-}h6 {
+}
+h6 {
   font-size: 0.67em;
-}ul,
+}
+ul,
 ol {
   list-style: revert;
-}* {
+}
+* {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
-}body {
+}
+body {
   font-family:
     system-ui,
     -apple-system,
@@ -47,77 +58,93 @@ ol {
   background: #0a0a0a;
   color: #e5e5e5;
   min-height: 100vh;
-}.chat-container {
+}
+.chat-container {
   display: flex;
   flex-direction: column;
   height: 100vh;
   max-width: 48rem;
   margin: 0 auto;
-}header {
+}
+header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
   padding: 1rem;
   border-bottom: 1px solid #222;
-}.status {
+}
+.status {
   font-size: 0.75rem;
   padding: 0.125rem 0.5rem;
   border-radius: 999px;
   background: #222;
-}.status.ready {
+}
+.status.ready {
   background: #1a5;
-}.status.streaming {
+}
+.status.streaming {
   background: #1a5;
-}.status.error {
+}
+.status.error {
   background: #c33;
-}.eve-avatar {
+}
+.eve-avatar {
   width: 150px;
   height: 150px;
   border-radius: 50%;
   object-fit: cover;
   border: 2px solid #333;
   flex-shrink: 0;
-}.error-message {
+}
+.error-message {
   margin: 1rem 1rem 0;
   padding: 0.75rem;
   border: 1px solid #c33;
   border-radius: 0.375rem;
   background: #321414;
   color: #f99;
-}.messages {
+}
+.messages {
   flex: 1;
   overflow-y: auto;
   padding: 1rem;
   display: flex;
   flex-direction: column;
   gap: 1rem;
-}.placeholder {
+}
+.placeholder {
   color: #666;
   text-align: center;
   margin-top: 4rem;
-}.message {
+}
+.message {
   padding: 0.75rem;
   border-radius: 0.5rem;
   max-width: 80%;
-}.message.user {
+}
+.message.user {
   background: #1a3a5c;
   align-self: flex-end;
-}.message.assistant {
+}
+.message.assistant {
   background: #1a1a2e;
   align-self: flex-start;
-}.message strong {
+}
+.message strong {
   display: block;
   font-size: 0.75rem;
   text-transform: uppercase;
   opacity: 0.6;
   margin-bottom: 0.25rem;
-}.composer {
+}
+.composer {
   display: flex;
   gap: 0.5rem;
   padding: 1rem;
   border-top: 1px solid #333;
-}.composer input {
+}
+.composer input {
   flex: 1;
   padding: 0.75rem;
   border: 1px solid #333;
@@ -125,9 +152,11 @@ ol {
   background: #111;
   color: #e5e5e5;
   font-size: 1rem;
-}.composer input:disabled {
+}
+.composer input:disabled {
   opacity: 0.5;
-}.composer button {
+}
+.composer button {
   padding: 0.75rem 1.5rem;
   border: none;
   border-radius: 0.375rem;
@@ -135,84 +164,102 @@ ol {
   color: #fff;
   font-size: 1rem;
   cursor: pointer;
-}.composer button:disabled {
+}
+.composer button:disabled {
   opacity: 0.5;
   cursor: default;
-}.architecture-container {
+}
+.architecture-container {
   max-width: 64rem;
   margin: 0 auto;
   padding: 2rem 1.5rem;
   line-height: 1.7;
-}.architecture-container h1 {
+}
+.architecture-container h1 {
   font-size: 2rem;
   margin-bottom: 1rem;
   color: #e5e5e5;
   border-bottom: 1px solid #333;
   padding-bottom: 0.5rem;
-}.architecture-container h2 {
+}
+.architecture-container h2 {
   font-size: 1.5rem;
   margin-top: 2rem;
   margin-bottom: 0.75rem;
   color: #e5e5e5;
-}.architecture-container h3 {
+}
+.architecture-container h3 {
   font-size: 1.2rem;
   margin-top: 1.5rem;
   margin-bottom: 0.5rem;
   color: #ccc;
-}.architecture-container p {
+}
+.architecture-container p {
   margin-bottom: 1rem;
   color: #bbb;
-}.architecture-container code.inline-code {
+}
+.architecture-container code.inline-code {
   background: #1a1a2e;
   padding: 0.125rem 0.375rem;
   border-radius: 0.25rem;
   font-size: 0.875rem;
   color: #aad;
-}.architecture-container pre:not(.mermaid) {
+}
+.architecture-container pre:not(.mermaid) {
   background: #111;
   border: 1px solid #333;
   border-radius: 0.5rem;
   padding: 1rem;
   overflow-x: auto;
   margin-bottom: 1rem;
-}.architecture-container pre:not(.mermaid) code {
+}
+.architecture-container pre:not(.mermaid) code {
   color: #aad;
   font-size: 0.875rem;
-}.architecture-container table {
+}
+.architecture-container table {
   width: 100%;
   border-collapse: collapse;
   margin-bottom: 1rem;
-}.architecture-container th,
+}
+.architecture-container th,
 .architecture-container td {
   border: 1px solid #333;
   padding: 0.5rem 0.75rem;
   text-align: left;
-}.architecture-container th {
+}
+.architecture-container th {
   background: #1a1a2e;
   color: #ccc;
-}.architecture-container td {
+}
+.architecture-container td {
   color: #bbb;
-}.architecture-container ul,
+}
+.architecture-container ul,
 .architecture-container ol {
   margin-bottom: 1rem;
   padding-left: 1.5rem;
   color: #bbb;
-}.architecture-container li {
+}
+.architecture-container li {
   margin-bottom: 0.25rem;
-}.mermaid-wrapper {
+}
+.mermaid-wrapper {
   background: #0d0d0d;
   border: 1px solid #333;
   border-radius: 0.5rem;
   padding: 1.5rem;
   margin: 1.5rem 0;
   overflow-x: auto;
-}.df-app {
+}
+.df-app {
   min-height: 100vh;
   display: grid;
   grid-template-columns: 104px 1fr;
   background: #0b0d10;
   color: #e4e8ed;
-}.df-rail {
+}
+.df-rail {
   background: #101318;
   border-right: 1px solid #2a3039;
   display: flex;
@@ -220,7 +267,8 @@ ol {
   align-items: center;
   padding: 13px 6px;
   gap: 9px;
-}.df-mark {
+}
+.df-mark {
   width: 32px;
   height: 32px;
   border: 1px solid #5d442c;
@@ -231,8 +279,8 @@ ol {
   font-weight: 800;
   background: #201910;
   margin-bottom: 15px;
-  }
-  .df-rail-link {
+}
+.df-rail-link {
   width: 100%;
   min-height: 30px;
   padding: 7px 8px;
@@ -245,13 +293,16 @@ ol {
   text-decoration: none;
   font-size: 12px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-}.df-rail-link:hover {
+}
+.df-rail-link:hover {
   background: #1a1f26;
   border-color: #39414b;
   color: #ffb454;
-}.df-main {
+}
+.df-main {
   min-width: 0;
-}.df-top {
+}
+.df-top {
   height: 58px;
   padding: 0 22px;
   border-bottom: 1px solid #2a3039;
@@ -260,47 +311,58 @@ ol {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-}.df-brand {
+}
+.df-brand {
   display: flex;
   align-items: center;
   gap: 12px;
-}.df-brand strong {
+}
+.df-brand strong {
   font-size: 13px;
   letter-spacing: 0.02em;
-}.df-brand span {
+}
+.df-brand span {
   font-size: 10px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   color: #5e6875;
   border-left: 1px solid #2a3039;
   padding-left: 12px;
-}.df-live {
+}
+.df-live {
   color: #6ad6a4;
   font-size: 10px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-}.df-content {
+}
+.df-content {
   padding: 20px 22px 30px;
   max-width: 1600px;
   margin: 0 auto;
-}.df-view {
+}
+.df-view {
   display: flex;
   flex-direction: column;
   gap: 15px;
-}.df-head {
+}
+.df-head {
   display: flex;
   justify-content: space-between;
   align-items: flex-end;
   gap: 12px;
-}.df-head h1 {
+}
+.df-head h1 {
   font-size: 20px;
   margin: 0;
-}.df-head p {
+}
+.df-head p {
   font-size: 11px;
   color: #8993a0;
   margin: 4px 0 0;
-}.df-actions {
+}
+.df-actions {
   display: flex;
   gap: 7px;
-}.df-btn {
+}
+.df-btn {
   background: #1a1f26;
   border: 1px solid #2a3039;
   color: #e4e8ed;
@@ -309,11 +371,13 @@ ol {
   font-size: 12px;
   cursor: pointer;
   text-decoration: none;
-}.df-kpis {
+}
+.df-kpis {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 12px;
-}.df-kpi {
+}
+.df-kpi {
   background: #15191f;
   border: 1px solid #2a3039;
   border-radius: 10px;
@@ -322,78 +386,80 @@ ol {
   flex-direction: column;
   gap: 4px;
 }
-.df-kpi-label{
-    font-size: 10px;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    color: #8993a0;
-    letter-spacing: 0.06em;
-  }
-.df-kpi-value{
-    font-size: 26px;
-    font-weight: 700;
-  }
-.df-kpi-hint{
-    font-size: 11px;
-    color: #5e6875;
-  }
+.df-kpi-label {
+  font-size: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: #8993a0;
+  letter-spacing: 0.06em;
+}
+.df-kpi-value {
+  font-size: 26px;
+  font-weight: 700;
+}
+.df-kpi-hint {
+  font-size: 11px;
+  color: #5e6875;
+}
 .df-grid {
   display: grid;
   grid-template-columns: 1.1fr 1.4fr;
   gap: 14px;
-}.df-stack {
+}
+.df-stack {
   display: flex;
   flex-direction: column;
   gap: 14px;
-}.df-panel {
+}
+.df-panel {
   background: #15191f;
   border: 1px solid #2a3039;
   border-radius: 10px;
   overflow: hidden;
 }
-.df-panel-head{
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 10px 14px;
-    border-bottom: 1px solid #2a3039;
-    font-size: 11px;
-    letter-spacing: 0.06em;
-    color: #8993a0;
-  }
-.df-panel-head strong{
-    color: #e4e8ed;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  }
-.df-panel-body{
-    padding: 14px;
-  }
+.df-panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  border-bottom: 1px solid #2a3039;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: #8993a0;
+}
+.df-panel-head strong {
+  color: #e4e8ed;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.df-panel-body {
+  padding: 14px;
+}
 .df-mix {
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
 }
-.df-mix-item{
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    font-size: 12px;
-    color: #8993a0;
-  }
-.df-mix-item b{
-    color: #e4e8ed;
-  }
-.df-mix-completed b{
-    color: #6ad6a4;
-  }
-.df-mix-active b{
-    color: #77b7ff;
-  }
-.df-mix-blocked b{
-    color: #f1cf70;
-  }
-.df-mix-failed b{
-    color: #ff7883;
-  }
+.df-mix-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: #8993a0;
+}
+.df-mix-item b {
+  color: #e4e8ed;
+}
+.df-mix-completed b {
+  color: #6ad6a4;
+}
+.df-mix-active b {
+  color: #77b7ff;
+}
+.df-mix-blocked b {
+  color: #f1cf70;
+}
+.df-mix-failed b {
+  color: #ff7883;
+}
 /* Outcome trend as a line chart (#258). It was a row of flex bars, which read as
    a single blue block whenever the window held one or two dates. */
 .df-trend-chart {
@@ -416,51 +482,55 @@ ol {
   grid-template-columns: repeat(3, 1fr);
   gap: 10px;
 }
-.df-snapshot-item{
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-  }
-.df-snapshot-item small{
-    font-size: 10px;
-    color: #5e6875;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-  }
-.df-snapshot-item b{
-    font-size: 15px;
-  }
+.df-snapshot-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.df-snapshot-item small {
+  font-size: 10px;
+  color: #5e6875;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.df-snapshot-item b {
+  font-size: 15px;
+}
 .df-recent {
   display: flex;
   flex-direction: column;
 }
-.df-recent-row{
-    display: grid;
-    grid-template-columns: 76px 1fr auto;
-    align-items: center;
-    gap: 12px;
-    padding: 9px 0;
-    border-bottom: 1px solid #20252d;
-  }
-.df-recent-row:last-child{
-    border-bottom: none;
-  }
+.df-recent-row {
+  display: grid;
+  grid-template-columns: 76px 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 0;
+  border-bottom: 1px solid #20252d;
+}
+.df-recent-row:last-child {
+  border-bottom: none;
+}
 .df-run-id {
   font-size: 11px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   color: #ffb454;
-}.df-recent-title {
+}
+.df-recent-title {
   font-size: 13px;
-}.df-recent-sub {
+}
+.df-recent-sub {
   font-size: 11px;
   color: #5e6875;
-}.df-recent-meta {
+}
+.df-recent-meta {
   display: flex;
   align-items: center;
   gap: 8px;
   font-size: 11px;
   color: #8993a0;
-}.df-pill {
+}
+.df-pill {
   display: inline-block;
   padding: 2px 8px;
   border-radius: 999px;
@@ -469,39 +539,42 @@ ol {
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
-.df-pill-active{
-    background: #172b40;
-    color: #77b7ff;
-  }
-.df-pill-blocked{
-    background: #392f1a;
-    color: #f1cf70;
-  }
-.df-pill-completed{
-    background: #143126;
-    color: #6ad6a4;
-  }
-.df-pill-failed{
-    background: #3b1f24;
-    color: #ff7883;
-  }
+.df-pill-active {
+  background: #172b40;
+  color: #77b7ff;
+}
+.df-pill-blocked {
+  background: #392f1a;
+  color: #f1cf70;
+}
+.df-pill-completed {
+  background: #143126;
+  color: #6ad6a4;
+}
+.df-pill-failed {
+  background: #3b1f24;
+  color: #ff7883;
+}
 .df-filters {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   align-items: center;
-}.df-field {
+}
+.df-field {
   background: #111419;
   border: 1px solid #2a3039;
   color: #e4e8ed;
   border-radius: 6px;
   padding: 6px 9px;
   font-size: 12px;
-}.df-filters small {
+}
+.df-filters small {
   color: #5e6875;
   font-size: 10px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-}.df-table {
+}
+.df-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 12px;
@@ -509,7 +582,8 @@ ol {
   border: 1px solid #2a3039;
   border-radius: 10px;
   overflow: hidden;
-}.df-table th {
+}
+.df-table th {
   text-align: left;
   padding: 8px 10px;
   color: #8993a0;
@@ -517,20 +591,26 @@ ol {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   text-transform: uppercase;
   border-bottom: 1px solid #2a3039;
-}.df-table td {
+}
+.df-table td {
   padding: 8px 10px;
   border-bottom: 1px solid #20252d;
-}.df-table-row {
+}
+.df-table-row {
   cursor: pointer;
-}.df-table-row:hover {
+}
+.df-table-row:hover {
   background: #1a1f26;
-}.df-table-row.selected {
+}
+.df-table-row.selected {
   background: #1c232b;
-}.df-metrics {
+}
+.df-metrics {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
   gap: 10px;
-}.df-metric {
+}
+.df-metric {
   display: flex;
   flex-direction: column;
   gap: 3px;
@@ -538,14 +618,17 @@ ol {
   border: 1px solid #2a3039;
   border-radius: 8px;
   padding: 9px 11px;
-}.df-metric small {
+}
+.df-metric small {
   font-size: 10px;
   color: #5e6875;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-}.df-metric b {
+}
+.df-metric b {
   font-size: 15px;
-}.df-detail {
+}
+.df-detail {
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -554,60 +637,78 @@ ol {
   border-radius: 10px;
   padding: 14px;
 }
-.df-detail-id{
-    font-size: 10px;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    color: #8993a0;
-  }
+.df-detail-id {
+  font-size: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: #8993a0;
+}
 .df-detail h2 {
   margin: 4px 0 8px;
   font-size: 18px;
-}.df-links {
+}
+.df-links {
   display: flex;
   gap: 12px;
-}.df-links a {
+}
+.df-links a {
   color: #77b7ff;
   font-size: 12px;
-}.df-detail-grid {
+}
+.df-detail-grid {
   display: grid;
   grid-template-columns: 1.5fr 1fr;
   gap: 14px;
   align-items: start;
-}.df-timeline {
+}
+.df-timeline {
   display: flex;
   flex-direction: column;
   gap: 10px;
-}.df-event {
+}
+.df-event {
   display: grid;
   grid-template-columns: 66px 1fr;
   gap: 10px;
 }
-.df-event-time{
-    font-size: 11px;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    color: #5e6875;
-  }
-.df-event-body strong{
-    font-size: 13px;
-    display: block;
-  }
-.df-event-body p{
-    margin: 2px 0 0;
-    font-size: 11px;
-    color: #8993a0;
-  }
+.df-event-time {
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: #5e6875;
+}
+.df-event-body strong {
+  font-size: 13px;
+  display: block;
+}
+.df-event-body p {
+  margin: 2px 0 0;
+  font-size: 11px;
+  color: #8993a0;
+}
+.df-event-comment {
+  display: inline-block;
+  margin-top: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #4aa3ff;
+  text-decoration: none;
+}
+.df-event-comment:hover {
+  text-decoration: underline;
+}
 .df-checkpoints {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-}.df-checkpoint {
+}
+.df-checkpoint {
   background: #1a1f26;
   border: 1px solid #2a3039;
   border-radius: 999px;
   padding: 3px 10px;
   font-size: 11px;
   color: #8993a0;
-}.df-state {
+}
+.df-state {
   padding: 22px;
   text-align: center;
   border: 1px dashed #2a3039;
@@ -615,51 +716,60 @@ ol {
   color: #8993a0;
   background: #13171c;
 }
-.df-state-error{
-    color: #ff7883;
-    border-color: #3b1f24;
-  }
-.df-state-auth{
-    color: #f1cf70;
-    border-color: #392f1a;
-  }
+.df-state-error {
+  color: #ff7883;
+  border-color: #3b1f24;
+}
+.df-state-auth {
+  color: #f1cf70;
+  border-color: #392f1a;
+}
 .df-control-card {
   margin-bottom: 16px;
-}.df-control-panel {
+}
+.df-control-panel {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
   min-height: 44px;
-}.df-control-state,
+}
+.df-control-state,
 .df-control-actions {
   display: flex;
   align-items: center;
   gap: 10px;
-}.df-control-state small,
+}
+.df-control-state small,
 .df-control-state time,
 .df-control-terminal {
   color: #8993a0;
   font-size: 11px;
-}.df-control-indicator {
+}
+.df-control-indicator {
   width: 9px;
   height: 9px;
   border-radius: 50%;
   background: #63c48b;
   box-shadow: 0 0 9px #63c48b55;
-}.df-control-indicator.is-paused {
+}
+.df-control-indicator.is-paused {
   background: #f1cf70;
   box-shadow: 0 0 9px #f1cf7055;
-}.df-control-indicator.is-stopped {
+}
+.df-control-indicator.is-stopped {
   background: #ff7883;
   box-shadow: 0 0 9px #ff788355;
-}.df-btn-danger {
+}
+.df-btn-danger {
   color: #ff9ca4;
   border-color: #69343a;
-}.df-control-notice {
+}
+.df-control-notice {
   margin: 0;
   color: #8993a0;
-}@media (max-width: 700px) {
+}
+@media (max-width: 700px) {
   .df-control-panel {
     align-items: flex-start;
     flex-direction: column;
@@ -668,19 +778,21 @@ ol {
   .df-control-state {
     flex-wrap: wrap;
   }
-}@media (max-width: 1050px) {
+}
+@media (max-width: 1050px) {
   .df-grid {
     grid-template-columns: 1fr;
   }
 
   .df-detail-grid {
-      grid-template-columns: 1fr;
-    }
+    grid-template-columns: 1fr;
+  }
 
   .df-kpis {
     grid-template-columns: repeat(2, 1fr);
   }
-}@media (max-width: 700px) {
+}
+@media (max-width: 700px) {
   .df-content {
     padding: 14px 11px;
   }
@@ -689,21 +801,24 @@ ol {
     flex-direction: column;
     align-items: flex-start;
   }
-}/* Customer usage panel (#213, epic #212 R1): per-tenant reporting. */.df-tenant-select {
+} /* Customer usage panel (#213, epic #212 R1): per-tenant reporting. */
+.df-tenant-select {
   display: flex;
   align-items: center;
   gap: 8px;
   margin: 0 0 10px;
   font-size: 13px;
-}.df-tenant-select select {
+}
+.df-tenant-select select {
   padding: 3px 6px;
   border: 1px solid #333;
   border-radius: 4px;
   background: #111;
   color: inherit;
   font: inherit;
-}/* Unattributed usage is not any customer's row — keep it visually distinct
-   so an operator never reads it as a customer's spend. */.df-tenant-unassigned th,
+} /* Unattributed usage is not any customer's row — keep it visually distinct
+   so an operator never reads it as a customer's spend. */
+.df-tenant-unassigned th,
 .df-tenant-unassigned td {
   opacity: 0.7;
   font-style: italic;

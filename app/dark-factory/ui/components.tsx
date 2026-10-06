@@ -387,6 +387,16 @@ export function EventTimeline({
           <div className="df-event-body">
             <strong>{entry.label}</strong>
             <p>{entry.detail}</p>
+            {entry.commentUrl ? (
+              <a
+                className="df-event-comment"
+                href={entry.commentUrl}
+                target="_blank"
+                rel="noreferrer"
+              >
+                View question on GitHub ↗
+              </a>
+            ) : null}
           </div>
         </div>
       ))}

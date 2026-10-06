@@ -83,6 +83,8 @@ export interface TimelineEntry {
   label: string;
   detail: string;
   status?: RunStatus;
+  /** When the event references an external comment (the worker question on GitHub), its URL. */
+  commentUrl?: string;
 }
 
 export interface Checkpoint {
@@ -321,6 +323,7 @@ export function toDetailView({
     label: EVENT_LABELS[event.type] ?? event.type,
     detail: event.status ? `${event.stage} · ${event.status}` : event.stage,
     status: event.status,
+    commentUrl: event.commentReference?.url,
   }));
 
   const summaryTiles: MetricItem[] = [
