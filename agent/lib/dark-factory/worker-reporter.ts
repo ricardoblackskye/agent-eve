@@ -125,7 +125,8 @@ export function toWorkerMessage(input: Partial<WorkerMessage>): WorkerMessage {
   };
 
   if (input.eventId !== undefined) {
-    const eventId = typeof input.eventId === "string" ? input.eventId.trim() : "";
+    const eventId =
+      typeof input.eventId === "string" ? input.eventId.trim() : "";
     if (
       !eventId ||
       eventId.length > 256 ||
@@ -134,14 +135,21 @@ export function toWorkerMessage(input: Partial<WorkerMessage>): WorkerMessage {
         return code < 0x20 || code === 0x7f;
       })
     ) {
-      throw new InvalidWorkerMessageError("Worker message eventId must be a valid non-empty identifier.");
+      throw new InvalidWorkerMessageError(
+        "Worker message eventId must be a valid non-empty identifier.",
+      );
     }
     message.eventId = eventId;
   }
   if (input.occurredAt !== undefined) {
-    const time = typeof input.occurredAt === "string" ? Date.parse(input.occurredAt) : Number.NaN;
+    const time =
+      typeof input.occurredAt === "string"
+        ? Date.parse(input.occurredAt)
+        : Number.NaN;
     if (!Number.isFinite(time)) {
-      throw new InvalidWorkerMessageError("Worker message occurredAt must be a valid timestamp.");
+      throw new InvalidWorkerMessageError(
+        "Worker message occurredAt must be a valid timestamp.",
+      );
     }
     message.occurredAt = new Date(time).toISOString();
   }
@@ -261,6 +269,8 @@ export interface ReportResult {
   /** True when this emission updated the recorded comment instead of posting. */
   edited?: boolean;
   error?: string;
+  /** Canonical web URL of the posted/edited comment, when one exists. */
+  commentUrl?: string;
 }
 
 export interface WorkerReporter {
@@ -357,6 +367,18 @@ export interface GitHubCommentReporterOptions {
  * orchestrator's process and refuses anything outside the allow-list before it
  * makes a call.
  */
+export /** Build the canonical web URL for a GitHub issue comment. The host mirrors the
+ *  writer's fixed public-GitHub apiBase; a GHES deployment would derive the web
+ *  host from the configured api base instead of hardcoding it. */
+function commentUrlFor(
+  owner: string,
+  repoName: string,
+  issue: number,
+  id: number,
+): string {
+  return `https://github.com/${owner}/${repoName}/issues/${issue}#issuecomment-${id}`;
+}
+
 export class GitHubCommentReporter implements WorkerReporter {
   id = "github";
   mode = "live" as const;
@@ -426,6 +448,7 @@ export class GitHubCommentReporter implements WorkerReporter {
         providerId: this.id,
         commentId: recorded,
         edited: true,
+        commentUrl: commentUrlFor(owner, repoName, valid.issue, recorded),
       };
     }
 
@@ -462,21 +485,30 @@ export class GitHubCommentReporter implements WorkerReporter {
       providerId: this.id,
       commentId: posted.id,
       edited: false,
+      commentUrl: commentUrlFor(owner, repoName, valid.issue, posted.id),
     };
   }
 
   /** A missing key is empty state; an unreadable key is an operational failure. */
   private async readRecord(
     runId: string,
-  ): Promise<{ ok: true; record: ReporterRecord } | { ok: false; error: string }> {
+  ): Promise<
+    { ok: true; record: ReporterRecord } | { ok: false; error: string }
+  > {
     let read: StateReadResult<ReporterRecord>;
     try {
       read = await this.store.get<ReporterRecord>(reporterKey(runId));
     } catch {
-      return { ok: false, error: `Cannot read reporter state from '${this.store.id}'.` };
+      return {
+        ok: false,
+        error: `Cannot read reporter state from '${this.store.id}'.`,
+      };
     }
     if (!read.ok) {
-      return { ok: false, error: `Cannot read reporter state from '${this.store.id}'.` };
+      return {
+        ok: false,
+        error: `Cannot read reporter state from '${this.store.id}'.`,
+      };
     }
     if (read.value === null) return { ok: true, record: { commentIds: {} } };
     if (
@@ -485,7 +517,11 @@ export class GitHubCommentReporter implements WorkerReporter {
       typeof read.value.commentIds !== "object" ||
       read.value.commentIds === null
     ) {
-      return { ok: false, error: "Reporter state is malformed; refusing to post a duplicate comment." };
+      return {
+        ok: false,
+        error:
+          "Reporter state is malformed; refusing to post a duplicate comment.",
+      };
     }
     for (const [kind, id] of Object.entries(read.value.commentIds)) {
       if (
@@ -493,7 +529,11 @@ export class GitHubCommentReporter implements WorkerReporter {
         !Number.isSafeInteger(id) ||
         (id as number) <= 0
       ) {
-        return { ok: false, error: "Reporter state is malformed; refusing to post a duplicate comment." };
+        return {
+          ok: false,
+          error:
+            "Reporter state is malformed; refusing to post a duplicate comment.",
+        };
       }
     }
     return { ok: true, record: { commentIds: { ...read.value.commentIds } } };
@@ -505,9 +545,7 @@ export class GitHubCommentReporter implements WorkerReporter {
   ): Promise<{ ok: boolean }> {
     try {
       const saved = await this.store.save(reporterKey(runId), record);
-      return saved.ok
-        ? { ok: true }
-        : { ok: false };
+      return saved.ok ? { ok: true } : { ok: false };
     } catch {
       return { ok: false };
     }

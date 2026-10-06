@@ -227,10 +227,7 @@ describe("#162 cycle 3-4: the default is console and writes NOTHING", () => {
     });
     const runId = accepted.value?.runId;
     if (!runId) throw new Error("run acceptance returned no runId");
-    const reporter = createWorkerReporter(
-      {},
-      { runHistory: history },
-    );
+    const reporter = createWorkerReporter({}, { runHistory: history });
     const message = msg({
       runId,
       attempt: 2,
@@ -243,7 +240,10 @@ describe("#162 cycle 3-4: the default is console and writes NOTHING", () => {
     const summary = await history.getRun(runId);
     const events = await history.listRunEvents(runId);
 
-    expect(summary.value).toMatchObject({ status: "running", iterationCount: 2 });
+    expect(summary.value).toMatchObject({
+      status: "running",
+      iterationCount: 2,
+    });
     expect(events.value?.items.map((item) => item.event.type)).toEqual([
       "run.accepted",
       "worker.progress",
@@ -261,10 +261,7 @@ describe("#162 cycle 3-4: the default is console and writes NOTHING", () => {
     });
     const runId = accepted.value?.runId;
     if (!runId) throw new Error("run acceptance returned no runId");
-    const reporter = createWorkerReporter(
-      {},
-      { runHistory: history },
-    );
+    const reporter = createWorkerReporter({}, { runHistory: history });
     const result = await reporter.report(
       msg({
         runId,
@@ -457,5 +454,47 @@ describe("#162 cycle 14-15: attribution and the credential boundary", () => {
     for (const key of ["GH_STORY_TOKEN", "GH_RELEASE_TOKEN", "GITHUB_TOKEN"]) {
       expect(ALLOWED_ENV_KEYS.has(key)).toBe(false);
     }
+  });
+});
+
+describe("GitHubCommentReporter comment URL", () => {
+  it("returns the canonical web URL of the posted comment", async () => {
+    const { subject, calls } = makeReporter();
+    const message = msg({
+      kind: "question",
+      question: "Which branch targets this?",
+      eventId: "q1",
+      occurredAt: "2026-09-24T12:01:00.000Z",
+    });
+    const res = await subject.report(message);
+    expect(res.ok).toBe(true);
+    expect(res.commentId).toBeGreaterThan(0);
+    expect(res.commentUrl).toBe(
+      `https://github.com/ricardoblackskye/agent-eve/issues/${message.issue}#issuecomment-${res.commentId}`,
+    );
+    expect(calls.length).toBe(1);
+  });
+
+  it("returns the comment URL when editing an existing comment", async () => {
+    const { subject } = makeReporter();
+    await subject.report(
+      msg({
+        kind: "question",
+        question: "First",
+        eventId: "q1",
+        occurredAt: "2026-09-24T12:01:00.000Z",
+      }),
+    );
+    const message = msg({
+      kind: "question",
+      question: "Second",
+      eventId: "q2",
+      occurredAt: "2026-09-24T12:02:00.000Z",
+    });
+    const second = await subject.report(message);
+    expect(second.edited).toBe(true);
+    expect(second.commentUrl).toBe(
+      `https://github.com/ricardoblackskye/agent-eve/issues/${message.issue}#issuecomment-${second.commentId}`,
+    );
   });
 });
