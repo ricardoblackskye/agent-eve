@@ -139,7 +139,10 @@ describe("Dark Factory run detail page", () => {
         );
       }
       return Promise.resolve(
-        jsonResponse({ summary: SUMMARY, events: EVENTS }),
+        jsonResponse({
+          summary: { ...SUMMARY, status: "running" as const },
+          events: EVENTS,
+        }),
       );
     });
     vi.stubGlobal("fetch", fetch);
@@ -171,5 +174,157 @@ describe("Dark Factory run detail page", () => {
         }),
       ),
     );
+  });
+
+  it("for a failed run, shows Resume run only (no Pause run, no Stop run)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: unknown) => {
+        const url = String(input);
+        if (url.includes("/api/dark-factory/control")) {
+          return Promise.resolve(
+            jsonResponse({
+              available: true,
+              factory: { paused: false, updatedAt: "2026-09-25T09:00:00.000Z" },
+              run: {
+                paused: false,
+                stopped: false,
+                updatedAt: "2026-09-25T09:00:00.000Z",
+              },
+              events: [],
+            }),
+          );
+        }
+        return Promise.resolve(
+          jsonResponse({
+            summary: { ...SUMMARY, status: "failed" as const },
+            events: EVENTS,
+          }),
+        );
+      }),
+    );
+    const { container } = render(<DarkFactoryRunDetailPage />);
+    await waitFor(() =>
+      expect(
+        container.querySelector('[aria-label="Run controls"]'),
+      ).not.toBeNull(),
+    );
+    expect(screen.getByRole("button", { name: "Resume run" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Stop run" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Pause run" })).toBeNull();
+  });
+
+  it("for a running run, shows Pause run and Stop run", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: unknown) => {
+        const url = String(input);
+        if (url.includes("/api/dark-factory/control")) {
+          return Promise.resolve(
+            jsonResponse({
+              available: true,
+              factory: { paused: false, updatedAt: "2026-09-25T09:00:00.000Z" },
+              run: {
+                paused: false,
+                stopped: false,
+                updatedAt: "2026-09-25T09:00:00.000Z",
+              },
+              events: [],
+            }),
+          );
+        }
+        return Promise.resolve(
+          jsonResponse({
+            summary: { ...SUMMARY, status: "running" as const },
+            events: EVENTS,
+          }),
+        );
+      }),
+    );
+    const { container } = render(<DarkFactoryRunDetailPage />);
+    await waitFor(() =>
+      expect(
+        container.querySelector('[aria-label="Run controls"]'),
+      ).not.toBeNull(),
+    );
+    expect(screen.getByRole("button", { name: "Pause run" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Stop run" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Resume run" })).toBeNull();
+  });
+
+  it("for a succeeded run, shows neither Resume nor Stop", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: unknown) => {
+        const url = String(input);
+        if (url.includes("/api/dark-factory/control")) {
+          return Promise.resolve(
+            jsonResponse({
+              available: true,
+              factory: { paused: false, updatedAt: "2026-09-25T09:00:00.000Z" },
+              run: {
+                paused: false,
+                stopped: false,
+                updatedAt: "2026-09-25T09:00:00.000Z",
+              },
+              events: [],
+            }),
+          );
+        }
+        return Promise.resolve(
+          jsonResponse({
+            summary: { ...SUMMARY, status: "succeeded" as const },
+            events: EVENTS,
+          }),
+        );
+      }),
+    );
+    const { container } = render(<DarkFactoryRunDetailPage />);
+    await waitFor(() =>
+      expect(
+        container.querySelector('[aria-label="Run controls"]'),
+      ).not.toBeNull(),
+    );
+    expect(screen.queryByRole("button", { name: "Resume run" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Stop run" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Pause run" })).toBeNull();
+  });
+
+  it("for a stopped run, shows neither Resume nor Stop", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: unknown) => {
+        const url = String(input);
+        if (url.includes("/api/dark-factory/control")) {
+          return Promise.resolve(
+            jsonResponse({
+              available: true,
+              factory: { paused: false, updatedAt: "2026-09-25T09:00:00.000Z" },
+              run: {
+                paused: false,
+                stopped: true,
+                updatedAt: "2026-09-25T09:00:00.000Z",
+              },
+              events: [],
+            }),
+          );
+        }
+        return Promise.resolve(
+          jsonResponse({
+            summary: { ...SUMMARY, status: "running" as const },
+            events: EVENTS,
+          }),
+        );
+      }),
+    );
+    const { container } = render(<DarkFactoryRunDetailPage />);
+    await waitFor(() =>
+      expect(
+        container.querySelector('[aria-label="Run controls"]'),
+      ).not.toBeNull(),
+    );
+    expect(screen.queryByRole("button", { name: "Resume run" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Stop run" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Pause run" })).toBeNull();
   });
 });
