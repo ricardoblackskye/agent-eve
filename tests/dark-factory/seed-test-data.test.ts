@@ -34,8 +34,8 @@ function closeStores(s: SeedStores): void {
   s.cost.close?.();
   s.runHistory.close();
   s.control.close?.();
-    s.membership.close?.();
-  }
+  s.membership.close?.();
+}
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "df-seed-"));
@@ -45,11 +45,11 @@ beforeEach(() => {
     cost: new InMemoryCostBudgetProvider(),
     runHistory: new SqliteRunHistoryStore(join(dir, "runs.sqlite")),
     control: createControlStore({
-          DF_CONTROL_DRIVER: "sqlite",
-          DF_CONTROL_DB_PATH: join(dir, "control.sqlite"),
-        }),
-        membership: new InMemoryMembershipProvider(),
-      };
+      DF_CONTROL_DRIVER: "sqlite",
+      DF_CONTROL_DB_PATH: join(dir, "control.sqlite"),
+    }),
+    membership: new InMemoryMembershipProvider(),
+  };
 });
 
 afterEach(() => {
@@ -163,11 +163,37 @@ describe("runSeed scenarios", () => {
   });
 
   it("is idempotent: a second run adds nothing", async () => {
-    await runSeed(stores, { scenarios: ["happy-path", "unassigned", "over-budget"] });
+    await runSeed(stores, {
+      scenarios: ["happy-path", "unassigned", "over-budget"],
+    });
     const before = await snapshot();
-    await runSeed(stores, { scenarios: ["happy-path", "unassigned", "over-budget"] });
+    await runSeed(stores, {
+      scenarios: ["happy-path", "unassigned", "over-budget"],
+    });
     const after = await snapshot();
     expect(after).toEqual(before);
+  });
+
+  it("happy-path seeds a run with the details the Run Details page shows", async () => {
+    await runSeed(stores, { scenarios: ["happy-path"] });
+    const listed = await stores.runHistory.listRuns({ limit: 100 });
+    expect(listed.ok).toBe(true);
+    const run = listed.value?.items?.find(
+      (r) => r.repo === "seed-org/happy-repo",
+    );
+    expect(run).toBeTruthy();
+    const summary = await stores.runHistory.getRun(run?.runId ?? "");
+    expect(summary?.ok).toBe(true);
+    const s = summary?.value;
+    expect(s?.startedAt).toBeDefined(); // Started
+    expect(s?.completedAt).toBeDefined(); // Elapsed = completedAt - startedAt
+    expect(s?.attemptCount).toBeGreaterThan(0); // Attempts
+    expect(s?.reviewCount).toBeGreaterThan(0); // Review round
+    expect(s?.iterationCount).toBeGreaterThan(0); // Iterations
+    expect(s?.fixCycleCount).toBeGreaterThan(0); // Fix cycles
+    expect(s?.costUsd).toBeDefined(); // Measured cost (£)
+    expect(s?.latencyMs).toBeDefined(); // Latency
+    expect(s?.prUrl).toBeDefined(); // PR link
   });
 });
 
