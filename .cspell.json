@@ -177,7 +177,9 @@
     "nums",
     "darkfactory",
     "isready",
-    "idempotently"
+    "idempotently",
+    "GHES",
+    "issuecomment"
   ],
   "ignorePaths": [
     "node_modules/**",
