@@ -542,3 +542,87 @@ describe("RunHistoryWorkerReporter propagates the posted comment reference", () 
     });
   });
 });
+
+describe("RunHistoryWorkerReporter fail-closed and idempotent (#260)", () => {
+  it("records the run blocked even when the GitHub post is refused", async () => {
+    const history = new SqliteRunHistoryStore(":memory:", () => "fc-run");
+    const accepted = await history.acceptDelivery({
+      deliveryId: "fc",
+      repo: "ricardoblackskye/agent-eve",
+      issue: 260,
+      receivedAt: "2026-09-24T12:00:00.000Z",
+    });
+    const runId = accepted.value?.runId;
+    expect(runId).toBeTruthy();
+    const store = new MemoryStore();
+    const { impl } = fakeFetch();
+    const reporter = createWorkerReporter(
+      {
+        DF_REPORTER_PROVIDER: "github",
+        GH_STORY_TOKEN: TOKEN,
+        DF_WORKER_ALLOWED_REPOS: "some-other/repo",
+      },
+      { store, runHistory: history, fetchImpl: impl },
+    );
+    const result = await reporter.report(
+      msg({
+        runId: runId!,
+        kind: "question",
+        question: "Which branch?",
+        eventId: "q1",
+        occurredAt: "2026-09-24T12:01:00.000Z",
+        issue: 260,
+      }),
+    );
+    expect(result.ok).toBe(false);
+    // Fail-closed: the run is recorded as blocked regardless of the post result.
+    const summary = await history.getRun(runId!);
+    expect(summary.value).toMatchObject({ status: "blocked", stage: "worker" });
+    const events = (await history.listRunEvents(runId!)).value?.items ?? [];
+    const question = events.find((e) => e.event.type === "worker.question");
+    expect(question).toBeDefined();
+    expect(question!.event.commentReference).toBeUndefined();
+  });
+
+  it("is idempotent when the same worker.question is reported again", async () => {
+    const history = new SqliteRunHistoryStore(":memory:", () => "idem-run");
+    const accepted = await history.acceptDelivery({
+      deliveryId: "idem",
+      repo: "ricardoblackskye/agent-eve",
+      issue: 260,
+      receivedAt: "2026-09-24T12:00:00.000Z",
+    });
+    const runId = accepted.value?.runId;
+    expect(runId).toBeTruthy();
+    const store = new MemoryStore();
+    const { impl, calls } = fakeFetch();
+    const reporter = createWorkerReporter(
+      {
+        DF_REPORTER_PROVIDER: "github",
+        GH_STORY_TOKEN: TOKEN,
+        DF_WORKER_ALLOWED_REPOS: "ricardoblackskye/agent-eve",
+      },
+      { store, runHistory: history, fetchImpl: impl },
+    );
+    const message = msg({
+      runId: runId!,
+      kind: "question",
+      question: "Which branch?",
+      eventId: "q1",
+      occurredAt: "2026-09-24T12:01:00.000Z",
+      issue: 260,
+    });
+    await expect(reporter.report(message)).resolves.toBeDefined();
+    await expect(reporter.report(message)).resolves.toBeDefined();
+    const events = (await history.listRunEvents(runId!)).value?.items ?? [];
+    const questions = events.filter((e) => e.event.type === "worker.question");
+    expect(questions).toHaveLength(1);
+    expect(questions[0].event.commentReference).toMatchObject({
+      provider: "github",
+      id: 5001,
+      url: "https://github.com/ricardoblackskye/agent-eve/issues/260#issuecomment-5001",
+    });
+    // One POST, then one EDIT (patch) on the retry — not two POSTs.
+    expect(calls.filter((c) => c.method === "POST")).toHaveLength(1);
+  });
+});

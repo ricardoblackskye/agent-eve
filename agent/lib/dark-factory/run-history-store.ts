@@ -125,6 +125,11 @@ export interface RunHistoryStore {
   ): Promise<RunHistoryWriteResult<RunControlDeliveryReceipt>>;
 
   appendEvent(event: RunEvent): Promise<RunHistoryWriteResult<RunSummary>>;
+  updateCommentReference(
+    runId: string,
+    eventId: string,
+    reference: RunEvent["commentReference"],
+  ): Promise<void>;
   getRun(runId: string): Promise<RunHistoryReadResult<RunSummary>>;
   listRuns(
     options?: RunListOptions,
@@ -407,6 +412,17 @@ function writeSummary(db: DatabaseSync, summary: RunSummary): void {
     summary.prUrl ?? null,
     summary.tenantId ?? null,
   );
+}
+
+function updateCommentReference(
+  db: DatabaseSync,
+  runId: string,
+  eventId: string,
+  reference: RunEvent["commentReference"],
+): void {
+  db.prepare(
+    `UPDATE df_run_events SET comment_reference = ? WHERE run_id = ? AND event_id = ?`,
+  ).run(reference ? JSON.stringify(reference) : null, runId, eventId);
 }
 
 function writeEvent(db: DatabaseSync, event: RunEvent): void {
@@ -988,6 +1004,17 @@ export class SqliteRunHistoryStore implements RunHistoryStore {
     } catch (error) {
       return blocked(this.id, error);
     }
+  }
+
+  async updateCommentReference(
+    runId: string,
+    eventId: string,
+    reference: RunEvent["commentReference"],
+  ): Promise<void> {
+    const db = this.handle();
+    if (!db)
+      throw new Error(`SQLite run history is unavailable at '${this.path}'.`);
+    updateCommentReference(db, runId, eventId, reference);
   }
 
   async getRun(runId: string): Promise<RunHistoryReadResult<RunSummary>> {

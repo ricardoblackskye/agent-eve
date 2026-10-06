@@ -85,6 +85,15 @@ export class ConsoleRunHistoryStore implements RunHistoryStore {
       error: RUN_HISTORY_NOT_CONFIGURED,
     };
   }
+
+  async updateCommentReference(
+    _runId: string,
+    _eventId: string,
+    _reference: RunEvent["commentReference"],
+  ): Promise<void> {
+    // Console store refuses all writes; there is no persisted run to attach to.
+  }
+
   async getRun(_runId: string): Promise<RunHistoryReadResult<RunSummary>> {
     return {
       ok: false,

@@ -311,20 +311,9 @@ class RunHistoryWorkerReporter implements WorkerReporter {
       );
     }
 
-    // Post/record the question on GitHub first, so we can reference the comment
-    // it produces. The run is still recorded blocked when the post fails; that
-    // failure is surfaced in the result and never swallowed.
-    const reported = await this.inner.report(valid);
-
-    const commentReference =
-      reported.ok && reported.commentId !== undefined && reported.commentUrl
-        ? {
-            provider: "github" as const,
-            id: reported.commentId,
-            url: reported.commentUrl,
-          }
-        : undefined;
-
+    // Record first (fail-closed): the run is persisted as blocked *before* we
+    // attempt the GitHub post, so a post failure never loses the run. The
+    // external comment reference is a derived link attached afterwards.
     const event = toRunEvent({
       eventId: valid.eventId,
       runId: valid.runId,
@@ -338,7 +327,6 @@ class RunHistoryWorkerReporter implements WorkerReporter {
       occurredAt: valid.occurredAt,
       status: valid.kind === "question" ? "blocked" : "running",
       ...(valid.attempt !== undefined ? { iterationCount: valid.attempt } : {}),
-      ...(commentReference !== undefined ? { commentReference } : {}),
     });
 
     try {
@@ -358,6 +346,23 @@ class RunHistoryWorkerReporter implements WorkerReporter {
         providerId: this.id,
         error: `Run history write failed: ${err instanceof Error ? err.message : String(err)}`,
       };
+    }
+
+    // Post the comment (side-effect). A failure here is surfaced but never
+    // loses the already-recorded run; the reference is attached only on success.
+    const reported = await this.inner.report(valid);
+
+    const reference = commentReferenceFromUrl(reported.commentUrl);
+    if (reference) {
+      try {
+        await this.runHistory.updateCommentReference(
+          valid.runId,
+          valid.eventId,
+          reference,
+        );
+      } catch {
+        // Best-effort: the recorded run already satisfies fail-closed.
+      }
     }
 
     return reported;
@@ -392,6 +397,18 @@ function commentUrlFor(
   id: number,
 ): string {
   return `https://github.com/${owner}/${repoName}/issues/${issue}#issuecomment-${id}`;
+}
+
+/** Parse the canonical GitHub comment URL back into a ledger reference. */
+function commentReferenceFromUrl(
+  url: string | undefined,
+): { provider: "github"; id: number; url: string } | undefined {
+  if (!url) return undefined;
+  const match = /#issuecomment-(\d+)$/.exec(url);
+  if (!match) return undefined;
+  const id = Number(match[1]);
+  if (!Number.isFinite(id) || id <= 0) return undefined;
+  return { provider: "github", id, url };
 }
 
 export class GitHubCommentReporter implements WorkerReporter {

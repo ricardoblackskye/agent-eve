@@ -71,6 +71,7 @@ interface RunEventRow {
   latency_ms: number | null;
   cost_usd: number | null;
   pr_url: string | null;
+  comment_reference: string | null;
 }
 
 const POSTGRES_SCHEMA = `
@@ -117,6 +118,7 @@ const POSTGRES_SCHEMA = `
     latency_ms DOUBLE PRECISION,
     cost_usd DOUBLE PRECISION,
     pr_url TEXT,
+    comment_reference TEXT,
     UNIQUE (run_id, event_id),
     FOREIGN KEY (run_id) REFERENCES df_run_summaries(run_id)
       ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED
@@ -125,6 +127,7 @@ const POSTGRES_SCHEMA = `
   ALTER TABLE df_run_summaries ADD COLUMN IF NOT EXISTS tenant_id TEXT;
   ALTER TABLE df_run_events ADD COLUMN IF NOT EXISTS resolved_count BIGINT;
   ALTER TABLE df_run_events ADD COLUMN IF NOT EXISTS accepted_count BIGINT;
+  ALTER TABLE df_run_events ADD COLUMN IF NOT EXISTS comment_reference TEXT;
   CREATE INDEX IF NOT EXISTS df_run_events_page_idx
     ON df_run_events (run_id, sequence);
 
@@ -190,6 +193,29 @@ function rowToSummary(row: RunSummaryRow): RunSummary {
   });
 }
 
+function readCommentRef(
+  value: string,
+): { provider: "github"; id: number; url: string } | undefined {
+  try {
+    const parsed = JSON.parse(value) as {
+      provider?: unknown;
+      id?: unknown;
+      url?: unknown;
+    };
+    if (
+      parsed &&
+      parsed.provider === "github" &&
+      typeof parsed.id === "number" &&
+      typeof parsed.url === "string"
+    ) {
+      return { provider: "github", id: parsed.id, url: parsed.url };
+    }
+  } catch {
+    // Malformed persisted reference: treat as absent rather than failing the read.
+  }
+  return undefined;
+}
+
 function rowToEvent(row: RunEventRow): PersistedRunEvent {
   return {
     sequence: Number(row.sequence),
@@ -222,12 +248,21 @@ function rowToEvent(row: RunEventRow): PersistedRunEvent {
       ...(row.latency_ms !== null ? { latencyMs: Number(row.latency_ms) } : {}),
       ...(row.cost_usd !== null ? { costUsd: Number(row.cost_usd) } : {}),
       ...(row.pr_url !== null ? { prUrl: row.pr_url } : {}),
+      ...(row.comment_reference !== null && row.comment_reference !== undefined
+        ? { commentReference: readCommentRef(row.comment_reference) }
+        : {}),
     }),
   };
 }
 
 function sameEvent(left: RunEvent, right: RunEvent): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
+  // Ignore the external comment reference: it is derived from GitHub after the
+  // event is recorded, so it must not break idempotent re-append on retry.
+  const strip = (e: RunEvent): RunEvent => ({
+    ...e,
+    commentReference: undefined,
+  });
+  return JSON.stringify(strip(left)) === JSON.stringify(strip(right));
 }
 
 function validateIdentifier(value: string, field: string): string {
@@ -389,13 +424,26 @@ function updateSummary(
   );
 }
 
+async function updateCommentReference(
+  client: Pool | PoolClient,
+  runId: string,
+  eventId: string,
+  reference: RunEvent["commentReference"],
+): Promise<void> {
+  await client.query(
+    `UPDATE df_run_events SET comment_reference = $1 WHERE run_id = $2 AND event_id = $3`,
+    [reference ? JSON.stringify(reference) : null, runId, eventId],
+  );
+}
+
 function insertEvent(client: PoolClient, event: RunEvent): Promise<unknown> {
   return client.query(
     `INSERT INTO df_run_events (
        run_id, event_id, type, stage, occurred_at, status, attempt,
        review_round, iteration_count, fix_cycle_count, finding_count,
-       resolved_count, accepted_count, latency_ms, cost_usd, pr_url
-     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+       resolved_count, accepted_count, latency_ms, cost_usd, pr_url,
+       comment_reference
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
     [
       event.runId,
       event.eventId,
@@ -413,6 +461,7 @@ function insertEvent(client: PoolClient, event: RunEvent): Promise<unknown> {
       event.latencyMs ?? null,
       event.costUsd ?? null,
       event.prUrl ?? null,
+      event.commentReference ? JSON.stringify(event.commentReference) : null,
     ],
   );
 }
@@ -889,6 +938,15 @@ export class PostgresRunHistoryStore implements RunHistoryStore {
     } catch (error) {
       return failedWrite(error);
     }
+  }
+
+  async updateCommentReference(
+    runId: string,
+    eventId: string,
+    reference: RunEvent["commentReference"],
+  ): Promise<void> {
+    const client = await this.pool();
+    await updateCommentReference(client, runId, eventId, reference);
   }
 
   async getRun(runId: string): Promise<RunHistoryReadResult<RunSummary>> {
