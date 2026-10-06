@@ -62,7 +62,7 @@ reference-threading + UI link that makes it reachable from a real run.
   the system of record for agent questions/blockers (Option A). The run ledger stores only a
   reference (`provider`, `id`, `url`), preserving the deliberate content-free `RunEvent`
   contract ("no raw prompts or free-form issue content"). Rationale: keeps the ledger
-  aggregatable/portable and avoids storing free-form author text. Status: Accepted.
+  aggregative/portable and avoids storing free-form author text. Status: Accepted.
 - Reference **ADR 0002** (`docs/adr/0002-r1-records-r2-refuses.md`) for the trusted-side /
   fail-closed posture already in force — do **not** duplicate it; just cite it.
 
