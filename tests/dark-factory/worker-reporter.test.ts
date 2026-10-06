@@ -498,3 +498,47 @@ describe("GitHubCommentReporter comment URL", () => {
     );
   });
 });
+
+describe("RunHistoryWorkerReporter propagates the posted comment reference", () => {
+  it("records the posted GitHub comment as a reference on the blocked worker.question event", async () => {
+    const history = new SqliteRunHistoryStore(":memory:", () => "q-run-t2");
+    const accepted = await history.acceptDelivery({
+      deliveryId: "qt2",
+      repo: "ricardoblackskye/agent-eve",
+      issue: 260,
+      receivedAt: "2026-09-24T12:00:00.000Z",
+    });
+    const runId = accepted.value?.runId;
+    expect(runId).toBeTruthy();
+    const store = new MemoryStore();
+    const { impl, calls } = fakeFetch();
+    const reporter = createWorkerReporter(
+      {
+        DF_REPORTER_PROVIDER: "github",
+        GH_STORY_TOKEN: TOKEN,
+        DF_WORKER_ALLOWED_REPOS: "ricardoblackskye/agent-eve",
+      },
+      { store, runHistory: history, fetchImpl: impl },
+    );
+    const message = msg({
+      runId: runId!,
+      kind: "question",
+      question: "Which branch targets this?",
+      eventId: "q1",
+      occurredAt: "2026-09-24T12:01:00.000Z",
+      issue: 260,
+    });
+    const result = await reporter.report(message);
+    expect(result.ok).toBe(true);
+    expect(calls.length).toBe(1);
+    const events = (await history.listRunEvents(runId!)).value?.items ?? [];
+    const question = events.find((e) => e.event.type === "worker.question");
+    expect(question).toBeDefined();
+    expect(question!.event.status).toBe("blocked");
+    expect(question!.event.commentReference).toMatchObject({
+      provider: "github",
+      id: 5001,
+      url: "https://github.com/ricardoblackskye/agent-eve/issues/260#issuecomment-5001",
+    });
+  });
+});

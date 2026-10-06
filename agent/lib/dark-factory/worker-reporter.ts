@@ -311,6 +311,20 @@ class RunHistoryWorkerReporter implements WorkerReporter {
       );
     }
 
+    // Post/record the question on GitHub first, so we can reference the comment
+    // it produces. The run is still recorded blocked when the post fails; that
+    // failure is surfaced in the result and never swallowed.
+    const reported = await this.inner.report(valid);
+
+    const commentReference =
+      reported.ok && reported.commentId !== undefined && reported.commentUrl
+        ? {
+            provider: "github" as const,
+            id: reported.commentId,
+            url: reported.commentUrl,
+          }
+        : undefined;
+
     const event = toRunEvent({
       eventId: valid.eventId,
       runId: valid.runId,
@@ -324,6 +338,7 @@ class RunHistoryWorkerReporter implements WorkerReporter {
       occurredAt: valid.occurredAt,
       status: valid.kind === "question" ? "blocked" : "running",
       ...(valid.attempt !== undefined ? { iterationCount: valid.attempt } : {}),
+      ...(commentReference !== undefined ? { commentReference } : {}),
     });
 
     try {
@@ -345,7 +360,7 @@ class RunHistoryWorkerReporter implements WorkerReporter {
       };
     }
 
-    return this.inner.report(valid);
+    return reported;
   }
 }
 
