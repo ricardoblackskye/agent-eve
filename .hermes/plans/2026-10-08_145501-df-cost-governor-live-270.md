@@ -35,8 +35,8 @@ So the cap is decorative for exactly the surfaces a run drives.
 
 ## Design
 
-### A. One gate, parameterised by category (DRY)
-Generalise the existing orchestrator gate rather than copy it:
+### A. One gate, parameterized by category (DRY)
+Generalize the existing orchestrator gate rather than copy it:
 - New `agent/lib/dark-factory/cost-gate.ts` → `createCostGate({ category, env, model,
   inputTokens, outputTokens?, tenantId?, governor? })` returning `{ admit(): Promise<void> }`
   that THROWS on refusal (the pre-call gate #217 established).
@@ -44,7 +44,7 @@ Generalise the existing orchestrator gate rather than copy it:
   `createOrchestratorGate(input) === createCostGate({ ...input, category: "orchestrator" })`.
 
 ### B. Subagents become governed (opt-in, unchanged when unconfigured)
-Generalise `buildOrchestratorModel`/`buildDynamicOrchestratorModel` into
+Generalize `buildOrchestratorModel`/`buildDynamicOrchestratorModel` into
 `agent/lib/dark-factory/governed-model.ts` → `buildGovernedModel({ category, env,
 chatModel, gate })`, and have `orchestrator-model.ts` delegate (public shape preserved).
 
@@ -102,12 +102,12 @@ Add a machine-readable field to the run ledger:
 
 ### Task 0 — Branch & plan *(this step)* — then **GATE 1**
 
-### Task 1 — `createCostGate` (generalise the gate), test-first
+### Task 1 — `createCostGate` (generalize the gate), test-first
 RED→GREEN on `tests/dark-factory/cost-gate.test.ts`: admits under the cap; THROWS on
 `budget_exceeded`; throws on `unpriced_model`; returns `null` when unconfigured; and
 `orchestrator-gate` still passes its existing tests (byte-compatible delegation).
 
-### Task 2 — `buildGovernedModel` (generalise the dynamic model), test-first
+### Task 2 — `buildGovernedModel` (generalize the dynamic model), test-first
 `tests/dark-factory/governed-model.test.ts`: unconfigured ⇒ returns the static model;
 configured ⇒ returns the dynamic sentinel whose `step.started` runs the gate FIRST and
 throws before returning a model. Keep `orchestrator-model.test.ts` green.
@@ -144,8 +144,8 @@ DF_PLATFORM_PROVIDER=generic npm run build
 
 | File                                                                                                                   | Action                                                    |
 |------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------|
-| `agent/lib/dark-factory/cost-gate.ts`                                                                                  | **Create** — category-parameterised gate                  |
-| `agent/lib/dark-factory/governed-model.ts`                                                                             | **Create** — category-parameterised dynamic model         |
+| `agent/lib/dark-factory/cost-gate.ts`                                                                                  | **Create** — category-parameterized gate                  |
+| `agent/lib/dark-factory/governed-model.ts`                                                                             | **Create** — category-parameterized dynamic model         |
 | `agent/orchestrator-gate.ts`, `agent/orchestrator-model.ts`                                                            | Modify — delegate to the new modules (shape preserved)    |
 | `agent/subagents/{product-owner,release-manager,sprint-reporter}/agent.ts`                                             | Modify — two-branch governed definition                   |
 | `agent/lib/dark-factory/run-history.ts`                                                                                | Modify — `RunEvent.costRefusal` + validation              |
@@ -172,10 +172,10 @@ DF_PLATFORM_PROVIDER=generic npm run build
 5. **No new env vars** — reuses `DF_COST_BUDGET_*`; `.env.example` unchanged.
 
 ## ADRs (decision-time, this change)
-- **ADR 0020 — every agent LLM surface is governed by one category-parameterised gate, and a
+- **ADR 0020 — every agent LLM surface is governed by one category-parameterized gate, and a
   cost refusal is recorded as a machine-readable code on the run.** Context: the cap was
   decorative for the subagents and the runner, and the run ledger stored no refusal reason.
-  Decision: one shared gate + dynamic-model builder (category-parameterised); the runner uses
+  Decision: one shared gate + dynamic-model builder (category-parameterized); the runner uses
   `runGovernedLlmCall`; refusals append a `run.terminal` event carrying `costRefusal`
   (a `CostGovernorRefusal` code, never free text). Consequences: the cap gates every surface;
   the reason is queryable without storing prompts; adding a category/budget is a seam change,

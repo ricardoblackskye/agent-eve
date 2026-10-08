@@ -1,7 +1,7 @@
 /**
  * Dark Factory — orchestrator cost gate (#217, epic #206 R7.2).
  *
- * Thin, backward-compatible wrapper over the shared category-parameterised gate
+ * Thin, backward-compatible wrapper over the shared category-parameterized gate
  * (#270): the orchestrator surface is simply `category: "orchestrator"`. The gate
  * is instantiated before `buildDynamicOrchestratorModel` returns a model, and a
  * refusal THROWS — failing the turn before the provider call is made.

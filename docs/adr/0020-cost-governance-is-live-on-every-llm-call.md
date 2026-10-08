@@ -9,7 +9,7 @@
 one, but nothing called them on the paths that actually spend money: only the
 orchestrator chat was gated (#217). The three subagents (product-owner,
 release-manager, sprint-reporter) and the runner's Architect and Developer
-`streamText` / `generateText` calls all ran **ungated**. A budget cap that covers one
+`streamText` / `generateText` calls all ran **without a gate**. A budget cap that covers one
 of five call sites is not a cap.
 
 Two forces shaped the choice. First, every call site builds its own provider client,
