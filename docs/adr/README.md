@@ -72,3 +72,4 @@ changes, write a new one that supersedes it.
 | [0016](0016-membership-is-resolved-per-request.md)                | Membership is resolved per request, not carried in the claim     | Accepted |
 | [0017](0017-tenant-scope-is-derived-server-side.md)          | Tenant scope is derived server-side and enforced at the route    | Accepted |
 | [0018](0018-comment-reference-in-ledger.md)                  | Store a comment reference, not the question text, in the ledger | Accepted |
+| [0019](0019-orchestration-handler-pipeline.md)               | The orchestration handler sequences the factory pipeline         | Accepted |
