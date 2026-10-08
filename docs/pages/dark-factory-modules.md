@@ -199,13 +199,23 @@ Dark Factory — Developer Agent (issues #131 / story #133). A sandboxed coding 
 
 ## dispatch
 
-Dark Factory — Orchestration Core (issues #137 / story #138). STUB — implementation pending (TDD RED).
+Dark Factory — Orchestration Core (issues #137 / story #138). The `Dispatcher`: at-most-once delivery, retry/backoff via a `RetryPolicy`, human-parking (`ParkedRunError` → `blocked`), per-run status persistence, a live control gate, and a per-invocation deadline. The pipeline it drives is sequenced by `dispatch-handler`.
 
 **Source:** [`agent/lib/dark-factory/dispatch.ts`](../../agent/lib/dark-factory/dispatch.ts)
 
 **Exports:** `DEFAULT_HANDLER_TIMEOUT_MS`, `DEFAULT_RETRY_POLICY`, `DispatchAttemptMetric`, `DispatchCheckpoint`, `DispatchEvent`, `DispatchHandler`, `DispatchObserver`, `DispatchOutcome`, `DispatchRecord`, `DispatchStatus`, `Dispatcher`, `DispatcherOptions`, `InvalidDispatchEventError`, `ParkedRunError`, `RetryPolicy`, `RetrySchedule`, `dedupKey`, `dispatchKey`, `nextRetry`, `toDispatchEvent`
 
 **Decisions:** [ADR 0002](../../docs/adr/0002-r1-records-r2-refuses.md)
+
+## dispatch-handler
+
+Dark Factory — orchestration handler (#268). The `DispatchHandler` that runs the factory pipeline in sequence: developer → tester → pr. It owns sequence and translation only — retry/backoff, parking, status persistence, dedup, control-gating and the per-invocation deadline all live in the `Dispatcher` (see `dispatch`). A stage that returns continues; a stage that throws a plain `Error` is retryable; a stage that throws `ParkedRunError` parks the run (`blocked`, no retry). Stages are injected so the handler is unit-testable without GitHub, an LLM, or the network.
+
+**Source:** [`agent/lib/dark-factory/dispatch-handler.ts`](../../agent/lib/dark-factory/dispatch-handler.ts)
+
+**Exports:** `DispatchHandlerDeps`, `FactoryStageContext`, `FactoryStages`, `TesterStageResult`, `createDispatchHandler`
+
+**Decisions:** [ADR 0019](../../docs/adr/0019-orchestration-handler-pipeline.md)
 
 ## dod-presentation
 

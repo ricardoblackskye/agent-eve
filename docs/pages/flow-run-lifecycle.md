@@ -42,6 +42,13 @@ its exponential backoff or `null` once the budget is exhausted. The full route
 inventory is generated from `app/api/**/route.ts` — see
 [`app/documentation/reference/generators.ts`](../../app/documentation/reference/generators.ts).
 
+The pipeline the Dispatcher drives is sequenced by the orchestration handler
+([`dispatch-handler.ts`](../../agent/lib/dark-factory/dispatch-handler.ts)):
+**developer → tester → pr**. It is a thin orchestrator — the `Dispatcher` owns
+retry, backoff and parking; the handler only decides order and turns a failing
+gate into a **retry** (a plain failure) or a **park** (a human question). See
+[ADR 0019](../../docs/adr/0019-orchestration-handler-pipeline.md).
+
 ## 4. Worker
 
 A dispatched CI event becomes a worker run via

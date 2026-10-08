@@ -210,6 +210,15 @@ export {
 } from "./issue-writer";
 // The handler-side signal that a run is parked on a human (#162, decision A).
 export { ParkedRunError } from "./dispatch";
+// The orchestration handler that sequences the factory pipeline (#268):
+// developer → tester → pr, over the Dispatcher's retry/park/status machinery.
+export {
+  createDispatchHandler,
+  type DispatchHandlerDeps,
+  type FactoryStageContext,
+  type FactoryStages,
+  type TesterStageResult,
+} from "./dispatch-handler";
 
 // R5 — the kick-off trigger and entry point (#163). The trigger is a pure decision
 // (testable offline); the entry point records the dispatch and hands off, and never

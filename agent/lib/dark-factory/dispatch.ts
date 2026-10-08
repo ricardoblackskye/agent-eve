@@ -13,7 +13,10 @@ import {
 /**
  * Dark Factory — Orchestration Core (issues #137 / story #138).
  *
- * STUB — implementation pending (TDD RED).
+ * The `Dispatcher`: at-most-once delivery, retry/backoff via a `RetryPolicy`,
+ * human-parking (`ParkedRunError` → `blocked`), per-run status persistence, a
+ * live control gate, and a per-invocation deadline. The pipeline it drives is
+ * sequenced by `dispatch-handler.ts` (#268).
  */
 
 export interface DispatchEvent {
