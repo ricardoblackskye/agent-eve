@@ -20,6 +20,7 @@ import type { ExecutionPlan } from "./plan-validator";
 import { toRunEvent, type RunEvent } from "./run-history";
 import { resolvePolicyMaxSteps } from "./llm-policy";
 import type { EventCursor, RunHistoryStore } from "./run-history-store";
+import { TRIGGER_LABELS } from "./trigger";
 
 export class InvalidConfigurationError extends Error {
   constructor(message: string) {
@@ -403,6 +404,52 @@ async function persistDODRunEvent(
       error: error instanceof Error ? error.message : String(error),
     };
   }
+}
+
+export interface FinalizeRunAsDoneOptions {
+  /** Injectable DoD runner; defaults to the real `runDefinitionOfDone` loop. */
+  runDefinitionOfDone?: (
+    deps: DefinitionOfDoneDeps,
+    task: DefinitionOfDoneTask,
+  ) => Promise<DefinitionOfDoneResult>;
+}
+
+export interface FinalizeRunAsDoneOutcome {
+  appliedDone: boolean;
+  result: DefinitionOfDoneResult | undefined;
+}
+
+/**
+ * Pure guard: a run may be labelled `df:done` only when the Definition of Done
+ * actually passed. `DefinitionOfDoneResult.status` is `"done" | "blocked" |
+ * "refused"` — anything but `"done"` means the DoD did not pass, so `df:done`
+ * must be withheld. This is what stops an agent's self-report from ever
+ * producing a `df:done` label.
+ */
+export function isDoneGateSatisfied(
+  result: DefinitionOfDoneResult | undefined,
+): boolean {
+  return result != null && result.status === "done";
+}
+
+/**
+ * Finalize a run as done: run the Definition of Done and apply the `df:done`
+ * lifecycle label ONLY when it passes. If the DoD is blocked/refused, `df:done`
+ * is withheld and the run is left for human review. The orchestrator (#268)
+ * calls this from its terminal-success path instead of setting `succeeded` bare.
+ */
+export async function finalizeRunAsDone(
+  deps: DefinitionOfDoneDeps,
+  task: DefinitionOfDoneTask,
+  opts: FinalizeRunAsDoneOptions = {},
+): Promise<FinalizeRunAsDoneOutcome> {
+  const dod = opts.runDefinitionOfDone ?? runDefinitionOfDone;
+  const result = await dod(deps, task);
+  if (isDoneGateSatisfied(result)) {
+    await deps.labelWriter?.add(task.repo, task.issue, TRIGGER_LABELS.done);
+    return { appliedDone: true, result };
+  }
+  return { appliedDone: false, result };
 }
 
 export async function runDefinitionOfDone(
