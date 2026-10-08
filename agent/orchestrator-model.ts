@@ -19,8 +19,8 @@
  * static model as before, so an unconfigured deployment is unchanged.
  */
 
-import { defineDynamic } from "eve";
 import type { AgentModelDefinition, AgentStaticModelDefinition } from "eve";
+import { buildGovernedDynamicModel } from "./lib/dark-factory/governed-model";
 import {
   isLlmPolicyConfigured,
   resolveLlmPolicy,
@@ -113,28 +113,17 @@ export function buildOrchestratorModel(
 }
 
 /**
- * The dynamic resolver itself.
+ * The dynamic resolver itself — delegates to the shared governed model (#270).
  *
- * Deliberately WITHOUT an explicit return type so TypeScript infers
- * `DynamicSentinel<...>` from `defineDynamic`. `defineAgent` requires an exact
- * match against one of its model branches, so widening this to the union type
- * makes the definition fail to compile — the inference is load-bearing.
+ * Deliberately WITHOUT an explicit return type so TypeScript infers the sentinel
+ * from `defineDynamic`. `defineAgent` requires an exact match against one of its
+ * model branches, so widening this to the union type makes the definition fail to
+ * compile — the inference is load-bearing.
  */
 export function buildDynamicOrchestratorModel(input: OrchestratorBuildInput) {
-  const { chatModel, gate } = input;
-  const gateConfigured = gate !== null && gate !== undefined;
-
-  return defineDynamic({
-    events: {
-      "step.started": async () => {
-        // The gate runs FIRST: throwing here fails the turn before any
-        // provider call is made (#217).
-        if (gateConfigured) await gate.admit();
-        return {
-          model: chatModel,
-          modelContextWindowTokens: ORCHESTRATOR_CONTEXT_WINDOW_TOKENS,
-        };
-      },
-    },
+  return buildGovernedDynamicModel({
+    chatModel: input.chatModel,
+    contextWindowTokens: ORCHESTRATOR_CONTEXT_WINDOW_TOKENS,
+    gate: input.gate,
   });
 }

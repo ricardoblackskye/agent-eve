@@ -161,6 +161,16 @@ Dark Factory — canonical cost budget types, price table, and estimation. One p
 
 **Exports:** `COST_CATEGORIES`, `CostBudget`, `CostBudgetConfigurationError`, `CostBudgetEnvError`, `CostCategory`, `DEFAULT_COST_BUDGET_PERIOD`, `ModelPrice`, `ResolvedCostBudgetEnv`, `createCostBudget`, `createCostGovernanceEnv`, `estimateCost`, `isCostBudget`, `isCostCategory`, `modelPriceTable`, `resolvePrice`, `validateCostBudgetEnv`
 
+## cost-gate
+
+Dark Factory — category-parameterized cost gate (#270, generalizing #217). The pre-call gate that a dynamic model resolver runs before returning a model; a refusal THROWS so the turn fails before the provider call. OPT-IN: returns `null` when cost governance is not configured.
+
+**Source:** [`agent/lib/dark-factory/cost-gate.ts`](../../agent/lib/dark-factory/cost-gate.ts)
+
+**Exports:** `CostGate`, `CostGateInput`, `DEFAULT_MAX_OUTPUT_TOKENS`, `createCostGate`
+
+**Decisions:** [ADR 0020](../../docs/adr/0020-cost-governance-is-live-on-every-llm-call.md)
+
 ## cost-governor
 
 Dark Factory — LLM cost governor. Sits between an LLM call site and the budget store. It estimates the call's maximum cost from the model price table, reserves it against the category's cap, and reconciles the actual cost afterwards. Every refusal is a structured result (never a thrown crash) so a call site can short-circuit cleanly. FAIL-CLOSED: an unconfigured cap, an unknown model price, or an unavailable store all refuse the call rather than letting it run unbounded.
@@ -170,6 +180,16 @@ Dark Factory — LLM cost governor. Sits between an LLM call site and the budget
 **Exports:** `CostGovernor`, `CostGovernorAdmitInput`, `CostGovernorDecision`, `CostGovernorRefusal`, `CostGovernorSettleResult`, `costBudgetId`, `createCostGovernor`, `utcMonth`
 
 **Decisions:** [ADR 0006](../../docs/adr/0006-provider-neutral-seams.md)
+
+## cost-refusal-recorder
+
+Dark Factory — record a cost refusal on a run (#270). Appends a terminal, failed run event carrying the machine-readable `CostGovernorRefusal` code, so a run stopped by the cost cap is explainable on the ticket rather than only in a log. Idempotent per (run, code, timestamp); never stores free text.
+
+**Source:** [`agent/lib/dark-factory/cost-refusal-recorder.ts`](../../agent/lib/dark-factory/cost-refusal-recorder.ts)
+
+**Exports:** `RecordCostRefusalInput`, `RecordCostRefusalResult`, `recordCostRefusal`
+
+**Decisions:** [ADR 0020](../../docs/adr/0020-cost-governance-is-live-on-every-llm-call.md)
 
 ## credentials
 
@@ -233,6 +253,16 @@ Dark Factory — the entry point (#163). WHAT IT DOES: takes the trigger's decis
 
 **Exports:** `DispatchIntent`, `EntryDeps`, `EntryResult`, `EntryStatus`, `LabelWriter`, `RunnerDecision`, `RunnerMode`, `buildIntent`, `renderHandoffMessage`, `resolveApiOrigin`, `resolveRunnerMode`, `runDarkFactoryDispatch`, `sanitizeIdentifier`, `toRunId`
 
+## governed-agent-call
+
+Dark Factory — a governed agent LLM call (#270). Wraps `runGovernedLlmCall` for an AGENT call site (the runner's Architect / Developer calls); on a refusal it records the code ON THE RUN and throws `CostRefusedError`. OPT-IN: with no governor the call runs unchanged.
+
+**Source:** [`agent/lib/dark-factory/governed-agent-call.ts`](../../agent/lib/dark-factory/governed-agent-call.ts)
+
+**Exports:** `CostRefusedError`, `GovernedAgentCallDeps`, `GovernedAgentCallOptions`, `runGovernedAgentCall`
+
+**Decisions:** [ADR 0020](../../docs/adr/0020-cost-governance-is-live-on-every-llm-call.md)
+
 ## governed-llm-call
 
 Dark Factory — governed LLM call seam. The single wrapper every LLM call site uses to be budget-governed: reserve the call's maximum cost, run it, then reconcile the actual cost. A refusal is returned (not thrown) so a call site can short-circuit; a thrown call still settles conservatively so a reservation is never leaked.
@@ -242,6 +272,16 @@ Dark Factory — governed LLM call seam. The single wrapper every LLM call site 
 **Exports:** `GovernedLlmCallOptions`, `GovernedLlmCallResult`, `runGovernedLlmCall`
 
 **Decisions:** [ADR 0006](../../docs/adr/0006-provider-neutral-seams.md)
+
+## governed-model
+
+Dark Factory — governed dynamic model (#270). The category-parameterized `defineDynamic` resolver shared by the subagents: it runs a cost gate FIRST, so a refusal fails the turn before the provider call. OPT-IN: with no gate the static model is used. A dynamic model forbids `modelContextWindowTokens` as a sibling, so a definition selects one branch or the other.
+
+**Source:** [`agent/lib/dark-factory/governed-model.ts`](../../agent/lib/dark-factory/governed-model.ts)
+
+**Exports:** `GovernedGate`, `GovernedModelInput`, `buildGovernedDynamicModel`
+
+**Decisions:** [ADR 0020](../../docs/adr/0020-cost-governance-is-live-on-every-llm-call.md)
 
 ## index
 

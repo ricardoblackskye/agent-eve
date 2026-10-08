@@ -52,24 +52,25 @@ changes, write a new one that supersedes it.
 
 ## Index
 
-| #                                                                 | Decision                                                         | Status   |
-|-------------------------------------------------------------------|------------------------------------------------------------------|----------|
-| [0001](0001-tenant-attribution-is-write-once.md)                  | Tenant attribution is write-once                                 | Accepted |
-| [0002](0002-r1-records-r2-refuses.md)                             | R1 records and reports; R2 refuses                               | Accepted |
-| [0003](0003-unmeasured-is-never-zero.md)                          | An unmeasured value is never zero                                | Accepted |
-| [0004](0004-story-publish-is-fail-closed.md)                      | Story publish is fail-closed                                     | Accepted |
-| [0005](0005-sqlite-is-local-only.md)                              | SQLite is local-only                                             | Accepted |
-| [0006](0006-provider-neutral-seams.md)                            | Provider-neutral seams                                           | Accepted |
-| [0007](0007-control-state-is-db-backed.md)                        | Control state is DB-backed and fail-closed                       | Accepted |
-| [0008](0008-tenant-registry-is-ours-crm-is-bought.md)             | The tenant registry is ours; the CRM is bought                   | Accepted |
-| [0009](0009-tailwind-adopted-repo-wide.md)                        | Tailwind is adopted repo-wide, as the single styling method      | Accepted |
-| [0010](0010-documentation-is-a-docs-tree.md)                      | Documentation is a docs/ tree served by server components        | Accepted |
-| [0011](0011-eve-is-pinned-and-upgrades-are-deliberate.md)         | eve is pinned; upgrades are not absorbed into dependency bumps   | Accepted |
-| [0012](0012-docs-reference-pages-are-generated-at-render-time.md) | Docs reference pages are generated at render time, not committed | Accepted |
-| [0013](0013-test-data-is-seeded-through-the-store-seam.md)        | Test data is seeded through the store seam                       | Accepted |
-| [0014](0014-tenant-budgets-are-a-dimension-of-the-store.md)       | Tenant budgets are a dimension of the existing budget store      | Accepted |
-| [0015](0015-unprovisioned-tenant-is-refused-not-provisioned.md)   | An unprovisioned tenant is refused, never auto-provisioned       | Accepted |
-| [0016](0016-membership-is-resolved-per-request.md)                | Membership is resolved per request, not carried in the claim     | Accepted |
-| [0017](0017-tenant-scope-is-derived-server-side.md)               | Tenant scope is derived server-side and enforced at the route    | Accepted |
-| [0018](0018-comment-reference-in-ledger.md)                       | Store a comment reference, not the question text, in the ledger  | Accepted |
-| [0019](0019-orchestration-handler-pipeline.md)                    | The orchestration handler sequences the factory pipeline         | Accepted |
+| #                                                                 | Decision                                                                    | Status   |
+|-------------------------------------------------------------------|-----------------------------------------------------------------------------|----------|
+| [0001](0001-tenant-attribution-is-write-once.md)                  | Tenant attribution is write-once                                            | Accepted |
+| [0002](0002-r1-records-r2-refuses.md)                             | R1 records and reports; R2 refuses                                          | Accepted |
+| [0003](0003-unmeasured-is-never-zero.md)                          | An unmeasured value is never zero                                           | Accepted |
+| [0004](0004-story-publish-is-fail-closed.md)                      | Story publish is fail-closed                                                | Accepted |
+| [0005](0005-sqlite-is-local-only.md)                              | SQLite is local-only                                                        | Accepted |
+| [0006](0006-provider-neutral-seams.md)                            | Provider-neutral seams                                                      | Accepted |
+| [0007](0007-control-state-is-db-backed.md)                        | Control state is DB-backed and fail-closed                                  | Accepted |
+| [0008](0008-tenant-registry-is-ours-crm-is-bought.md)             | The tenant registry is ours; the CRM is bought                              | Accepted |
+| [0009](0009-tailwind-adopted-repo-wide.md)                        | Tailwind is adopted repo-wide, as the single styling method                 | Accepted |
+| [0010](0010-documentation-is-a-docs-tree.md)                      | Documentation is a docs/ tree served by server components                   | Accepted |
+| [0011](0011-eve-is-pinned-and-upgrades-are-deliberate.md)         | eve is pinned; upgrades are not absorbed into dependency bumps              | Accepted |
+| [0012](0012-docs-reference-pages-are-generated-at-render-time.md) | Docs reference pages are generated at render time, not committed            | Accepted |
+| [0013](0013-test-data-is-seeded-through-the-store-seam.md)        | Test data is seeded through the store seam                                  | Accepted |
+| [0014](0014-tenant-budgets-are-a-dimension-of-the-store.md)       | Tenant budgets are a dimension of the existing budget store                 | Accepted |
+| [0015](0015-unprovisioned-tenant-is-refused-not-provisioned.md)   | An unprovisioned tenant is refused, never auto-provisioned                  | Accepted |
+| [0016](0016-membership-is-resolved-per-request.md)                | Membership is resolved per request, not carried in the claim                | Accepted |
+| [0017](0017-tenant-scope-is-derived-server-side.md)               | Tenant scope is derived server-side and enforced at the route               | Accepted |
+| [0018](0018-comment-reference-in-ledger.md)                       | Store a comment reference, not the question text, in the ledger             | Accepted |
+| [0019](0019-orchestration-handler-pipeline.md)                    | The orchestration handler sequences the factory pipeline                    | Accepted |
+| [0020](0020-cost-governance-is-live-on-every-llm-call.md)         | Cost governance is live on every LLM call; a refusal is recorded on the run | Accepted |

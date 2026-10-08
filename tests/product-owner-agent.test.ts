@@ -7,7 +7,9 @@ const dir = path.join(process.cwd(), "agent", "subagents", "product-owner");
 describe("product-owner subagent", () => {
   it("has an agent.ts with a required description", () => {
     const src = fs.readFileSync(path.join(dir, "agent.ts"), "utf8");
-    expect(src).toMatch(/description:\s*\n?\s*["'`]/);
+    // Descriptions may be inline (`description: "..."`) or hoisted to a const
+    // (`const description = ...`) so the definition can branch on the cost gate.
+    expect(src).toMatch(/(?:description:|\bdescription\s*=)\s*\n?\s*["'`]/);
   });
 
   it("declares a model", () => {

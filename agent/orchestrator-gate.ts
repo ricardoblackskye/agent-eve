@@ -1,26 +1,24 @@
 /**
  * Dark Factory — orchestrator cost gate (#217, epic #206 R7.2).
  *
- * Instantiates the pre-call gate that `buildDynamicOrchestratorModel` runs
- * before returning a model. A refusal THROWS, which fails the turn before the
- * provider call is made — the mechanism #217 was blocked on.
+ * Thin, backward-compatible wrapper over the shared category-parameterised gate
+ * (#270): the orchestrator surface is simply `category: "orchestrator"`. The gate
+ * is instantiated before `buildDynamicOrchestratorModel` returns a model, and a
+ * refusal THROWS — failing the turn before the provider call is made.
  *
  * OPT-IN: returns `null` when cost governance is not configured, so an
  * unconfigured deployment pays nothing and behaves exactly as before.
  */
 
-import {
-  createCostBudgetStore,
-  isCostGovernanceConfigured,
-} from "./lib/dark-factory/cost-budget-store";
-import {
-  createCostGovernor,
-  type CostGovernor,
-} from "./lib/dark-factory/cost-governor";
 import type { OrchestratorGate } from "./orchestrator-model";
+import {
+  DEFAULT_MAX_OUTPUT_TOKENS,
+  createCostGate,
+} from "./lib/dark-factory/cost-gate";
+import type { CostGovernor } from "./lib/dark-factory/cost-governor";
 
 /** Default upper bound for the orchestrator's completion, used to reserve. */
-export const ORCHESTRATOR_MAX_OUTPUT_TOKENS = 8_000;
+export const ORCHESTRATOR_MAX_OUTPUT_TOKENS = DEFAULT_MAX_OUTPUT_TOKENS;
 
 export interface OrchestratorGateInput {
   env: Record<string, string | undefined>;
@@ -51,33 +49,5 @@ export interface OrchestratorGateInput {
 export function createOrchestratorGate(
   input: OrchestratorGateInput,
 ): OrchestratorGate | null {
-  const { env, model, inputTokens } = input;
-  const outputTokens = input.outputTokens ?? ORCHESTRATOR_MAX_OUTPUT_TOKENS;
-
-  const governor =
-    input.governor !== undefined
-      ? input.governor
-      : isCostGovernanceConfigured(env)
-        ? createCostGovernor(createCostBudgetStore(env), env)
-        : null;
-
-  if (!governor) return null;
-
-  return {
-    async admit(): Promise<void> {
-      const decision = await governor.admit({
-        category: "orchestrator",
-        model,
-        inputTokens,
-        outputTokens,
-        ...(input.tenantId ? { tenantId: input.tenantId } : {}),
-      });
-      if (!decision.admitted) {
-        const forTenant = input.tenantId ? ` for tenant '${input.tenantId}'` : "";
-        throw new Error(
-          `orchestrator cost gate refused the call${forTenant}: ${decision.reason ?? "budget_unavailable"}`,
-        );
-      }
-    },
-  };
+  return createCostGate({ ...input, category: "orchestrator" });
 }

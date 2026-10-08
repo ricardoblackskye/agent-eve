@@ -183,6 +183,7 @@ interface RunEventRow {
   cost_usd: number | null;
   pr_url: string | null;
   comment_reference: string | null;
+  cost_refusal: string | null;
 }
 
 function readSummary(db: DatabaseSync, runId: string): RunSummary | null {
@@ -248,6 +249,9 @@ function rowToEvent(row: RunEventRow): PersistedRunEvent {
       ...(row.comment_reference !== null && row.comment_reference !== undefined
         ? { commentReference: readCommentRef(row.comment_reference) }
         : {}),
+      ...(row.cost_refusal !== null && row.cost_refusal !== undefined
+        ? { costRefusal: row.cost_refusal as RunEvent["costRefusal"] }
+        : {}),
     }),
   };
 }
@@ -308,6 +312,7 @@ const SQLITE_SCHEMA = `
     cost_usd REAL,
     pr_url TEXT,
     comment_reference TEXT,
+    cost_refusal TEXT,
     UNIQUE (run_id, event_id),
     FOREIGN KEY (run_id) REFERENCES df_run_summaries(run_id)
       ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED
@@ -431,8 +436,8 @@ function writeEvent(db: DatabaseSync, event: RunEvent): void {
        run_id, event_id, type, stage, occurred_at, status, attempt,
        review_round, iteration_count, fix_cycle_count, finding_count,
        resolved_count, accepted_count, latency_ms, cost_usd, pr_url,
-       comment_reference
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       comment_reference, cost_refusal
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     event.runId,
     event.eventId,
@@ -451,6 +456,7 @@ function writeEvent(db: DatabaseSync, event: RunEvent): void {
     event.costUsd ?? null,
     event.prUrl ?? null,
     event.commentReference ? JSON.stringify(event.commentReference) : null,
+    event.costRefusal ?? null,
   );
 }
 
@@ -594,6 +600,9 @@ export class SqliteRunHistoryStore implements RunHistoryStore {
         .all() as { name: string }[];
       if (!eventColumns.some((column) => column.name === "comment_reference")) {
         db.exec("ALTER TABLE df_run_events ADD COLUMN comment_reference TEXT");
+      }
+      if (!eventColumns.some((column) => column.name === "cost_refusal")) {
+        db.exec("ALTER TABLE df_run_events ADD COLUMN cost_refusal TEXT");
       }
       this.db = db;
       return db;
