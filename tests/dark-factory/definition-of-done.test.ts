@@ -16,9 +16,12 @@ import {
   InvalidConfigurationError,
   resolveMaxReviewRounds,
   runDefinitionOfDone,
+  finalizeRunAsDone,
+  isDoneGateSatisfied,
   renderAcceptedFindingComment,
   type DefinitionOfDoneDeps,
   type DefinitionOfDoneTask,
+  type DefinitionOfDoneResult,
   type PrCommentWriter,
   type PrOpener,
   type ReviewFinding,
@@ -670,5 +673,112 @@ describe("#164 cycles 3-10: runDefinitionOfDone coordinator", () => {
     const { deps } = setupTestDeps();
     const result = await runDefinitionOfDone(deps, sampleTask);
     expect((result as any).merged).toBeUndefined();
+  });
+});
+
+describe("#271: finalizeRunAsDone — Definition of Done must gate the df:done label", () => {
+  const task: DefinitionOfDoneTask = {
+    runId: "ricardoblackskye/agent-eve#271",
+    repo: "ricardoblackskye/agent-eve",
+    issue: 271,
+    head: "feat/df-dod-271",
+    title: "Enforce DoD before df:done",
+    body: "Wire the DoD gate so df:done is only applied after the DoD passes.",
+  };
+
+  function setupTestDeps(over: Partial<DefinitionOfDoneDeps> = {}) {
+    const labels: { op: string; label: string }[] = [];
+    const prWriter: PrOpener = {
+      createPullRequest: async () => ({
+        ok: true,
+        pr: {
+          number: 1,
+          url: "https://github.com/ricardoblackskye/agent-eve/pull/1",
+          head: "h",
+          base: "main",
+          title: "t",
+          body: "b",
+        },
+      }),
+    };
+    const commentWriter: PrCommentWriter = {
+      postComment: async () => ({ ok: true }),
+    };
+    const labelWriter = {
+      add: async (_r: string, _i: number, label: string) => {
+        labels.push({ op: "add", label });
+        return { ok: true };
+      },
+      remove: async (_r: string, _i: number, label: string) => {
+        labels.push({ op: "remove", label });
+        return { ok: true };
+      },
+    };
+    return {
+      labels,
+      deps: {
+        prWriter,
+        commentWriter,
+        labelWriter,
+        runChecks: async () => [],
+        env: { DF_WORKER_ALLOWED_REPOS: "ricardoblackskye/agent-eve" },
+        ...over,
+      } as DefinitionOfDoneDeps,
+    };
+  }
+
+  function doneResult(over: Partial<DefinitionOfDoneResult> = {}): DefinitionOfDoneResult {
+    return {
+      ok: true,
+      status: "done",
+      roundsExecuted: 1,
+      totalFindings: 0,
+      resolvedCount: 0,
+      acceptedCount: 0,
+      remainingFindings: [],
+      reason: "ok",
+      ...over,
+    };
+  }
+
+  it("does NOT apply df:done when the DoD is blocked (ACs fail)", async () => {
+    const { labels, deps } = setupTestDeps();
+    const result = await finalizeRunAsDone(deps, task, {
+      runDefinitionOfDone: async () =>
+        doneResult({ ok: false, status: "blocked", reason: "ACs failed" }),
+    });
+    expect(result.appliedDone).toBe(false);
+    expect(labels.some((l) => l.op === "add" && l.label === "df:done")).toBe(false);
+  });
+
+  it("does NOT apply df:done when review findings are unresolved (blocked)", async () => {
+    const { labels, deps } = setupTestDeps();
+    const result = await finalizeRunAsDone(deps, task, {
+      runDefinitionOfDone: async () =>
+        doneResult({
+          ok: false,
+          status: "blocked",
+          totalFindings: 2,
+          remainingFindings: [{ id: "lint-1", source: "linter", message: "x" }],
+        }),
+    });
+    expect(result.appliedDone).toBe(false);
+    expect(labels.some((l) => l.op === "add" && l.label === "df:done")).toBe(false);
+  });
+
+  it("DOES apply df:done when the DoD passes", async () => {
+    const { labels, deps } = setupTestDeps();
+    const result = await finalizeRunAsDone(deps, task, {
+      runDefinitionOfDone: async () => doneResult(),
+    });
+    expect(result.appliedDone).toBe(true);
+    expect(labels.some((l) => l.op === "add" && l.label === "df:done")).toBe(true);
+  });
+
+  it("isDoneGateSatisfied is true only for status 'done'", () => {
+    expect(isDoneGateSatisfied(undefined)).toBe(false);
+    expect(isDoneGateSatisfied(doneResult({ ok: false, status: "blocked" }))).toBe(false);
+    expect(isDoneGateSatisfied(doneResult({ status: "refused" }))).toBe(false);
+    expect(isDoneGateSatisfied(doneResult())).toBe(true);
   });
 });
