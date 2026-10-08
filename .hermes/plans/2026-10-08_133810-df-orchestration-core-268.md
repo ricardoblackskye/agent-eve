@@ -24,12 +24,12 @@ well-tested `Dispatcher`. Only its header comment still says "STUB".
 
 Consequence for the four acceptance criteria:
 
-| AC | Status today | Evidence |
-|---|---|---|
-| AC1 — handler runs dev→tester→pr in sequence | **MISSING** | No `DispatchHandler` implementation exists anywhere; every test stubs it (`handler: async () => {}`) |
-| AC2 — retry/backoff via `DEFAULT_RETRY_POLICY` | **DONE** | `dispatch.ts` retry loop; `tests/dark-factory/dispatch.test.ts` |
-| AC3 — parked runs do not consume retry budget | **DONE** | `dispatch-blocked.test.ts` — "a parked run consumes nothing" |
-| AC4 — dispatch status recorded per run | **DONE** | `Dispatcher.persist()` + `emit()`; `dispatch.test.ts` |
+| AC                                             | Status today | Evidence                                                                                             |
+|------------------------------------------------|--------------|------------------------------------------------------------------------------------------------------|
+| AC1 — handler runs dev→tester→pr in sequence   | **MISSING**  | No `DispatchHandler` implementation exists anywhere; every test stubs it (`handler: async () => {}`) |
+| AC2 — retry/backoff via `DEFAULT_RETRY_POLICY` | **DONE**     | `dispatch.ts` retry loop; `tests/dark-factory/dispatch.test.ts`                                      |
+| AC3 — parked runs do not consume retry budget  | **DONE**     | `dispatch-blocked.test.ts` — "a parked run consumes nothing"                                         |
+| AC4 — dispatch status recorded per run         | **DONE**     | `Dispatcher.persist()` + `emit()`; `dispatch.test.ts`                                                |
 
 **So #268 reduces to AC1:** implement the handler and prove the *handler + Dispatcher
 integration* satisfies AC2–AC4 end-to-end. No changes to `dispatch.ts` behaviour are
@@ -45,7 +45,7 @@ A new module `agent/lib/dark-factory/dispatch-handler.ts` exports
 The handler is a **thin, injected orchestrator** — it owns *sequence and translation*,
 nothing else:
 
-```
+```text
 checkpoint()
 developer stage  →  tester stage  →  (pr stage)
 ```
@@ -192,16 +192,16 @@ DF_PLATFORM_PROVIDER=generic npm run build
 
 ## Files likely to change
 
-| File | Action |
-|---|---|
-| `agent/lib/dark-factory/dispatch-handler.ts` | **Create** — the handler seam |
-| `tests/dark-factory/dispatch-handler.test.ts` | **Create** — TDD tests |
-| `agent/lib/dark-factory/index.ts` | Modify — barrel exports |
-| `agent/lib/dark-factory/dispatch.ts` | Modify — correct the stale `STUB` header only |
-| `docs/pages/dark-factory-modules.md` | Modify — module doc entry (drift guard) |
-| `docs/pages/flow-run-lifecycle.md` | Modify — describe the pipeline |
-| `docs/adr/0019-orchestration-handler-sequences-the-factory-pipeline.md` | **Create** |
-| `docs/adr/README.md` | Modify — link ADR 0019 |
+| File                                                                    | Action                                        |
+|-------------------------------------------------------------------------|-----------------------------------------------|
+| `agent/lib/dark-factory/dispatch-handler.ts`                            | **Create** — the handler seam                 |
+| `tests/dark-factory/dispatch-handler.test.ts`                           | **Create** — TDD tests                        |
+| `agent/lib/dark-factory/index.ts`                                       | Modify — barrel exports                       |
+| `agent/lib/dark-factory/dispatch.ts`                                    | Modify — correct the stale `STUB` header only |
+| `docs/pages/dark-factory-modules.md`                                    | Modify — module doc entry (drift guard)       |
+| `docs/pages/flow-run-lifecycle.md`                                      | Modify — describe the pipeline                |
+| `docs/adr/0019-orchestration-handler-sequences-the-factory-pipeline.md` | **Create**                                    |
+| `docs/adr/README.md`                                                    | Modify — link ADR 0019                        |
 
 ---
 
