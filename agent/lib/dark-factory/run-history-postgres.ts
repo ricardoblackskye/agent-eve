@@ -72,6 +72,7 @@ interface RunEventRow {
   cost_usd: number | null;
   pr_url: string | null;
   comment_reference: string | null;
+  cost_refusal: string | null;
 }
 
 const POSTGRES_SCHEMA = `
@@ -119,6 +120,7 @@ const POSTGRES_SCHEMA = `
     cost_usd DOUBLE PRECISION,
     pr_url TEXT,
     comment_reference TEXT,
+    cost_refusal TEXT,
     UNIQUE (run_id, event_id),
     FOREIGN KEY (run_id) REFERENCES df_run_summaries(run_id)
       ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED
@@ -128,6 +130,7 @@ const POSTGRES_SCHEMA = `
   ALTER TABLE df_run_events ADD COLUMN IF NOT EXISTS resolved_count BIGINT;
   ALTER TABLE df_run_events ADD COLUMN IF NOT EXISTS accepted_count BIGINT;
   ALTER TABLE df_run_events ADD COLUMN IF NOT EXISTS comment_reference TEXT;
+  ALTER TABLE df_run_events ADD COLUMN IF NOT EXISTS cost_refusal TEXT;
   CREATE INDEX IF NOT EXISTS df_run_events_page_idx
     ON df_run_events (run_id, sequence);
 
@@ -250,6 +253,9 @@ function rowToEvent(row: RunEventRow): PersistedRunEvent {
       ...(row.pr_url !== null ? { prUrl: row.pr_url } : {}),
       ...(row.comment_reference !== null && row.comment_reference !== undefined
         ? { commentReference: readCommentRef(row.comment_reference) }
+        : {}),
+      ...(row.cost_refusal !== null && row.cost_refusal !== undefined
+        ? { costRefusal: row.cost_refusal as RunEvent["costRefusal"] }
         : {}),
     }),
   };
@@ -442,8 +448,8 @@ function insertEvent(client: PoolClient, event: RunEvent): Promise<unknown> {
        run_id, event_id, type, stage, occurred_at, status, attempt,
        review_round, iteration_count, fix_cycle_count, finding_count,
        resolved_count, accepted_count, latency_ms, cost_usd, pr_url,
-       comment_reference
-     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
+       comment_reference, cost_refusal
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
     [
       event.runId,
       event.eventId,
@@ -462,6 +468,7 @@ function insertEvent(client: PoolClient, event: RunEvent): Promise<unknown> {
       event.costUsd ?? null,
       event.prUrl ?? null,
       event.commentReference ? JSON.stringify(event.commentReference) : null,
+      event.costRefusal ?? null,
     ],
   );
 }

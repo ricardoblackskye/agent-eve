@@ -1,4 +1,5 @@
 import { MAX_METRIC_COST_USD, MAX_METRIC_LATENCY_MS } from "./metrics";
+import type { CostGovernorRefusal } from "./cost-governor";
 
 export function normalizeRunDateRange(
   from: string | undefined,
@@ -104,6 +105,11 @@ export interface RunEvent {
    * `worker.question` events; the ledger stores the reference, never the text.
    */
   commentReference?: CommentReference;
+  /**
+   * The machine-readable reason a cost-governed LLM call was refused (#270):
+   * one of the CostGovernorRefusal codes, or absent. Never free text.
+   */
+  costRefusal?: CostGovernorRefusal;
 }
 
 export class InvalidRunRecordError extends Error {
@@ -360,6 +366,30 @@ function optionalCommentReference(
   return value === undefined ? undefined : commentReference(value);
 }
 
+/** The canonical cost-refusal codes (#270); kept in sync with CostGovernorRefusal. */
+const COST_REFUSALS: readonly CostGovernorRefusal[] = [
+  "not_configured",
+  "unpriced_model",
+  "budget_exceeded",
+  "budget_unavailable",
+  "tenant_unconfigured",
+];
+
+function optionalCostRefusal(value: unknown): CostGovernorRefusal | undefined {
+  if (value === undefined) return undefined;
+  if (
+    typeof value !== "string" ||
+    !COST_REFUSALS.includes(value as CostGovernorRefusal)
+  ) {
+    return invalid(
+      "costRefusal",
+      value,
+      `to be one of ${COST_REFUSALS.join(", ")}`,
+    );
+  }
+  return value as CostGovernorRefusal;
+}
+
 function isTerminal(status: RunStatus): boolean {
   return TERMINAL_STATUSES.includes(status);
 }
@@ -454,6 +484,7 @@ export function toRunEvent(input: Partial<RunEvent>): RunEvent {
   const costUsd = optionalMeasurement(input.costUsd, "costUsd");
   const prUrl = optionalPrUrl(input.prUrl);
   const commentReference = optionalCommentReference(input.commentReference);
+  const costRefusal = optionalCostRefusal(input.costRefusal);
 
   if (type === "run.accepted" && status !== "queued") {
     return invalid("status", status, 'to be "queued" for run.accepted');
@@ -530,6 +561,7 @@ export function toRunEvent(input: Partial<RunEvent>): RunEvent {
     ...(costUsd !== undefined ? { costUsd } : {}),
     ...(prUrl !== undefined ? { prUrl } : {}),
     ...(commentReference !== undefined ? { commentReference } : {}),
+    ...(costRefusal !== undefined ? { costRefusal } : {}),
   };
 }
 

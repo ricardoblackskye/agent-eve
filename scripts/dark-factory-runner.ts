@@ -42,6 +42,13 @@ import { validateExecutionPlan, type ExecutionPlan } from "../agent/lib/dark-fac
 import { createControlStore } from "../agent/lib/dark-factory/control";
 import { createControlCheckpoint } from "../agent/lib/dark-factory/control-checkpoint";
 import type { ControlStore } from "../agent/lib/dark-factory/control";
+import {
+  createCostBudgetStore,
+  isCostGovernanceConfigured,
+} from "../agent/lib/dark-factory/cost-budget-store";
+import { createCostGovernor } from "../agent/lib/dark-factory/cost-governor";
+import { createRunHistoryStore } from "../agent/lib/dark-factory/run-history-provider";
+import { runGovernedAgentCall } from "../agent/lib/dark-factory/governed-agent-call";
 
 // Load .env variables into process.env
 function initEnv(): Record<string, string | undefined> {
@@ -162,6 +169,13 @@ async function main(): Promise<void> {
   const metrics = createMetricsStore();
   const developerAgent = new DeveloperAgent({ metrics });
   const model = resolveChatModel();
+  const modelId = env.EVE_CHAT_MODEL ?? "deepseek/deepseek-chat";
+
+  // Cost governance (#270): OPT-IN — `null` unless a budget backend is configured.
+  const governor = isCostGovernanceConfigured(env)
+    ? createCostGovernor(createCostBudgetStore(env), env)
+    : null;
+  const runHistory = createRunHistoryStore(env);
 
   // STEP 1: Fetch live issue from GitHub
   console.log(`\n[STEP 1] Fetching live User Story #${issueNum} from GitHub...`);
@@ -199,13 +213,26 @@ async function main(): Promise<void> {
     listFiles: async () => scanWorkspaceFiles(process.cwd()),
     generateText: async (prompt) => {
       await checkpoint();
-      const stream = streamText({ model, prompt });
-      let output = "";
-      for await (const chunk of stream.textStream) {
-        output += chunk;
-        process.stdout.write(chunk);
-      }
-      return output;
+      // Governed (#270): an over-budget call is refused at THIS call site, and the
+      // refusal code is recorded on the run.
+      return runGovernedAgentCall(
+        { governor, runHistory, runId },
+        {
+          category: "developer",
+          model: modelId,
+          inputTokens: Math.ceil(prompt.length / 4),
+          outputTokens: 8_000,
+          run: async () => {
+            const stream = streamText({ model, prompt });
+            let output = "";
+            for await (const chunk of stream.textStream) {
+              output += chunk;
+              process.stdout.write(chunk);
+            }
+            return output;
+          },
+        },
+      );
     },
     maxPlanRetries: 2,
   });
@@ -260,11 +287,23 @@ async function main(): Promise<void> {
         `Example: { "app/chat.tsx": "export ...", "tests/chat.test.ts": "import ..." }`,
       ].join("\n");
 
-      const stream = streamText({ model, prompt: workerPrompt });
-      let output = "";
-      for await (const chunk of stream.textStream) {
-        output += chunk;
-      }
+      const output = await runGovernedAgentCall(
+        { governor, runHistory, runId },
+        {
+          category: "developer",
+          model: modelId,
+          inputTokens: Math.ceil(workerPrompt.length / 4),
+          outputTokens: 8_000,
+          run: async () => {
+            const stream = streamText({ model, prompt: workerPrompt });
+            let acc = "";
+            for await (const chunk of stream.textStream) {
+              acc += chunk;
+            }
+            return acc;
+          },
+        },
+      );
 
       try {
         const jsonMatch = output.match(/\{[\s\S]*\}/);
