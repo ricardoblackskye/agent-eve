@@ -70,6 +70,8 @@ export interface RunSummary {
   latencyMs?: number;
   costUsd?: number;
   prUrl?: string;
+  /** Sanitized unified git diff produced by the developer-agent. Absent until captured. */
+  gitDiff?: string;
   /**
    * Customer tenant this run is attributed to. Absent means UNASSIGNED — a
    * legitimate state for historical runs recorded before attribution existed.
@@ -206,6 +208,14 @@ const TERMINAL_STATUSES: readonly RunStatus[] = [
 const REPO_PAIR = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const MAX_IDENTIFIER_LENGTH = 256;
 const MAX_RUN_COUNTER = Number.MAX_SAFE_INTEGER;
+/** Hard cap on the stored git diff so a huge patch cannot bloat the ledger. */
+const MAX_GIT_DIFF_CHARS = 65536;
+/**
+ * Detects `DF_*=value` / `DF_*: value` assignments that should have been
+ * redacted by the capture layer before storage. Defense-in-depth guard so
+ * unsanitized secrets can never reach the run history.
+ */
+const RAW_SECRET_RE = /DF_[A-Z0-9_]+\s*[=:]\s*["']?[A-Za-z0-9/+._-]{6,}/;
 
 function invalid(field: string, value: unknown, expected: string): never {
   throw new InvalidRunRecordError(
@@ -343,6 +353,28 @@ function optionalPrUrl(value: unknown): string | undefined {
   return httpUrl(value, "prUrl");
 }
 
+function optionalGitDiff(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string") {
+    return invalid("gitDiff", value, "to be a string when present");
+  }
+  if (value.length > MAX_GIT_DIFF_CHARS) {
+    return invalid(
+      "gitDiff",
+      value.length,
+      `to be at most ${MAX_GIT_DIFF_CHARS} characters`,
+    );
+  }
+  if (RAW_SECRET_RE.test(value)) {
+    return invalid(
+      "gitDiff",
+      "<redacted>",
+      "to contain no unsanitized DF_* secret assignments",
+    );
+  }
+  return value;
+}
+
 function commentReference(value: unknown): CommentReference {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return invalid(
@@ -420,6 +452,7 @@ export function toRunSummary(input: Partial<RunSummary>): RunSummary {
   const latencyMs = optionalMeasurement(input.latencyMs, "latencyMs");
   const costUsd = optionalMeasurement(input.costUsd, "costUsd");
   const prUrl = optionalPrUrl(input.prUrl);
+  const gitDiff = optionalGitDiff(input.gitDiff);
   const tenantId = optionalIdentifier(input.tenantId, "tenantId");
 
   if (Date.parse(updatedAt) < Date.parse(createdAt)) {
@@ -459,6 +492,7 @@ export function toRunSummary(input: Partial<RunSummary>): RunSummary {
     ...(latencyMs !== undefined ? { latencyMs } : {}),
     ...(costUsd !== undefined ? { costUsd } : {}),
     ...(prUrl !== undefined ? { prUrl } : {}),
+    ...(gitDiff !== undefined ? { gitDiff } : {}),
   };
 }
 
