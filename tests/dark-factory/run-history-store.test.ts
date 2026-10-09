@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SqliteRunHistoryStore } from "../../agent/lib/dark-factory/run-history-store";
+import { type RunSummary } from "../../agent/lib/dark-factory/run-history";
 
 const at = "2026-09-24T12:00:00.000Z";
 const directories: string[] = [];
@@ -781,5 +782,35 @@ describe("SqliteRunHistoryStore delivery acceptance", () => {
       .sort();
     expect(trend).toEqual(["2026-09-24:2"]);
     expect(metrics.value?.measured.latencyMs).toEqual({ sum: 500, count: 2 });
+  });
+});
+
+describe("gitDiff persistence (#295)", () => {
+  const SAMPLE_DIFF =
+    "diff --git a/foo.ts b/foo.ts\n--- a/foo.ts\n+++ b/foo.ts\n@@ -1 +1 @@\n-const a = 1;\n+const a = 2;\n";
+
+  it("round-trips the git diff through the sqlite store", async () => {
+    const store = createStore(() => "run-diff-1");
+    const summary: RunSummary = {
+      runId: "run-diff-1",
+      repo: "owner/repo",
+      issue: 198,
+      status: "succeeded",
+      stage: "terminal",
+      createdAt: at,
+      updatedAt: at,
+      startedAt: at,
+      completedAt: at,
+      attemptCount: 1,
+      reviewCount: 0,
+      iterationCount: 1,
+      fixCycleCount: 0,
+      gitDiff: SAMPLE_DIFF,
+    };
+    const written = await store.recordRunSummary(summary);
+    expect(written.ok).toBe(true);
+    const stored = await store.getRun("run-diff-1");
+    expect(stored.ok).toBe(true);
+    expect(stored.value?.gitDiff).toBe(SAMPLE_DIFF);
   });
 });

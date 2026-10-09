@@ -57,6 +57,39 @@ describeWithDatabase("PostgresRunHistoryStore integration", () => {
     ]);
   });
 
+  it("round-trips the git diff through the postgres store (#295)", async () => {
+    const deliveryId = `pg-diff-${namespace}`;
+    const accepted = await store.acceptDelivery({
+      deliveryId,
+      repo: "owner/repo",
+      issue,
+      receivedAt: at,
+    });
+    const runId = accepted.value?.runId;
+    if (!runId) throw new Error("Postgres delivery acceptance returned no runId");
+    const SAMPLE_DIFF =
+      "diff --git a/foo.ts b/foo.ts\n--- a/foo.ts\n+++ b/foo.ts\n@@ -1 +1 @@\n-const a = 1;\n+const a = 2;\n";
+    const written = await store.recordRunSummary({
+      runId,
+      repo: "owner/repo",
+      issue,
+      status: "succeeded",
+      stage: "terminal",
+      createdAt: at,
+      updatedAt: at,
+      startedAt: at,
+      completedAt: at,
+      attemptCount: 1,
+      reviewCount: 0,
+      iterationCount: 1,
+      fixCycleCount: 0,
+      gitDiff: SAMPLE_DIFF,
+    });
+    expect(written.ok).toBe(true);
+    const stored = await store.getRun(runId);
+    expect(stored.value?.gitDiff).toBe(SAMPLE_DIFF);
+  });
+
   it("round-trips review finding dispositions through the event table", async () => {
     const accepted = await store.acceptDelivery({
       deliveryId: `pg-review-${namespace}`,
