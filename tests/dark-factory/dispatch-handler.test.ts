@@ -6,7 +6,7 @@
  * assert the sequence and the control-error translation, and the integration
  * tests drive a REAL `Dispatcher` to prove AC2/AC3/AC4 hold through the handler.
  */
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import {
   createDispatchHandler,
   type FactoryStages,
@@ -237,5 +237,45 @@ describe("#268 orchestration handler — Dispatcher integration", () => {
     expect(outcome.ok).toBe(false);
     expect(outcome.status).toBe("failed");
     expect(developerRuns).toBe(3); // 1 attempt + 2 retries (DEFAULT_RETRY_POLICY)
+  });
+});
+
+describe("#295 diff capture wiring", () => {
+  it("captures + records the developer workspace diff when runHistory + workspaceDir are present", async () => {
+    const captureDiff = vi.fn(async () => {});
+    const runId = "run-295";
+    const workspaceDir = "/tmp/dev-workspace";
+    const { stages } = recordingStages({
+      developer: async () => ({ runId, workspaceDir }),
+    });
+    const handler = createDispatchHandler({
+      stages,
+      runHistory: {} as never,
+      captureDiff,
+    });
+    await handler(event(runId), "developer", async () => {});
+    expect(captureDiff).toHaveBeenCalledTimes(1);
+    expect(captureDiff).toHaveBeenCalledWith({}, runId, workspaceDir);
+  });
+
+  it("does not capture when no runHistory is wired", async () => {
+    const captureDiff = vi.fn(async () => {});
+    const { stages } = recordingStages();
+    const handler = createDispatchHandler({ stages, captureDiff });
+    await handler(event(), "developer", async () => {});
+    expect(captureDiff).not.toHaveBeenCalled();
+  });
+
+  it("still runs tester + pr when the developer stage returns void", async () => {
+    const captureDiff = vi.fn(async () => {});
+    const { order, stages } = recordingStages();
+    const handler = createDispatchHandler({
+      stages,
+      runHistory: {} as never,
+      captureDiff,
+    });
+    await handler(event(), "developer", async () => {});
+    expect(captureDiff).not.toHaveBeenCalled();
+    expect(order).toEqual(["developer", "tester", "pr"]);
   });
 });
