@@ -105,6 +105,7 @@ export interface DetailView {
   checkpoints: Checkpoint[];
   metrics: MetricItem[];
   prUrl?: string;
+  gitDiff?: string;
 }
 
 export interface RunFilters {
@@ -400,7 +401,7 @@ export function toDetailView({
       value: String(accepted),
     });
 
-  return { summaryTiles, timeline, checkpoints, metrics, prUrl: summary.prUrl };
+  return { summaryTiles, timeline, checkpoints, metrics, prUrl: summary.prUrl, gitDiff: summary.gitDiff };
 }
 
 export function toQueryParams(filters: RunFilters): URLSearchParams {

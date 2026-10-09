@@ -465,3 +465,43 @@ export function OutcomeArtifacts({ prUrl }: { prUrl?: string }): ReactNode {
     </section>
   );
 }
+
+
+export function RunDiffPanel({ gitDiff }: { gitDiff?: string }): ReactNode {
+  if (!gitDiff) {
+    return (
+      <section className="df-panel">
+        <PanelHead title="RUN DIFF" badges={["GIT"]} />
+        <div className="df-panel-body">
+          <StatePanel state="empty" message="No diff captured" />
+        </div>
+      </section>
+    );
+  }
+  const lines = gitDiff.split("\n");
+  return (
+    <section className="df-panel">
+      <PanelHead title="RUN DIFF" badges={["GIT", "CAPTURED"]} />
+      <div className="df-panel-body">
+        <pre className="df-diff" data-testid="run-diff">
+          {lines.map((line, index) => {
+            const cls =
+              /^(diff |index |@@ |--- |\+\+\+ )/.test(line)
+                ? "df-diff-meta"
+                : line.startsWith("+")
+                  ? "df-diff-add"
+                  : line.startsWith("-")
+                    ? "df-diff-del"
+                    : "df-diff-ctx";
+            return (
+              <span key={index} className={cls}>
+                {line}
+                {"\n"}
+              </span>
+            );
+          })}
+        </pre>
+      </div>
+    </section>
+  );
+}

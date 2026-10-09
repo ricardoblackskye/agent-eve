@@ -10,6 +10,7 @@ import {
   OutcomeArtifacts,
   PanelHead,
   RunDetailPanel,
+  RunDiffPanel,
   StatePanel,
   WorkerCheckpoints,
 } from "../../ui/components";
@@ -85,6 +86,7 @@ export default function DarkFactoryRunDetailPage() {
       </section>
       <RunDetailPanel summary={run.data.summary} view={view} />
       <OutcomeArtifacts prUrl={view.prUrl} />
+      <RunDiffPanel gitDiff={view.gitDiff} />
       <div className="df-detail-grid">
         <section className="df-panel">
           <PanelHead title="EVENT STREAM" badges={["OLDEST → NEWEST"]} />
