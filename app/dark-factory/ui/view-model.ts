@@ -104,6 +104,7 @@ export interface DetailView {
   timeline: TimelineEntry[];
   checkpoints: Checkpoint[];
   metrics: MetricItem[];
+  prUrl?: string;
 }
 
 export interface RunFilters {
@@ -399,7 +400,7 @@ export function toDetailView({
       value: String(accepted),
     });
 
-  return { summaryTiles, timeline, checkpoints, metrics };
+  return { summaryTiles, timeline, checkpoints, metrics, prUrl: summary.prUrl };
 }
 
 export function toQueryParams(filters: RunFilters): URLSearchParams {
