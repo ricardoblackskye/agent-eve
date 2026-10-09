@@ -5,6 +5,7 @@ import {
   EventTimeline,
   KpiTiles,
   MeasuredMetrics,
+  OutcomeArtifacts,
   OutcomeMix,
   PanelHead,
   RecentRunsList,
@@ -313,5 +314,22 @@ describe("detail components", () => {
     const { container } = render(<MeasuredMetrics metrics={view.metrics} />);
     expect(container.textContent).toContain("Total findings");
     expect(container.textContent).toContain("Fix cycles");
+  });
+});
+
+describe("OutcomeArtifacts", () => {
+  it("renders the PR link when the run has one", () => {
+    const { container } = render(
+      <OutcomeArtifacts prUrl="https://github.com/owner/repo/pull/9" />,
+    );
+    expect(container.textContent).toContain("Pull request");
+    expect(
+      container.querySelector('a[href="https://github.com/owner/repo/pull/9"]'),
+    ).not.toBeNull();
+  });
+
+  it("renders an empty state when there is no PR", () => {
+    const { container } = render(<OutcomeArtifacts prUrl={undefined} />);
+    expect(container.querySelector(".df-state-empty")).toBeTruthy();
   });
 });
