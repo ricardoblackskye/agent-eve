@@ -327,4 +327,14 @@ describe("Dark Factory run detail page", () => {
     expect(screen.queryByRole("button", { name: "Stop run" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Pause run" })).toBeNull();
   });
+
+  it("renders the OUTCOME artifact panel linking the PR", async () => {
+    const { container } = render(<DarkFactoryRunDetailPage />);
+    await waitFor(() =>
+      expect(container.querySelector("a.df-outcome-link")).not.toBeNull(),
+    );
+    expect(
+      container.querySelector("a.df-outcome-link")?.getAttribute("href"),
+    ).toBe("https://github.com/owner/repo/pull/202");
+  });
 });
