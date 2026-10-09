@@ -443,3 +443,25 @@ export function MeasuredMetrics({
     </div>
   );
 }
+
+export function OutcomeArtifacts({ prUrl }: { prUrl?: string }): ReactNode {
+  return (
+    <section className="df-panel">
+      <PanelHead title="OUTCOME" badges={["ARTIFACTS"]} />
+      <div className="df-panel-body">
+        {prUrl ? (
+          <a
+            className="df-outcome-link"
+            href={prUrl}
+            target="_blank"
+            rel="noreferrer"
+          >
+            {"Pull request — agent outcome ↗"}
+          </a>
+        ) : (
+          <StatePanel state="empty" message="No PR opened yet" />
+        )}
+      </div>
+    </section>
+  );
+}
