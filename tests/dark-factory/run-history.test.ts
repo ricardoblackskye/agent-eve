@@ -267,4 +267,32 @@ describe("canonical run history records", () => {
       ).toThrow(/commentReference/i);
     });
   });
+
+  describe("gitDiff on RunSummary", () => {
+    const SAMPLE_DIFF =
+      "diff --git a/foo.ts b/foo.ts\n--- a/foo.ts\n+++ b/foo.ts\n@@ -1 +1 @@\n-const a = 1;\n+const a = 2;\n";
+
+    it("preserves the git diff when supplied", () => {
+      const result = toRunSummary({
+        ...summary(),
+        gitDiff: SAMPLE_DIFF,
+      } as RunSummary);
+      expect(result.gitDiff).toBe(SAMPLE_DIFF);
+    });
+
+    it("rejects a git diff that exceeds the size cap", () => {
+      const tooBig = "x".repeat(200_000);
+      expect(() =>
+        toRunSummary({ ...summary(), gitDiff: tooBig } as RunSummary),
+      ).toThrow(/gitDiff/i);
+    });
+
+    it("rejects a git diff containing an unsanitized DF_* secret", () => {
+      const leaky =
+        "diff --git a/.env b/.env\n-DF_API_TOKEN=supersecretvalue123\n";
+      expect(() =>
+        toRunSummary({ ...summary(), gitDiff: leaky } as RunSummary),
+      ).toThrow(/gitDiff|secret/i);
+    });
+  });
 });
