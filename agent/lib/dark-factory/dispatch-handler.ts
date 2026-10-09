@@ -27,6 +27,9 @@ import {
   type DispatchHandler,
 } from "./dispatch";
 
+import { recordRunDiff } from "./diff-capture";
+import { type RunHistoryStore } from "./run-history-store";
+
 /** Context handed to every stage: the dispatch event and the routed worker. */
 export interface FactoryStageContext {
   event: DispatchEvent;
@@ -47,14 +50,33 @@ export interface TesterStageResult {
  * The three pipeline stages. Each receives the run context and the cooperative
  * checkpoint; a stage MAY invoke the checkpoint itself inside a long loop.
  */
+/** Optional result a developer stage may return so the orchestrator can capture + persist the produced patch. */
+export interface DeveloperStageResult {
+  /** Run id to record the diff against; defaults to the dispatch event's runId. */
+  runId?: string;
+  /** The developer agent's work tree; a `git diff` here is captured + sanitized. */
+  workspaceDir?: string;
+}
+
 export interface FactoryStages {
-  developer(ctx: FactoryStageContext, checkpoint: DispatchCheckpoint): Promise<void>;
+  developer(
+    ctx: FactoryStageContext,
+    checkpoint: DispatchCheckpoint,
+  ): Promise<void | DeveloperStageResult>;
   tester(ctx: FactoryStageContext, checkpoint: DispatchCheckpoint): Promise<TesterStageResult>;
   pr(ctx: FactoryStageContext, checkpoint: DispatchCheckpoint): Promise<void>;
 }
 
 export interface DispatchHandlerDeps {
   stages: FactoryStages;
+  /** Optional run-history store; when present, developer-stage diffs are captured. */
+  runHistory?: RunHistoryStore;
+  /** Override the diff-capture used after the developer stage (defaults to `recordRunDiff`). */
+  captureDiff?: (
+    store: RunHistoryStore,
+    runId: string,
+    workspaceDir: string,
+  ) => Promise<void>;
 }
 
 export function createDispatchHandler(deps: DispatchHandlerDeps): DispatchHandler {
@@ -62,7 +84,15 @@ export function createDispatchHandler(deps: DispatchHandlerDeps): DispatchHandle
     const ctx: FactoryStageContext = { event, worker };
 
     await checkpoint();
-    await deps.stages.developer(ctx, checkpoint);
+    const devResult = await deps.stages.developer(ctx, checkpoint);
+    if (deps.runHistory && devResult && devResult.workspaceDir) {
+      const capture = deps.captureDiff ?? recordRunDiff;
+      await capture(
+        deps.runHistory,
+        devResult.runId ?? event.runId,
+        devResult.workspaceDir,
+      );
+    }
 
     await checkpoint();
     const tester = await deps.stages.tester(ctx, checkpoint);
