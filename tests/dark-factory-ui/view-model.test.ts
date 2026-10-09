@@ -307,6 +307,14 @@ describe("toDetailView", () => {
     const progress = view.timeline.find((t) => t.type === "worker.progress");
     expect(progress?.commentUrl).toBeUndefined();
   });
+
+  it("exposes the PR link from the run summary on the detail view", () => {
+    const view = toDetailView({
+      summary: summary({ prUrl: "https://github.com/owner/repo/pull/9" }),
+      events: [],
+    });
+    expect(view.prUrl).toBe("https://github.com/owner/repo/pull/9");
+  });
 });
 
 describe("toQueryParams", () => {
