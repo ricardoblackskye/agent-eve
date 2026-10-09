@@ -7,6 +7,7 @@ import type { PersistedRunEvent } from "../../../../agent/lib/dark-factory/run-h
 import {
   EventTimeline,
   MeasuredMetrics,
+  OutcomeArtifacts,
   PanelHead,
   RunDetailPanel,
   StatePanel,
@@ -83,6 +84,7 @@ export default function DarkFactoryRunDetailPage() {
         </div>
       </section>
       <RunDetailPanel summary={run.data.summary} view={view} />
+      <OutcomeArtifacts prUrl={view.prUrl} />
       <div className="df-detail-grid">
         <section className="df-panel">
           <PanelHead title="EVENT STREAM" badges={["OLDEST → NEWEST"]} />
