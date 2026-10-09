@@ -11,6 +11,7 @@ import {
   RecentRunsList,
   ResourceSnapshot,
   RunDetailPanel,
+  RunDiffPanel,
   RunTable,
   StatePanel,
   StatusPill,
@@ -330,6 +331,32 @@ describe("OutcomeArtifacts", () => {
 
   it("renders an empty state when there is no PR", () => {
     const { container } = render(<OutcomeArtifacts prUrl={undefined} />);
+    expect(container.querySelector(".df-state-empty")).toBeTruthy();
+  });
+});
+
+describe("RunDiffPanel", () => {
+  it("renders the captured diff in a scrollable block", () => {
+    const { container } = render(
+      <RunDiffPanel gitDiff={"diff --git a/foo.ts b/foo.ts\n-const a = 1;\n+const a = 2;"} />,
+    );
+    const block = container.querySelector(".df-diff");
+    expect(block).not.toBeNull();
+    expect(block?.textContent).toContain("const a = 1;");
+    expect(block?.textContent).toContain("const a = 2;");
+  });
+
+  it("color-codes added and removed lines", () => {
+    const { container } = render(
+      <RunDiffPanel gitDiff={"-removed line\n+added line"} />,
+    );
+    expect(container.querySelector(".df-diff-add")).toBeTruthy();
+    expect(container.querySelector(".df-diff-del")).toBeTruthy();
+  });
+
+  it("renders an empty state when no diff was captured", () => {
+    const { container } = render(<RunDiffPanel gitDiff={undefined} />);
+    expect(container.querySelector(".df-diff")).toBeNull();
     expect(container.querySelector(".df-state-empty")).toBeTruthy();
   });
 });
