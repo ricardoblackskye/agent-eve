@@ -289,7 +289,7 @@ describe("canonical run history records", () => {
 
     it("rejects a git diff containing an unsanitized DF_* secret", () => {
       const leaky =
-        "diff --git a/.env b/.env\n-DF_API_TOKEN=supersecretvalue123\n";
+        "diff --git a/.env b/.env\n-DF_API_TOKEN=superSecretValue123\n";
       expect(() =>
         toRunSummary({ ...summary(), gitDiff: leaky } as RunSummary),
       ).toThrow(/gitDiff|secret/i);
