@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import type {
   RunTrendPoint,
   RunSummary,
+  TestOutcome,
 } from "../../../agent/lib/dark-factory/run-history";
 import { formatCostUsd, formatCount } from "./format";
 import {
@@ -501,6 +502,51 @@ export function RunDiffPanel({ gitDiff }: { gitDiff?: string }): ReactNode {
             );
           })}
         </pre>
+      </div>
+    </section>
+  );
+}
+
+export function TestOutputPanel({
+  testResults,
+}: {
+  testResults?: TestOutcome[];
+}): ReactNode {
+  if (!testResults || testResults.length === 0) {
+    return (
+      <section className="df-panel">
+        <PanelHead title="TEST OUTPUT" badges={["TESTER"]} />
+        <div className="df-panel-body">
+          <StatePanel state="empty" message="No test output captured" />
+        </div>
+      </section>
+    );
+  }
+  const passed = testResults.filter((t) => t.passed).length;
+  const failed = testResults.length - passed;
+  return (
+    <section className="df-panel">
+      <PanelHead title="TEST OUTPUT" badges={["TESTER", "CAPTURED"]} />
+      <div className="df-panel-body">
+        <p className="df-test-summary" data-testid="test-output-summary">
+          <span className="df-test-pass">{passed} passed</span>
+          <span className="df-test-sep"> · </span>
+          <span className="df-test-fail">{failed} failed</span>
+        </p>
+        <ul className="df-test-list">
+          {testResults.map((t, index) => (
+            <li
+              key={`${t.testFile}:${t.testCaseName}:${index}`}
+              className={t.passed ? "df-test-pass" : "df-test-fail"}
+              data-testid={t.passed ? "test-passed" : "test-failed"}
+            >
+              <span aria-hidden="true">{t.passed ? "✓" : "✗"}</span>{" "}
+              <span className="df-test-file">{t.testFile}</span>
+              <span className="df-test-sep"> › </span>
+              <span className="df-test-name">{t.testCaseName}</span>
+            </li>
+          ))}
+        </ul>
       </div>
     </section>
   );
