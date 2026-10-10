@@ -90,6 +90,37 @@ describeWithDatabase("PostgresRunHistoryStore integration", () => {
     expect(stored.value?.gitDiff).toBe(SAMPLE_DIFF);
   });
 
+  it("round-trips tester test results on review-round events through postgres (#296)", async () => {
+    const accepted = await store.acceptDelivery({
+      deliveryId: `pg-testresults-${namespace}`,
+      repo: "owner/review-counts",
+      issue,
+      receivedAt: at,
+    });
+    const runId = accepted.value?.runId;
+    if (!runId) throw new Error("Postgres delivery acceptance returned no runId");
+    const testResults = [
+      { testFile: "src/foo.test.ts", testCaseName: "adds numbers", passed: true },
+      { testFile: "src/bar.test.ts", testCaseName: "throws on null", passed: false },
+    ];
+    const recorded = await store.appendEvent({
+      eventId: `pg-review-testresults-${namespace}`,
+      runId,
+      type: "review.round",
+      stage: "review",
+      occurredAt: "2026-09-24T12:00:01.000Z",
+      reviewRound: 1,
+      findingCount: 2,
+      resolvedCount: 1,
+      acceptedCount: 1,
+      testResults,
+    });
+    expect(recorded.ok).toBe(true);
+    const events = (await store.listRunEvents(runId)).value?.items ?? [];
+    const reviewEvent = events.find((e) => e.event.type === "review.round");
+    expect(reviewEvent?.event.testResults).toEqual(testResults);
+  });
+
   it("round-trips review finding dispositions through the event table", async () => {
     const accepted = await store.acceptDelivery({
       deliveryId: `pg-review-${namespace}`,
