@@ -604,6 +604,7 @@ export async function runDefinitionOfDone(
     reviewRound: round,
     ...counts,
     ...task.runMetrics,
+    testResults: task.testResults,
   });
 
   const completeSuccessfully = async (
