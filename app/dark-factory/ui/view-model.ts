@@ -4,6 +4,7 @@ import type {
   RunStatus,
   RunStatusCount,
   RunSummary,
+  TestOutcome,
 } from "../../../agent/lib/dark-factory/run-history";
 import type { PersistedRunEvent } from "../../../agent/lib/dark-factory/run-history-store";
 import {
@@ -106,6 +107,7 @@ export interface DetailView {
   metrics: MetricItem[];
   prUrl?: string;
   gitDiff?: string;
+  testResults?: TestOutcome[];
 }
 
 export interface RunFilters {
@@ -401,7 +403,20 @@ export function toDetailView({
       value: String(accepted),
     });
 
-  return { summaryTiles, timeline, checkpoints, metrics, prUrl: summary.prUrl, gitDiff: summary.gitDiff };
+  const testResultsEvent = [...ordered]
+    .reverse()
+    .find(({ event }) => event.type === "review.round" && event.testResults?.length);
+  const testResults = testResultsEvent?.event.testResults;
+
+  return {
+    summaryTiles,
+    timeline,
+    checkpoints,
+    metrics,
+    prUrl: summary.prUrl,
+    gitDiff: summary.gitDiff,
+    testResults,
+  };
 }
 
 export function toQueryParams(filters: RunFilters): URLSearchParams {
