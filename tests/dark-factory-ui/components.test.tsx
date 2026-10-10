@@ -14,6 +14,7 @@ import {
   RunDiffPanel,
   RunTable,
   StatePanel,
+  TestOutputPanel,
   StatusPill,
   TrendChart,
   WorkerCheckpoints,
@@ -357,6 +358,35 @@ describe("RunDiffPanel", () => {
   it("renders an empty state when no diff was captured", () => {
     const { container } = render(<RunDiffPanel gitDiff={undefined} />);
     expect(container.querySelector(".df-diff")).toBeNull();
+    expect(container.querySelector(".df-state-empty")).toBeTruthy();
+  });
+});
+
+describe("TestOutputPanel", () => {
+  it("renders the per-test pass/fail detail with an aggregate summary", () => {
+    const { container } = render(
+      <TestOutputPanel
+        testResults={[
+          { testFile: "src/foo.test.ts", testCaseName: "adds numbers", passed: true },
+          { testFile: "src/bar.test.ts", testCaseName: "throws on null", passed: false },
+        ]}
+      />,
+    );
+    const summary = container.querySelector('[data-testid="test-output-summary"]');
+    expect(summary?.textContent).toContain("1 passed");
+    expect(summary?.textContent).toContain("1 failed");
+    expect(
+      container.querySelectorAll('[data-testid="test-passed"]'),
+    ).toHaveLength(1);
+    expect(
+      container.querySelectorAll('[data-testid="test-failed"]'),
+    ).toHaveLength(1);
+    expect(container.textContent).toContain("src/foo.test.ts");
+    expect(container.textContent).toContain("throws on null");
+  });
+
+  it("renders an empty state when there is no test output", () => {
+    const { container } = render(<TestOutputPanel testResults={undefined} />);
     expect(container.querySelector(".df-state-empty")).toBeTruthy();
   });
 });

@@ -346,4 +346,40 @@ describe("Dark Factory run detail page", () => {
     );
     expect(container.textContent).toContain("const a = 2;");
   });
+
+  it("renders captured tester test output from a review-round event", async () => {
+    const testResults = [
+      { testFile: "src/foo.test.ts", testCaseName: "adds numbers", passed: true },
+      { testFile: "src/bar.test.ts", testCaseName: "throws on null", passed: false },
+    ];
+    const events = [
+      ...EVENTS,
+      {
+        sequence: 2,
+        event: {
+          eventId: "evt-review",
+          runId: "df-1a2b",
+          type: "review.round",
+          stage: "review",
+          occurredAt: "2026-09-25T09:20:00.000Z",
+          reviewRound: 1,
+          findingCount: 2,
+          resolvedCount: 1,
+          acceptedCount: 1,
+          testResults,
+        },
+      },
+    ];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.resolve(jsonResponse({ summary: SUMMARY, events }))),
+    );
+    const { container } = render(<DarkFactoryRunDetailPage />);
+    await waitFor(() =>
+      expect(container.textContent).toContain("adds numbers"),
+    );
+    expect(container.textContent).toContain("throws on null");
+    expect(container.textContent).toContain("1 passed");
+    expect(container.textContent).toContain("1 failed");
+  });
 });
