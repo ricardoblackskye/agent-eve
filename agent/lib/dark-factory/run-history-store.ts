@@ -131,6 +131,9 @@ export interface RunHistoryStore {
     reference: RunEvent["commentReference"],
   ): Promise<void>;
   getRun(runId: string): Promise<RunHistoryReadResult<RunSummary>>;
+  recordRunSummary(
+    summary: RunSummary,
+  ): Promise<RunHistoryWriteResult<RunSummary>>;
   listRuns(
     options?: RunListOptions,
   ): Promise<RunHistoryReadResult<Page<RunSummary, RunCursor>>>;
@@ -161,6 +164,7 @@ interface RunSummaryRow {
   latency_ms: number | null;
   cost_usd: number | null;
   pr_url: string | null;
+  git_diff: string | null;
   tenant_id: string | null;
 }
 
@@ -285,6 +289,7 @@ const SQLITE_SCHEMA = `
     latency_ms REAL,
     cost_usd REAL,
     pr_url TEXT,
+    git_diff TEXT,
     tenant_id TEXT
   );
   CREATE INDEX IF NOT EXISTS df_run_summaries_page_idx
@@ -370,8 +375,9 @@ function rowToSummary(row: RunSummaryRow): RunSummary {
     ...(row.latency_ms !== null ? { latencyMs: row.latency_ms } : {}),
     ...(row.cost_usd !== null ? { costUsd: row.cost_usd } : {}),
     ...(row.pr_url !== null ? { prUrl: row.pr_url } : {}),
+    ...(row.git_diff !== null ? { gitDiff: row.git_diff } : {}),
     ...(row.tenant_id !== null ? { tenantId: row.tenant_id } : {}),
-  });
+    });
 }
 
 function writeSummary(db: DatabaseSync, summary: RunSummary): void {
@@ -379,9 +385,9 @@ function writeSummary(db: DatabaseSync, summary: RunSummary): void {
     `INSERT INTO df_run_summaries (
        run_id, repo, issue, status, stage, created_at, updated_at,
        started_at, completed_at, attempt_count, review_count,
-       iteration_count, fix_cycle_count, latency_ms, cost_usd, pr_url,
+       iteration_count, fix_cycle_count, latency_ms, cost_usd, pr_url, git_diff,
        tenant_id
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(run_id) DO UPDATE SET
        repo = excluded.repo,
        issue = excluded.issue,
@@ -397,7 +403,8 @@ function writeSummary(db: DatabaseSync, summary: RunSummary): void {
        fix_cycle_count = excluded.fix_cycle_count,
        latency_ms = excluded.latency_ms,
        cost_usd = excluded.cost_usd,
-       pr_url = excluded.pr_url`,
+       pr_url = excluded.pr_url,
+       git_diff = excluded.git_diff`,
   ).run(
     summary.runId,
     summary.repo,
@@ -415,6 +422,7 @@ function writeSummary(db: DatabaseSync, summary: RunSummary): void {
     summary.latencyMs ?? null,
     summary.costUsd ?? null,
     summary.prUrl ?? null,
+    summary.gitDiff ?? null,
     summary.tenantId ?? null,
   );
 }
@@ -594,6 +602,7 @@ export class SqliteRunHistoryStore implements RunHistoryStore {
         .all() as { name: string }[];
       if (!summaryColumns.some((column) => column.name === "tenant_id")) {
         db.exec("ALTER TABLE df_run_summaries ADD COLUMN tenant_id TEXT");
+        db.exec("ALTER TABLE df_run_summaries ADD COLUMN git_diff TEXT");
       }
       const eventColumns = db
         .prepare("PRAGMA table_info(df_run_events)")
@@ -1009,6 +1018,26 @@ export class SqliteRunHistoryStore implements RunHistoryStore {
         providerId: this.id,
         value: appended.summary,
         duplicate: appended.duplicate,
+      };
+    } catch (error) {
+      return blocked(this.id, error);
+    }
+  }
+
+  async recordRunSummary(
+    summary: RunSummary,
+  ): Promise<RunHistoryWriteResult<RunSummary>> {
+    try {
+      const written = this.transaction((db) => {
+        writeSummary(db, summary);
+        return summary;
+      });
+      return {
+        ok: true,
+        mode: "live",
+        providerId: this.id,
+        value: written,
+        duplicate: false,
       };
     } catch (error) {
       return blocked(this.id, error);

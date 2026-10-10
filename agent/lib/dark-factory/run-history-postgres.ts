@@ -50,6 +50,7 @@ interface RunSummaryRow {
   latency_ms: number | null;
   cost_usd: number | null;
   pr_url: string | null;
+  git_diff: string | null;
   tenant_id: string | null;
 }
 
@@ -71,6 +72,7 @@ interface RunEventRow {
   latency_ms: number | null;
   cost_usd: number | null;
   pr_url: string | null;
+  git_diff: string | null;
   comment_reference: string | null;
   cost_refusal: string | null;
 }
@@ -93,6 +95,7 @@ const POSTGRES_SCHEMA = `
     latency_ms DOUBLE PRECISION,
     cost_usd DOUBLE PRECISION,
     pr_url TEXT,
+    git_diff TEXT,
     tenant_id TEXT
   );
   CREATE INDEX IF NOT EXISTS df_run_summaries_page_idx
@@ -127,6 +130,7 @@ const POSTGRES_SCHEMA = `
   );
   ALTER TABLE df_run_events ADD COLUMN IF NOT EXISTS finding_count BIGINT;
   ALTER TABLE df_run_summaries ADD COLUMN IF NOT EXISTS tenant_id TEXT;
+  ALTER TABLE df_run_summaries ADD COLUMN IF NOT EXISTS git_diff TEXT;
   ALTER TABLE df_run_events ADD COLUMN IF NOT EXISTS resolved_count BIGINT;
   ALTER TABLE df_run_events ADD COLUMN IF NOT EXISTS accepted_count BIGINT;
   ALTER TABLE df_run_events ADD COLUMN IF NOT EXISTS comment_reference TEXT;
@@ -192,6 +196,7 @@ function rowToSummary(row: RunSummaryRow): RunSummary {
     ...(row.latency_ms !== null ? { latencyMs: Number(row.latency_ms) } : {}),
     ...(row.cost_usd !== null ? { costUsd: Number(row.cost_usd) } : {}),
     ...(row.pr_url !== null ? { prUrl: row.pr_url } : {}),
+      ...(row.git_diff !== null ? { gitDiff: row.git_diff } : {}),
     ...(row.tenant_id !== null ? { tenantId: row.tenant_id } : {}),
   });
 }
@@ -251,6 +256,7 @@ function rowToEvent(row: RunEventRow): PersistedRunEvent {
       ...(row.latency_ms !== null ? { latencyMs: Number(row.latency_ms) } : {}),
       ...(row.cost_usd !== null ? { costUsd: Number(row.cost_usd) } : {}),
       ...(row.pr_url !== null ? { prUrl: row.pr_url } : {}),
+      ...(row.git_diff !== null ? { gitDiff: row.git_diff } : {}),
       ...(row.comment_reference !== null && row.comment_reference !== undefined
         ? { commentReference: readCommentRef(row.comment_reference) }
         : {}),
@@ -371,9 +377,9 @@ function insertSummary(
     `INSERT INTO df_run_summaries (
        run_id, repo, issue, status, stage, created_at, updated_at,
        started_at, completed_at, attempt_count, review_count,
-       iteration_count, fix_cycle_count, latency_ms, cost_usd, pr_url,
+       iteration_count, fix_cycle_count, latency_ms, cost_usd, pr_url, git_diff,
        tenant_id
-     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
     [
       summary.runId,
       summary.repo,
@@ -391,6 +397,7 @@ function insertSummary(
       summary.latencyMs ?? null,
       summary.costUsd ?? null,
       summary.prUrl ?? null,
+      summary.gitDiff ?? null,
       summary.tenantId ?? null,
     ],
   );
@@ -407,7 +414,7 @@ function updateSummary(
        repo = $2, issue = $3, status = $4, stage = $5,
        created_at = $6, updated_at = $7, started_at = $8, completed_at = $9,
        attempt_count = $10, review_count = $11, iteration_count = $12,
-       fix_cycle_count = $13, latency_ms = $14, cost_usd = $15, pr_url = $16
+       fix_cycle_count = $13, latency_ms = $14, cost_usd = $15, pr_url = $16, git_diff = $17
      WHERE run_id = $1`,
     [
       summary.runId,
@@ -426,6 +433,7 @@ function updateSummary(
       summary.latencyMs ?? null,
       summary.costUsd ?? null,
       summary.prUrl ?? null,
+      summary.gitDiff ?? null,
     ],
   );
 }
@@ -897,6 +905,26 @@ export class PostgresRunHistoryStore implements RunHistoryStore {
         providerId: this.id,
         value: advanced.value,
         duplicate: advanced.duplicate,
+      };
+    } catch (error) {
+      return failedWrite(error);
+    }
+  }
+
+  async recordRunSummary(
+    summary: RunSummary,
+  ): Promise<RunHistoryWriteResult<RunSummary>> {
+    try {
+      const written = await this.transaction(async (client) => {
+        await insertSummary(client, summary);
+        return summary;
+      });
+      return {
+        ok: true,
+        mode: "live",
+        providerId: this.id,
+        value: written,
+        duplicate: false,
       };
     } catch (error) {
       return failedWrite(error);

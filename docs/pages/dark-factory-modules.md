@@ -9,7 +9,7 @@
 > is [Dark Factory (R1)](dark-factory.md) and the flow walkthroughs in the
 > [flow deep-dives](flow-run-lifecycle.md).
 
-_61 modules._
+_62 modules._
 
 ## architect-agent
 
@@ -217,6 +217,13 @@ Dark Factory — Developer Agent (issues #131 / story #133). A sandboxed coding 
 
 **Exports:** `ALLOWED_SKELETON_EXTENSIONS`, `ALLOWED_TOOLS`, `ALLOWED_WORKSPACE_EXTENSIONS`, `CodingLoopOptions`, `CommandRunnerFn`, `DeveloperAgent`, `DeveloperAgentConfig`, `InvalidTaskError`, `IterationRecord`, `LoopContext`, `LoopResult`, `MultiFileCodingLoopOptions`, `SkeletonMap`, `SkeletonMapError`, `TaskAssignment`, `TaskAssignmentInput`, `ToolNotAllowedError`, `WorkerFn`, `WorkerResult`, `WorkerUsageSink`, `WorkspaceTools`, `applySkeletalMap`, `assertToolAllowed`, `createDeveloperAgent`, `createWorkspaceTools`, `runCodingLoop`, `runMultiFileCodingLoop`, `toTaskAssignment`, `toTaskStatus`
 
+## diff-capture
+
+Dark Factory — git diff capture (#295). After the developer-agent finishes editing its work tree, the diff against the base is captured, any inline `DF_*` secrets are redacted, and the sanitized diff is persisted on the run summary via `recordRunSummary`. The git invocation is injectable so the capture is unit-testable without a real repository.
+
+**Source:** [`agent/lib/dark-factory/diff-capture.ts`](../../agent/lib/dark-factory/diff-capture.ts)
+
+**Exports:** `CaptureWorkspaceDiffOptions`, `GitRunner`, `MAX_GIT_DIFF_CHARS`, `captureWorkspaceDiff`, `recordRunDiff`, `sanitizeDiff`
 ## dispatch
 
 Dark Factory — Orchestration Core (issues #137 / story #138). The `Dispatcher`: at-most-once delivery, retry/backoff via a `RetryPolicy`, human-parking (`ParkedRunError` → `blocked`), per-run status persistence, a live control gate, and a per-invocation deadline. The pipeline it drives is sequenced by `dispatch-handler`.

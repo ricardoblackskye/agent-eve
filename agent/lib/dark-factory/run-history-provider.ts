@@ -94,6 +94,17 @@ export class ConsoleRunHistoryStore implements RunHistoryStore {
     // Console store refuses all writes; there is no persisted run to attach to.
   }
 
+  async recordRunSummary(
+    _summary: RunSummary,
+  ): Promise<RunHistoryWriteResult<RunSummary>> {
+    return {
+      ok: false,
+      mode: "blocked",
+      providerId: this.id,
+      error: RUN_HISTORY_NOT_CONFIGURED,
+    };
+  }
+
   async getRun(_runId: string): Promise<RunHistoryReadResult<RunSummary>> {
     return {
       ok: false,

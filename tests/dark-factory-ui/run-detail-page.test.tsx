@@ -34,6 +34,7 @@ const SUMMARY = {
   latencyMs: 1917,
   costUsd: 0.42,
   prUrl: "https://github.com/owner/repo/pull/202",
+  gitDiff: "diff --git a/foo.ts b/foo.ts\n--- a/foo.ts\n+++ b/foo.ts\n@@ -1 +1 @@\n-const a = 1;\n+const a = 2;\n",
 };
 
 const EVENTS = [
@@ -336,5 +337,13 @@ describe("Dark Factory run detail page", () => {
     expect(
       container.querySelector("a.df-outcome-link")?.getAttribute("href"),
     ).toBe("https://github.com/owner/repo/pull/202");
+  });
+
+  it("renders the captured run diff panel", async () => {
+    const { container } = render(<DarkFactoryRunDetailPage />);
+    await waitFor(() =>
+      expect(container.querySelector(".df-diff")).not.toBeNull(),
+    );
+    expect(container.textContent).toContain("const a = 2;");
   });
 });
