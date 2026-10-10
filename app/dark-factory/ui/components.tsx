@@ -4,6 +4,7 @@ import type {
   RunTrendPoint,
   RunSummary,
   TestOutcome,
+  TraceItem,
 } from "../../../agent/lib/dark-factory/run-history";
 import { formatCostUsd, formatCount } from "./format";
 import {
@@ -551,3 +552,57 @@ export function TestOutputPanel({
     </section>
   );
 }
+
+
+export function TracePanel({ trace }: { trace?: TraceItem[] }): ReactNode {
+  if (!trace || trace.length === 0) {
+    return (
+      <section className="df-panel">
+        <PanelHead title="AGENT TRACE" badges={["REASONING"]} />
+        <div className="df-panel-body">
+          <StatePanel
+            state="empty"
+            message="No agent trace reference captured"
+          />
+        </div>
+      </section>
+    );
+  }
+  const passed = trace.filter((t) => t.passed).length;
+  const failed = trace.length - passed;
+  return (
+    <section className="df-panel">
+      <PanelHead title="AGENT TRACE" badges={["AC", "REASONING"]} />
+      <div className="df-panel-body">
+        <p className="df-test-summary" data-testid="agent-trace-summary">
+          <span className="df-test-pass">{passed} verified</span>
+          <span className="df-test-sep"> · </span>
+          <span className="df-test-fail">{failed} unverified</span>
+        </p>
+        <ul className="df-test-list" data-testid="agent-trace">
+          {trace.map((item, index) => (
+            <li
+              key={`${item.acId}:${index}`}
+              className={item.passed ? "df-test-pass" : "df-test-fail"}
+              data-testid={item.passed ? "trace-verified" : "trace-unverified"}
+            >
+              <span aria-hidden="true">{item.passed ? "✓" : "✗"}</span>{" "}
+              <span className="df-test-file">{item.acId}</span>
+              <span className="df-test-sep"> › </span>
+              <span className="df-test-name">
+                {item.description ?? item.testCaseName ?? "Acceptance criterion"}
+              </span>
+              {item.testFile ? (
+                <>
+                  <span className="df-test-sep"> › </span>
+                  <span className="df-test-file">{item.testFile}</span>
+                </>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      </div>
+    </section>
+  );
+}
+

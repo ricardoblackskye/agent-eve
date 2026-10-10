@@ -342,6 +342,54 @@ describe("SqliteRunHistoryStore delivery acceptance", () => {
     });
   });
 
+  describe("trace persistence", () => {
+    it("persists the AC traceability matrix on review-round events and reads it back", async () => {
+      const store = createStore();
+      const accepted = await store.acceptDelivery({
+        deliveryId: "delivery-trace",
+        repo: "owner/repo",
+        issue: 198,
+        receivedAt: at,
+      });
+      const runId = accepted.value?.runId;
+      if (!runId) throw new Error("run acceptance did not return a runId");
+
+      const trace = [
+        {
+          acId: "AC1",
+          description: "handles empty input",
+          testFile: "src/foo.test.ts",
+          testCaseName: "adds numbers",
+          passed: true,
+        },
+        {
+          acId: "AC2",
+          description: "throws on null",
+          testFile: "src/bar.test.ts",
+          testCaseName: "throws on null",
+          passed: false,
+        },
+      ];
+      const recorded = await store.appendEvent({
+        eventId: "review-round-trace",
+        runId,
+        type: "review.round",
+        stage: "review",
+        occurredAt: "2026-09-24T12:00:01.000Z",
+        reviewRound: 1,
+        findingCount: 2,
+        resolvedCount: 1,
+        acceptedCount: 1,
+        trace,
+      });
+      expect(recorded.ok).toBe(true);
+
+      const events = (await store.listRunEvents(runId)).value?.items ?? [];
+      const reviewEvent = events.find((e) => e.event.type === "review.round");
+      expect(reviewEvent?.event.trace).toEqual(trace);
+    });
+  });
+
   it("deduplicates event IDs without double-counting and refuses conflicting replay data", async () => {
     const store = createStore();
     const accepted = await store.acceptDelivery({

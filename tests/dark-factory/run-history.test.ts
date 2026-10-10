@@ -328,4 +328,47 @@ describe("canonical run history records", () => {
       ).toThrow(/testResults/i);
     });
   });
+
+  describe("trace on review.round events", () => {
+    const SAMPLE_TRACE = [
+      {
+        acId: "AC1",
+        description: "handles empty input",
+        testFile: "src/foo.test.ts",
+        testCaseName: "adds numbers",
+        passed: true,
+      },
+      {
+        acId: "AC2",
+        description: "throws on null",
+        testFile: "src/bar.test.ts",
+        testCaseName: "throws on null",
+        passed: false,
+      },
+    ];
+
+    it("preserves trace on a review.round event", () => {
+      const result = toRunEvent({
+        ...event("review.round"),
+        stage: "review",
+        reviewRound: 1,
+        findingCount: 2,
+        resolvedCount: 1,
+        acceptedCount: 1,
+        trace: SAMPLE_TRACE,
+      });
+      expect(result.trace).toEqual(SAMPLE_TRACE);
+    });
+
+    it("rejects trace on non-review.round events", () => {
+      expect(() =>
+        toRunEvent({
+          ...event("dispatch.attempt"),
+          stage: "dispatch",
+          attempt: 1,
+          trace: [{ acId: "AC1", passed: true }],
+        }),
+      ).toThrow(/trace/i);
+    });
+  });
 });

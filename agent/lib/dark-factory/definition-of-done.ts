@@ -572,6 +572,7 @@ export async function runDefinitionOfDone(
         stage: "review",
         status: "blocked",
         reviewRound: 1,
+        trace: acMatrix,
       });
       return historyError ? blockedByHistory(blocked, historyError) : blocked;
     }
@@ -605,6 +606,7 @@ export async function runDefinitionOfDone(
     ...counts,
     ...task.runMetrics,
     testResults: task.testResults,
+    trace: acMatrix,
   });
 
   const completeSuccessfully = async (
