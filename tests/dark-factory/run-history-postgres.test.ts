@@ -121,6 +121,49 @@ describeWithDatabase("PostgresRunHistoryStore integration", () => {
     expect(reviewEvent?.event.testResults).toEqual(testResults);
   });
 
+  it("round-trips the AC traceability matrix on review-round events through postgres (#297)", async () => {
+    const accepted = await store.acceptDelivery({
+      deliveryId: `pg-trace-${namespace}`,
+      repo: "owner/review-counts",
+      issue,
+      receivedAt: at,
+    });
+    const runId = accepted.value?.runId;
+    if (!runId) throw new Error("Postgres delivery acceptance returned no runId");
+    const trace = [
+      {
+        acId: "AC1",
+        description: "handles empty input",
+        testFile: "src/foo.test.ts",
+        testCaseName: "adds numbers",
+        passed: true,
+      },
+      {
+        acId: "AC2",
+        description: "throws on null",
+        testFile: "src/bar.test.ts",
+        testCaseName: "throws on null",
+        passed: false,
+      },
+    ];
+    const recorded = await store.appendEvent({
+      eventId: `pg-review-trace-${namespace}`,
+      runId,
+      type: "review.round",
+      stage: "review",
+      occurredAt: "2026-09-24T12:00:01.000Z",
+      reviewRound: 1,
+      findingCount: 2,
+      resolvedCount: 1,
+      acceptedCount: 1,
+      trace,
+    });
+    expect(recorded.ok).toBe(true);
+    const events = (await store.listRunEvents(runId)).value?.items ?? [];
+    const reviewEvent = events.find((e) => e.event.type === "review.round");
+    expect(reviewEvent?.event.trace).toEqual(trace);
+  });
+
   it("round-trips review finding dispositions through the event table", async () => {
     const accepted = await store.acceptDelivery({
       deliveryId: `pg-review-${namespace}`,

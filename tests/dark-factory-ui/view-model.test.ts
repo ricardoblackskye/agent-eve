@@ -338,6 +338,41 @@ describe("toDetailView", () => {
     });
     expect(view.testResults).toEqual(testResults);
   });
+
+  it("surfaces the AC traceability matrix from review-round events on the detail view", () => {
+    const trace = [
+      {
+        acId: "AC1",
+        description: "adds numbers",
+        testFile: "src/foo.test.ts",
+        testCaseName: "adds numbers",
+        passed: true,
+      },
+      {
+        acId: "AC2",
+        description: "throws on null",
+        testFile: "src/bar.test.ts",
+        testCaseName: "throws on null",
+        passed: false,
+      },
+    ];
+    const view = toDetailView({
+      summary: summary(),
+      events: [
+        event({
+          sequence: 1,
+          type: "review.round",
+          stage: "review",
+          reviewRound: 1,
+          findingCount: 2,
+          resolvedCount: 1,
+          acceptedCount: 1,
+          trace,
+        }),
+      ],
+    });
+    expect(view.trace).toEqual(trace);
+  });
 });
 
 describe("toQueryParams", () => {

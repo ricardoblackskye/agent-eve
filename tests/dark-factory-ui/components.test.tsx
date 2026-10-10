@@ -15,6 +15,7 @@ import {
   RunTable,
   StatePanel,
   TestOutputPanel,
+  TracePanel,
   StatusPill,
   TrendChart,
   WorkerCheckpoints,
@@ -390,3 +391,47 @@ describe("TestOutputPanel", () => {
     expect(container.querySelector(".df-state-empty")).toBeTruthy();
   });
 });
+
+describe("TracePanel", () => {
+  it("renders the AC traceability matrix with an aggregate summary", () => {
+    const { container } = render(
+      <TracePanel
+        trace={[
+          {
+            acId: "AC1",
+            description: "adds numbers",
+            testFile: "src/foo.test.ts",
+            testCaseName: "adds numbers",
+            passed: true,
+          },
+          {
+            acId: "AC2",
+            description: "throws on null",
+            testFile: "src/bar.test.ts",
+            testCaseName: "throws on null",
+            passed: false,
+          },
+        ]}
+      />,
+    );
+    const summary = container.querySelector(
+      '[data-testid="agent-trace-summary"]',
+    );
+    expect(summary?.textContent).toContain("1 verified");
+    expect(summary?.textContent).toContain("1 unverified");
+    expect(
+      container.querySelectorAll('[data-testid="trace-verified"]'),
+    ).toHaveLength(1);
+    expect(
+      container.querySelectorAll('[data-testid="trace-unverified"]'),
+    ).toHaveLength(1);
+    expect(container.textContent).toContain("AC1");
+    expect(container.textContent).toContain("throws on null");
+  });
+
+  it("renders an empty state when there is no trace", () => {
+    const { container } = render(<TracePanel trace={undefined} />);
+    expect(container.querySelector(".df-state-empty")).toBeTruthy();
+  });
+});
+
