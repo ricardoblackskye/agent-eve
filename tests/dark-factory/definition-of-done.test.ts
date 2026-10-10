@@ -350,6 +350,37 @@ describe("#164 cycles 3-10: runDefinitionOfDone coordinator", () => {
     await history.close();
   });
 
+  it("persists tester test results on review-round events (#296)", async () => {
+    const testResults = [
+      { testFile: "src/foo.test.ts", testCaseName: "adds numbers", passed: true },
+      { testFile: "src/bar.test.ts", testCaseName: "throws on null", passed: false },
+    ];
+    const task = { ...sampleTask, runId: "run-history-testresults", testResults };
+    const history = new SqliteRunHistoryStore(":memory:", () => task.runId);
+    const accepted = await history.acceptDelivery({
+      deliveryId: "delivery-dod-testresults",
+      repo: task.repo,
+      issue: task.issue,
+      receivedAt: "2026-09-24T12:00:00.000Z",
+    });
+    expect(accepted.ok).toBe(true);
+
+    const { deps } = setupTestDeps({
+      runChecks: async () => [],
+      runHistory: history,
+    });
+
+    const result = await runDefinitionOfDone(deps, task);
+    const events = await history.listRunEvents(task.runId);
+    const rounds = events.value?.items
+      .map(({ event }) => event)
+      .filter((event) => event.type === "review.round");
+
+    expect(result.status).toBe("done");
+    expect(rounds?.[0]?.testResults).toEqual(testResults);
+    await history.close();
+  });
+
   it("records aggregate review findings and verified dispositions per round", async () => {
     const task = { ...sampleTask, runId: "run-history-dispositions" };
     const history = new SqliteRunHistoryStore(":memory:", () => task.runId);

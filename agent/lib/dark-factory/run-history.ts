@@ -98,6 +98,8 @@ export interface RunEvent {
   findingCount?: number;
   resolvedCount?: number;
   acceptedCount?: number;
+  /** Structured per-test pass/fail detail from the tester-agent (developer loop). No raw output text. */
+  testResults?: TestOutcome[];
   latencyMs?: number;
   costUsd?: number;
   prUrl?: string;
@@ -112,6 +114,13 @@ export interface RunEvent {
    * one of the CostGovernorRefusal codes, or absent. Never free text.
    */
   costRefusal?: CostGovernorRefusal;
+}
+
+/** One captured test result from the tester-agent; structured so no raw output is stored. */
+export interface TestOutcome {
+  testFile: string;
+  testCaseName: string;
+  passed: boolean;
 }
 
 export class InvalidRunRecordError extends Error {
@@ -422,6 +431,31 @@ function optionalCostRefusal(value: unknown): CostGovernorRefusal | undefined {
   return value as CostGovernorRefusal;
 }
 
+function optionalTestResults(value: unknown): TestOutcome[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) {
+    return invalid("testResults", value, "to be an array of test outcomes");
+  }
+  const results: TestOutcome[] = [];
+  for (const item of value) {
+    if (
+      item === null ||
+      typeof item !== "object" ||
+      typeof (item as { testFile?: unknown }).testFile !== "string" ||
+      typeof (item as { testCaseName?: unknown }).testCaseName !== "string" ||
+      typeof (item as { passed?: unknown }).passed !== "boolean"
+    ) {
+      return invalid("testResults", item, "to be a valid test outcome");
+    }
+    results.push({
+      testFile: (item as { testFile: string }).testFile,
+      testCaseName: (item as { testCaseName: string }).testCaseName,
+      passed: (item as { passed: boolean }).passed,
+    });
+  }
+  return results;
+}
+
 function isTerminal(status: RunStatus): boolean {
   return TERMINAL_STATUSES.includes(status);
 }
@@ -519,6 +553,7 @@ export function toRunEvent(input: Partial<RunEvent>): RunEvent {
   const prUrl = optionalPrUrl(input.prUrl);
   const commentReference = optionalCommentReference(input.commentReference);
   const costRefusal = optionalCostRefusal(input.costRefusal);
+  const testResults = optionalTestResults(input.testResults);
 
   if (type === "run.accepted" && status !== "queued") {
     return invalid("status", status, 'to be "queued" for run.accepted');
@@ -547,6 +582,13 @@ export function toRunEvent(input: Partial<RunEvent>): RunEvent {
     return invalid(
       "findingCount",
       findingCount,
+      "to be used only on review.round events",
+    );
+  }
+  if (testResults !== undefined && type !== "review.round") {
+    return invalid(
+      "testResults",
+      testResults,
       "to be used only on review.round events",
     );
   }
@@ -596,6 +638,7 @@ export function toRunEvent(input: Partial<RunEvent>): RunEvent {
     ...(prUrl !== undefined ? { prUrl } : {}),
     ...(commentReference !== undefined ? { commentReference } : {}),
     ...(costRefusal !== undefined ? { costRefusal } : {}),
+    ...(testResults !== undefined ? { testResults } : {}),
   };
 }
 

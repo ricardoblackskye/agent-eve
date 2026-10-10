@@ -306,6 +306,42 @@ describe("SqliteRunHistoryStore delivery acceptance", () => {
     });
   });
 
+  describe("testResults persistence", () => {
+    it("persists testResults on review-round events and reads them back", async () => {
+      const store = createStore();
+      const accepted = await store.acceptDelivery({
+        deliveryId: "delivery-test-results",
+        repo: "owner/repo",
+        issue: 198,
+        receivedAt: at,
+      });
+      const runId = accepted.value?.runId;
+      if (!runId) throw new Error("run acceptance did not return a runId");
+
+      const testResults = [
+        { testFile: "src/foo.test.ts", testCaseName: "adds numbers", passed: true },
+        { testFile: "src/bar.test.ts", testCaseName: "throws on null", passed: false },
+      ];
+      const recorded = await store.appendEvent({
+        eventId: "review-round-test-results",
+        runId,
+        type: "review.round",
+        stage: "review",
+        occurredAt: "2026-09-24T12:00:01.000Z",
+        reviewRound: 1,
+        findingCount: 2,
+        resolvedCount: 1,
+        acceptedCount: 1,
+        testResults,
+      });
+      expect(recorded.ok).toBe(true);
+
+      const events = (await store.listRunEvents(runId)).value?.items ?? [];
+      const reviewEvent = events.find((e) => e.event.type === "review.round");
+      expect(reviewEvent?.event.testResults).toEqual(testResults);
+    });
+  });
+
   it("deduplicates event IDs without double-counting and refuses conflicting replay data", async () => {
     const store = createStore();
     const accepted = await store.acceptDelivery({

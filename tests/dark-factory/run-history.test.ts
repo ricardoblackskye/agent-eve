@@ -295,4 +295,37 @@ describe("canonical run history records", () => {
       ).toThrow(/gitDiff|secret/i);
     });
   });
+
+  describe("testResults on review.round events", () => {
+    const SAMPLE_RESULTS = [
+      { testFile: "src/foo.test.ts", testCaseName: "adds numbers", passed: true },
+      { testFile: "src/bar.test.ts", testCaseName: "throws on null", passed: false },
+    ];
+
+    it("preserves testResults on a review.round event", () => {
+      const result = toRunEvent({
+        ...event("review.round"),
+        stage: "review",
+        reviewRound: 1,
+        findingCount: 2,
+        resolvedCount: 1,
+        acceptedCount: 1,
+        testResults: SAMPLE_RESULTS,
+      });
+      expect(result.testResults).toEqual(SAMPLE_RESULTS);
+    });
+
+    it("rejects testResults on non-review.round events", () => {
+      expect(() =>
+        toRunEvent({
+          ...event("dispatch.attempt"),
+          stage: "dispatch",
+          attempt: 1,
+          testResults: [
+            { testFile: "src/foo.test.ts", testCaseName: "adds", passed: true },
+          ],
+        }),
+      ).toThrow(/testResults/i);
+    });
+  });
 });

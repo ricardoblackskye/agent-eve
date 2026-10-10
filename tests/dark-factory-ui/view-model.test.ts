@@ -315,6 +315,29 @@ describe("toDetailView", () => {
     });
     expect(view.prUrl).toBe("https://github.com/owner/repo/pull/9");
   });
+
+  it("surfaces tester test results from review-round events on the detail view", () => {
+    const testResults = [
+      { testFile: "src/foo.test.ts", testCaseName: "adds numbers", passed: true },
+      { testFile: "src/bar.test.ts", testCaseName: "throws on null", passed: false },
+    ];
+    const view = toDetailView({
+      summary: summary(),
+      events: [
+        event({
+          sequence: 1,
+          type: "review.round",
+          stage: "review",
+          reviewRound: 1,
+          findingCount: 2,
+          resolvedCount: 1,
+          acceptedCount: 1,
+          testResults,
+        }),
+      ],
+    });
+    expect(view.testResults).toEqual(testResults);
+  });
 });
 
 describe("toQueryParams", () => {
