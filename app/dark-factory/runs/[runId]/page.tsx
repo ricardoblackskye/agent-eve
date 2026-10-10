@@ -13,6 +13,7 @@ import {
   RunDiffPanel,
   StatePanel,
   TestOutputPanel,
+  TracePanel,
   WorkerCheckpoints,
 } from "../../ui/components";
 import { DEFAULT_POLL_INTERVAL_MS, useRunQuery } from "../../ui/use-run-query";
@@ -89,6 +90,7 @@ export default function DarkFactoryRunDetailPage() {
       <OutcomeArtifacts prUrl={view.prUrl} />
       <RunDiffPanel gitDiff={view.gitDiff} />
       <TestOutputPanel testResults={view.testResults} />
+      <TracePanel trace={view.trace} />
       <div className="df-detail-grid">
         <section className="df-panel">
           <PanelHead title="EVENT STREAM" badges={["OLDEST → NEWEST"]} />

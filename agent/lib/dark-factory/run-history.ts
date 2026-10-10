@@ -100,6 +100,11 @@ export interface RunEvent {
   acceptedCount?: number;
   /** Structured per-test pass/fail detail from the tester-agent (developer loop). No raw output text. */
   testResults?: TestOutcome[];
+  /**
+   * AC traceability matrix for review.round events: the agent's reasoning that
+   * each acceptance criterion is verified by a test. Derived, never raw prompts.
+   */
+  trace?: TraceItem[];
   latencyMs?: number;
   costUsd?: number;
   prUrl?: string;
@@ -120,6 +125,19 @@ export interface RunEvent {
 export interface TestOutcome {
   testFile: string;
   testCaseName: string;
+  passed: boolean;
+}
+
+/**
+ * One row of the Acceptance Criteria traceability matrix: the agent's derived
+ * reasoning mapping each acceptance criterion to the test that verifies it.
+ * Structured so no raw prompts or issue content are stored.
+ */
+export interface TraceItem {
+  acId: string;
+  description?: string;
+  testFile?: string;
+  testCaseName?: string;
   passed: boolean;
 }
 
@@ -431,6 +449,41 @@ function optionalCostRefusal(value: unknown): CostGovernorRefusal | undefined {
   return value as CostGovernorRefusal;
 }
 
+function optionalTrace(value: unknown): TraceItem[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) {
+    return invalid("trace", value, "to be an array of trace items");
+  }
+  const results: TraceItem[] = [];
+  for (const item of value) {
+    if (
+      item === null ||
+      typeof item !== "object" ||
+      typeof (item as { acId?: unknown }).acId !== "string" ||
+      typeof (item as { passed?: unknown }).passed !== "boolean"
+    ) {
+      return invalid("trace", item, "to be a valid trace item");
+    }
+    results.push({
+      acId: (item as { acId: string }).acId,
+      description:
+        typeof (item as { description?: unknown }).description === "string"
+          ? (item as { description: string }).description
+          : undefined,
+      testFile:
+        typeof (item as { testFile?: unknown }).testFile === "string"
+          ? (item as { testFile: string }).testFile
+          : undefined,
+      testCaseName:
+        typeof (item as { testCaseName?: unknown }).testCaseName === "string"
+          ? (item as { testCaseName: string }).testCaseName
+          : undefined,
+      passed: (item as { passed: boolean }).passed,
+    });
+  }
+  return results;
+}
+
 function optionalTestResults(value: unknown): TestOutcome[] | undefined {
   if (value === undefined) return undefined;
   if (!Array.isArray(value)) {
@@ -554,6 +607,7 @@ export function toRunEvent(input: Partial<RunEvent>): RunEvent {
   const commentReference = optionalCommentReference(input.commentReference);
   const costRefusal = optionalCostRefusal(input.costRefusal);
   const testResults = optionalTestResults(input.testResults);
+  const trace = optionalTrace(input.trace);
 
   if (type === "run.accepted" && status !== "queued") {
     return invalid("status", status, 'to be "queued" for run.accepted');
@@ -591,6 +645,9 @@ export function toRunEvent(input: Partial<RunEvent>): RunEvent {
       testResults,
       "to be used only on review.round events",
     );
+  }
+  if (trace !== undefined && type !== "review.round") {
+    return invalid("trace", trace, "to be used only on review.round events");
   }
   if (
     findingCount === undefined &&
@@ -639,6 +696,7 @@ export function toRunEvent(input: Partial<RunEvent>): RunEvent {
     ...(commentReference !== undefined ? { commentReference } : {}),
     ...(costRefusal !== undefined ? { costRefusal } : {}),
     ...(testResults !== undefined ? { testResults } : {}),
+    ...(trace !== undefined ? { trace } : {}),
   };
 }
 

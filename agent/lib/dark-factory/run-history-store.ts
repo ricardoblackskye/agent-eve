@@ -189,6 +189,7 @@ interface RunEventRow {
   comment_reference: string | null;
   cost_refusal: string | null;
   test_results: string | null;
+  trace: string | null;
 }
 
 function readSummary(db: DatabaseSync, runId: string): RunSummary | null {
@@ -232,6 +233,17 @@ function readTestResults(value: string): RunEvent["testResults"] | undefined {
   return undefined;
 }
 
+function readTrace(value: string): RunEvent["trace"] | undefined {
+  try {
+    const parsed = JSON.parse(value);
+    if (!Array.isArray(parsed)) return undefined;
+    return parsed as RunEvent["trace"];
+  } catch {
+    // Malformed persisted trace: treat as absent rather than failing the read.
+  }
+  return undefined;
+}
+
 function rowToEvent(row: RunEventRow): PersistedRunEvent {
   return {
     sequence: Number(row.sequence),
@@ -270,6 +282,9 @@ function rowToEvent(row: RunEventRow): PersistedRunEvent {
         : {}),
       ...(row.test_results !== null && row.test_results !== undefined
         ? { testResults: readTestResults(row.test_results) }
+        : {}),
+      ...(row.trace !== null && row.trace !== undefined
+        ? { trace: readTrace(row.trace) }
         : {}),
     }),
   };
@@ -334,6 +349,7 @@ const SQLITE_SCHEMA = `
     comment_reference TEXT,
     cost_refusal TEXT,
     test_results TEXT,
+    trace TEXT,
     UNIQUE (run_id, event_id),
     FOREIGN KEY (run_id) REFERENCES df_run_summaries(run_id)
       ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED
@@ -460,8 +476,8 @@ function writeEvent(db: DatabaseSync, event: RunEvent): void {
        run_id, event_id, type, stage, occurred_at, status, attempt,
        review_round, iteration_count, fix_cycle_count, finding_count,
        resolved_count, accepted_count, latency_ms, cost_usd, pr_url,
-       comment_reference, cost_refusal, test_results
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       comment_reference, cost_refusal, test_results, trace
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     event.runId,
     event.eventId,
@@ -482,6 +498,7 @@ function writeEvent(db: DatabaseSync, event: RunEvent): void {
     event.commentReference ? JSON.stringify(event.commentReference) : null,
     event.costRefusal ?? null,
     event.testResults ? JSON.stringify(event.testResults) : null,
+    event.trace ? JSON.stringify(event.trace) : null,
   );
 }
 
@@ -632,6 +649,9 @@ export class SqliteRunHistoryStore implements RunHistoryStore {
       }
       if (!eventColumns.some((column) => column.name === "test_results")) {
         db.exec("ALTER TABLE df_run_events ADD COLUMN test_results TEXT");
+      }
+      if (!eventColumns.some((column) => column.name === "trace")) {
+        db.exec("ALTER TABLE df_run_events ADD COLUMN trace TEXT");
       }
       this.db = db;
       return db;
