@@ -53,22 +53,19 @@ Two wrinkles that constrain the wiring:
 5. Document the cooperative caveat honestly: the halt takes effect at the next iteration
    boundary, not mid-token (the same caveat as pause/stop).
 
-## Decisions I need confirmed (all flagged in the PR too)
+## Decisions — CONFIRMED by the operator (2026-10-10)
 
-1. **pbiId derivation.** I recommend keying on the **ISSUE** (`pbi-<issue>`) rather than a
-   sanitised run id: the cap's documented purpose is a cumulative budget per unit of work,
-   and the issue is that unit. A per-run key would reset the budget on every retry.
-2. **Breaker lifetime — per-run vs per-process.** The class is explicitly NOT thread-safe
-   and does not share state across instances. I recommend **per-run** (simplest, matches the
-   ledger); per-process would pool concurrent runs into one budget.
-3. **On by default?** `createCircuitBreaker(env)` always returns a breaker with the
-   documented defaults (60 minutes, 3 failures), so wiring it unconditionally changes runner
-   behaviour. I recommend on-by-default (it is a guard and its defaults are documented) and
-   will say so plainly in the PR.
-4. **What "halt" means.** Reusing the existing terminal-failure path (throw, then the #284
-   finalizer applies `df:failed`) is the smaller change; parking the run for a human matches
-   the Epic's "a human is pulled in" wording better. I recommend reusing the failure path
-   now and recording the parked variant as follow-up.
+1. **pbiId derivation — key on the ISSUE (`pbi-<issue>`).** The cap is a cumulative budget
+   per unit of work, and the issue is that unit; a per-run key would reset the budget on
+   every retry.
+2. **Breaker lifetime — per run.** The class is explicitly NOT thread-safe and does not
+   share state across instances, so pooling concurrent runs into one budget is out.
+3. **On by default.** `createCircuitBreaker(env)` always returns a breaker carrying the
+   documented defaults (60 minutes, 3 failures); the wiring is unconditional and the PR says
+   so plainly.
+4. **Halt — reuse the existing terminal-failure path now** (throw, then the #284 finalizer
+   applies `df:failed`). The "park the run for a human" variant is recorded as **follow-up**
+   — it matches the Epic's "a human is pulled in" wording better, but is NOT built here.
 
 ## Tasks (TDD, one RED to GREEN cycle each)
 
