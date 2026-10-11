@@ -33,14 +33,21 @@ import {
 } from "../agent/lib/dark-factory/issue-writer";
 import { resolveWorkerAllowedRepos } from "../agent/lib/dark-factory/credentials";
 import {
+  CircuitTrippedError,
   DeveloperAgent,
   createWorkspaceTools,
   runMultiFileCodingLoop,
   toTaskAssignment,
+  type LoopResult,
 } from "../agent/lib/dark-factory/developer-agent";
+import { createCircuitBreaker } from "../agent/lib/dark-factory/circuit-breaker";
+import { createCodingLoopBreaker } from "../agent/lib/dark-factory/breaker-wiring";
 import { createMetricsStore } from "../agent/lib/dark-factory/metrics";
 import { ArchitectAgent } from "../agent/lib/dark-factory/architect-agent";
-import { validateExecutionPlan, type ExecutionPlan } from "../agent/lib/dark-factory/plan-validator";
+import {
+  validateExecutionPlan,
+  type ExecutionPlan,
+} from "../agent/lib/dark-factory/plan-validator";
 import { createControlStore } from "../agent/lib/dark-factory/control";
 import { createControlCheckpoint } from "../agent/lib/dark-factory/control-checkpoint";
 import type { ControlStore } from "../agent/lib/dark-factory/control";
@@ -80,7 +87,9 @@ function initEnv(): Record<string, string | undefined> {
 initEnv();
 
 const line = (label: string, value: unknown) =>
-  console.log(`  ${label.padEnd(32)} ${typeof value === "string" ? value : JSON.stringify(value)}`);
+  console.log(
+    `  ${label.padEnd(32)} ${typeof value === "string" ? value : JSON.stringify(value)}`,
+  );
 
 /** Recursively scan workspace to build file tree for the Architect Agent. */
 function scanWorkspaceFiles(dir: string, base: string = dir): string[] {
@@ -88,7 +97,8 @@ function scanWorkspaceFiles(dir: string, base: string = dir): string[] {
   try {
     const entries = readdirSync(dir);
     for (const entry of entries) {
-      if (entry === "node_modules" || entry === ".git" || entry === ".next") continue;
+      if (entry === "node_modules" || entry === ".git" || entry === ".next")
+        continue;
       const full = join(dir, entry);
       const stat = statSync(full);
       if (stat.isDirectory()) {
@@ -124,13 +134,21 @@ export function resolveRunnerRunId(
   now = Date.now(),
 ): string {
   const index = argv.indexOf("--run-id");
-  return index !== -1 && argv[index + 1] ? argv[index + 1] : `run-${issueNum}-${now}`;
+  return index !== -1 && argv[index + 1]
+    ? argv[index + 1]
+    : `run-${issueNum}-${now}`;
 }
 
 async function main(): Promise<void> {
-  console.log("################################################################################");
-  console.log("  DARK FACTORY: HARDENED ARCHITECT & MULTI-FILE DEVELOPER RUNNER (#179)        ");
-  console.log("################################################################################\n");
+  console.log(
+    "################################################################################",
+  );
+  console.log(
+    "  DARK FACTORY: HARDENED ARCHITECT & MULTI-FILE DEVELOPER RUNNER (#179)        ",
+  );
+  console.log(
+    "################################################################################\n",
+  );
 
   const env = initEnv();
   const token = resolveIssueToken(env);
@@ -162,7 +180,9 @@ async function main(): Promise<void> {
   line("OpenRouter Key Present?", Boolean(env.OPENROUTER_API_KEY));
 
   if (!token || !env.OPENROUTER_API_KEY) {
-    console.error("[ERROR] Missing GITHUB_TOKEN or OPENROUTER_API_KEY in environment or .env");
+    console.error(
+      "[ERROR] Missing GITHUB_TOKEN or OPENROUTER_API_KEY in environment or .env",
+    );
     throw new Error("Dark Factory Runner stopped after the preceding error.");
   }
 
@@ -181,16 +201,23 @@ async function main(): Promise<void> {
   const runHistory = createRunHistoryStore(env);
 
   // STEP 1: Fetch live issue from GitHub
-  console.log(`\n[STEP 1] Fetching live User Story #${issueNum} from GitHub...`);
-  const issueRes = await fetch(`https://api.github.com/repos/${targetRepo}/issues/${issueNum}`, {
-    headers: {
-      authorization: `Bearer ${token}`,
-      accept: "application/vnd.github+json",
-      "user-agent": "Dark-Factory-Runner",
+  console.log(
+    `\n[STEP 1] Fetching live User Story #${issueNum} from GitHub...`,
+  );
+  const issueRes = await fetch(
+    `https://api.github.com/repos/${targetRepo}/issues/${issueNum}`,
+    {
+      headers: {
+        authorization: `Bearer ${token}`,
+        accept: "application/vnd.github+json",
+        "user-agent": "Dark-Factory-Runner",
+      },
     },
-  });
+  );
   if (!issueRes.ok) {
-    console.error(`Failed to fetch issue #${issueNum}: HTTP ${issueRes.status}`);
+    console.error(
+      `Failed to fetch issue #${issueNum}: HTTP ${issueRes.status}`,
+    );
     throw new Error("Dark Factory Runner stopped after the preceding error.");
   }
   const issueData = (await issueRes.json()) as { title: string; body: string };
@@ -198,8 +225,15 @@ async function main(): Promise<void> {
   console.log(`  Story Length: ${issueData.body.length} characters`);
 
   // STEP 2: Move issue lifecycle label to df:running & post progress
-  console.log(`\n[STEP 2] Updating ticket lifecycle label to 'df:running' and posting progress comment...`);
-  await issueWriter.addLabel("ricardoblackskye", "agent-eve", issueNum, "df:running");
+  console.log(
+    `\n[STEP 2] Updating ticket lifecycle label to 'df:running' and posting progress comment...`,
+  );
+  await issueWriter.addLabel(
+    "ricardoblackskye",
+    "agent-eve",
+    issueNum,
+    "df:running",
+  );
   await issueWriter.postComment(
     "ricardoblackskye",
     "agent-eve",
@@ -211,7 +245,9 @@ async function main(): Promise<void> {
   );
 
   // STEP 3: Architect Agent Planning Phase
-  console.log(`\n[STEP 3] Architect Agent discovering repository structure and planning story...`);
+  console.log(
+    `\n[STEP 3] Architect Agent discovering repository structure and planning story...`,
+  );
   const architectAgent = new ArchitectAgent({
     listFiles: async () => scanWorkspaceFiles(process.cwd()),
     generateText: async (prompt) => {
@@ -248,8 +284,15 @@ async function main(): Promise<void> {
   await checkpoint();
 
   if (!planResult.ok || !planResult.plan) {
-    console.error(`[ERROR] Architect Agent planning failed: ${planResult.error}`);
-    await issueWriter.addLabel("ricardoblackskye", "agent-eve", issueNum, "needs-answer");
+    console.error(
+      `[ERROR] Architect Agent planning failed: ${planResult.error}`,
+    );
+    await issueWriter.addLabel(
+      "ricardoblackskye",
+      "agent-eve",
+      issueNum,
+      "needs-answer",
+    );
     await applyTerminalLifecycle(
       { labelWriter, runHistory },
       { repo: targetRepo, issue: issueNum, runId, terminalStatus: "failed" },
@@ -264,10 +307,15 @@ async function main(): Promise<void> {
   line("AC Mappings Count", executionPlan.acceptanceCriteriaMap.length);
 
   // STEP 4: Pre-flight Domain Validation
-  console.log(`\n[STEP 4] Validating ExecutionPlan against domain constraints...`);
+  console.log(
+    `\n[STEP 4] Validating ExecutionPlan against domain constraints...`,
+  );
   const validation = validateExecutionPlan(executionPlan, issueData.body);
   if (!validation.valid) {
-    console.error(`[ERROR] Plan domain validation rejected:`, validation.errors);
+    console.error(
+      `[ERROR] Plan domain validation rejected:`,
+      validation.errors,
+    );
     await applyTerminalLifecycle(
       { labelWriter, runHistory },
       { repo: targetRepo, issue: issueNum, runId, terminalStatus: "failed" },
@@ -277,74 +325,114 @@ async function main(): Promise<void> {
   console.log("  -> Domain Validation Passed!");
 
   // STEP 5: Multi-File Developer Agent Execution Loop
-  console.log(`\n[STEP 5] Dispatched Multi-File Developer Agent with Workspace Tools...`);
+  console.log(
+    `\n[STEP 5] Dispatched Multi-File Developer Agent with Workspace Tools...`,
+  );
   const workspaceTools = createWorkspaceTools(process.cwd());
-  const capturedTestResults: { testFile: string; testCaseName: string; passed: boolean }[] = [];
+  const capturedTestResults: {
+    testFile: string;
+    testCaseName: string;
+    passed: boolean;
+  }[] = [];
 
-  const loopResult = await runMultiFileCodingLoop({
-    plan: executionPlan,
-    tools: workspaceTools,
-    maxIterations: developerAgent.maxIterations,
-    checkpoint,
-    worker: async (ctx) => {
-      console.log(`  -> Coding Iteration ${ctx.iteration}/${developerAgent.maxIterations}...`);
+  // #312: the circuit breaker is a GUARD, not telemetry — it is wired into the coding
+  // loop so a PBI that exceeds its worker budget HALTS the run fail-closed (documented
+  // defaults: 60 worker-minutes, 3 failed self-correct cycles) instead of continuing to
+  // spend. The key is the ISSUE, not the run: a run id contains '/' and '#', which
+  // PBI_ID_PATTERN rejects, and a per-run key would reset the budget on every retry.
+  const breaker = createCircuitBreaker(process.env);
+  const loopBreaker = createCodingLoopBreaker(breaker, issueNum);
 
-      const workerPrompt = [
-        `You are Eve's Developer Agent. Execute the following ExecutionPlan:`,
-        JSON.stringify(ctx.plan, null, 2),
-        ``,
-        `For each target file, provide the code to write.`,
-        `Return a JSON object where keys are relative file paths and values are string file contents.`,
-        `Example: { "app/chat.tsx": "export ...", "tests/chat.test.ts": "import ..." }`,
-      ].join("\n");
+  let loopResult: LoopResult;
+  try {
+    loopResult = await runMultiFileCodingLoop({
+      plan: executionPlan,
+      tools: workspaceTools,
+      maxIterations: developerAgent.maxIterations,
+      breaker: loopBreaker,
+      checkpoint,
+      worker: async (ctx) => {
+        console.log(
+          `  -> Coding Iteration ${ctx.iteration}/${developerAgent.maxIterations}...`,
+        );
 
-      const output = await runGovernedAgentCall(
-        { governor, runHistory, runId },
-        {
-          category: "developer",
-          model: modelId,
-          inputTokens: Math.ceil(workerPrompt.length / 4),
-          outputTokens: 8_000,
-          run: async () => {
-            const stream = streamText({ model, prompt: workerPrompt });
-            let acc = "";
-            for await (const chunk of stream.textStream) {
-              acc += chunk;
-            }
-            return acc;
+        const workerPrompt = [
+          `You are Eve's Developer Agent. Execute the following ExecutionPlan:`,
+          JSON.stringify(ctx.plan, null, 2),
+          ``,
+          `For each target file, provide the code to write.`,
+          `Return a JSON object where keys are relative file paths and values are string file contents.`,
+          `Example: { "app/chat.tsx": "export ...", "tests/chat.test.ts": "import ..." }`,
+        ].join("\n");
+
+        const output = await runGovernedAgentCall(
+          { governor, runHistory, runId },
+          {
+            category: "developer",
+            model: modelId,
+            inputTokens: Math.ceil(workerPrompt.length / 4),
+            outputTokens: 8_000,
+            run: async () => {
+              const stream = streamText({ model, prompt: workerPrompt });
+              let acc = "";
+              for await (const chunk of stream.textStream) {
+                acc += chunk;
+              }
+              return acc;
+            },
           },
-        },
+        );
+
+        try {
+          const jsonMatch = output.match(/\{[\s\S]*\}/);
+          const filesMap = JSON.parse(
+            jsonMatch ? jsonMatch[0] : output,
+          ) as Record<string, string>;
+          for (const [filePath, content] of Object.entries(filesMap)) {
+            await ctx.tools.writeFile(filePath, content);
+            console.log(`     Wrote ${filePath} (${content.length} chars)`);
+          }
+        } catch (err: any) {
+          return {
+            passed: false,
+            output: `JSON parsing error: ${err.message}`,
+          };
+        }
+
+        // Run vitest to verify acceptance criteria
+        const testOutcome = await ctx.tools.runTests("npx vitest run");
+        console.log(
+          `     Test result: ${testOutcome.passed ? "PASS" : "FAIL"}`,
+        );
+
+        if (testOutcome.passed) {
+          // Record passing test results for each mapped AC
+          for (const ac of ctx.plan.acceptanceCriteriaMap) {
+            capturedTestResults.push({
+              testFile: ac.testFile,
+              testCaseName: ac.testCaseName,
+              passed: true,
+            });
+          }
+        }
+
+        return { passed: testOutcome.passed, output: testOutcome.output };
+      },
+    });
+  } catch (error) {
+    // #312: a trip halts fail-closed through the SAME terminal path as the runner's other
+    // steps, so a tripped run is never silently left running.
+    if (error instanceof CircuitTrippedError) {
+      console.error(
+        `[ERROR] Circuit breaker tripped — halting fail-closed: ${JSON.stringify(breaker.getTripEvents())}`,
       );
-
-      try {
-        const jsonMatch = output.match(/\{[\s\S]*\}/);
-        const filesMap = JSON.parse(jsonMatch ? jsonMatch[0] : output) as Record<string, string>;
-        for (const [filePath, content] of Object.entries(filesMap)) {
-          await ctx.tools.writeFile(filePath, content);
-          console.log(`     Wrote ${filePath} (${content.length} chars)`);
-        }
-      } catch (err: any) {
-        return { passed: false, output: `JSON parsing error: ${err.message}` };
-      }
-
-      // Run vitest to verify acceptance criteria
-      const testOutcome = await ctx.tools.runTests("npx vitest run");
-      console.log(`     Test result: ${testOutcome.passed ? "PASS" : "FAIL"}`);
-
-      if (testOutcome.passed) {
-        // Record passing test results for each mapped AC
-        for (const ac of ctx.plan.acceptanceCriteriaMap) {
-          capturedTestResults.push({
-            testFile: ac.testFile,
-            testCaseName: ac.testCaseName,
-            passed: true,
-          });
-        }
-      }
-
-      return { passed: testOutcome.passed, output: testOutcome.output };
-    },
-  });
+      await applyTerminalLifecycle(
+        { labelWriter, runHistory },
+        { repo: targetRepo, issue: issueNum, runId, terminalStatus: "failed" },
+      );
+    }
+    throw error;
+  }
 
   if (loopResult.status !== "success") {
     console.error("[ERROR] Developer Agent failed to achieve passing tests.");
@@ -356,12 +444,16 @@ async function main(): Promise<void> {
   }
 
   // STEP 6: Commit and Push Task Branch
-  console.log(`\n[STEP 6] Committing changes to '${branchName}' and pushing to GitHub...`);
+  console.log(
+    `\n[STEP 6] Committing changes to '${branchName}' and pushing to GitHub...`,
+  );
   const filesToCommit = executionPlan.targetFiles.map((f) => f.path).join(" ");
   await checkpoint();
   execSync(`git add ${filesToCommit}`, { stdio: "inherit" });
   await checkpoint();
-  execSync(`git commit -m "feat: #${issueNum} ${executionPlan.title}"`, { stdio: "inherit" });
+  execSync(`git commit -m "feat: #${issueNum} ${executionPlan.title}"`, {
+    stdio: "inherit",
+  });
   await checkpoint();
 
   const pushUrl = `https://x-access-token:${token}@github.com/${targetRepo}.git`;
@@ -411,7 +503,8 @@ async function main(): Promise<void> {
           {
             id: "TYPE-CHECK-FAIL",
             source: "linter",
-            message: "TypeScript compiler reported type error in generated code",
+            message:
+              "TypeScript compiler reported type error in generated code",
             severity: "error",
           },
         ];
@@ -447,21 +540,32 @@ async function main(): Promise<void> {
     );
   }
 
-  console.log("\n================================================================================");
+  console.log(
+    "\n================================================================================",
+  );
   console.log("DARK FACTORY RUNNER: EXECUTION COMPLETED SUCCESSFULLY");
-  console.log("================================================================================\n");
+  console.log(
+    "================================================================================\n",
+  );
   await activeControlStore?.close?.();
   activeControlStore = null;
 }
 
 // Only execute main when run as script directly
-if (require.main === module || process.argv[1]?.endsWith("dark-factory-runner.ts")) {
+if (
+  require.main === module ||
+  process.argv[1]?.endsWith("dark-factory-runner.ts")
+) {
   void main().catch(async (error: unknown) => {
-    console.error(`[ERROR] Runner aborted: ${error instanceof Error ? error.message : String(error)}`);
+    console.error(
+      `[ERROR] Runner aborted: ${error instanceof Error ? error.message : String(error)}`,
+    );
     try {
       await activeControlStore?.close?.();
     } catch (closeError) {
-      console.error(`[ERROR] Failed to close control store: ${closeError instanceof Error ? closeError.message : String(closeError)}`);
+      console.error(
+        `[ERROR] Failed to close control store: ${closeError instanceof Error ? closeError.message : String(closeError)}`,
+      );
     } finally {
       activeControlStore = null;
       process.exitCode = 1;

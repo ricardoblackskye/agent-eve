@@ -43,6 +43,7 @@ import type { MetricsStore, TaskStatus } from "./metrics";
 import type { Capabilities } from "./skills";
 import type { ExecutionPlan } from "./plan-validator";
 import { resolvePolicyMaxSteps } from "./llm-policy";
+import type { WorkerActivitySink } from "./circuit-breaker";
 
 const execAsync = promisify(exec);
 
@@ -707,6 +708,33 @@ export function createWorkspaceTools(
   };
 }
 
+/** Thrown when the circuit breaker has tripped: the coding loop halts fail-closed (#312). */
+export class CircuitTrippedError extends Error {
+  readonly code = "ERR_CIRCUIT_TRIPPED";
+  constructor(message: string) {
+    super(message);
+    this.name = "CircuitTrippedError";
+  }
+}
+
+/**
+ * The circuit-breaker seam for the coding loop (#312).
+ *
+ * Deliberately a NARROW STRUCTURAL CONTRACT, in the same spirit as `WorkerUsageSink`: the
+ * loop never imports the breaker module, and a breaker can never corrupt the loop's own
+ * result. The breaker is a GUARD, not telemetry — once a PBI's budget is exceeded the loop
+ * halts fail-closed at its next cooperative boundary instead of continuing to spend, so the
+ * halt takes effect at the next ITERATION boundary, not mid-token.
+ */
+export interface CodingLoopBreaker {
+  /** The unit of work this loop's activity is charged to (must satisfy PBI_ID_PATTERN). */
+  pbiId: string;
+  /** True once this PBI's budget is exhausted; consulted before each worker iteration. */
+  isTripped(pbiId: string): boolean;
+  /** Fed exactly one measurement per completed worker iteration. */
+  recordActivity: WorkerActivitySink;
+}
+
 export interface MultiFileCodingLoopOptions {
   plan: ExecutionPlan;
   tools: WorkspaceTools;
@@ -716,6 +744,23 @@ export interface MultiFileCodingLoopOptions {
   maxIterations: number;
   /** Called before each worker iteration at a cooperative control boundary. */
   checkpoint?: (iteration: number) => Promise<void>;
+  /** Circuit-breaker seam (#312). Omitted or null keeps the loop's previous behaviour. */
+  breaker?: CodingLoopBreaker | null;
+}
+
+/**
+ * Fail-closed trip check at a cooperative boundary (#312). The breaker is a guard: once a
+ * PBI's budget is exhausted the loop stops spending rather than finishing more iterations.
+ */
+function assertBreakerClosed(
+  breaker: CodingLoopBreaker | null | undefined,
+  iteration: number,
+): void {
+  if (!breaker || !breaker.isTripped(breaker.pbiId)) return;
+  throw new CircuitTrippedError(
+    `Circuit breaker tripped for ${breaker.pbiId} at iteration ${iteration}: ` +
+      `the worker budget is exhausted. Halting fail-closed.`,
+  );
 }
 
 /**
@@ -731,11 +776,23 @@ export async function runMultiFileCodingLoop(
     const iteration = i + 1;
     iterations = iteration;
     await opts.checkpoint?.(iteration);
+    assertBreakerClosed(opts.breaker, iteration);
+    const startedAt = Date.now();
     const res = await opts.worker({
       iteration,
       plan: opts.plan,
       tools: opts.tools,
     });
+    // Record exactly one unit of activity per completed iteration. The breaker rounds
+    // sub-minute work UP to a full minute, so an iteration cannot escape the budget.
+    const breaker = opts.breaker;
+    if (breaker) {
+      breaker.recordActivity({
+        pbiId: breaker.pbiId,
+        durationMs: Date.now() - startedAt,
+        status: res.passed ? "success" : "failure",
+      });
+    }
     passed = res.passed;
     if (passed) break;
   }
@@ -744,6 +801,9 @@ export async function runMultiFileCodingLoop(
   // that arrives during the last model/test call must be honored BEFORE we
   // report success, so the runner never commits/pushes stopped work.
   await opts.checkpoint?.(iterations);
+  // A trip raised by the FINAL iteration must halt too, rather than being reported as a
+  // success the runner would then commit and push (#312).
+  assertBreakerClosed(opts.breaker, iterations);
 
   const fixCycles = passed ? iterations - 1 : iterations;
   return { status: passed ? "success" : "failed", iterations, fixCycles };

@@ -187,7 +187,8 @@
     "isready",
     "idempotently",
     "GHES",
-    "issuecomment"
+    "issuecomment",
+    "unwired"
   ],
   "ignorePaths": [
     "node_modules/**",

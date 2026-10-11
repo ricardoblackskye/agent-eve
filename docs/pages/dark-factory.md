@@ -119,11 +119,14 @@ breaker** that caps how much a single PBI may cost before a human is pulled in.
   bounds in #138/#133: it reads the same worker-activity stream but never mutates
   agent-internal state, and a tripped PBI stays halted so no further minutes are
   counted or trips emitted.
-- **Wiring** — `createCircuitBreaker(env)` builds the guard from the env knobs
-  (fail-closed on malformed values, defaults 60 min / 3 failures);
-  `createWorkerActivityObserver(breaker)` adapts it into the worker-env sink so the
-  R2 handler records each run. Both thresholds, the trip-event shape, and the
-  fail-closed env contract are covered by `tests/dark-factory/circuit-breaker.test.ts`.
-
-The Developer (#133) and Tester (#136) agents plug into this seam in their own
-story branches; neither can run a worker task past a tripped PBI.
+- **Wiring (#312)** — `createCircuitBreaker(env)` builds the guard from the env knobs
+  (fail-closed on malformed values, defaults 60 min / 3 failures), and
+  `createCodingLoopBreaker(breaker, issue)` binds it to the coding loop, which records one
+  activity per completed iteration and halts fail-closed at its next cooperative boundary
+  once the PBI trips. The budget is charged to the **issue**, not the run: a run id contains
+  `/` and `#`, which `PBI_ID_PATTERN` rejects, and a per-run key would reset the budget on
+  every retry. Both thresholds, the trip-event shape, and the fail-closed env contract are
+  covered by `tests/dark-factory/circuit-breaker.test.ts`.
+- **Honest limits** — before #312 the guard was built, tested and documented but never
+  constructed, so no trip could occur; the wiring above is what made it live. The Developer
+  (#133) coding loop is wired in; the Tester (#136) agent does not yet feed the breaker.
