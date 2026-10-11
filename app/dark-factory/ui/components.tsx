@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import type {
+  BreakerTrip,
   RunTrendPoint,
   RunSummary,
   TestOutcome,
@@ -468,7 +469,6 @@ export function OutcomeArtifacts({ prUrl }: { prUrl?: string }): ReactNode {
   );
 }
 
-
 export function RunDiffPanel({ gitDiff }: { gitDiff?: string }): ReactNode {
   if (!gitDiff) {
     return (
@@ -487,14 +487,13 @@ export function RunDiffPanel({ gitDiff }: { gitDiff?: string }): ReactNode {
       <div className="df-panel-body">
         <pre className="df-diff" data-testid="run-diff">
           {lines.map((line, index) => {
-            const cls =
-              /^(diff |index |@@ |--- |\+\+\+ )/.test(line)
-                ? "df-diff-meta"
-                : line.startsWith("+")
-                  ? "df-diff-add"
-                  : line.startsWith("-")
-                    ? "df-diff-del"
-                    : "df-diff-ctx";
+            const cls = /^(diff |index |@@ |--- |\+\+\+ )/.test(line)
+              ? "df-diff-meta"
+              : line.startsWith("+")
+                ? "df-diff-add"
+                : line.startsWith("-")
+                  ? "df-diff-del"
+                  : "df-diff-ctx";
             return (
               <span key={index} className={cls}>
                 {line}
@@ -553,7 +552,6 @@ export function TestOutputPanel({
   );
 }
 
-
 export function TracePanel({ trace }: { trace?: TraceItem[] }): ReactNode {
   if (!trace || trace.length === 0) {
     return (
@@ -590,7 +588,9 @@ export function TracePanel({ trace }: { trace?: TraceItem[] }): ReactNode {
               <span className="df-test-file">{item.acId}</span>
               <span className="df-test-sep"> › </span>
               <span className="df-test-name">
-                {item.description ?? item.testCaseName ?? "Acceptance criterion"}
+                {item.description ??
+                  item.testCaseName ??
+                  "Acceptance criterion"}
               </span>
               {item.testFile ? (
                 <>
@@ -606,3 +606,47 @@ export function TracePanel({ trace }: { trace?: TraceItem[] }): ReactNode {
   );
 }
 
+export function BreakerTripPanel({ trip }: { trip?: BreakerTrip }): ReactNode {
+  if (!trip) {
+    return (
+      <section className="df-panel">
+        <PanelHead title="CIRCUIT BREAKER" badges={["GUARD"]} />
+        <div className="df-panel-body">
+          <StatePanel
+            state="empty"
+            message="No circuit-breaker trip recorded"
+          />
+        </div>
+      </section>
+    );
+  }
+  // The unit depends on WHICH bound was hit: a minutes trip counts minutes, a
+  // self-correct trip counts failed cycles. Saying so beats a bare number.
+  const unit =
+    trip.reason === "worker-minutes-exceeded"
+      ? "worker-minutes"
+      : "failed self-correct cycles";
+  return (
+    <section className="df-panel">
+      <PanelHead title="CIRCUIT BREAKER" badges={["TRIPPED", "GUARD"]} />
+      <div className="df-panel-body">
+        <p className="df-test-summary" data-testid="breaker-trip-summary">
+          <span className="df-test-fail">{trip.reason}</span>
+          <span className="df-test-sep"> · </span>
+          <span data-testid="breaker-trip-limit">
+            cap {trip.limit} {unit}
+          </span>
+        </p>
+        <ul className="df-test-list" data-testid="breaker-trip">
+          <li className="df-test-fail">
+            <span className="df-test-file">{trip.reason}</span>
+            <span className="df-test-sep"> › </span>
+            <span className="df-test-name">
+              {trip.workerMinutes} worker-minutes measured against the cap above
+            </span>
+          </li>
+        </ul>
+      </div>
+    </section>
+  );
+}

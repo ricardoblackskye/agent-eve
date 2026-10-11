@@ -14,6 +14,7 @@ import {
   RunDiffPanel,
   RunTable,
   StatePanel,
+  BreakerTripPanel,
   TestOutputPanel,
   TracePanel,
   StatusPill,
@@ -340,7 +341,9 @@ describe("OutcomeArtifacts", () => {
 describe("RunDiffPanel", () => {
   it("renders the captured diff in a scrollable block", () => {
     const { container } = render(
-      <RunDiffPanel gitDiff={"diff --git a/foo.ts b/foo.ts\n-const a = 1;\n+const a = 2;"} />,
+      <RunDiffPanel
+        gitDiff={"diff --git a/foo.ts b/foo.ts\n-const a = 1;\n+const a = 2;"}
+      />,
     );
     const block = container.querySelector(".df-diff");
     expect(block).not.toBeNull();
@@ -368,12 +371,22 @@ describe("TestOutputPanel", () => {
     const { container } = render(
       <TestOutputPanel
         testResults={[
-          { testFile: "src/foo.test.ts", testCaseName: "adds numbers", passed: true },
-          { testFile: "src/bar.test.ts", testCaseName: "throws on null", passed: false },
+          {
+            testFile: "src/foo.test.ts",
+            testCaseName: "adds numbers",
+            passed: true,
+          },
+          {
+            testFile: "src/bar.test.ts",
+            testCaseName: "throws on null",
+            passed: false,
+          },
         ]}
       />,
     );
-    const summary = container.querySelector('[data-testid="test-output-summary"]');
+    const summary = container.querySelector(
+      '[data-testid="test-output-summary"]',
+    );
     expect(summary?.textContent).toContain("1 passed");
     expect(summary?.textContent).toContain("1 failed");
     expect(
@@ -434,4 +447,43 @@ describe("TracePanel", () => {
     expect(container.querySelector(".df-state-empty")).toBeTruthy();
   });
 });
+describe("BreakerTripPanel", () => {
+  it("renders the reason and the cap that was hit", () => {
+    const { container } = render(
+      <BreakerTripPanel
+        trip={{
+          reason: "worker-minutes-exceeded",
+          limit: 60,
+          workerMinutes: 61,
+        }}
+      />,
+    );
 
+    expect(container.textContent).toContain("worker-minutes-exceeded");
+    expect(
+      container.querySelector("[data-testid='breaker-trip-limit']")
+        ?.textContent,
+    ).toContain("60");
+    expect(container.textContent).toContain("worker-minutes");
+    expect(container.textContent).toContain("61");
+  });
+
+  it("names the unit for a self-correct trip rather than a bare number", () => {
+    const { container } = render(
+      <BreakerTripPanel
+        trip={{
+          reason: "failed-selfcorrect-exceeded",
+          limit: 3,
+          workerMinutes: 12,
+        }}
+      />,
+    );
+
+    expect(container.textContent).toContain("failed self-correct cycles");
+  });
+
+  it("renders an empty state when no trip was recorded", () => {
+    const { container } = render(<BreakerTripPanel trip={undefined} />);
+    expect(container.querySelector(".df-state-empty")).toBeTruthy();
+  });
+});

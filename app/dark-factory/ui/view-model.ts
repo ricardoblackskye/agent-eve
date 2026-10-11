@@ -1,4 +1,5 @@
 import type {
+  BreakerTrip,
   RunMetrics,
   RunStage,
   RunStatus,
@@ -110,6 +111,8 @@ export interface DetailView {
   gitDiff?: string;
   testResults?: TestOutcome[];
   trace?: TraceItem[];
+  /** A circuit-breaker trip recorded on the run (#313); absent unless one occurred. */
+  breakerTrip?: BreakerTrip;
 }
 
 export interface RunFilters {
@@ -407,13 +410,20 @@ export function toDetailView({
 
   const testResultsEvent = [...ordered]
     .reverse()
-    .find(({ event }) => event.type === "review.round" && event.testResults?.length);
+    .find(
+      ({ event }) => event.type === "review.round" && event.testResults?.length,
+    );
   const testResults = testResultsEvent?.event.testResults;
 
   const traceEvent = [...ordered]
     .reverse()
     .find(({ event }) => event.type === "review.round" && event.trace?.length);
   const trace = traceEvent?.event.trace;
+
+  // #313: a trip is written to the run's terminal event, so surface the recorded trip.
+  const breakerTrip = [...ordered]
+    .reverse()
+    .find(({ event }) => event.breakerTrip)?.event.breakerTrip;
 
   return {
     summaryTiles,
@@ -424,6 +434,7 @@ export function toDetailView({
     gitDiff: summary.gitDiff,
     testResults,
     trace,
+    breakerTrip,
   };
 }
 
