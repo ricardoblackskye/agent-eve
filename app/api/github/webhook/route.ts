@@ -131,6 +131,50 @@ function verifySignature(
   return `sha256=${sig}` === signatureHeader;
 }
 
+/**
+ * Record and hand off ONE Dark Factory decision, then map the outcome onto an HTTP
+ * response. Shared by every Dark Factory inbound event (issue labels and, since #306,
+ * issue comments) so the two paths cannot drift.
+ *
+ * Gate refusals are final for the event; infrastructure/write failures stay non-2xx so
+ * GitHub can retry after the operator repairs configuration.
+ */
+async function dispatchDarkFactory(
+  request: NextRequest,
+  dfDecision: ReturnType<typeof decideDarkFactoryTrigger>,
+  deliveryId: string,
+): Promise<NextResponse> {
+  const runHistory = createRunHistoryStore();
+  // Control is opt-in: only enforce the gate when a real control store is
+  // configured. An unset/console driver means control is disabled for this
+  // deployment, so the run-history configuration governs dispatch instead.
+  const controlDriver = (process.env.DF_CONTROL_DRIVER ?? "").trim().toLowerCase();
+  const controlStore = controlDriver && controlDriver !== "console"
+    ? createControlStore(process.env)
+    : undefined;
+  const result = await runDarkFactoryDispatch(dfDecision, {
+    runHistory,
+    controlStore,
+    deliveryId,
+    labels: createGitHubLabelWriter(),
+    apiKey: process.env.EVE_API_KEY,
+    env: process.env,
+    origin: request.nextUrl.origin,
+  });
+  await Promise.all([runHistory.close(), controlStore?.close?.()]);
+  const retryableFailure = !result.ok && (result.status === "failed" || Boolean(result.error));
+  return NextResponse.json(
+    {
+      ok: result.ok,
+      message: `dark-factory trigger: ${result.status}`,
+      ...(result.runId ? { runId: result.runId } : {}),
+      ...(result.runStatus ? { runStatus: result.runStatus } : {}),
+      ...(result.ok ? {} : { error: result.reason }),
+    },
+    { status: result.ok ? 202 : retryableFailure ? 503 : 200 },
+  );
+}
+
 async function handler(request: NextRequest) {
   // Only accept POST requests
   if (request.method !== "POST") {
@@ -381,6 +425,50 @@ async function handler(request: NextRequest) {
     });
   }
 
+  // #306 — a comment on the ticket answers a parked question. This is the behaviour the
+  // question comment already promises on the ticket ("Reply here and the run resumes").
+  // A comment can only ever RESUME; it can never start fresh work. GitHub issue comments
+  // are FLAT, so the answer is correlated by ISSUE plus arrival order, and an unrelated
+  // comment is made a no-op by the blocked-run requirement inside runDarkFactoryDispatch.
+  if (event === "issue_comment") {
+    const commentedIssue = data.issue;
+    const comment = data.comment;
+    const dfDecision = decideDarkFactoryTrigger({
+      action: data.action,
+      issue: {
+        number: commentedIssue?.number,
+        title: commentedIssue?.title,
+        body: commentedIssue?.body || "",
+        labels: (commentedIssue?.labels || []).map((l: any) => ({ name: l.name })),
+      },
+      comment: comment
+        ? { id: comment.id, body: comment.body || "" }
+        : undefined,
+      sender: data.sender ? { login: data.sender.login } : undefined,
+      repository: { full_name: repoFullName },
+    });
+    if (dfDecision.kind !== "not-a-trigger") {
+      // Idempotency is keyed on the COMMENT, not the delivery: re-delivering the same
+      // answer can never resume a run twice, while a genuinely new comment is a new
+      // answer. The delivery id is therefore derived from the comment id.
+      const commentId = comment?.id;
+      const deliveryId = Number.isInteger(commentId)
+        ? `comment:${commentId}`
+        : request.headers.get("x-github-delivery");
+      if (!deliveryId) {
+        return NextResponse.json(
+          { ok: false, error: "Missing comment id for Dark Factory comment event." },
+          { status: 400 },
+        );
+      }
+      return dispatchDarkFactory(request, dfDecision, deliveryId);
+    }
+    return NextResponse.json({
+      ok: true,
+      message: "comment is not a dark-factory answer to a parked run",
+    });
+  }
+
   // Handle issue events that ask the Product Owner subagent to draft a story.
   if (event === "issues") {
     const action = data.action; // opened, edited, reopened, labeled, closed, ...
@@ -510,37 +598,7 @@ async function handler(request: NextRequest) {
           { status: 400 },
         );
       }
-      const runHistory = createRunHistoryStore();
-      // Control is opt-in: only enforce the gate when a real control store is
-      // configured. An unset/console driver means control is disabled for this
-      // deployment, so the run-history configuration governs dispatch instead.
-      const controlDriver = (process.env.DF_CONTROL_DRIVER ?? "").trim().toLowerCase();
-      const controlStore = controlDriver && controlDriver !== "console"
-        ? createControlStore(process.env)
-        : undefined;
-      const result = await runDarkFactoryDispatch(dfDecision, {
-        runHistory,
-        controlStore,
-        deliveryId,
-        labels: createGitHubLabelWriter(),
-        apiKey: process.env.EVE_API_KEY,
-        env: process.env,
-        origin: request.nextUrl.origin,
-      });
-      await Promise.all([runHistory.close(), controlStore?.close?.()]);
-      // Gate refusals are final for this event; infrastructure/write failures must
-      // remain non-2xx so GitHub can retry after the operator repairs configuration.
-      const retryableFailure = !result.ok && (result.status === "failed" || Boolean(result.error));
-      return NextResponse.json(
-        {
-          ok: result.ok,
-          message: `dark-factory trigger: ${result.status}`,
-          ...(result.runId ? { runId: result.runId } : {}),
-          ...(result.runStatus ? { runStatus: result.runStatus } : {}),
-          ...(result.ok ? {} : { error: result.reason }),
-        },
-        { status: result.ok ? 202 : retryableFailure ? 503 : 200 },
-      );
+      return dispatchDarkFactory(request, dfDecision, deliveryId);
     }
 
     // Detect the trigger (mention in body, or the trigger label) using the

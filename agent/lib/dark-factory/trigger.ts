@@ -27,6 +27,11 @@ export interface DarkFactoryTriggerPayload {
     labels?: Array<{ name?: string }>;
   };
   label?: { name?: string };
+  /**
+   * Present on an `issue_comment` payload (#306): the human's reply to a parked
+   * question. A comment is an ANSWER — never a fresh-run trigger.
+   */
+  comment?: { id?: number; body?: string };
   pull_request?: unknown;
   sender?: { login?: string };
   repository?: { full_name?: string };
@@ -98,11 +103,18 @@ export interface DarkFactoryTriggerDecision {
    */
   issueTitle?: string;
   issueBody?: string;
+  /**
+   * The human's answer to a parked question (#306). Bounded here, and passed as DATA.
+   */
+  commentBody?: string;
 }
 
 /** Bounds on the free text carried from the issue into the handoff. */
 export const MAX_BRIEF_TITLE_CHARS = 500;
 export const MAX_BRIEF_BODY_CHARS = 2000;
+
+/** Bound on the answer text carried from a comment into the resume handoff (#306). */
+export const MAX_ANSWER_CHARS = 2000;
 
 function clamp(value: string): string {
   return value.length > MAX_IDENTIFIER_CHARS
@@ -159,23 +171,37 @@ export function decideDarkFactoryTrigger(
   const isTriggerLabel = labelName === triggerLabel;
   const isQuestionLabel = labelName === questionLabel;
 
-  if (action === "labeled" && !isTriggerLabel) {
+  // #306 — a comment answers a parked question. It can only ever RESUME, never start
+  // fresh work. GitHub issue comments are FLAT (there is no thread id to match on), so
+  // the answer is correlated by ISSUE plus arrival order; an unrelated comment is made
+  // a no-op by the blocked-run requirement inside runDarkFactoryDispatch, not here.
+  const comment = payload.comment;
+  if (comment !== undefined && action !== "created") {
     return decide(
       "not-a-trigger",
-      `'${clamp(labelName || "(none)")}' is not a dark-factory trigger label`,
+      `'${clamp(action)}' comment events are not answers to a parked question`,
     );
   }
-  if (action === "unlabeled" && !isTriggerLabel && !isQuestionLabel) {
-    return decide(
-      "not-a-trigger",
-      `'${clamp(labelName || "(none)")}' is not a dark-factory label`,
-    );
-  }
-  if (action !== "labeled" && action !== "unlabeled") {
-    return decide(
-      "not-a-trigger",
-      `'${action}' is not a dark-factory trigger action`,
-    );
+
+  if (comment === undefined) {
+    if (action === "labeled" && !isTriggerLabel) {
+      return decide(
+        "not-a-trigger",
+        `'${clamp(labelName || "(none)")}' is not a dark-factory trigger label`,
+      );
+    }
+    if (action === "unlabeled" && !isTriggerLabel && !isQuestionLabel) {
+      return decide(
+        "not-a-trigger",
+        `'${clamp(labelName || "(none)")}' is not a dark-factory label`,
+      );
+    }
+    if (action !== "labeled" && action !== "unlabeled") {
+      return decide(
+        "not-a-trigger",
+        `'${action}' is not a dark-factory trigger action`,
+      );
+    }
   }
 
   // A run that already reached a terminal state is finished: re-applying the label must
@@ -237,6 +263,13 @@ export function decideDarkFactoryTrigger(
     issueTitle: (payload.issue?.title ?? "").slice(0, MAX_BRIEF_TITLE_CHARS),
     issueBody: (payload.issue?.body ?? "").slice(0, MAX_BRIEF_BODY_CHARS),
   };
+  if (comment !== undefined) {
+    return decide(
+      "resume",
+      `a comment answer on ${clamp(repo)}#${issue} resumes the parked run`,
+      { ...where, commentBody: (comment.body ?? "").slice(0, MAX_ANSWER_CHARS) },
+    );
+  }
   if (action === "labeled") {
     return decide(
       "trigger",

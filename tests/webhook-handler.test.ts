@@ -275,3 +275,106 @@ describe("webhook handler (bug #39)", () => {
     expect(response.data.eveApiResult).toBe("accepted");
   });
 });
+
+describe("#306: a comment answers a parked question", () => {
+  function commentBody(over: Record<string, unknown> = {}) {
+    return JSON.stringify({
+      action: "created",
+      comment: { id: 555001, body: "Use the EU region." },
+      sender: { login: "ricardoblackskye" },
+      repository: { full_name: "ricardoblackskye/agent-eve" },
+      issue: {
+        number: 306,
+        title: "Human-in-loop",
+        body: "Answer the question",
+        labels: [{ name: "needs-answer" }],
+      },
+      ...over,
+    });
+  }
+
+  function configure() {
+    process.env.DF_TRIGGER_LABEL = "dark-factory";
+    process.env.DF_WORKER_ALLOWED_REPOS = "ricardoblackskye/agent-eve";
+    process.env.DF_TRIGGER_ALLOWED_USERS = "ricardoblackskye";
+  }
+
+  it("routes an issue_comment from an allowed actor into the dark-factory dispatch", async () => {
+    configure();
+    delete process.env.DF_RUN_HISTORY_DRIVER;
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const { POST } = await import("../app/api/github/webhook/route");
+    const response: any = await POST(
+      createRequest("/api/github/webhook", {
+        headers: {
+          "content-type": "application/json",
+          "x-github-event": "issue_comment",
+          "x-github-delivery": "comment-delivery-1",
+        },
+        body: commentBody(),
+      }) as any,
+    );
+
+    // The comment branch reached dispatch: with run history unconfigured that is the
+    // retryable failure the label path produces too.
+    expect(response.status).toBe(503);
+    expect(response.data.ok).toBe(false);
+    expect(response.data.error).toMatch(/run history/i);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses a comment from an actor outside DF_TRIGGER_ALLOWED_USERS, with the reason", async () => {
+    configure();
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const { POST } = await import("../app/api/github/webhook/route");
+    const response: any = await POST(
+      createRequest("/api/github/webhook", {
+        headers: {
+          "content-type": "application/json",
+          "x-github-event": "issue_comment",
+          "x-github-delivery": "comment-delivery-2",
+        },
+        body: commentBody({ sender: { login: "stranger" } }),
+      }) as any,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.data.ok).toBe(false);
+    expect(response.data.error).toMatch(/DF_TRIGGER_ALLOWED_USERS/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("ignores an edited comment — only a created comment is an answer", async () => {
+    configure();
+    delete process.env.DF_RUN_HISTORY_DRIVER;
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const { POST } = await import("../app/api/github/webhook/route");
+    const response: any = await POST(
+      createRequest("/api/github/webhook", {
+        headers: {
+          "content-type": "application/json",
+          "x-github-event": "issue_comment",
+          "x-github-delivery": "comment-delivery-3",
+        },
+        body: commentBody({ action: "edited" }),
+      }) as any,
+    );
+
+    // Falls through: a 503 (dark-factory branch) must NOT be what an edit produces.
+    expect(response.status).not.toBe(503);
+  });
+
+  it("keys the resume delivery on the COMMENT id, so a re-delivered answer cannot resume twice", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { resolve } = await import("node:path");
+    const source = readFileSync(
+      resolve(process.cwd(), "app/api/github/webhook/route.ts"),
+      "utf8",
+    );
+    // The delivery identity is the comment, not the GitHub delivery id.
+    expect(source).toMatch(/comment:\$\{/);
+  });
+});
