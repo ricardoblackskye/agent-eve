@@ -53,6 +53,14 @@ async function performAction(
     if (input.scope === "factory" && input.action === "stop") {
       throw new InvalidControlError("Stop is only available for an individual run.");
     }
+    if (input.scope === "factory" && input.action === "abort") {
+      throw new InvalidControlError("Abort is only available for an individual run.");
+    }
+    if (input.action === "retry") {
+      throw new InvalidControlError(
+        "Retry is not a control-state action; it re-dispatches the run.",
+      );
+    }
     if (input.scope === "run" && !runId) {
       throw new InvalidControlError("Run-scoped control actions require a runId.");
     }
@@ -95,13 +103,15 @@ async function performAction(
       if (!current.ok) return unavailable(current.error);
       const previous = current.value;
       if (previous?.stopped) {
-        if (input.action === "stop") {
+        if (input.action === "stop" || input.action === "abort") {
           return { ok: true, status: "applied", state: previous, event, duplicate: true };
         }
         return { ok: false, status: "invalid", error: "A stopped run cannot be paused or resumed." };
       }
       const paused = input.action === "pause";
-      const stopped = input.action === "stop";
+      // `abort` sets the SAME cooperative stop flag as `stop` (the checkpoint halts the
+      // run), and additionally reaches the ledger terminally — see operator-actions.ts.
+      const stopped = input.action === "stop" || input.action === "abort";
       state = {
         paused: stopped ? false : paused,
         stopped,

@@ -210,9 +210,48 @@ describe("Dark Factory run detail page", () => {
         container.querySelector('[aria-label="Run controls"]'),
       ).not.toBeNull(),
     );
-    expect(screen.getByRole("button", { name: "Resume run" })).toBeTruthy();
+    // #307 — a failed run is terminal: the useful action is RETRY (which re-dispatches
+    // as a NEW run). Abort is not offered here because aborting an already-terminal run
+    // is a no-op the ledger correctly holds.
+    expect(screen.getByRole("button", { name: "Retry run" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Resume run" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Stop run" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Pause run" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Abort run" })).toBeNull();
+  });
+
+  it("for a running run, offers Abort run alongside Stop run (#307)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: unknown) => {
+        const url = String(input);
+        if (url.includes("/api/dark-factory/control")) {
+          return Promise.resolve(
+            jsonResponse({
+              available: true,
+              factory: { paused: false, updatedAt: "2026-09-25T09:00:00.000Z" },
+              run: {
+                paused: false,
+                stopped: false,
+                updatedAt: "2026-09-25T09:00:00.000Z",
+              },
+              events: [],
+            }),
+          );
+        }
+        return Promise.resolve(
+          jsonResponse({
+            summary: { ...SUMMARY, status: "running" as const },
+            events: EVENTS,
+          }),
+        );
+      }),
+    );
+    render(<DarkFactoryRunDetailPage />);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Abort run" })).toBeTruthy(),
+    );
+    expect(screen.getByRole("button", { name: "Stop run" })).toBeTruthy();
   });
 
   it("for a running run, shows Pause run and Stop run", async () => {

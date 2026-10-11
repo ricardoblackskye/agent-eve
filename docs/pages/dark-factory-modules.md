@@ -9,7 +9,7 @@
 > is [Dark Factory (R1)](dark-factory.md) and the flow walkthroughs in the
 > [flow deep-dives](flow-run-lifecycle.md).
 
-_74 modules._
+_75 modules._
 
 ## architect-agent
 
@@ -347,6 +347,16 @@ Dark Factory — Observability / Self-Improvement (issues #139 / story #140). Th
 **Exports:** `BufferedMetricsRecorder`, `FixEvent`, `InMemoryMetricsStore`, `InvalidMetricsError`, `MAX_METRIC_COST_USD`, `MAX_METRIC_LATENCY_MS`, `MetricsStore`, `MetricsWriteResult`, `TaskMetric`, `TaskMetricInput`, `TaskStatus`, `countFixCycles`, `createMetricsStore`, `meanOfMeasured`, `round2`, `toTaskMetric`
 
 **Decisions:** [ADR 0003](../../docs/adr/0003-unmeasured-is-never-zero.md)
+
+## operator-actions
+
+Dark Factory — operator retry / abort, the ledger-reaching half (#307). `performOperatorRunAction` is the seam behind the two operator actions that need the run ledger rather than the control-state flags: `abort` drives the ledger's existing terminal abort transition (so the run-history status becomes `aborted`, which is what distinguishes it from a flag-only `stop`), and `retry` re-dispatches a FAILED run as a NEW run. The delivery identity is derived from the run, so a repeated click is idempotent through the ledger's claim/accept dedupe.
+
+**Source:** [`agent/lib/dark-factory/operator-actions.ts`](../../agent/lib/dark-factory/operator-actions.ts)
+
+**Exports:** `DispatchFn`, `OperatorActionDeps`, `OperatorActionInput`, `OperatorActionResult`, `OperatorRunAction`, `operatorDeliveryId`, `performOperatorRunAction`
+
+**Decisions:** [ADR 0023](../../docs/adr/0023-retry-is-a-new-run-abort-is-terminal.md)
 
 ## operator-cli
 

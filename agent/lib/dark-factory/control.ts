@@ -2,7 +2,12 @@ import { DatabaseSync } from "node:sqlite";
 import { PostgresControlAdapter } from "./control-postgres";
 
 export type ControlScope = "factory" | "run";
-export type ControlAction = "pause" | "resume" | "stop";
+/**
+ * The operator vocabulary. `pause`/`resume`/`stop` are control-STATE flags; `abort`
+ * additionally reaches the ledger terminally (#307), and `retry` has no state at all
+ * (it is only a control event plus a re-dispatch).
+ */
+export type ControlAction = "pause" | "resume" | "stop" | "abort" | "retry";
 export type ControlStoreMode = "live" | "blocked";
 
 export interface FactoryControlState {
