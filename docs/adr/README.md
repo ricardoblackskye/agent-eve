@@ -74,3 +74,4 @@ changes, write a new one that supersedes it.
 | [0018](0018-comment-reference-in-ledger.md)                       | Store a comment reference, not the question text, in the ledger             | Accepted |
 | [0019](0019-orchestration-handler-pipeline.md)                    | The orchestration handler sequences the factory pipeline                    | Accepted |
 | [0020](0020-cost-governance-is-live-on-every-llm-call.md)         | Cost governance is live on every LLM call; a refusal is recorded on the run | Accepted |
+| [0021](0021-terminal-labels-fail-closed.md)                       | Terminal lifecycle labels are applied by a fail-closed finalizer            | Accepted |
