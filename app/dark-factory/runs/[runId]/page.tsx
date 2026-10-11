@@ -9,6 +9,7 @@ import {
   MeasuredMetrics,
   OutcomeArtifacts,
   PanelHead,
+  BreakerTripPanel,
   RunDetailPanel,
   RunDiffPanel,
   StatePanel,
@@ -91,6 +92,7 @@ export default function DarkFactoryRunDetailPage() {
       <RunDiffPanel gitDiff={view.gitDiff} />
       <TestOutputPanel testResults={view.testResults} />
       <TracePanel trace={view.trace} />
+      <BreakerTripPanel trip={view.breakerTrip} />
       <div className="df-detail-grid">
         <section className="df-panel">
           <PanelHead title="EVENT STREAM" badges={["OLDEST → NEWEST"]} />

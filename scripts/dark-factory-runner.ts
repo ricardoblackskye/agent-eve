@@ -42,6 +42,7 @@ import {
 } from "../agent/lib/dark-factory/developer-agent";
 import { createCircuitBreaker } from "../agent/lib/dark-factory/circuit-breaker";
 import { createCodingLoopBreaker } from "../agent/lib/dark-factory/breaker-wiring";
+import { recordBreakerTrip } from "../agent/lib/dark-factory/breaker-trip-recorder";
 import { createMetricsStore } from "../agent/lib/dark-factory/metrics";
 import { ArchitectAgent } from "../agent/lib/dark-factory/architect-agent";
 import {
@@ -423,9 +424,35 @@ async function main(): Promise<void> {
     // #312: a trip halts fail-closed through the SAME terminal path as the runner's other
     // steps, so a tripped run is never silently left running.
     if (error instanceof CircuitTrippedError) {
+      const trips = breaker.getTripEvents();
       console.error(
-        `[ERROR] Circuit breaker tripped — halting fail-closed: ${JSON.stringify(breaker.getTripEvents())}`,
+        `[ERROR] Circuit breaker tripped — halting fail-closed: ${JSON.stringify(trips)}`,
       );
+      // #313: persist the trip ON THE RUN so it is explainable on the ticket, not only in a
+      // log. Honest fail-closed: a ledger outage must never turn a recorded trip into a
+      // silent one, so the failure is reported loudly and the run still fails.
+      for (const trip of trips) {
+        if (trip.limit === undefined) {
+          console.error(
+            `[WARN] Circuit-breaker trip (${trip.reason}) carried no limit and cannot be ` +
+              `recorded machine-readably; refusing to invent one.`,
+          );
+          continue;
+        }
+        const recorded = await recordBreakerTrip(runHistory, {
+          runId,
+          trip: {
+            reason: trip.reason,
+            limit: trip.limit,
+            workerMinutes: trip.workerMinutes,
+          },
+        });
+        if (!recorded.ok) {
+          console.error(
+            `[ERROR] Circuit-breaker trip could not be persisted for ${runId}: ${recorded.error}`,
+          );
+        }
+      }
       await applyTerminalLifecycle(
         { labelWriter, runHistory },
         { repo: targetRepo, issue: issueNum, runId, terminalStatus: "failed" },

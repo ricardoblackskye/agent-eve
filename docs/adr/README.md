@@ -77,3 +77,4 @@ changes, write a new one that supersedes it.
 | [0021](0021-terminal-labels-fail-closed.md)                       | Terminal lifecycle labels are applied by a fail-closed finalizer              | Accepted |
 | [0022](0022-comment-answer-resumes-a-parked-run.md)               | A comment answer resumes a parked run; the answer reaches the factory as DATA | Accepted |
 | [0023](0023-retry-is-a-new-run-abort-is-terminal.md)              | Retry starts a new run; abort is terminal where stop is a flag                | Accepted |
+| [0024](0024-record-the-trip-on-the-run.md)                       | A circuit-breaker trip is recorded on the run; the breaker stamps the cap it hit | Accepted |

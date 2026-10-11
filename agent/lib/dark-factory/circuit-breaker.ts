@@ -33,6 +33,12 @@ export interface TripEvent {
   reason: TripReason;
   /** ISO 8601 timestamp in UTC (format: YYYY-MM-DDTHH:mm:ss.sssZ). */
   timestamp: TripTimestamp;
+  /**
+   * The configured cap that was hit (#313): `maxWorkerMinutesPerPbi` for a worker-minutes
+   * trip, `maxFailedSelfCorrect` for a self-correct trip. Stamped from the breaker's OWN
+   * config so the trip is self-describing and no caller re-derives the default.
+   */
+  limit?: number;
 }
 
 export interface CircuitBreakerConfig {
@@ -200,6 +206,7 @@ export function toTripEvent(input: {
   pbiId?: string;
   workerMinutes?: number;
   reason?: string;
+  limit?: number;
 }): TripEvent {
   const rawPbiId = typeof input.pbiId === "string" ? input.pbiId.trim() : "";
   if (!rawPbiId) {
@@ -239,11 +246,23 @@ export function toTripEvent(input: {
     );
   }
 
+  const rawLimit = input.limit;
+  let limit: number | undefined;
+  if (rawLimit !== undefined) {
+    if (typeof rawLimit !== "number" || !Number.isInteger(rawLimit) || rawLimit < 1) {
+      throw new InvalidTripEventError(
+        `Trip event "limit" must be an integer >= 1 when present (received ${JSON.stringify(rawLimit)}).`,
+      );
+    }
+    limit = rawLimit;
+  }
+
   return {
     pbiId: rawPbiId,
     workerMinutes: minutes,
     reason: reason as TripReason,
     timestamp: new Date().toISOString(),
+    ...(limit !== undefined ? { limit } : {}),
   };
 }
 
@@ -561,7 +580,19 @@ export class CircuitBreaker {
 
     s.tripped = true;
     s.tripCount++;
-    this.tripEvents.push(toTripEvent({ pbiId, workerMinutes, reason }));
+    // Stamp the cap that was hit, read from THIS breaker's own config (#313), so the trip
+    // records what was exceeded as well as what was measured.
+    this.tripEvents.push(
+      toTripEvent({
+        pbiId,
+        workerMinutes,
+        reason,
+        limit:
+          reason === "worker-minutes-exceeded"
+            ? this.config.maxWorkerMinutesPerPbi
+            : this.config.maxFailedSelfCorrect,
+      }),
+    );
   }
 }
 

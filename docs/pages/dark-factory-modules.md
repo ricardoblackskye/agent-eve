@@ -9,7 +9,7 @@
 > is [Dark Factory (R1)](dark-factory.md) and the flow walkthroughs in the
 > [flow deep-dives](flow-run-lifecycle.md).
 
-_76 modules._
+_77 modules._
 
 ## architect-agent
 
@@ -18,6 +18,16 @@ Dark Factory — Architect Agent (#179). Pre-code planning agent that inspects t
 **Source:** [`agent/lib/dark-factory/architect-agent.ts`](../../agent/lib/dark-factory/architect-agent.ts)
 
 **Exports:** `ArchitectAgent`, `ArchitectDeps`, `ArchitectResult`, `DEFAULT_LOWEST_PRIORITY_SCORE`, `DEFAULT_MAX_CONTEXT_FILES`, `MAX_STORY_BODY_LENGTH`, `MAX_STORY_TITLE_LENGTH`, `ProcessTimerRegistry`, `StoryInput`, `sanitizeRelativePath`, `sortFilesByRelevance`
+
+## breaker-trip-recorder
+
+Dark Factory — record a circuit-breaker trip on a run (#313). A trip halts the coding loop (#312), and an operator reading the ticket must be able to see WHY it stopped and what bound was exceeded — not just find it in a log. The trip is stored machine-readably (a closed vocabulary of reasons plus the numeric bound), never free text, and the breaker itself stays a pure in-memory guard: it is never taught about the ledger. Mirrors `cost-refusal-recorder.ts` (#270) deliberately — same shape, same idempotency, same honest failure reporting.
+
+**Source:** [`agent/lib/dark-factory/breaker-trip-recorder.ts`](../../agent/lib/dark-factory/breaker-trip-recorder.ts)
+
+**Exports:** `RecordBreakerTripInput`, `RecordBreakerTripResult`, `recordBreakerTrip`
+
+**Decisions:** [ADR 0024](../../docs/adr/0024-record-the-trip-on-the-run.md)
 
 ## breaker-wiring
 
