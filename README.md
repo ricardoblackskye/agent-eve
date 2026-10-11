@@ -243,8 +243,9 @@ in #138/#143.
   - `DF_MAX_WORKER_MINUTES_PER_PBI` (default 60) — total worker-task duration crosses threshold, or
   - `DF_MAX_FAILED_SELFCORRECT` (default 3) — N CI-fail → re-dispatch → fail cycles with no success.
 - A tripped PBI stays **halted**: no further minutes counted, no additional trips emitted.
-- **Wiring** — `createCircuitBreaker(env)` builds from env knobs (fail-closed on bad values);
-  `createWorkerActivityObserver(breaker)` adapts it into the worker-env sink.
+- **Wiring (#312)** — `createCircuitBreaker(env)` builds from env knobs (fail-closed on bad
+  values) and `createCodingLoopBreaker(breaker, issue)` binds it to the coding loop, which
+  halts fail-closed once the issue's worker budget trips.
 - See [`ARCHITECTURE.md`](ARCHITECTURE.md#factory-level-circuit-breaker-cost-guard-r3-144) for detail.
 
 ### Dark Factory (R3) — Developer Agent (#133)

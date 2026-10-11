@@ -12,6 +12,13 @@ import type { ExecutionPlan } from "../../agent/lib/dark-factory/plan-validator"
 import { createCircuitBreaker } from "../../agent/lib/dark-factory/circuit-breaker";
 import { createCodingLoopBreaker } from "../../agent/lib/dark-factory/breaker-wiring";
 
+/**
+ * The breaker charges `Math.ceil(durationMs / 60_000)` minutes, so a worker must consume at
+ * least a millisecond of wall clock for a trip to be deterministic. A bare async function
+ * measures ~0ms, which the breaker correctly charges as 0 minutes.
+ */
+const sleep = (ms = 5) => new Promise((resolve) => setTimeout(resolve, ms));
+
 const PLAN: ExecutionPlan = {
   storyId: 312,
   title: "Wire the circuit breaker into the worker path",
@@ -32,7 +39,8 @@ describe("coding loop circuit-breaker seam (#312)", () => {
   });
 
   it("records one worker activity per completed iteration", async () => {
-    const activities: { pbiId: string; durationMs: number; status: string }[] = [];
+    const activities: { pbiId: string; durationMs: number; status: string }[] =
+      [];
     const breaker: CodingLoopBreaker = {
       pbiId: "pbi-312",
       isTripped: () => false,
@@ -57,7 +65,10 @@ describe("coding loop circuit-breaker seam (#312)", () => {
   });
 
   it("halts fail-closed before the next iteration once the breaker has tripped", async () => {
-    const worker = vi.fn(async () => ({ passed: false }));
+    const worker = vi.fn(async () => {
+      await sleep();
+      return { passed: false };
+    });
     const breaker: CodingLoopBreaker = {
       pbiId: "pbi-312",
       // Trips as soon as one unit of work has been observed.
@@ -90,7 +101,10 @@ describe("coding loop circuit-breaker seam (#312)", () => {
         tools: createWorkspaceTools(tempDir),
         maxIterations: 1,
         breaker: createCodingLoopBreaker(breaker, 312),
-        worker: async () => ({ passed: true }),
+        worker: async () => {
+          await sleep();
+          return { passed: true };
+        },
       }),
     ).rejects.toBeInstanceOf(CircuitTrippedError);
   });
@@ -100,7 +114,10 @@ describe("coding loop circuit-breaker seam (#312)", () => {
       DF_MAX_WORKER_MINUTES_PER_PBI: "1",
       DF_MIN_DURATION_MS: "0",
     });
-    const worker = vi.fn(async () => ({ passed: false }));
+    const worker = vi.fn(async () => {
+      await sleep();
+      return { passed: false };
+    });
 
     await expect(
       runMultiFileCodingLoop({

@@ -49,7 +49,11 @@ describe("circuit-breaker wiring (#312)", () => {
     expect(wiring.pbiId).toBe("pbi-312");
     expect(wiring.isTripped(wiring.pbiId)).toBe(false);
 
-    wiring.recordActivity({ pbiId: wiring.pbiId, durationMs: 1, status: "success" });
+    wiring.recordActivity({
+      pbiId: wiring.pbiId,
+      durationMs: 1,
+      status: "success",
+    });
 
     expect(wiring.isTripped(wiring.pbiId)).toBe(true);
   });

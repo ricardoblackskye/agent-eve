@@ -9,7 +9,7 @@
 > is [Dark Factory (R1)](dark-factory.md) and the flow walkthroughs in the
 > [flow deep-dives](flow-run-lifecycle.md).
 
-_75 modules._
+_76 modules._
 
 ## architect-agent
 
@@ -18,6 +18,14 @@ Dark Factory — Architect Agent (#179). Pre-code planning agent that inspects t
 **Source:** [`agent/lib/dark-factory/architect-agent.ts`](../../agent/lib/dark-factory/architect-agent.ts)
 
 **Exports:** `ArchitectAgent`, `ArchitectDeps`, `ArchitectResult`, `DEFAULT_LOWEST_PRIORITY_SCORE`, `DEFAULT_MAX_CONTEXT_FILES`, `MAX_STORY_BODY_LENGTH`, `MAX_STORY_TITLE_LENGTH`, `ProcessTimerRegistry`, `StoryInput`, `sanitizeRelativePath`, `sortFilesByRelevance`
+
+## breaker-wiring
+
+Dark Factory — circuit-breaker wiring for the coding loop (#312). The breaker was a complete guard that nothing ever constructed, so no trip could occur (see #308). This module owns the two things the coding loop deliberately does not know about: the KEY — the ISSUE, not the run, because a run id contains `/` and `#`, which `PBI_ID_PATTERN` rejects, and a per-run key would reset the budget on every retry — and the BINDING of a breaker into the loop's narrow seam. The breaker is a GUARD, not telemetry: once a PBI's budget is exceeded the coding loop halts fail-closed at its next cooperative boundary.
+
+**Source:** [`agent/lib/dark-factory/breaker-wiring.ts`](../../agent/lib/dark-factory/breaker-wiring.ts)
+
+**Exports:** `PBI_ID_PREFIX`, `createCodingLoopBreaker`, `pbiIdForIssue`
 
 ## circuit-breaker
 
