@@ -195,3 +195,60 @@ describe("#163 cycle 12: the two label removals mean different things", () => {
     expect(decideDarkFactoryTrigger(offRepo, ENV).kind).toBe("refused");
   });
 });
+
+describe("#306: a comment answers a parked question", () => {
+  function comment(over: Record<string, unknown> = {}) {
+    return payload({
+      action: "created",
+      label: undefined,
+      comment: { id: 555001, body: "Use the EU region." },
+      ...over,
+    });
+  }
+
+  it("decides resume for a created comment from an allow-listed actor", () => {
+    const d = decideDarkFactoryTrigger(comment(), ENV);
+    expect(d.kind).toBe("resume");
+    expect(d.repo).toBe("ricardoblackskye/agent-eve");
+    expect(d.issue).toBe(163);
+    expect(d.commentBody).toBe("Use the EU region.");
+  });
+
+  it("NEVER starts a run from a comment", () => {
+    expect(decideDarkFactoryTrigger(comment(), ENV).kind).not.toBe("trigger");
+  });
+
+  it("refuses a comment from an actor outside DF_TRIGGER_ALLOWED_USERS", () => {
+    const d = decideDarkFactoryTrigger(
+      comment({ sender: { login: "stranger" } }),
+      ENV,
+    );
+    expect(d.kind).toBe("refused");
+    expect(d.reason).toMatch(/DF_TRIGGER_ALLOWED_USERS/);
+  });
+
+  it("refuses a comment on a repo outside DF_WORKER_ALLOWED_REPOS", () => {
+    const d = decideDarkFactoryTrigger(
+      comment({ repository: { full_name: "evil/repo" } }),
+      ENV,
+    );
+    expect(d.kind).toBe("refused");
+    expect(d.reason).toMatch(/DF_WORKER_ALLOWED_REPOS/);
+  });
+
+  it("ignores edited and deleted comments — only a created comment is an answer", () => {
+    for (const action of ["edited", "deleted"]) {
+      expect(decideDarkFactoryTrigger(comment({ action }), ENV).kind).toBe(
+        "not-a-trigger",
+      );
+    }
+  });
+
+  it("bounds the answer text carried on the decision", () => {
+    const d = decideDarkFactoryTrigger(
+      comment({ comment: { id: 1, body: "x".repeat(5000) } }),
+      ENV,
+    );
+    expect(d.commentBody?.length).toBeLessThanOrEqual(2000);
+  });
+});
