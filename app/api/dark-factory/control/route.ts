@@ -1,10 +1,15 @@
 import { NextResponse, type NextRequest } from "next/server";
 import {
   createControlStore,
+  toControlEvent,
   type ControlAction,
   type ControlScope,
 } from "../../../../agent/lib/dark-factory/control";
 import { performControlAction } from "../../../../agent/lib/dark-factory/control-service";
+import { performOperatorRunAction } from "../../../../agent/lib/dark-factory/operator-actions";
+import { runDarkFactoryDispatch } from "../../../../agent/lib/dark-factory/entry";
+import { createGitHubLabelWriter } from "../../../../agent/lib/dark-factory/issue-writer";
+import { createRunHistoryStore } from "../../../../agent/lib/dark-factory/run-history-provider";
 import { guardOperator } from "../guard";
 import { badRequest, NO_STORE_HEADERS, okJson } from "../responses";
 
@@ -16,11 +21,90 @@ function unavailable(): NextResponse {
 }
 
 function isAction(value: unknown): value is ControlAction {
-  return value === "pause" || value === "resume" || value === "stop";
+  return (
+    value === "pause" ||
+    value === "resume" ||
+    value === "stop" ||
+    value === "abort" ||
+    value === "retry"
+  );
 }
 
 function isScope(value: unknown): value is ControlScope {
   return value === "factory" || value === "run";
+}
+
+/**
+ * #307 — the two operator actions that reach the LEDGER, as opposed to the control-state
+ * flags. `abort` ends a run terminally (`aborted`, which the ledger distinguishes from a
+ * flag-only `stop`); `retry` re-dispatches a FAILED run as a new run.
+ *
+ * Both are operator-guarded by the caller and recorded with the acting operator: `abort`
+ * writes the run's control state (actor + reason), `retry` appends a control event (it
+ * changes no state).
+ */
+async function operatorRunAction(
+  action: "abort" | "retry",
+  actor: string,
+  runId: string,
+  reason: string | undefined,
+): Promise<NextResponse> {
+  let controlStore;
+  let runHistory;
+  try {
+    controlStore = createControlStore();
+    runHistory = createRunHistoryStore();
+
+    if (action === "abort") {
+      // The cooperative flag first, so a still-running run halts at its next checkpoint,
+      // then the terminal ledger transition.
+      const flagged = await performControlAction(controlStore, {
+        action: "abort",
+        scope: "run",
+        actor,
+        runId,
+        ...(reason ? { reason } : {}),
+      });
+      if (!flagged.ok) {
+        return flagged.status === "invalid"
+          ? badRequest(flagged.error)
+          : unavailable();
+      }
+    } else {
+      const recorded = await controlStore.appendEvent(
+        toControlEvent({
+          at: new Date().toISOString(),
+          actor,
+          action: "retry",
+          scope: "run",
+          runId,
+          ...(reason ? { reason } : {}),
+        }),
+      );
+      if (!recorded.ok) return unavailable();
+    }
+
+    const result = await performOperatorRunAction(
+      {
+        runHistory,
+        dispatch: runDarkFactoryDispatch,
+        labels: createGitHubLabelWriter(),
+        env: process.env,
+      },
+      { action, runId, actor, ...(reason ? { reason } : {}) },
+    );
+    if (result.status === "unavailable") return unavailable();
+    // A refusal is the operator's business to see, so it is a 4xx with the reason.
+    if (!result.ok) return badRequest(result.reason);
+    return okJson({
+      status: result.status,
+      ...(result.runId ? { runId: result.runId } : {}),
+    });
+  } catch {
+    return unavailable();
+  } finally {
+    await Promise.all([controlStore?.close?.(), runHistory?.close?.()]);
+  }
 }
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
@@ -70,6 +154,22 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
   if (raw.reason !== undefined && typeof raw.reason !== "string") {
     return badRequest("reason must be a string.");
+  }
+
+  // #307 — retry/abort reach the ledger, not just the control state.
+  if (raw.action === "abort" || raw.action === "retry") {
+    if (raw.scope !== "run") {
+      return badRequest(`'${raw.action}' is only available for an individual run.`);
+    }
+    if (typeof raw.runId !== "string" || raw.runId.trim() === "") {
+      return badRequest("Run-scoped control actions require a runId.");
+    }
+    return operatorRunAction(
+      raw.action,
+      guard.viewer.email,
+      raw.runId,
+      typeof raw.reason === "string" ? raw.reason : undefined,
+    );
   }
 
   let store;

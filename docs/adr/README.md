@@ -76,3 +76,4 @@ changes, write a new one that supersedes it.
 | [0020](0020-cost-governance-is-live-on-every-llm-call.md)         | Cost governance is live on every LLM call; a refusal is recorded on the run   | Accepted |
 | [0021](0021-terminal-labels-fail-closed.md)                       | Terminal lifecycle labels are applied by a fail-closed finalizer              | Accepted |
 | [0022](0022-comment-answer-resumes-a-parked-run.md)               | A comment answer resumes a parked run; the answer reaches the factory as DATA | Accepted |
+| [0023](0023-retry-is-a-new-run-abort-is-terminal.md)              | Retry starts a new run; abort is terminal where stop is a flag                | Accepted |

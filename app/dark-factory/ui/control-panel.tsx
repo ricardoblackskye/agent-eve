@@ -53,8 +53,9 @@ export function ControlPanel({
   const isRun = Boolean(runId);
   // Terminal runs (succeeded/failed/aborted) have already finished and must not
   // be stopped again. An explicit control stop (`run.stopped`) is terminal too.
-  // A failed run is terminal but resumable — offer Resume (starts a new run)
-  // and never a redundant Stop.
+  // A failed run is terminal: the only useful action is Retry, which re-dispatches
+  // it as a NEW run (#307). Aborting a run that is ALREADY terminal is a no-op — the
+  // ledger correctly holds it — so Abort is offered only while a run can still end.
   const isTerminal =
     isRun &&
     Boolean(
@@ -117,9 +118,9 @@ export function ControlPanel({
               type="button"
               className="df-btn"
               disabled={pending}
-              onClick={() => onAction("resume", scope)}
+              onClick={() => onAction("retry", "run")}
             >
-              {isRun ? "Resume run" : "Resume factory"}
+              Retry run
             </button>
           ) : (
             <span className="df-control-terminal">
@@ -148,14 +149,24 @@ export function ControlPanel({
                   : "Pause factory"}
             </button>
             {isRun ? (
-              <button
-                type="button"
-                className="df-btn df-btn-danger"
-                disabled={pending}
-                onClick={() => onAction("stop", "run")}
-              >
-                Stop run
-              </button>
+              <>
+                <button
+                  type="button"
+                  className="df-btn df-btn-danger"
+                  disabled={pending}
+                  onClick={() => onAction("stop", "run")}
+                >
+                  Stop run
+                </button>
+                <button
+                  type="button"
+                  className="df-btn df-btn-danger"
+                  disabled={pending}
+                  onClick={() => onAction("abort", "run")}
+                >
+                  Abort run
+                </button>
+              </>
             ) : null}
           </>
         )}
