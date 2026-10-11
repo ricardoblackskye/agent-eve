@@ -24,9 +24,11 @@ import {
   type DefinitionOfDoneTask,
   type ReviewFinding,
 } from "../agent/lib/dark-factory/definition-of-done";
+import { applyTerminalLifecycle } from "../agent/lib/dark-factory/run-finalizer";
 import { GitHubPrWriter } from "../agent/lib/dark-factory/pr-writer";
 import {
   GitHubIssueWriter,
+  createGitHubLabelWriter,
   resolveIssueToken,
 } from "../agent/lib/dark-factory/issue-writer";
 import { resolveWorkerAllowedRepos } from "../agent/lib/dark-factory/credentials";
@@ -165,6 +167,7 @@ async function main(): Promise<void> {
   }
 
   const issueWriter = new GitHubIssueWriter({ token });
+  const labelWriter = createGitHubLabelWriter(issueWriter);
   const prWriter = new GitHubPrWriter({ token, env });
   const metrics = createMetricsStore();
   const developerAgent = new DeveloperAgent({ metrics });
@@ -247,6 +250,10 @@ async function main(): Promise<void> {
   if (!planResult.ok || !planResult.plan) {
     console.error(`[ERROR] Architect Agent planning failed: ${planResult.error}`);
     await issueWriter.addLabel("ricardoblackskye", "agent-eve", issueNum, "needs-answer");
+    await applyTerminalLifecycle(
+      { labelWriter, runHistory },
+      { repo: targetRepo, issue: issueNum, runId, terminalStatus: "failed" },
+    );
     throw new Error("Dark Factory Runner stopped after the preceding error.");
   }
 
@@ -261,6 +268,10 @@ async function main(): Promise<void> {
   const validation = validateExecutionPlan(executionPlan, issueData.body);
   if (!validation.valid) {
     console.error(`[ERROR] Plan domain validation rejected:`, validation.errors);
+    await applyTerminalLifecycle(
+      { labelWriter, runHistory },
+      { repo: targetRepo, issue: issueNum, runId, terminalStatus: "failed" },
+    );
     throw new Error("Dark Factory Runner stopped after the preceding error.");
   }
   console.log("  -> Domain Validation Passed!");
@@ -337,6 +348,10 @@ async function main(): Promise<void> {
 
   if (loopResult.status !== "success") {
     console.error("[ERROR] Developer Agent failed to achieve passing tests.");
+    await applyTerminalLifecycle(
+      { labelWriter, runHistory },
+      { repo: targetRepo, issue: issueNum, runId, terminalStatus: "failed" },
+    );
     throw new Error("Dark Factory Runner stopped after the preceding error.");
   }
 
@@ -350,7 +365,18 @@ async function main(): Promise<void> {
   await checkpoint();
 
   const pushUrl = `https://x-access-token:${token}@github.com/${targetRepo}.git`;
-  execSync(`git push ${pushUrl} ${branchName}`, { stdio: "pipe" });
+  try {
+    execSync(`git push ${pushUrl} ${branchName}`, { stdio: "pipe" });
+  } catch (pushError) {
+    console.error(
+      `[ERROR] Failed to push branch '${branchName}': ${pushError instanceof Error ? pushError.message : String(pushError)}`,
+    );
+    await applyTerminalLifecycle(
+      { labelWriter, runHistory },
+      { repo: targetRepo, issue: issueNum, runId, terminalStatus: "failed" },
+    );
+    throw new Error("Dark Factory Runner stopped after the preceding error.");
+  }
   console.log(`  -> Pushed '${branchName}' successfully!`);
 
   // STEP 7: Definition of DONE with AC Traceability Matrix
@@ -400,8 +426,16 @@ async function main(): Promise<void> {
 
   if (dodResult.pr) {
     line("Live PR URL", dodResult.pr.url);
-    await issueWriter.addLabel("ricardoblackskye", "agent-eve", issueNum, "df:done");
-    await issueWriter.removeLabel("ricardoblackskye", "agent-eve", issueNum, "df:running");
+    await applyTerminalLifecycle(
+      { labelWriter, runHistory },
+      {
+        repo: targetRepo,
+        issue: issueNum,
+        runId,
+        terminalStatus: "succeeded",
+        dodResult,
+      },
+    );
     await issueWriter.postComment(
       "ricardoblackskye",
       "agent-eve",

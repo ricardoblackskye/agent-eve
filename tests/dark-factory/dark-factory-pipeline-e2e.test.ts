@@ -8,9 +8,11 @@
  *     ->  createDispatchHandler(developer -> tester -> pr)  ->  PR OPENED (never merged)
  *
  * SCOPE (agreed at review): the pipeline is proven up to "PR opened (not merged)".
- * The terminal lifecycle labels (`df:done`/`df:failed`) are applied by NO library
- * module today (df:done only in scripts/dark-factory-runner.ts; df:failed nowhere),
- * so their wiring is filed separately as #284 — not asserted here.
+ * The terminal lifecycle labels (`df:done`/`df:failed`) now have a library seam —
+ * `run-finalizer.ts` (#284) — which the runner drives on the success path AND on
+ * every terminal-failure path. This entry/dispatch-level test still asserts that no
+ * TERMINAL label is applied here: the finalizer runs at run completion, after the
+ * dispatch stages this test composes, so only `df:running` is expected below.
  *
  * External edges are mocked exactly as the repo already does elsewhere: the GitHub
  * label writer and the session handoff are recorders; run history and dispatch state

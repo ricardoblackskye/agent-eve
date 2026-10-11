@@ -9,7 +9,7 @@
 > is [Dark Factory (R1)](dark-factory.md) and the flow walkthroughs in the
 > [flow deep-dives](flow-run-lifecycle.md).
 
-_62 modules._
+_74 modules._
 
 ## architect-agent
 
@@ -401,6 +401,16 @@ Resolve the tenant a newly accepted run is attributed to (#213, epic #212 R1). R
 **Exports:** `resolveRunTenant`
 
 **Decisions:** [ADR 0001](../../docs/adr/0001-tenant-attribution-is-write-once.md)
+
+## run-finalizer
+
+Dark Factory — terminal lifecycle labels at run completion (#284). A finished run must carry a terminal label so it is distinguishable from an abandoned one on the ticket, and so the trigger re-run guard has something to key on. `applyTerminalLifecycle` is the single seam the runner calls on success and on every terminal-failure path: it applies `df:done` / `df:failed`, clears `df:running` and `needs-answer`, is idempotent (a re-delivery applies nothing) and fail-closed (a label-write failure is recorded on the run and thrown, never swallowed).
+
+**Source:** [`agent/lib/dark-factory/run-finalizer.ts`](../../agent/lib/dark-factory/run-finalizer.ts)
+
+**Exports:** `applyTerminalLifecycle`, `LabelWriteError`, `TerminalFinalizeArgs`, `TerminalFinalizeOutcome`, `TerminalFinalizerDeps`, `TerminalStatus`
+
+**Decisions:** [ADR 0021](../../docs/adr/0021-terminal-labels-fail-closed.md)
 
 ## run-history-postgres
 
