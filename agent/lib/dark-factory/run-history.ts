@@ -1,5 +1,6 @@
 import { MAX_METRIC_COST_USD, MAX_METRIC_LATENCY_MS } from "./metrics";
 import type { CostGovernorRefusal } from "./cost-governor";
+import type { TripReason } from "./circuit-breaker";
 
 export function normalizeRunDateRange(
   from: string | undefined,
@@ -119,6 +120,26 @@ export interface RunEvent {
    * one of the CostGovernorRefusal codes, or absent. Never free text.
    */
   costRefusal?: CostGovernorRefusal;
+  /**
+   * A circuit-breaker trip recorded on the run (#313): a closed vocabulary of
+   * reasons plus the numeric bound that was hit. Never free text.
+   */
+  breakerTrip?: BreakerTrip;
+}
+
+/**
+ * A circuit-breaker trip recorded on a run (#313).
+ *
+ * The reason is a CLOSED VOCABULARY (kept in sync with `TripReason`), and `limit` is the
+ * cap that was actually hit, so nothing has to re-derive the breaker's configured defaults
+ * to explain what happened.
+ */
+export interface BreakerTrip {
+  reason: TripReason;
+  /** The configured cap that was hit: worker-minutes, or failed self-correct cycles. */
+  limit: number;
+  /** The PBI's cumulative worker-minutes when it tripped (always minutes, per TripEvent). */
+  workerMinutes: number;
 }
 
 /** One captured test result from the tester-agent; structured so no raw output is stored. */
@@ -449,6 +470,35 @@ function optionalCostRefusal(value: unknown): CostGovernorRefusal | undefined {
   return value as CostGovernorRefusal;
 }
 
+/** The canonical trip reasons (#313); kept in sync with TripReason. */
+const BREAKER_TRIP_REASONS: readonly TripReason[] = [
+  "worker-minutes-exceeded",
+  "failed-selfcorrect-exceeded",
+];
+
+function optionalBreakerTrip(value: unknown): BreakerTrip | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return invalid("breakerTrip", value, "to be a circuit-breaker trip");
+  }
+  const obj = value as { reason?: unknown; limit?: unknown; workerMinutes?: unknown };
+  if (
+    typeof obj.reason !== "string" ||
+    !BREAKER_TRIP_REASONS.includes(obj.reason as TripReason)
+  ) {
+    return invalid(
+      "breakerTrip.reason",
+      obj.reason,
+      `to be one of ${BREAKER_TRIP_REASONS.join(", ")}`,
+    );
+  }
+  return {
+    reason: obj.reason as TripReason,
+    limit: positiveInteger(obj.limit, "breakerTrip.limit"),
+    workerMinutes: count(obj.workerMinutes, "breakerTrip.workerMinutes"),
+  };
+}
+
 function optionalTrace(value: unknown): TraceItem[] | undefined {
   if (value === undefined) return undefined;
   if (!Array.isArray(value)) {
@@ -608,6 +658,7 @@ export function toRunEvent(input: Partial<RunEvent>): RunEvent {
   const costRefusal = optionalCostRefusal(input.costRefusal);
   const testResults = optionalTestResults(input.testResults);
   const trace = optionalTrace(input.trace);
+  const breakerTrip = optionalBreakerTrip(input.breakerTrip);
 
   if (type === "run.accepted" && status !== "queued") {
     return invalid("status", status, 'to be "queued" for run.accepted');
@@ -697,6 +748,7 @@ export function toRunEvent(input: Partial<RunEvent>): RunEvent {
     ...(costRefusal !== undefined ? { costRefusal } : {}),
     ...(testResults !== undefined ? { testResults } : {}),
     ...(trace !== undefined ? { trace } : {}),
+    ...(breakerTrip !== undefined ? { breakerTrip } : {}),
   };
 }
 

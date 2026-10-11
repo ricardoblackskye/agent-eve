@@ -190,6 +190,7 @@ interface RunEventRow {
   cost_refusal: string | null;
   test_results: string | null;
   trace: string | null;
+  breaker_trip: string | null;
 }
 
 function readSummary(db: DatabaseSync, runId: string): RunSummary | null {
@@ -244,6 +245,20 @@ function readTrace(value: string): RunEvent["trace"] | undefined {
   return undefined;
 }
 
+/** A persisted trip is JSON; a malformed value is treated as absent, never fatal. */
+function readBreakerTrip(value: string): RunEvent["breakerTrip"] | undefined {
+  try {
+    const parsed = JSON.parse(value);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      return undefined;
+    }
+    return parsed as RunEvent["breakerTrip"];
+  } catch {
+    // Malformed persisted trip: treat as absent rather than failing the read.
+  }
+  return undefined;
+}
+
 function rowToEvent(row: RunEventRow): PersistedRunEvent {
   return {
     sequence: Number(row.sequence),
@@ -286,6 +301,9 @@ function rowToEvent(row: RunEventRow): PersistedRunEvent {
       ...(row.trace !== null && row.trace !== undefined
         ? { trace: readTrace(row.trace) }
         : {}),
+        ...(row.breaker_trip !== null && row.breaker_trip !== undefined
+          ? { breakerTrip: readBreakerTrip(row.breaker_trip) }
+          : {}),
     }),
   };
 }
@@ -350,6 +368,7 @@ const SQLITE_SCHEMA = `
     cost_refusal TEXT,
     test_results TEXT,
     trace TEXT,
+    breaker_trip TEXT,
     UNIQUE (run_id, event_id),
     FOREIGN KEY (run_id) REFERENCES df_run_summaries(run_id)
       ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED
@@ -476,8 +495,8 @@ function writeEvent(db: DatabaseSync, event: RunEvent): void {
        run_id, event_id, type, stage, occurred_at, status, attempt,
        review_round, iteration_count, fix_cycle_count, finding_count,
        resolved_count, accepted_count, latency_ms, cost_usd, pr_url,
-       comment_reference, cost_refusal, test_results, trace
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       comment_reference, cost_refusal, test_results, trace, breaker_trip
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     event.runId,
     event.eventId,
@@ -499,6 +518,7 @@ function writeEvent(db: DatabaseSync, event: RunEvent): void {
     event.costRefusal ?? null,
     event.testResults ? JSON.stringify(event.testResults) : null,
     event.trace ? JSON.stringify(event.trace) : null,
+    event.breakerTrip ? JSON.stringify(event.breakerTrip) : null,
   );
 }
 
@@ -649,6 +669,9 @@ export class SqliteRunHistoryStore implements RunHistoryStore {
       }
       if (!eventColumns.some((column) => column.name === "test_results")) {
         db.exec("ALTER TABLE df_run_events ADD COLUMN test_results TEXT");
+      }
+      if (!eventColumns.some((column) => column.name === "breaker_trip")) {
+        db.exec("ALTER TABLE df_run_events ADD COLUMN breaker_trip TEXT");
       }
       if (!eventColumns.some((column) => column.name === "trace")) {
         db.exec("ALTER TABLE df_run_events ADD COLUMN trace TEXT");
