@@ -27,12 +27,12 @@ it *legible*.
   The trip reasons are a closed vocabulary: `worker-minutes-exceeded |
   failed-selfcorrect-exceeded`.
 
-## Open decision 1 — the cap is not in the trip payload (my recommendation: ADD IT)
+## Decision 1 — CONFIRMED by the operator (2026-10-11): ADD the cap to the trip payload
 
 `TripEvent` is `{ pbiId, workerMinutes, reason, timestamp }` — it records what *happened*
 (`workerMinutes`) but not what was *hit* (the cap), which the UI must show.
 
-**Recommendation: add an optional `limit` to `TripEvent`,** set by the breaker's own `trip()`
+**Confirmed: add an optional `limit` to `TripEvent`,** set by the breaker's own `trip()`
 from its own config for the reason hit:
 
 | reason | limit |
@@ -46,7 +46,7 @@ documented defaults (`60`, `3`) in a second place, which is precisely the "one d
 setting, not two" rule this repo follows. The field is optional, so existing `TripEvent` tests
 keep passing.
 
-## Open decision 2 — the operator action has a REAL scope problem (needs your call)
+## Decision 2 — CONFIRMED by the operator (2026-10-11): reuse `abort`; nothing else
 
 The issue's AC says the operator can act: *"stop the run, clear the trip, or deliberately
 raise the cap"*. Two of those three are **not reachable from a dashboard**, and I will not
@@ -58,14 +58,14 @@ pretend otherwise:
 | **Clear the trip** | **No, not literally** | The breaker is **in-memory and per-run inside the runner process**. A dashboard request cannot reach another process's breaker, so "clear" cannot mean "un-trip a live breaker". |
 | **Raise the cap** | **No** | `DF_MAX_WORKER_MINUTES_PER_PBI` is **deploy-time** config read at run start, with a fail-closed env contract. Raising it mid-run is a configuration change, like the LLM policy. |
 
-**My recommendation:**
-1. **Stop** — reuse `abort` (already shipped).
-2. **Clear** — means the operator **ACKNOWLEDGES** the trip **on the run**: a recorded control
-   event with actor + reason. The ledger is the durable record; acknowledging it says "seen and
-   dispositioned", which is the real need. Building a genuinely shared breaker store would
-   contradict the breaker's documented "state is IN-MEMORY by design" and is a much larger change.
-3. **Raise the cap** — **out of code scope**: I will give you exact steps to change the env var
-   (and note that the change applies to the NEXT run, not a run already tripped).
+**Confirmed by the operator:**
+1. **Stop** — reuse `abort` (already shipped in #307). No new action is built: `abort` is
+   already a RECORDED operator action (actor + reason), so the requirement "the operator can act
+   as a recorded action" is satisfied by pointing the panel at it.
+2. **Clear** — **NOT built.** The breaker is in-memory and per-run, so a dashboard cannot
+   un-trip a live breaker; an "acknowledge" event was considered and explicitly dropped.
+3. **Raise the cap** — **NOT built.** `DF_MAX_WORKER_MINUTES_PER_PBI` is deploy-time config;
+   the operator steps will be stated in the PR body instead of shipping a control.
 
 ## Tasks (TDD, RED → GREEN per task)
 
@@ -84,7 +84,9 @@ pretend otherwise:
 - **T5** — `DetailView.breakerTrip` in `view-model.ts` + a `BreakerTripPanel` **sibling** panel
   (the established pattern; NOT inside `OutcomeArtifacts`) rendering the reason, the cap hit and
   the measured minutes, plus a view-model + UI test.
-- **T6** — the operator acknowledge action, per your call on Open decision 2.
+- **T6** — **no new operator action** (confirmed): the panel names the trip and the existing
+  `abort` control as the operator's action. A test pins that a tripped run still offers `abort`,
+  so the two surfaces cannot drift apart.
 
 ## Files likely to change
 
