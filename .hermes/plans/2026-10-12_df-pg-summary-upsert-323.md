@@ -10,7 +10,7 @@ normal case because the run row is created at acceptance:
 
 ```
 recordRunSummary (run row ALREADY EXISTS) -> ok = false
-error = duplicate key value violates unique constraint "df_run_summaries_pkey"
+error = duplicate key value violates the unique constraint on the summaries table
 ```
 
 `recordRunSummary` is the **diff-capture path** (`diff-capture.ts`), so on Postgres the
