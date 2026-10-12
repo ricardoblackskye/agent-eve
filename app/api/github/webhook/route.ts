@@ -12,6 +12,7 @@ import {
 } from "../../../../agent/lib/dark-factory/entry";
 import { createGitHubLabelWriter } from "../../../../agent/lib/dark-factory/issue-writer";
 import { createRunHistoryStore } from "../../../../agent/lib/dark-factory/run-history-provider";
+import { withNotifications } from "../../../../agent/lib/dark-factory/notifying-run-history";
 import { createControlStore } from "../../../../agent/lib/dark-factory/control";
 import { createPlatformAdapter } from "../../../../agent/lib/dark-factory/platform";
 
@@ -80,10 +81,18 @@ function resolveSignaturePolicy(): SignaturePolicy {
   }
 
   if (isTruthy(process.env.REQUIRE_WEBHOOK_SIGNATURE)) {
-    return { required: true, providerId: context.providerId, stage: context.stage };
+    return {
+      required: true,
+      providerId: context.providerId,
+      stage: context.stage,
+    };
   }
   if (isTruthy(process.env.ALLOW_UNSIGNED_WEBHOOKS)) {
-    return { required: false, providerId: context.providerId, stage: context.stage };
+    return {
+      required: false,
+      providerId: context.providerId,
+      stage: context.stage,
+    };
   }
   return {
     required:
@@ -144,14 +153,17 @@ async function dispatchDarkFactory(
   dfDecision: ReturnType<typeof decideDarkFactoryTrigger>,
   deliveryId: string,
 ): Promise<NextResponse> {
-  const runHistory = createRunHistoryStore();
+  const runHistory = withNotifications(createRunHistoryStore(), process.env);
   // Control is opt-in: only enforce the gate when a real control store is
   // configured. An unset/console driver means control is disabled for this
   // deployment, so the run-history configuration governs dispatch instead.
-  const controlDriver = (process.env.DF_CONTROL_DRIVER ?? "").trim().toLowerCase();
-  const controlStore = controlDriver && controlDriver !== "console"
-    ? createControlStore(process.env)
-    : undefined;
+  const controlDriver = (process.env.DF_CONTROL_DRIVER ?? "")
+    .trim()
+    .toLowerCase();
+  const controlStore =
+    controlDriver && controlDriver !== "console"
+      ? createControlStore(process.env)
+      : undefined;
   const result = await runDarkFactoryDispatch(dfDecision, {
     runHistory,
     controlStore,
@@ -162,7 +174,8 @@ async function dispatchDarkFactory(
     origin: request.nextUrl.origin,
   });
   await Promise.all([runHistory.close(), controlStore?.close?.()]);
-  const retryableFailure = !result.ok && (result.status === "failed" || Boolean(result.error));
+  const retryableFailure =
+    !result.ok && (result.status === "failed" || Boolean(result.error));
   return NextResponse.json(
     {
       ok: result.ok,
@@ -439,7 +452,9 @@ async function handler(request: NextRequest) {
         number: commentedIssue?.number,
         title: commentedIssue?.title,
         body: commentedIssue?.body || "",
-        labels: (commentedIssue?.labels || []).map((l: any) => ({ name: l.name })),
+        labels: (commentedIssue?.labels || []).map((l: any) => ({
+          name: l.name,
+        })),
       },
       comment: comment
         ? { id: comment.id, body: comment.body || "" }
@@ -457,7 +472,10 @@ async function handler(request: NextRequest) {
         : request.headers.get("x-github-delivery");
       if (!deliveryId) {
         return NextResponse.json(
-          { ok: false, error: "Missing comment id for Dark Factory comment event." },
+          {
+            ok: false,
+            error: "Missing comment id for Dark Factory comment event.",
+          },
           { status: 400 },
         );
       }
@@ -594,7 +612,10 @@ async function handler(request: NextRequest) {
       const deliveryId = request.headers.get("x-github-delivery");
       if (!deliveryId) {
         return NextResponse.json(
-          { ok: false, error: "Missing x-github-delivery header for Dark Factory event." },
+          {
+            ok: false,
+            error: "Missing x-github-delivery header for Dark Factory event.",
+          },
           { status: 400 },
         );
       }

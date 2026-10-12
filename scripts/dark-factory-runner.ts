@@ -59,6 +59,7 @@ import {
 import { createCostGovernor } from "../agent/lib/dark-factory/cost-governor";
 import { createRunHistoryStore } from "../agent/lib/dark-factory/run-history-provider";
 import { beginRunRecord } from "../agent/lib/dark-factory/run-record";
+import { withNotifications } from "../agent/lib/dark-factory/notifying-run-history";
 import { runGovernedAgentCall } from "../agent/lib/dark-factory/governed-agent-call";
 
 // Load .env variables into process.env
@@ -170,7 +171,7 @@ async function main(): Promise<void> {
   // attempt is a no-op — and adopting its id is what makes the run appear in the dashboard and
   // addressable by its control actions. An unconfigured ledger is reported loudly and the attempt
   // id is used as a fallback, so a local run still works.
-  const runHistory = createRunHistoryStore(env);
+  const runHistory = withNotifications(createRunHistoryStore(env), env);
   const begun = await beginRunRecord({
     history: runHistory,
     attemptId,
