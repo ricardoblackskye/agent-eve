@@ -7,7 +7,8 @@
  *
  * PROVIDER-NEUTRAL: a canonical, bounded payload plus a provider interface, so the channel (Slack,
  * email, …) is a seam choice rather than a rewrite — the same shape as the store / platform /
- * credential seams. **No vendor is named here.**
+ * credential seams. The SEAM names no vendor: a channel arrives as a separate adapter module
+ * (e.g. Slack, #318).
  *
  * The payload carries **no secrets and no free text**: bounded machine-readable fields only. The
  * run-history no-raw-content rule applies to this second egress point too — never the issue body,
@@ -17,6 +18,8 @@
  * configured** — it never claims a delivery it did not perform — and an unknown driver THROWS so a
  * typo surfaces instead of silently losing notifications.
  */
+
+import { SlackNotificationProvider } from "./slack-notification";
 
 /** The closed vocabulary of things worth telling a human about. */
 export const NOTIFICATION_KINDS = [
@@ -193,7 +196,7 @@ export class ConsoleNotificationProvider implements NotificationProvider {
   }
 }
 
-const SUPPORTED_DRIVERS = "console (leave unset for the no-op default)";
+const SUPPORTED_DRIVERS = "console, slack (leave unset for the no-op default)";
 
 /**
  * Select the notification provider.
@@ -208,6 +211,11 @@ export function createNotificationProvider(
   const driver = (env.DF_NOTIFY_DRIVER ?? "").trim().toLowerCase();
   if (driver === "" || driver === "console") {
     return new ConsoleNotificationProvider();
+  }
+  if (driver === "slack") {
+    // The URL is validated by the adapter: a missing or malformed one THROWS, so a misconfiguration
+    // is a loud error rather than notifications quietly going nowhere.
+    return new SlackNotificationProvider({ env });
   }
   throw new NotificationConfigurationError(
     `Unknown DF_NOTIFY_DRIVER '${driver}'. Supported drivers: ${SUPPORTED_DRIVERS}.`,
