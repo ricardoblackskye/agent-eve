@@ -58,6 +58,7 @@ import {
 } from "../agent/lib/dark-factory/cost-budget-store";
 import { createCostGovernor } from "../agent/lib/dark-factory/cost-governor";
 import { createRunHistoryStore } from "../agent/lib/dark-factory/run-history-provider";
+import { beginRunRecord } from "../agent/lib/dark-factory/run-record";
 import { runGovernedAgentCall } from "../agent/lib/dark-factory/governed-agent-call";
 
 // Load .env variables into process.env
@@ -162,7 +163,22 @@ async function main(): Promise<void> {
       ? parseInt(process.argv[issueArgIdx + 1], 10)
       : 179;
 
-  const runId = resolveRunnerRunId(process.argv, issueNum);
+  const attemptId = resolveRunnerRunId(process.argv, issueNum);
+
+  // #316: open the run's record FIRST, through the existing seam, and adopt the id the ledger
+  // mints. The LEDGER owns run identity — it is idempotent per delivery, so re-running the same
+  // attempt is a no-op — and adopting its id is what makes the run appear in the dashboard and
+  // addressable by its control actions. An unconfigured ledger is reported loudly and the attempt
+  // id is used as a fallback, so a local run still works.
+  const runHistory = createRunHistoryStore(env);
+  const begun = await beginRunRecord({
+    history: runHistory,
+    attemptId,
+    repo: targetRepo,
+    issue: issueNum,
+  });
+  const runId = begun.runId;
+
   const { store: runControlStore, checkpoint } = buildRunControl(env, runId);
   activeControlStore = runControlStore;
   await checkpoint();
@@ -199,7 +215,6 @@ async function main(): Promise<void> {
   const governor = isCostGovernanceConfigured(env)
     ? createCostGovernor(createCostBudgetStore(env), env)
     : null;
-  const runHistory = createRunHistoryStore(env);
 
   // STEP 1: Fetch live issue from GitHub
   console.log(
