@@ -31,14 +31,16 @@ describe("notification payload (#317)", () => {
   });
 
   it("refuses a kind outside the vocabulary", () => {
-    expect(() => toNotification({ ...base, kind: "pinged" as never })).toThrow();
+    expect(() =>
+      toNotification({ ...base, kind: "pinged" as never }),
+    ).toThrow();
   });
 
   it("cannot carry free text: the payload is exactly the machine-readable fields", () => {
     const notification = toNotification({
       ...base,
-      ...({ issueBody: "the secret issue text" } as never),
-    });
+      issueBody: "the secret issue text",
+    } as never);
 
     expect(Object.keys(notification).sort()).toEqual([
       "issue",
@@ -73,7 +75,9 @@ describe("notification provider selection (#317)", () => {
   it("is OPT-IN: with nothing set the no-op default applies and nothing is configured", () => {
     expect(createNotificationProvider({}).id).toBe("console");
     expect(isNotificationsConfigured({})).toBe(false);
-    expect(isNotificationsConfigured({ DF_NOTIFY_DRIVER: "console" })).toBe(false);
+    expect(isNotificationsConfigured({ DF_NOTIFY_DRIVER: "console" })).toBe(
+      false,
+    );
   });
 
   it("throws on an unknown driver rather than losing notifications silently", () => {

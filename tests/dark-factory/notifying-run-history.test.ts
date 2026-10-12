@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SqliteRunHistoryStore } from "../../agent/lib/dark-factory/run-history-store";
@@ -202,5 +202,34 @@ describe("NotifyingRunHistoryStore (#317)", () => {
       }),
     );
     expect(appended.ok).toBe(true);
+  });
+});
+
+/**
+ * The wiring guard (#317). Without this the decorator is a dead seam: built, tested, and never
+ * applied — the failure mode that produced the breaker, the usage recorder and `worker-reporter`.
+ */
+describe("notification wiring (#317)", () => {
+  const read = (relative: string) =>
+    readFileSync(join(process.cwd(), relative), "utf8");
+
+  it("wraps the store on BOTH paths that write run transitions", () => {
+    const runner = read("scripts/dark-factory-runner.ts");
+    expect(runner).toContain("withNotifications(");
+    expect(runner).toContain("createRunHistoryStore(env)");
+
+    const webhook = read("app/api/github/webhook/route.ts");
+    expect(webhook).toContain("withNotifications(");
+  });
+
+  it("leaves the read-only routes and the seed unwrapped", () => {
+    for (const file of [
+      "app/api/dark-factory/runs/route.ts",
+      "app/api/dark-factory/runs/[runId]/route.ts",
+      "app/api/dark-factory/metrics/route.ts",
+      "scripts/seed-test-data.ts",
+    ]) {
+      expect(read(file)).not.toContain("withNotifications(");
+    }
   });
 });

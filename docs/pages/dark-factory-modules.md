@@ -9,7 +9,7 @@
 > is [Dark Factory (R1)](dark-factory.md) and the flow walkthroughs in the
 > [flow deep-dives](flow-run-lifecycle.md).
 
-_78 modules._
+_80 modules._
 
 ## architect-agent
 
@@ -375,6 +375,22 @@ Dark Factory — operator retry / abort, the ledger-reaching half (#307). `perfo
 **Exports:** `DispatchFn`, `OperatorActionDeps`, `OperatorActionInput`, `OperatorActionResult`, `OperatorRunAction`, `operatorDeliveryId`, `performOperatorRunAction`
 
 **Decisions:** [ADR 0023](../../docs/adr/0023-retry-is-a-new-run-abort-is-terminal.md)
+
+## notifications
+
+Dark Factory — the notification seam (#317). A run's labels and comments are the record ON the ticket: they reach only someone already looking. This is the missing out-of-band push, so a run's outcome reaches a human without them polling. PROVIDER-NEUTRAL: a canonical bounded payload plus a provider interface, so the channel is a seam choice rather than a rewrite, and no vendor is named here. The payload carries NO secrets and NO free text — the run-history no-raw-content rule applied to a second egress point. FAIL-CLOSED and OPT-IN: with nothing configured the default is a no-op that reports it is not configured and never claims a delivery it did not perform, while an unknown driver THROWS so a typo surfaces instead of silently losing notifications.
+
+**Source:** [`agent/lib/dark-factory/notifications.ts`](../../agent/lib/dark-factory/notifications.ts)
+
+**Exports:** `ConsoleNotificationProvider`, `NOTIFICATION_KINDS`, `Notification`, `NotificationConfigurationError`, `NotificationInput`, `NotificationKind`, `NotificationProvider`, `NotifyResult`, `createNotificationProvider`, `isNotificationsConfigured`, `toNotification`
+
+## notifying-run-history
+
+Dark Factory — drive notifications from the ledger (#317). Every write path in the factory reaches the run history through `RunHistoryStore`, so this DECORATES the store and inspects each write: no lifecycle site needs a call and no path can be forgotten (the failure mode that produced three dead seams already). IDEMPOTENT: a transition is announced once — the ledger's `duplicate` flag is the primary guard and a bounded in-process set of `(runId, eventId)` backs it up, so a re-delivered webhook or a retried run cannot spam the channel. BEST-EFFORT: a notification can never fail a run, and every suppression is logged rather than silent.
+
+**Source:** [`agent/lib/dark-factory/notifying-run-history.ts`](../../agent/lib/dark-factory/notifying-run-history.ts)
+
+**Exports:** `MAX_REMEMBERED_TRANSITIONS`, `NotifyingRunHistoryOptions`, `NotifyingRunHistoryStore`, `notificationKindFor`, `withNotifications`
 
 ## operator-cli
 
