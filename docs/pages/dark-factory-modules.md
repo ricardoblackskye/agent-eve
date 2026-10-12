@@ -9,7 +9,7 @@
 > is [Dark Factory (R1)](dark-factory.md) and the flow walkthroughs in the
 > [flow deep-dives](flow-run-lifecycle.md).
 
-_77 modules._
+_78 modules._
 
 ## architect-agent
 
@@ -489,6 +489,14 @@ Opaque, URL-safe pagination cursor codec. The public API never exposes the store
 **Exports:** `DEFAULT_PAGE_SIZE`, `MAX_PAGE_SIZE`, `RunDetailOutcome`, `RunEventParams`, `RunEventRequest`, `RunListOutcome`, `RunListParams`, `RunListRequest`, `RunMetricsOutcome`, `RunMetricsParams`, `RunMetricsRequest`, `ValidationResult`, `decodeEventCursor`, `decodeListCursor`, `encodeEventCursor`, `encodeListCursor`, `queryRunDetail`, `queryRunDetailFromParams`, `queryRunList`, `queryRunListFromParams`, `queryRunMetrics`, `queryRunMetricsFromParams`, `validateRunEventParams`, `validateRunListParams`, `validateRunMetricsParams`
 
 **Decisions:** [ADR 0003](../../docs/adr/0003-unmeasured-is-never-zero.md)
+
+## run-record
+
+Dark Factory — open a run's record at the start of a run (#316). A run driven by `scripts/dark-factory-runner.ts` used to leave NO trace in the ledger: the runner invented its own id, which nothing else knew, so the run could not appear in the dashboard and the events it later appended attached to a run the ledger had never seen. This module uses the existing seam instead — the LEDGER owns run identity: it mints the id and is idempotent per delivery, so the same attempt is a no-op rather than a duplicate, and the runner adopts what comes back. A ledger that refuses (an unconfigured driver) is reported loudly and the attempt id is used as a fallback, so a local run still works: never a silent claim of recording, and it never throws.
+
+**Source:** [`agent/lib/dark-factory/run-record.ts`](../../agent/lib/dark-factory/run-record.ts)
+
+**Exports:** `BeginRunRecordInput`, `BeginRunRecordResult`, `beginRunRecord`, `runnerDeliveryId`
 
 ## self-improve-state
 
