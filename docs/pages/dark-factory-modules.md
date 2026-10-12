@@ -9,7 +9,7 @@
 > is [Dark Factory (R1)](dark-factory.md) and the flow walkthroughs in the
 > [flow deep-dives](flow-run-lifecycle.md).
 
-_80 modules._
+_81 modules._
 
 ## architect-agent
 
@@ -545,6 +545,14 @@ Dark Factory — skill catalogue (#157). A skill is a **capability grant**: a na
 **Source:** [`agent/lib/dark-factory/skills.ts`](../../agent/lib/dark-factory/skills.ts)
 
 **Exports:** `Capabilities`, `SKILLS`, `SKILL_NAMES`, `SkillCatalogueError`, `SkillDefinition`, `SkillGrant`, `SkillName`, `canonicaliseSkills`, `parseSkillName`, `resolveCapabilities`, `validateCatalogue`
+
+## slack-notification
+
+Dark Factory — Slack notification adapter (#318). The first REAL driver for the notification seam (#317): delivery via an incoming webhook URL — no vendor SDK, no OAuth, no app registration. The seam, the payload and the wiring already exist, so activating it is just `DF_NOTIFY_DRIVER=slack` plus the URL. SECRET DISCIPLINE: the webhook URL is a credential, so it is never logged, never placed in the request body, never written to the ledger, and never echoed in an error; an absent or malformed URL THROWS rather than silently no-opping. BEST-EFFORT and BOUNDED: a failure returns `{ ok: false }` rather than throwing (the seam already swallows it, so a notification can never fail a run), every attempt is bounded by a timeout, and it retries at most once — a 5xx or a timeout may be transient, while a 4xx is a configuration problem that must not be repeated.
+
+**Source:** [`agent/lib/dark-factory/slack-notification.ts`](../../agent/lib/dark-factory/slack-notification.ts)
+
+**Exports:** `DEFAULT_SLACK_TIMEOUT_MS`, `MAX_SLACK_ATTEMPTS`, `SlackFetch`, `SlackMessage`, `SlackNotificationConfigurationError`, `SlackNotificationOptions`, `SlackNotificationProvider`, `renderSlackMessage`
 
 ## state-provider
 
