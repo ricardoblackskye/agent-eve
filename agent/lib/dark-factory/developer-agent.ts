@@ -28,6 +28,7 @@ import {
   realpath,
   writeFile,
 } from "node:fs/promises";
+import { filterChildEnv } from "./child-env";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import {
@@ -696,6 +697,10 @@ export function createWorkspaceTools(
         const { stdout, stderr } = await execAsync(testCmd, {
           cwd: root,
           maxBuffer: 10 * 1024 * 1024,
+          // #275: `exec` INHERITS the parent environment when `env` is omitted, so the
+          // child would otherwise see the push token, every DF_* knob and any database
+          // URL. Hand it the same minimal allow-list the tester agent uses.
+          env: filterChildEnv(process.env) as NodeJS.ProcessEnv,
         });
         return { passed: true, output: stdout || stderr };
       } catch (err: any) {
