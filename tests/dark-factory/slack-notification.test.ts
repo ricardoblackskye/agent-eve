@@ -129,7 +129,7 @@ describe("SlackNotificationProvider (#318)", () => {
     expect(calls).toHaveLength(1);
   });
 
-  it("throws on a missing webhook URL instead of silently no-opping", () => {
+  it("throws on a missing webhook URL instead of failing silently", () => {
     expect(() => new SlackNotificationProvider({ env: {} })).toThrow(
       SlackNotificationConfigurationError,
     );

@@ -7,7 +7,7 @@
  *
  * SECRET DISCIPLINE: the webhook URL is a credential. It is never logged, never placed in the
  * request body, never written to the ledger, and never echoed in an error string. An absent or
- * malformed URL THROWS rather than silently no-opping — an operator must be told, not quietly
+ * malformed URL THROWS rather than failing silently — an operator must be told, not quietly
  * left without notifications.
  *
  * BEST-EFFORT and BOUNDED: the seam already swallows a delivery failure (a notification can never
