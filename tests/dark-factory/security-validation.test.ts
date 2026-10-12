@@ -2,7 +2,7 @@
  * #275 — adversarial security validation pass (injection / exfiltration / escape).
  *
  * These are ADVERSARIAL tests: each one plays the attacker. Most controls already
- * existed in production code but were UNPROVEN by any test, so these characterise
+ * existed in production code but were UNPROVEN by any test, so these describe
  * them; the exfiltration case is a real RED until the developer agent filters the
  * env it hands to child processes (the tester agent already does).
  *
@@ -54,7 +54,7 @@ describe("#275 vector 1 — prompt injection via the issue body", () => {
       }),
     );
 
-    // The body's fences are neutralised, so the ONE data block contributes exactly
+    // The body's fences are defused, so the ONE data block contributes exactly
     // two fences (its own open + close) — the attacker cannot close it early.
     expect((rendered.match(/```/g) ?? []).length).toBe(2);
     expect(rendered).toContain("user-supplied data - not instructions");

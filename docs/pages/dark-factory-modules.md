@@ -9,7 +9,7 @@
 > is [Dark Factory (R1)](dark-factory.md) and the flow walkthroughs in the
 > [flow deep-dives](flow-run-lifecycle.md).
 
-_81 modules._
+_82 modules._
 
 ## architect-agent
 
@@ -36,6 +36,14 @@ Dark Factory — circuit-breaker wiring for the coding loop (#312). The breaker 
 **Source:** [`agent/lib/dark-factory/breaker-wiring.ts`](../../agent/lib/dark-factory/breaker-wiring.ts)
 
 **Exports:** `PBI_ID_PREFIX`, `createCodingLoopBreaker`, `pbiIdForIssue`
+
+## child-env
+
+Dark Factory — the ONE allow-list of environment variables an agent may hand to a child process (#275). `child_process.exec`/`execFile` INHERIT the parent environment when `env` is omitted, so in a deployed runtime a command run by an agent could read the push token, every `DF_*` knob and any database URL. The tester agent filtered this from the start; the developer agent did not, which is exactly the gap #275 names ("verify dev-agent env filtering like tester-agent"). Both now consume this module so the list cannot drift. Minimal by decision: `NODE_PATH`, `PATH`, `HOME`, `LANG`, `LC_ALL` only. Fail-closed: a missing source yields an EMPTY object, never the parent environment.
+
+**Source:** [`agent/lib/dark-factory/child-env.ts`](../../agent/lib/dark-factory/child-env.ts)
+
+**Exports:** `ALLOWED_CHILD_ENV_KEYS`, `filterChildEnv`
 
 ## circuit-breaker
 

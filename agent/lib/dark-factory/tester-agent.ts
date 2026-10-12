@@ -51,11 +51,18 @@ const MAX_BUFFER_BYTES = 10 * 1024 * 1024;
 /** Git SHA-1 regex (40 hex chars) */
 const GIT_SHA_PATTERN = /^[0-9a-fA-F]{40}$/;
 
+import { ALLOWED_CHILD_ENV_KEYS, filterChildEnv } from "./child-env";
+
 /** Allowed npx commands for validation checks */
 const ALLOWED_COMMANDS = new Set(["tsc", "cspell", "vitest", "gitleaks"]);
 
-/** Allowed environment variable keys passed to child processes */
-export const ALLOWED_ENV_KEYS = new Set(["NODE_PATH", "PATH", "HOME", "LANG", "LC_ALL"]);
+/**
+ * Allowed environment variable keys passed to child processes.
+ *
+ * Re-exported from `child-env.ts`, its canonical home (#275): the developer agent now
+ * filters its child env too, and two copies of this list would drift apart.
+ */
+export const ALLOWED_ENV_KEYS = ALLOWED_CHILD_ENV_KEYS;
 
 /**
  * Interface for command execution (dependency injection for testability).
@@ -66,7 +73,11 @@ export interface CommandRunner {
    * Execute a command with explicit argument array (no shell interpolation).
    * Returns exit code, stdout, and stderr.
    */
-  (cmd: string, args: string[], timeoutMs: number): Promise<{
+  (
+    cmd: string,
+    args: string[],
+    timeoutMs: number,
+  ): Promise<{
     exitCode: number;
     stdout: string;
     stderr: string;
@@ -94,9 +105,7 @@ export const defaultCommandRunner: CommandRunner = async (
     const { stdout, stderr } = await execFileAsync(cmd, args, {
       timeout: timeoutMs,
       maxBuffer: MAX_BUFFER_BYTES,
-      env: Object.fromEntries(
-        Object.entries(process.env ?? {}).filter(([k]) => ALLOWED_ENV_KEYS.has(k)),
-      ) as NodeJS.ProcessEnv,
+      env: filterChildEnv(process.env) as NodeJS.ProcessEnv,
     });
     return {
       exitCode: 0,
@@ -105,7 +114,7 @@ export const defaultCommandRunner: CommandRunner = async (
     };
   } catch (e: any) {
     return {
-      exitCode: typeof e.code === "number" ? e.code : e.exitCode ?? 1,
+      exitCode: typeof e.code === "number" ? e.code : (e.exitCode ?? 1),
       stdout: e.stdout?.toString() ?? "",
       stderr: e.stderr?.toString() ?? "",
     };
@@ -268,7 +277,10 @@ export function toValidationRequest(input: {
  * @param output Raw output string
  * @param maxLines Maximum lines to return (default: 1000, from config)
  */
-export function parseErrorOutput(output: string, maxLines: number = 1000): string[] {
+export function parseErrorOutput(
+  output: string,
+  maxLines: number = 1000,
+): string[] {
   if (!output) return [];
   return output
     .split("\n")
@@ -279,7 +291,10 @@ export function parseErrorOutput(output: string, maxLines: number = 1000): strin
 
 /** A single validation check, registered in the agent's check list. */
 interface ValidationCheck {
-  name: keyof Omit<ValidationReport, "overall" | "timestamp" | "branch" | "durationMs">;
+  name: keyof Omit<
+    ValidationReport,
+    "overall" | "timestamp" | "branch" | "durationMs"
+  >;
   run: () => Promise<PassFail>;
 }
 
@@ -312,7 +327,10 @@ export class TesterAgent {
       { name: "smokeTests", run: () => this.runSmokeTests() },
     ];
     if (config.enableSecurityScan) {
-      this.checks.push({ name: "securityScan", run: () => this.runSecurityScan() });
+      this.checks.push({
+        name: "securityScan",
+        run: () => this.runSecurityScan(),
+      });
     }
   }
 
@@ -345,7 +363,10 @@ export class TesterAgent {
 
     const tsc = await this.runner("npx", ["tsc", "--noEmit"], this.timeoutMs);
     if (tsc.exitCode !== 0) {
-      errors.push(...parseErrorOutput(tsc.stdout, this.maxOutputLines), ...parseErrorOutput(tsc.stderr, this.maxOutputLines));
+      errors.push(
+        ...parseErrorOutput(tsc.stdout, this.maxOutputLines),
+        ...parseErrorOutput(tsc.stderr, this.maxOutputLines),
+      );
     }
 
     const cspell = await this.runner(
@@ -354,12 +375,13 @@ export class TesterAgent {
       this.timeoutMs,
     );
     if (cspell.exitCode !== 0) {
-      errors.push(...parseErrorOutput(cspell.stdout, this.maxOutputLines), ...parseErrorOutput(cspell.stderr, this.maxOutputLines));
+      errors.push(
+        ...parseErrorOutput(cspell.stdout, this.maxOutputLines),
+        ...parseErrorOutput(cspell.stderr, this.maxOutputLines),
+      );
     }
 
-    return errors.length > 0
-      ? { status: "fail", errors }
-      : { status: "pass" };
+    return errors.length > 0 ? { status: "fail", errors } : { status: "pass" };
   }
 
   /** Run unit/integration test suite via vitest. */

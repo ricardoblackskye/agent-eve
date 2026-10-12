@@ -31,3 +31,4 @@ describes, and design decisions live as [Architecture Decision Records](../adr/R
 ## Module catalog
 
 - [Dark Factory module catalog](dark-factory-modules.md)
+- [Dark Factory security validation (#275)](dark-factory-security-review.md)
