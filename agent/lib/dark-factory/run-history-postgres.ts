@@ -205,7 +205,7 @@ function rowToSummary(row: RunSummaryRow): RunSummary {
     ...(row.latency_ms !== null ? { latencyMs: Number(row.latency_ms) } : {}),
     ...(row.cost_usd !== null ? { costUsd: Number(row.cost_usd) } : {}),
     ...(row.pr_url !== null ? { prUrl: row.pr_url } : {}),
-      ...(row.git_diff !== null ? { gitDiff: row.git_diff } : {}),
+    ...(row.git_diff !== null ? { gitDiff: row.git_diff } : {}),
     ...(row.tenant_id !== null ? { tenantId: row.tenant_id } : {}),
   });
 }
@@ -259,7 +259,11 @@ function readTrace(value: string): RunEvent["trace"] | undefined {
 function readBreakerTrip(value: string): RunEvent["breakerTrip"] | undefined {
   try {
     const parsed = JSON.parse(value);
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    if (
+      typeof parsed !== "object" ||
+      parsed === null ||
+      Array.isArray(parsed)
+    ) {
       return undefined;
     }
     return parsed as RunEvent["breakerTrip"];
@@ -314,9 +318,9 @@ function rowToEvent(row: RunEventRow): PersistedRunEvent {
       ...(row.trace !== null && row.trace !== undefined
         ? { trace: readTrace(row.trace) }
         : {}),
-        ...(row.breaker_trip !== null && row.breaker_trip !== undefined
-          ? { breakerTrip: readBreakerTrip(row.breaker_trip) }
-          : {}),
+      ...(row.breaker_trip !== null && row.breaker_trip !== undefined
+        ? { breakerTrip: readBreakerTrip(row.breaker_trip) }
+        : {}),
     }),
   };
 }
@@ -433,7 +437,30 @@ function insertSummary(
        started_at, completed_at, attempt_count, review_count,
        iteration_count, fix_cycle_count, latency_ms, cost_usd, pr_url, git_diff,
        tenant_id
-     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+     ON CONFLICT (run_id) DO UPDATE SET
+       -- UPSERT, mirroring SQLite's writeSummary (#323). The run row is created at ACCEPTANCE,
+       -- so recordRunSummary -- the diff-capture path (#295) -- always targets a row that
+       -- already exists. A plain INSERT therefore failed with a duplicate-key error and the
+       -- captured diff was never persisted on Postgres, while SQLite (which upserts) passed.
+       repo = EXCLUDED.repo,
+       issue = EXCLUDED.issue,
+       status = EXCLUDED.status,
+       stage = EXCLUDED.stage,
+       created_at = EXCLUDED.created_at,
+       updated_at = EXCLUDED.updated_at,
+       started_at = EXCLUDED.started_at,
+       completed_at = EXCLUDED.completed_at,
+       attempt_count = EXCLUDED.attempt_count,
+       review_count = EXCLUDED.review_count,
+       iteration_count = EXCLUDED.iteration_count,
+       fix_cycle_count = EXCLUDED.fix_cycle_count,
+       latency_ms = EXCLUDED.latency_ms,
+       cost_usd = EXCLUDED.cost_usd,
+       pr_url = EXCLUDED.pr_url,
+       -- tenant_id is deliberately NOT set: attribution is write-once, resolved at acceptance,
+       -- so a later write must never rewrite it (the same rule updateSummary keeps).
+       git_diff = EXCLUDED.git_diff`,
     [
       summary.runId,
       summary.repo,
