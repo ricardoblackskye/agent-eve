@@ -35,7 +35,7 @@ already there. No service, job or step changes.
 1. **CI-parity run.** Build a container to the WORKFLOW'S OWN spec
    (`POSTGRES_HOST_AUTH_METHOD=trust`, `POSTGRES_DB=darkfactory`) and run with the workflow's EXACT DSN
    strings (`postgres://postgres@localhost:5432/darkfactory?sslmode=disable`). Assert the 13
-   previously-skipped tests now RUN and pass — not merely that the YAML looks right. The passwordless
+   previously-skipped tests now RUN and pass — not merely that the YAML looks right. The no-password
    URL and `sslmode=disable` differ from my earlier local run, so they must be exercised, not assumed.
 2. YAML parses; changed-file gates (cspell / prettier / markdownlint) clean.
 3. Count evidence: skipped drops to **2** (the LIVE network tests only).
