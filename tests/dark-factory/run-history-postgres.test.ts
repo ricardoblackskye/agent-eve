@@ -8,7 +8,12 @@ const at = "2026-09-24T12:00:00.000Z";
 
 describeWithDatabase("PostgresRunHistoryStore integration", () => {
   const namespace = randomUUID();
-  const issue = Number.parseInt(namespace.slice(0, 6), 16) + 1;
+  const baseIssue = Number.parseInt(namespace.slice(0, 6), 16) + 1;
+  /**
+   * #328 — each test needs its OWN issue. The active-run claim allows only ONE ACTIVE
+   * run per (repo, issue), and these tests deliberately create several runs against a
+   * shared repo, so they must not share an issue.
+   */
   const store = new PostgresRunHistoryStore(connectionString as string);
 
   afterAll(async () => {
@@ -16,6 +21,7 @@ describeWithDatabase("PostgresRunHistoryStore integration", () => {
   });
 
   it("atomically persists an idempotent delivery, events, and queryable summary", async () => {
+    const issue = baseIssue + 1;
     const deliveryId = `pg-delivery-${namespace}`;
     const accepted = await store.acceptDelivery({
       deliveryId,
@@ -58,6 +64,7 @@ describeWithDatabase("PostgresRunHistoryStore integration", () => {
   });
 
   it("round-trips the git diff through the postgres store (#295)", async () => {
+    const issue = baseIssue + 2;
     const deliveryId = `pg-diff-${namespace}`;
     const accepted = await store.acceptDelivery({
       deliveryId,
@@ -66,7 +73,8 @@ describeWithDatabase("PostgresRunHistoryStore integration", () => {
       receivedAt: at,
     });
     const runId = accepted.value?.runId;
-    if (!runId) throw new Error("Postgres delivery acceptance returned no runId");
+    if (!runId)
+      throw new Error("Postgres delivery acceptance returned no runId");
     const SAMPLE_DIFF =
       "diff --git a/foo.ts b/foo.ts\n--- a/foo.ts\n+++ b/foo.ts\n@@ -1 +1 @@\n-const a = 1;\n+const a = 2;\n";
     const written = await store.recordRunSummary({
@@ -91,6 +99,7 @@ describeWithDatabase("PostgresRunHistoryStore integration", () => {
   });
 
   it("round-trips tester test results on review-round events through postgres (#296)", async () => {
+    const issue = baseIssue + 3;
     const accepted = await store.acceptDelivery({
       deliveryId: `pg-testresults-${namespace}`,
       repo: "owner/review-counts",
@@ -98,10 +107,19 @@ describeWithDatabase("PostgresRunHistoryStore integration", () => {
       receivedAt: at,
     });
     const runId = accepted.value?.runId;
-    if (!runId) throw new Error("Postgres delivery acceptance returned no runId");
+    if (!runId)
+      throw new Error("Postgres delivery acceptance returned no runId");
     const testResults = [
-      { testFile: "src/foo.test.ts", testCaseName: "adds numbers", passed: true },
-      { testFile: "src/bar.test.ts", testCaseName: "throws on null", passed: false },
+      {
+        testFile: "src/foo.test.ts",
+        testCaseName: "adds numbers",
+        passed: true,
+      },
+      {
+        testFile: "src/bar.test.ts",
+        testCaseName: "throws on null",
+        passed: false,
+      },
     ];
     const recorded = await store.appendEvent({
       eventId: `pg-review-testresults-${namespace}`,
@@ -122,6 +140,7 @@ describeWithDatabase("PostgresRunHistoryStore integration", () => {
   });
 
   it("round-trips the AC traceability matrix on review-round events through postgres (#297)", async () => {
+    const issue = baseIssue + 4;
     const accepted = await store.acceptDelivery({
       deliveryId: `pg-trace-${namespace}`,
       repo: "owner/review-counts",
@@ -129,7 +148,8 @@ describeWithDatabase("PostgresRunHistoryStore integration", () => {
       receivedAt: at,
     });
     const runId = accepted.value?.runId;
-    if (!runId) throw new Error("Postgres delivery acceptance returned no runId");
+    if (!runId)
+      throw new Error("Postgres delivery acceptance returned no runId");
     const trace = [
       {
         acId: "AC1",
@@ -165,6 +185,7 @@ describeWithDatabase("PostgresRunHistoryStore integration", () => {
   });
 
   it("round-trips review finding dispositions through the event table", async () => {
+    const issue = baseIssue + 5;
     const accepted = await store.acceptDelivery({
       deliveryId: `pg-review-${namespace}`,
       repo: "owner/review-counts",
@@ -197,6 +218,7 @@ describeWithDatabase("PostgresRunHistoryStore integration", () => {
   });
 
   it("creates a new run for each distinct delivery and permits reruns after terminal state", async () => {
+    const issue = baseIssue + 6;
     const repo = "owner/active-run";
     const first = await store.acceptDelivery({
       deliveryId: `pg-active-first-${namespace}`,
@@ -262,6 +284,7 @@ describeWithDatabase("PostgresRunHistoryStore integration", () => {
   });
 
   it("persists control receipt progress across duplicate delivery reads", async () => {
+    const issue = baseIssue + 7;
     const repo = "owner/control-progress";
     const accepted = await store.acceptDelivery({
       deliveryId: `pg-control-progress-run-${namespace}`,
@@ -316,6 +339,7 @@ describeWithDatabase("PostgresRunHistoryStore integration", () => {
   });
 
   it("filters runs by inclusive from and exclusive to alongside repo and status", async () => {
+    const issue = baseIssue + 8;
     const repo = `owner/date-filter-${namespace}`;
     const runs = [
       ["pg-date-before", 210, "2026-09-24T12:00:00.999Z"],
@@ -346,6 +370,7 @@ describeWithDatabase("PostgresRunHistoryStore integration", () => {
   });
 
   it("aggregates status counts, terminal trend, and measured sums", async () => {
+    const issue = baseIssue + 9;
     const repo = `owner/metrics-${namespace}`;
     const terminal = async (
       deliveryId: string,

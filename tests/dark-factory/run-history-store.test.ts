@@ -55,7 +55,7 @@ describe("SqliteRunHistoryStore delivery acceptance", () => {
     store.close();
   });
 
-  it("creates a distinct run for a new trigger delivery even while another run is active", async () => {
+  it("REFUSES a second trigger delivery for the same ACTIVE issue, then permits a rerun once terminal (#328)", async () => {
     let generated = 0;
     const store = createStore(() => `active-run-${++generated}`);
     const first = await store.acceptDelivery({
@@ -64,20 +64,21 @@ describe("SqliteRunHistoryStore delivery acceptance", () => {
       issue: 198,
       receivedAt: at,
     });
+    const runId = first.value?.runId;
+    if (!runId) throw new Error("run acceptance did not return a runId");
+
+    // #328 — the claim: a second delivery for the same ACTIVE issue starts NO colliding run and
+    // NAMES the run that already holds the claim. (This test previously asserted the opposite.)
     const repeatedIntent = await store.acceptDelivery({
       deliveryId: "active-delivery-2",
       repo: "owner/repo",
       issue: 198,
       receivedAt: "2026-09-24T12:00:01.000Z",
     });
-    const runId = first.value?.runId;
-    if (!runId) throw new Error("run acceptance did not return a runId");
-
     expect(repeatedIntent.ok).toBe(true);
-    expect(repeatedIntent.duplicate).toBe(false);
-    expect(repeatedIntent.value?.runId).toBe("active-run-2");
-    expect(repeatedIntent.value?.runId).not.toBe(runId);
-    expect(generated).toBe(2);
+    expect(repeatedIntent.value).toBeUndefined();
+    expect(repeatedIntent.activeConflict?.runId).toBe(runId);
+    expect(generated).toBe(1);
 
     const stopped = await store.appendEvent({
       eventId: "active-run-aborted",
@@ -97,8 +98,9 @@ describe("SqliteRunHistoryStore delivery acceptance", () => {
     });
     expect(deliberateRerun.ok).toBe(true);
     expect(deliberateRerun.duplicate).toBe(false);
-    expect(deliberateRerun.value?.runId).toBe("active-run-3");
-    expect(generated).toBe(3);
+    // The refused delivery consumed NO run id, so the rerun is the SECOND run (not the third).
+    expect(deliberateRerun.value?.runId).toBe("active-run-2");
+    expect(generated).toBe(2);
   });
 
   it("binds a replayed control delivery to its original run", async () => {
@@ -319,8 +321,16 @@ describe("SqliteRunHistoryStore delivery acceptance", () => {
       if (!runId) throw new Error("run acceptance did not return a runId");
 
       const testResults = [
-        { testFile: "src/foo.test.ts", testCaseName: "adds numbers", passed: true },
-        { testFile: "src/bar.test.ts", testCaseName: "throws on null", passed: false },
+        {
+          testFile: "src/foo.test.ts",
+          testCaseName: "adds numbers",
+          passed: true,
+        },
+        {
+          testFile: "src/bar.test.ts",
+          testCaseName: "throws on null",
+          passed: false,
+        },
       ];
       const recorded = await store.appendEvent({
         eventId: "review-round-test-results",

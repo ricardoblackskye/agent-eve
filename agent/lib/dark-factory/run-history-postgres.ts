@@ -28,6 +28,7 @@ import type {
   RunCursor,
   RunEventListOptions,
   RunHistoryReadResult,
+  ActiveRunConflict,
   RunHistoryStore,
   RunHistoryWriteResult,
   RunListOptions,
@@ -105,7 +106,7 @@ const POSTGRES_SCHEMA = `
     ON df_run_summaries (created_at DESC, run_id DESC);
   CREATE INDEX IF NOT EXISTS df_run_summaries_repo_idx
     ON df_run_summaries (repo, created_at DESC, run_id DESC);
-  DROP INDEX IF EXISTS df_run_active_issue_uidx;
+  -- df_run_active_issue_uidx is created in ensureSchema AFTER the duplicate repair (#328).
 
   CREATE TABLE IF NOT EXISTS df_run_events (
     sequence BIGSERIAL PRIMARY KEY,
@@ -185,6 +186,64 @@ function failedRead<T>(error: unknown): RunHistoryReadResult<T> {
     value: null,
     error: `Run history store read failed: ${error instanceof Error ? error.message : String(error)}`,
   };
+}
+
+/**
+ * #328 — the ACTIVE run for a repo+issue, if any. Refusal DATA, never a throw.
+ * The ACTIVE set is exactly the partial index predicate.
+ */
+async function activeRunHolder(
+  client: Pool | PoolClient,
+  repo: string,
+  issue: number,
+): Promise<ActiveRunConflict | undefined> {
+  const { rows } = await client.query<{ run_id: string; status: RunStatus }>(
+    `SELECT run_id, status FROM df_run_summaries
+      WHERE repo = $1 AND issue = $2 AND status IN ('queued','running','blocked')
+      LIMIT 1`,
+    [repo, issue],
+  );
+  const row = rows[0];
+  return row ? { runId: row.run_id, status: row.status } : undefined;
+}
+
+/** A UNIQUE violation (Postgres 23505) — the claim index arbitrating a true race. */
+function isClaimConflict(error: unknown): boolean {
+  return (error as { code?: string } | null)?.code === "23505";
+}
+
+/**
+ * #328 — terminate older ACTIVE duplicates for the same (repo, issue).
+ *
+ * The claim is a partial UNIQUE index, which CANNOT be created while the table still holds two
+ * active runs for one issue — the state the previous code allowed. Bounded and idempotent;
+ * newest wins (created_at, then run_id); a no-op on a consistent database.
+ */
+async function repairActiveRunDuplicates(
+  client: Pool | PoolClient,
+): Promise<number> {
+  const { rows } = await client.query<{
+    run_id: string;
+    repo: string;
+    issue: number;
+  }>(
+    `SELECT run_id, repo, issue FROM df_run_summaries
+      WHERE status IN ('queued','running','blocked')
+      ORDER BY repo, issue, created_at DESC, run_id DESC`,
+  );
+  const seen = new Set<string>();
+  const losers: string[] = [];
+  for (const row of rows) {
+    const key = `${row.repo}\u0000${row.issue}`;
+    if (seen.has(key)) losers.push(row.run_id);
+    else seen.add(key);
+  }
+  if (losers.length === 0) return 0;
+  await client.query(
+    "UPDATE df_run_summaries SET status = 'aborted', stage = 'terminal', updated_at = $1 WHERE run_id = ANY($2::text[])",
+    [new Date().toISOString(), losers],
+  );
+  return losers.length;
 }
 
 function rowToSummary(row: RunSummaryRow): RunSummary {
@@ -590,8 +649,18 @@ export class PostgresRunHistoryStore implements RunHistoryStore {
   private async ensureSchema(): Promise<void> {
     if (!this.schemaPromise) {
       this.schemaPromise = this.pool()
-        .then((pool) => pool.query(POSTGRES_SCHEMA))
-        .then(() => undefined)
+        .then(async (pool) => {
+          await pool.query(POSTGRES_SCHEMA);
+          const repaired = await repairActiveRunDuplicates(pool);
+          if (repaired > 0) {
+            console.warn(
+              `[run-history] terminated ${repaired} older duplicate ACTIVE run(s) so the active-run claim could be created (#328).`,
+            );
+          }
+          await pool.query(
+            "CREATE UNIQUE INDEX IF NOT EXISTS df_run_active_issue_uidx ON df_run_summaries (repo, issue) WHERE status IN ('queued','running','blocked')",
+          );
+        })
         .catch((error) => {
           this.schemaPromise = null;
           throw error;
@@ -652,78 +721,131 @@ export class PostgresRunHistoryStore implements RunHistoryStore {
       fixCycleCount: 0,
     });
     try {
-      const accepted = await this.transaction(async (client) => {
-        const runId = this.idFactory();
-        const reservation = await client.query<{ run_id: string }>(
-          `INSERT INTO df_run_deliveries (delivery_id, run_id)
+      const accepted = await this.transaction(
+        async (
+          client,
+        ): Promise<{
+          summary: RunSummary | null;
+          duplicate: boolean;
+          activeConflict?: ActiveRunConflict;
+        }> => {
+          const runId = this.idFactory();
+          const reservation = await client.query<{ run_id: string }>(
+            `INSERT INTO df_run_deliveries (delivery_id, run_id)
            VALUES ($1, $2)
            ON CONFLICT (delivery_id) DO NOTHING
            RETURNING run_id`,
-          [eventId, runId],
-        );
-        if (reservation.rowCount === 0) {
-          const existing = await client.query<{ run_id: string }>(
-            "SELECT run_id FROM df_run_deliveries WHERE delivery_id = $1",
-            [eventId],
+            [eventId, runId],
           );
-          const existingRunId = existing.rows[0]?.run_id;
-          if (!existingRunId)
-            throw new Error(`Delivery '${eventId}' has no run binding.`);
-          const summaryResult = await client.query<RunSummaryRow>(
-            "SELECT * FROM df_run_summaries WHERE run_id = $1",
-            [existingRunId],
-          );
-          const row = summaryResult.rows[0];
-          if (!row)
-            throw new Error(
-              `Delivery '${eventId}' points to a missing summary.`,
+          if (reservation.rowCount === 0) {
+            const existing = await client.query<{ run_id: string }>(
+              "SELECT run_id FROM df_run_deliveries WHERE delivery_id = $1",
+              [eventId],
             );
-          const summary = rowToSummary(row);
-          if (
-            summary.repo !== normalizedInput.repo ||
-            summary.issue !== normalizedInput.issue
-          ) {
-            throw new Error(
-              `Delivery '${eventId}' was replayed with a different repo/issue identity.`,
+            const existingRunId = existing.rows[0]?.run_id;
+            if (!existingRunId)
+              throw new Error(`Delivery '${eventId}' has no run binding.`);
+            const summaryResult = await client.query<RunSummaryRow>(
+              "SELECT * FROM df_run_summaries WHERE run_id = $1",
+              [existingRunId],
             );
+            const row = summaryResult.rows[0];
+            if (!row)
+              throw new Error(
+                `Delivery '${eventId}' points to a missing summary.`,
+              );
+            const summary = rowToSummary(row);
+            if (
+              summary.repo !== normalizedInput.repo ||
+              summary.issue !== normalizedInput.issue
+            ) {
+              throw new Error(
+                `Delivery '${eventId}' was replayed with a different repo/issue identity.`,
+              );
+            }
+            return { summary, duplicate: true };
           }
-          return { summary, duplicate: true };
-        }
 
-        const acceptedEvent = toRunEvent({
-          eventId,
-          runId,
-          type: "run.accepted",
-          stage: "trigger",
-          occurredAt: input.receivedAt,
-          status: "queued",
-        });
-        const summary = toRunSummary({
-          runId,
-          repo: input.repo,
-          issue: input.issue,
-          tenantId: input.tenantId,
-          status: "queued",
-          stage: "trigger",
-          createdAt: acceptedEvent.occurredAt,
-          updatedAt: acceptedEvent.occurredAt,
-          attemptCount: 0,
-          reviewCount: 0,
-          iterationCount: 0,
-          fixCycleCount: 0,
-        });
-        await insertSummary(client, summary);
-        await insertEvent(client, acceptedEvent);
-        return { summary, duplicate: false };
-      });
+          // #328 — the active-run claim, AFTER the replay check so a re-delivery still reports
+          // `duplicate: true` (its delivery is already bound). The partial UNIQUE index is the real
+          // arbiter for a simultaneous pair (see the isClaimConflict translation in the catch below);
+          // this read makes the common case a clean refusal that NAMES the run holding the claim.
+          const holder = await activeRunHolder(
+            client,
+            normalizedInput.repo,
+            normalizedInput.issue,
+          );
+          if (holder) {
+            // Undo OUR reservation: a refused delivery must not stay bound to a run.
+            await client.query(
+              "DELETE FROM df_run_deliveries WHERE delivery_id = $1 AND run_id = $2",
+              [eventId, runId],
+            );
+            return { summary: null, duplicate: false, activeConflict: holder };
+          }
+
+          const acceptedEvent = toRunEvent({
+            eventId,
+            runId,
+            type: "run.accepted",
+            stage: "trigger",
+            occurredAt: input.receivedAt,
+            status: "queued",
+          });
+          const summary = toRunSummary({
+            runId,
+            repo: input.repo,
+            issue: input.issue,
+            tenantId: input.tenantId,
+            status: "queued",
+            stage: "trigger",
+            createdAt: acceptedEvent.occurredAt,
+            updatedAt: acceptedEvent.occurredAt,
+            attemptCount: 0,
+            reviewCount: 0,
+            iterationCount: 0,
+            fixCycleCount: 0,
+          });
+          await insertSummary(client, summary);
+          await insertEvent(client, acceptedEvent);
+          return { summary, duplicate: false };
+        },
+      );
+      if (accepted.activeConflict) {
+        return {
+          ok: true,
+          mode: "live",
+          providerId: this.id,
+          duplicate: false,
+          activeConflict: accepted.activeConflict,
+        };
+      }
       return {
         ok: true,
         mode: "live",
         providerId: this.id,
-        value: accepted.summary,
+        ...(accepted.summary ? { value: accepted.summary } : {}),
         duplicate: accepted.duplicate,
       };
     } catch (error) {
+      // #328 — a true race: the claim index rejected our INSERT (23505). The transaction has
+      // already rolled back, so nothing is half-written; translate it into a clean refusal.
+      if (isClaimConflict(error)) {
+        const holder = await activeRunHolder(
+          await this.pool(),
+          normalizedInput.repo,
+          normalizedInput.issue,
+        ).catch(() => undefined);
+        if (holder) {
+          return {
+            ok: true,
+            mode: "live",
+            providerId: this.id,
+            duplicate: false,
+            activeConflict: holder,
+          };
+        }
+      }
       return failedWrite(error);
     }
   }

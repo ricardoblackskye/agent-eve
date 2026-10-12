@@ -15,7 +15,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { PostgresRunHistoryStore } from "../../agent/lib/dark-factory/run-history-postgres";
 import { SqliteRunHistoryStore } from "../../agent/lib/dark-factory/run-history-store";
@@ -34,11 +34,15 @@ function makeSqlite(): SqliteRunHistoryStore {
 }
 
 afterEach(() => {
-  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  for (const dir of dirs.splice(0))
+    rmSync(dir, { recursive: true, force: true });
 });
 
 /** Shared assertions, run against BOTH stores so they cannot diverge. */
-function claimSuite(name: string, makeStore: () => SqliteRunHistoryStore | PostgresRunHistoryStore) {
+function claimSuite(
+  name: string,
+  makeStore: () => SqliteRunHistoryStore | PostgresRunHistoryStore,
+) {
   describe(name, () => {
     it("refuses a SECOND delivery for the same repo+issue, NAMING the existing run", async () => {
       const store = makeStore();
@@ -187,5 +191,30 @@ claimSuite("sqlite", makeSqlite);
 const dsn = process.env.DF_RUN_HISTORY_TEST_DATABASE_URL;
 const describePg = dsn ? describe : describe.skip;
 describePg("#328 active-run claim (postgres)", () => {
+  /**
+   * This suite shares ONE database with the other Postgres suites. A run left ACTIVE by an earlier
+   * run would hold the claim and make the first delivery of the next run fail for the wrong reason,
+   * so the suite is made HERMETIC: its own rows are cleared before and after.
+   */
+  const clearClaimRows = async (): Promise<void> => {
+    const { Client } = await import("pg");
+    const client = new Client({ connectionString: dsn as string });
+    await client.connect();
+    try {
+      await client.query(
+        `DELETE FROM df_run_deliveries WHERE run_id IN
+           (SELECT run_id FROM df_run_summaries WHERE repo LIKE 'owner/claim-%')`,
+      );
+      await client.query(
+        "DELETE FROM df_run_summaries WHERE repo LIKE 'owner/claim-%'",
+      );
+    } finally {
+      await client.end();
+    }
+  };
+
+  beforeAll(clearClaimRows);
+  afterAll(clearClaimRows);
+
   claimSuite("postgres", () => new PostgresRunHistoryStore(dsn as string));
 });
