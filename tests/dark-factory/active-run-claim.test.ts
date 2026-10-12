@@ -14,8 +14,17 @@ import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
 import { PostgresRunHistoryStore } from "../../agent/lib/dark-factory/run-history-postgres";
 import { SqliteRunHistoryStore } from "../../agent/lib/dark-factory/run-history-store";
@@ -34,8 +43,13 @@ function makeSqlite(): SqliteRunHistoryStore {
 }
 
 afterEach(() => {
-  for (const dir of dirs.splice(0))
-    rmSync(dir, { recursive: true, force: true });
+  for (const dir of dirs.splice(0)) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {
+      // Windows can hold the sqlite file briefly after close; a temp dir is not worth failing on.
+    }
+  }
 });
 
 /** Shared assertions, run against BOTH stores so they cannot diverge. */
@@ -217,4 +231,70 @@ describePg("#328 active-run claim (postgres)", () => {
   afterAll(clearClaimRows);
 
   claimSuite("postgres", () => new PostgresRunHistoryStore(dsn as string));
+});
+
+// ---------------------------------------------------------------------------
+// #328 — the repair must NAME the runs it terminated (operator traceability)
+// ---------------------------------------------------------------------------
+
+describe("#328 repair logging", () => {
+  it("names the terminated runs so an operator can trace them", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "df-claim-log-"));
+    dirs.push(dir);
+    const path = join(dir, "runs.db");
+    const first = new SqliteRunHistoryStore(path, () => "active-run");
+    const accepted = await first.acceptDelivery({
+      deliveryId: "log-d1",
+      repo: "owner/log",
+      issue: 328,
+      receivedAt: at,
+    });
+    const keptRunId = accepted.value?.runId;
+    expect(keptRunId).toBe("active-run");
+    await first.close();
+
+    // Force the state the claim forbids: drop the index, then copy the ACTIVE run under a new id
+    // with an OLDER created_at, so the original is the run that survives the repair.
+    const raw = new DatabaseSync(path);
+    raw.exec("DROP INDEX IF EXISTS df_run_active_issue_uidx");
+    const columns = (
+      raw.prepare("PRAGMA table_info(df_run_summaries)").all() as {
+        name: string;
+      }[]
+    ).map((column) => column.name);
+    const source = raw
+      .prepare("SELECT * FROM df_run_summaries WHERE run_id = ?")
+      .get(keptRunId as string) as Record<string, unknown>;
+    const duplicate: Record<string, unknown> = {
+      ...source,
+      run_id: "duplicate-run",
+      created_at: "2020-01-01T00:00:00.000Z",
+    };
+    raw
+      .prepare(
+        `INSERT INTO df_run_summaries (${columns.join(",")}) VALUES (${columns.map(() => "?").join(",")})`,
+      )
+      .run(...columns.map((column) => duplicate[column] as never));
+    raw.close();
+
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    let reopened: SqliteRunHistoryStore | undefined;
+    try {
+      reopened = new SqliteRunHistoryStore(path, () => "unused");
+      await reopened.getRun("duplicate-run"); // forces the schema pass, including the repair
+
+      const logged = warn.mock.calls.map((call) => String(call[0])).join("\n");
+      expect(logged).toContain("terminated 1 older duplicate ACTIVE run");
+      expect(logged).toContain("duplicate-run");
+      expect(logged).toContain("owner/log#328");
+
+      const loser = await reopened.getRun("duplicate-run");
+      const survivor = await reopened.getRun(keptRunId as string);
+      expect(loser.value?.status).toBe("aborted");
+      expect(survivor.value?.status).toBe("queued");
+    } finally {
+      warn.mockRestore();
+      await reopened?.close();
+    }
+  });
 });

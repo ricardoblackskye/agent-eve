@@ -59,8 +59,11 @@ not starting a second run`), satisfying the issue's "refused with a reason namin
    two active runs for one `repo`+`issue` — almost certainly why the index was dropped in the first
    place. So `ensureSchema` runs a bounded, idempotent **repair pre-pass** _before_ creating the
    index: for each `(repo, issue)` with more than one active run, the newest (by `created_at`, tie
-   broken by `run_id`) is kept and the older ones are marked `aborted`/`terminal` (logged). On a
-   consistent database the pre-pass is a no-op.
+   broken by `run_id`) is kept and the older ones are marked `aborted`/`terminal` — each written with `completed_at` and a `run.terminal` event, so the run
+   stays READABLE by the record layer (a terminal status requires `completedAt`) and the ledger's
+   timeline stays honest. The repair logs WHICH runs it terminated — a bounded list naming
+   `repo#issue (runId)` — so an operator can trace what the claim removed. On a consistent
+   database the pre-pass is a no-op.
 
 ## Consequences
 

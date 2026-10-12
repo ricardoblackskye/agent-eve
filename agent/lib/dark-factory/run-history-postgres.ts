@@ -16,6 +16,7 @@ import {
   type RunSummary,
   type RunTrendPoint,
 } from "./run-history";
+import { formatTerminatedRuns } from "./run-history";
 import type {
   AcceptRunDelivery,
   AdvanceRunControlDelivery,
@@ -219,9 +220,11 @@ function isClaimConflict(error: unknown): boolean {
  * active runs for one issue — the state the previous code allowed. Bounded and idempotent;
  * newest wins (created_at, then run_id); a no-op on a consistent database.
  */
+type TerminatedRun = { repo: string; issue: number; runId: string };
+
 async function repairActiveRunDuplicates(
-  client: Pool | PoolClient,
-): Promise<number> {
+  client: PoolClient,
+): Promise<TerminatedRun[]> {
   const { rows } = await client.query<{
     run_id: string;
     repo: string;
@@ -232,18 +235,33 @@ async function repairActiveRunDuplicates(
       ORDER BY repo, issue, created_at DESC, run_id DESC`,
   );
   const seen = new Set<string>();
-  const losers: string[] = [];
+  const losers: TerminatedRun[] = [];
   for (const row of rows) {
     const key = `${row.repo}\u0000${row.issue}`;
-    if (seen.has(key)) losers.push(row.run_id);
-    else seen.add(key);
+    if (seen.has(key)) {
+      losers.push({ repo: row.repo, issue: row.issue, runId: row.run_id });
+    } else {
+      seen.add(key);
+    }
   }
-  if (losers.length === 0) return 0;
+  if (losers.length === 0) return [];
+  const nowIso = new Date().toISOString();
   await client.query(
-    "UPDATE df_run_summaries SET status = 'aborted', stage = 'terminal', updated_at = $1 WHERE run_id = ANY($2::text[])",
-    [new Date().toISOString(), losers],
+    "UPDATE df_run_summaries SET status = 'aborted', stage = 'terminal', completed_at = $1, updated_at = $1 WHERE run_id = ANY($2::text[])",
+    [nowIso, losers.map((loser) => loser.runId)],
   );
-  return losers.length;
+  for (const loser of losers) {
+    // Readable AND recorded, for the same reasons as the sqlite store's repair.
+    await insertEvent(client, {
+      runId: loser.runId,
+      eventId: `repair-active-claim:${loser.runId}`,
+      type: "run.terminal",
+      stage: "terminal",
+      occurredAt: nowIso,
+      status: "aborted",
+    });
+  }
+  return losers;
 }
 
 function rowToSummary(row: RunSummaryRow): RunSummary {
@@ -651,15 +669,21 @@ export class PostgresRunHistoryStore implements RunHistoryStore {
       this.schemaPromise = this.pool()
         .then(async (pool) => {
           await pool.query(POSTGRES_SCHEMA);
-          const repaired = await repairActiveRunDuplicates(pool);
-          if (repaired > 0) {
-            console.warn(
-              `[run-history] terminated ${repaired} older duplicate ACTIVE run(s) so the active-run claim could be created (#328).`,
+          // The repair writes events as well as summaries, so it needs a client, not the pool.
+          const client = await pool.connect();
+          try {
+            const repaired = await repairActiveRunDuplicates(client);
+            if (repaired.length > 0) {
+              console.warn(
+                `[run-history] terminated ${repaired.length} older duplicate ACTIVE run(s) so the active-run claim could be created (#328): ${formatTerminatedRuns(repaired)}`,
+              );
+            }
+            await client.query(
+              "CREATE UNIQUE INDEX IF NOT EXISTS df_run_active_issue_uidx ON df_run_summaries (repo, issue) WHERE status IN ('queued','running','blocked')",
             );
+          } finally {
+            client.release();
           }
-          await pool.query(
-            "CREATE UNIQUE INDEX IF NOT EXISTS df_run_active_issue_uidx ON df_run_summaries (repo, issue) WHERE status IN ('queued','running','blocked')",
-          );
         })
         .catch((error) => {
           this.schemaPromise = null;

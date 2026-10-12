@@ -16,6 +16,7 @@ import {
   type RunSummary,
   type RunTrendPoint,
 } from "./run-history";
+import { formatTerminatedRuns } from "./run-history";
 
 export interface AcceptRunDelivery {
   deliveryId: string;
@@ -479,7 +480,12 @@ function isClaimConflict(error: unknown): boolean {
  * repair runs BEFORE the index: newest wins (created_at, then run_id), older ones are marked
  * aborted/terminal. It is a no-op on a consistent database.
  */
-function repairActiveRunDuplicates(db: DatabaseSync, nowIso: string): number {
+type TerminatedRun = { repo: string; issue: number; runId: string };
+
+function repairActiveRunDuplicates(
+  db: DatabaseSync,
+  nowIso: string,
+): TerminatedRun[] {
   const rows = db
     .prepare(
       `SELECT run_id, repo, issue FROM df_run_summaries
@@ -488,17 +494,33 @@ function repairActiveRunDuplicates(db: DatabaseSync, nowIso: string): number {
     )
     .all() as { run_id: string; repo: string; issue: number }[];
   const seen = new Set<string>();
-  const losers: string[] = [];
+  const losers: TerminatedRun[] = [];
   for (const row of rows) {
     const key = `${row.repo}\u0000${row.issue}`;
-    if (seen.has(key)) losers.push(row.run_id);
-    else seen.add(key);
+    if (seen.has(key)) {
+      losers.push({ repo: row.repo, issue: row.issue, runId: row.run_id });
+    } else {
+      seen.add(key);
+    }
   }
   const update = db.prepare(
-    "UPDATE df_run_summaries SET status = 'aborted', stage = 'terminal', updated_at = ? WHERE run_id = ?",
+    "UPDATE df_run_summaries SET status = 'aborted', stage = 'terminal', completed_at = ?, updated_at = ? WHERE run_id = ?",
   );
-  for (const runId of losers) update.run(nowIso, runId);
-  return losers.length;
+  for (const loser of losers) {
+    update.run(nowIso, nowIso, loser.runId);
+    // A terminal transition must be READABLE and RECORDED: without completed_at the record layer
+    // rejects the row ("completedAt to be present for a terminal status"), and without the event
+    // the ledger's timeline would show a run that never ended.
+    writeEvent(db, {
+      runId: loser.runId,
+      eventId: `repair-active-claim:${loser.runId}`,
+      type: "run.terminal",
+      stage: "terminal",
+      occurredAt: nowIso,
+      status: "aborted",
+    });
+  }
+  return losers;
 }
 
 function writeSummary(db: DatabaseSync, summary: RunSummary): void {
@@ -709,9 +731,9 @@ export class SqliteRunHistoryStore implements RunHistoryStore {
       const db = new DatabaseSync(this.path);
       db.exec(SQLITE_SCHEMA);
       const repaired = repairActiveRunDuplicates(db, new Date().toISOString());
-      if (repaired > 0) {
+      if (repaired.length > 0) {
         console.warn(
-          `[run-history] terminated ${repaired} older duplicate ACTIVE run(s) so the active-run claim could be created (#328).`,
+          `[run-history] terminated ${repaired.length} older duplicate ACTIVE run(s) so the active-run claim could be created (#328): ${formatTerminatedRuns(repaired)}`,
         );
       }
       db.exec(
