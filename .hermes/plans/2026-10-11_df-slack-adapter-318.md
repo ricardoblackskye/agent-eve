@@ -17,7 +17,7 @@ getter. The same shape applies here.
 
 ## Why #318 needs NO new wiring
 
-#317's `withNotifications(store, env)` already wraps the store on both write paths and already
+**#317's** `withNotifications(store, env)` already wraps the store on both write paths and already
 consults `createNotificationProvider(env)`. So adding a `slack` driver makes the channel live
 end-to-end — `DF_NOTIFY_DRIVER=slack` + the webhook URL is the whole activation. There is no second
 composition point to forget, which is the point of the decorator.
@@ -46,7 +46,7 @@ API in the process.
 
 ### One honest clarification of the AC written in #318
 
-#318's wording says the adapter "adds **no** new fields". Slack's incoming webhook requires a
+**#318's** wording says the adapter "adds **no** new fields". Slack's incoming webhook requires a
 `{ "text": ... }` envelope, so the adapter necessarily **renders** the canonical payload into that
 wire shape. I will satisfy the *intent* — the message contains **no data beyond the canonical
 payload** and no secret — and say so plainly rather than pretending the body is byte-identical to

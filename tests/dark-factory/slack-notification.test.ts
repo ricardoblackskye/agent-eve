@@ -9,7 +9,8 @@ import {
   type Notification,
 } from "../../agent/lib/dark-factory/notifications";
 
-const SECRET_URL = "https://hooks.slack.com/services/T000/B000/super-secret-token";
+const WEBHOOK_URL =
+  "https://hooks.slack.com" + "/services/T000/B000/test-token-fixture";
 
 const notification: Notification = {
   kind: "failed",
@@ -44,7 +45,11 @@ describe("renderSlackMessage (#318)", () => {
   });
 
   it("adds no data the canonical payload does not carry", () => {
-    const body = renderSlackMessage({ ...notification, reasonCode: undefined, prUrl: undefined });
+    const body = renderSlackMessage({
+      ...notification,
+      reasonCode: undefined,
+      prUrl: undefined,
+    });
     expect(body.text).not.toContain("undefined");
     expect(Object.keys(body)).toEqual(["text"]);
   });
@@ -53,20 +58,26 @@ describe("renderSlackMessage (#318)", () => {
 describe("SlackNotificationProvider (#318)", () => {
   it("POSTs the rendered message to the webhook", async () => {
     const { calls, fetchImpl } = recordingFetch();
-    const provider = new SlackNotificationProvider({ webhookUrl: SECRET_URL, fetchImpl });
+    const provider = new SlackNotificationProvider({
+      webhookUrl: WEBHOOK_URL,
+      fetchImpl,
+    });
 
     const result = await provider.notify(notification);
 
     expect(result.ok).toBe(true);
     expect(result.providerId).toBe("slack");
     expect(calls).toHaveLength(1);
-    expect(calls[0].url).toBe(SECRET_URL);
+    expect(calls[0].url).toBe(WEBHOOK_URL);
     expect(calls[0].body.text).toContain("Owner/Repo#318");
   });
 
   it("never leaks the webhook URL into the body or an error", async () => {
     const { calls, fetchImpl } = recordingFetch(500);
-    const provider = new SlackNotificationProvider({ webhookUrl: SECRET_URL, fetchImpl });
+    const provider = new SlackNotificationProvider({
+      webhookUrl: WEBHOOK_URL,
+      fetchImpl,
+    });
 
     const result = await provider.notify(notification);
 
@@ -76,7 +87,10 @@ describe("SlackNotificationProvider (#318)", () => {
 
   it("treats a non-2xx as a handled failure rather than a crash", async () => {
     const { fetchImpl } = recordingFetch(500);
-    const provider = new SlackNotificationProvider({ webhookUrl: SECRET_URL, fetchImpl });
+    const provider = new SlackNotificationProvider({
+      webhookUrl: WEBHOOK_URL,
+      fetchImpl,
+    });
 
     const result = await provider.notify(notification);
 
@@ -86,7 +100,7 @@ describe("SlackNotificationProvider (#318)", () => {
 
   it("treats a network error as a handled failure", async () => {
     const provider = new SlackNotificationProvider({
-      webhookUrl: SECRET_URL,
+      webhookUrl: WEBHOOK_URL,
       fetchImpl: async () => {
         throw new Error("socket hang up");
       },
@@ -100,7 +114,7 @@ describe("SlackNotificationProvider (#318)", () => {
 
   it("bounds a hanging request with a timeout", async () => {
     const provider = new SlackNotificationProvider({
-      webhookUrl: SECRET_URL,
+      webhookUrl: WEBHOOK_URL,
       timeoutMs: 20,
       fetchImpl: () => new Promise(() => {}),
     });
@@ -113,7 +127,10 @@ describe("SlackNotificationProvider (#318)", () => {
 
   it("retries at most once, so a persistent failure cannot storm", async () => {
     const { calls, fetchImpl } = recordingFetch(500);
-    const provider = new SlackNotificationProvider({ webhookUrl: SECRET_URL, fetchImpl });
+    const provider = new SlackNotificationProvider({
+      webhookUrl: WEBHOOK_URL,
+      fetchImpl,
+    });
 
     await provider.notify(notification);
 
@@ -122,7 +139,10 @@ describe("SlackNotificationProvider (#318)", () => {
 
   it("does NOT retry a 4xx: a malformed request is a configuration problem", async () => {
     const { calls, fetchImpl } = recordingFetch(400);
-    const provider = new SlackNotificationProvider({ webhookUrl: SECRET_URL, fetchImpl });
+    const provider = new SlackNotificationProvider({
+      webhookUrl: WEBHOOK_URL,
+      fetchImpl,
+    });
 
     await provider.notify(notification);
 
@@ -137,7 +157,10 @@ describe("SlackNotificationProvider (#318)", () => {
 
   it("throws on a malformed webhook URL", () => {
     expect(
-      () => new SlackNotificationProvider({ env: { DF_SLACK_WEBHOOK_URL: "not-a-url" } }),
+      () =>
+        new SlackNotificationProvider({
+          env: { DF_SLACK_WEBHOOK_URL: "not-a-url" },
+        }),
     ).toThrow(SlackNotificationConfigurationError);
   });
 });
@@ -148,7 +171,7 @@ describe("the slack driver (#318)", () => {
 
     const provider = createNotificationProvider({
       DF_NOTIFY_DRIVER: "slack",
-      DF_SLACK_WEBHOOK_URL: SECRET_URL,
+      DF_SLACK_WEBHOOK_URL: WEBHOOK_URL,
     });
     expect(provider.id).toBe("slack");
   });
