@@ -16,6 +16,7 @@ import {
   type RunSummary,
   type RunTrendPoint,
 } from "./run-history";
+import { formatTerminatedRuns } from "./run-history";
 
 export interface AcceptRunDelivery {
   deliveryId: string;
@@ -58,6 +59,12 @@ export interface AdvanceRunControlDelivery extends ClaimRunControlDelivery {
   completed?: boolean;
 }
 
+/** The ACTIVE run holding the claim for a repo+issue (#328). */
+export interface ActiveRunConflict {
+  runId: string;
+  status: RunStatus;
+}
+
 export interface RunHistoryWriteResult<T> {
   ok: boolean;
   mode: "live" | "blocked";
@@ -65,6 +72,11 @@ export interface RunHistoryWriteResult<T> {
   value?: T;
   duplicate?: boolean;
   error?: string;
+  /**
+   * Set when an ACTIVE run for the same repo+issue already holds the claim (#328).
+   * `ok` stays true: the delivery was handled, it simply started NO new run.
+   */
+  activeConflict?: ActiveRunConflict;
 }
 
 export interface RunHistoryReadResult<T> {
@@ -249,7 +261,11 @@ function readTrace(value: string): RunEvent["trace"] | undefined {
 function readBreakerTrip(value: string): RunEvent["breakerTrip"] | undefined {
   try {
     const parsed = JSON.parse(value);
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    if (
+      typeof parsed !== "object" ||
+      parsed === null ||
+      Array.isArray(parsed)
+    ) {
       return undefined;
     }
     return parsed as RunEvent["breakerTrip"];
@@ -301,9 +317,9 @@ function rowToEvent(row: RunEventRow): PersistedRunEvent {
       ...(row.trace !== null && row.trace !== undefined
         ? { trace: readTrace(row.trace) }
         : {}),
-        ...(row.breaker_trip !== null && row.breaker_trip !== undefined
-          ? { breakerTrip: readBreakerTrip(row.breaker_trip) }
-          : {}),
+      ...(row.breaker_trip !== null && row.breaker_trip !== undefined
+        ? { breakerTrip: readBreakerTrip(row.breaker_trip) }
+        : {}),
     }),
   };
 }
@@ -344,7 +360,7 @@ const SQLITE_SCHEMA = `
     ON df_run_summaries (created_at DESC, run_id DESC);
   CREATE INDEX IF NOT EXISTS df_run_summaries_repo_idx
     ON df_run_summaries (repo, created_at DESC, run_id DESC);
-  DROP INDEX IF EXISTS df_run_active_issue_uidx;
+  -- df_run_active_issue_uidx is created in ensureSchema AFTER the duplicate repair (#328).
 
   CREATE TABLE IF NOT EXISTS df_run_events (
     sequence INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -428,7 +444,83 @@ function rowToSummary(row: RunSummaryRow): RunSummary {
     ...(row.pr_url !== null ? { prUrl: row.pr_url } : {}),
     ...(row.git_diff !== null ? { gitDiff: row.git_diff } : {}),
     ...(row.tenant_id !== null ? { tenantId: row.tenant_id } : {}),
+  });
+}
+
+/**
+ * #328 — the ACTIVE run for a repo+issue, if any. `ok`-shaped refusal data, never a throw.
+ * The ACTIVE set is exactly the partial index predicate.
+ */
+function activeRunHolder(
+  db: DatabaseSync,
+  repo: string,
+  issue: number,
+): ActiveRunConflict | undefined {
+  const row = db
+    .prepare(
+      `SELECT run_id, status FROM df_run_summaries
+        WHERE repo = ? AND issue = ? AND status IN ('queued','running','blocked')
+        LIMIT 1`,
+    )
+    .get(repo, issue) as { run_id: string; status: RunStatus } | undefined;
+  return row ? { runId: row.run_id, status: row.status } : undefined;
+}
+
+/** A UNIQUE violation from the active-run claim index (as opposed to any other write failure). */
+function isClaimConflict(error: unknown): boolean {
+  const code = (error as { code?: string } | null)?.code ?? "";
+  return code.startsWith("SQLITE_CONSTRAINT");
+}
+
+/**
+ * #328 — terminate older ACTIVE duplicates for the same (repo, issue).
+ *
+ * The claim is a partial UNIQUE index, which CANNOT be created while the table still holds two
+ * active runs for one issue — the state the previous code allowed. This bounded, idempotent
+ * repair runs BEFORE the index: newest wins (created_at, then run_id), older ones are marked
+ * aborted/terminal. It is a no-op on a consistent database.
+ */
+type TerminatedRun = { repo: string; issue: number; runId: string };
+
+function repairActiveRunDuplicates(
+  db: DatabaseSync,
+  nowIso: string,
+): TerminatedRun[] {
+  const rows = db
+    .prepare(
+      `SELECT run_id, repo, issue FROM df_run_summaries
+        WHERE status IN ('queued','running','blocked')
+        ORDER BY repo, issue, created_at DESC, run_id DESC`,
+    )
+    .all() as { run_id: string; repo: string; issue: number }[];
+  const seen = new Set<string>();
+  const losers: TerminatedRun[] = [];
+  for (const row of rows) {
+    const key = `${row.repo}\u0000${row.issue}`;
+    if (seen.has(key)) {
+      losers.push({ repo: row.repo, issue: row.issue, runId: row.run_id });
+    } else {
+      seen.add(key);
+    }
+  }
+  const update = db.prepare(
+    "UPDATE df_run_summaries SET status = 'aborted', stage = 'terminal', completed_at = ?, updated_at = ? WHERE run_id = ?",
+  );
+  for (const loser of losers) {
+    update.run(nowIso, nowIso, loser.runId);
+    // A terminal transition must be READABLE and RECORDED: without completed_at the record layer
+    // rejects the row ("completedAt to be present for a terminal status"), and without the event
+    // the ledger's timeline would show a run that never ended.
+    writeEvent(db, {
+      runId: loser.runId,
+      eventId: `repair-active-claim:${loser.runId}`,
+      type: "run.terminal",
+      stage: "terminal",
+      occurredAt: nowIso,
+      status: "aborted",
     });
+  }
+  return losers;
 }
 
 function writeSummary(db: DatabaseSync, summary: RunSummary): void {
@@ -638,6 +730,15 @@ export class SqliteRunHistoryStore implements RunHistoryStore {
     try {
       const db = new DatabaseSync(this.path);
       db.exec(SQLITE_SCHEMA);
+      const repaired = repairActiveRunDuplicates(db, new Date().toISOString());
+      if (repaired.length > 0) {
+        console.warn(
+          `[run-history] terminated ${repaired.length} older duplicate ACTIVE run(s) so the active-run claim could be created (#328): ${formatTerminatedRuns(repaired)}`,
+        );
+      }
+      db.exec(
+        "CREATE UNIQUE INDEX IF NOT EXISTS df_run_active_issue_uidx ON df_run_summaries (repo, issue) WHERE status IN ('queued','running','blocked')",
+      );
       const receiptColumns = db
         .prepare("PRAGMA table_info(df_run_control_receipts)")
         .all() as { name: string }[];
@@ -739,67 +840,109 @@ export class SqliteRunHistoryStore implements RunHistoryStore {
     });
 
     try {
-      const accepted = this.transaction((db) => {
-        const existingDelivery = db
-          .prepare("SELECT run_id FROM df_run_deliveries WHERE delivery_id = ?")
-          .get(eventId) as { run_id?: string } | undefined;
-        if (existingDelivery?.run_id) {
-          const row = db
-            .prepare("SELECT * FROM df_run_summaries WHERE run_id = ?")
-            .get(existingDelivery.run_id) as RunSummaryRow | undefined;
-          if (!row) {
-            throw new Error(
-              `Delivery '${eventId}' points to a missing run summary.`,
-            );
+      const accepted = this.transaction(
+        (
+          db,
+        ): {
+          summary: RunSummary | null;
+          duplicate: boolean;
+          activeConflict?: ActiveRunConflict;
+        } => {
+          const existingDelivery = db
+            .prepare(
+              "SELECT run_id FROM df_run_deliveries WHERE delivery_id = ?",
+            )
+            .get(eventId) as { run_id?: string } | undefined;
+          if (existingDelivery?.run_id) {
+            const row = db
+              .prepare("SELECT * FROM df_run_summaries WHERE run_id = ?")
+              .get(existingDelivery.run_id) as RunSummaryRow | undefined;
+            if (!row) {
+              throw new Error(
+                `Delivery '${eventId}' points to a missing run summary.`,
+              );
+            }
+            const existing = rowToSummary(row);
+            if (
+              existing.repo !== normalizedInput.repo ||
+              existing.issue !== normalizedInput.issue
+            ) {
+              throw new Error(
+                `Delivery '${eventId}' was replayed with a different repo/issue identity.`,
+              );
+            }
+            return { summary: existing, duplicate: true };
           }
-          const existing = rowToSummary(row);
-          if (
-            existing.repo !== normalizedInput.repo ||
-            existing.issue !== normalizedInput.issue
-          ) {
-            throw new Error(
-              `Delivery '${eventId}' was replayed with a different repo/issue identity.`,
-            );
+
+          // #328 — the ATOMIC active-run claim. This is the single place a run is
+          // created, so enforcing it here means no caller can defeat it. The partial
+          // UNIQUE index on df_run_summaries is the backstop for a true race (see the
+          // isClaimConflict catch below); this read makes the common path clean.
+          const holder = activeRunHolder(
+            db,
+            normalizedInput.repo,
+            normalizedInput.issue,
+          );
+          if (holder) {
+            return { summary: null, duplicate: false, activeConflict: holder };
           }
-          return { summary: existing, duplicate: true };
-        }
 
-        const runId = this.idFactory();
-        const createdAt = toRunEvent({
-          eventId,
-          runId,
-          type: "run.accepted",
-          stage: "trigger",
-          occurredAt: input.receivedAt,
-          status: "queued",
-        });
-        const initial: RunSummary = toRunSummary({
-          runId,
-          repo: input.repo,
-          issue: input.issue,
-          tenantId: input.tenantId,
-          status: "queued",
-          stage: "trigger",
-          createdAt: createdAt.occurredAt,
-          updatedAt: createdAt.occurredAt,
-          attemptCount: 0,
-          reviewCount: 0,
-          iterationCount: 0,
-          fixCycleCount: 0,
-        });
+          const runId = this.idFactory();
+          const createdAt = toRunEvent({
+            eventId,
+            runId,
+            type: "run.accepted",
+            stage: "trigger",
+            occurredAt: input.receivedAt,
+            status: "queued",
+          });
+          const initial: RunSummary = toRunSummary({
+            runId,
+            repo: input.repo,
+            issue: input.issue,
+            tenantId: input.tenantId,
+            status: "queued",
+            stage: "trigger",
+            createdAt: createdAt.occurredAt,
+            updatedAt: createdAt.occurredAt,
+            attemptCount: 0,
+            reviewCount: 0,
+            iterationCount: 0,
+            fixCycleCount: 0,
+          });
 
-        writeSummary(db, initial);
-        writeEvent(db, createdAt);
-        db.prepare(
-          "INSERT INTO df_run_deliveries (delivery_id, run_id) VALUES (?, ?)",
-        ).run(eventId, runId);
-        return { summary: initial, duplicate: false };
-      });
+          try {
+            writeSummary(db, initial);
+          } catch (error) {
+            const racer = isClaimConflict(error)
+              ? activeRunHolder(db, normalizedInput.repo, normalizedInput.issue)
+              : undefined;
+            if (racer) {
+              return { summary: null, duplicate: false, activeConflict: racer };
+            }
+            throw error;
+          }
+          writeEvent(db, createdAt);
+          db.prepare(
+            "INSERT INTO df_run_deliveries (delivery_id, run_id) VALUES (?, ?)",
+          ).run(eventId, runId);
+          return { summary: initial, duplicate: false };
+        },
+      );
+      if (accepted.activeConflict) {
+        return {
+          ok: true,
+          mode: "live",
+          providerId: this.id,
+          duplicate: false,
+          activeConflict: accepted.activeConflict,
+        };
+      }
       return {
         ok: true,
         mode: "live",
         providerId: this.id,
-        value: accepted.summary,
+        ...(accepted.summary ? { value: accepted.summary } : {}),
         duplicate: accepted.duplicate,
       };
     } catch (error) {

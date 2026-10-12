@@ -760,6 +760,22 @@ export async function runDarkFactoryDispatch(
     // repository reassignment must not rewrite this run's attribution.
     tenantId: await resolveRunTenant(deps.tenantStore, baseIntent.repo),
   });
+  // #328 — an ACTIVE run already holds this repo+issue. Held (not an error): the delivery was
+  // acknowledged, it simply started NO second run — and the existing run is named so the operator
+  // can see what is in flight. Mutual exclusion is the isolation available while the worker is a
+  // non-isolated dry-run and the runner shares `process.cwd()`.
+  if (accepted.activeConflict) {
+    return statusResult(
+      true,
+      "held",
+      `an active run already exists for ${baseIntent.repo}#${baseIntent.issue}: ` +
+        `${accepted.activeConflict.runId} (${accepted.activeConflict.status}); not starting a second run`,
+      {
+        runId: accepted.activeConflict.runId,
+        runStatus: accepted.activeConflict.status,
+      },
+    );
+  }
   if (!accepted.ok || !accepted.value) {
     const error = accepted.error ?? "run acceptance could not be persisted";
     return statusResult(false, "refused", error, { error });

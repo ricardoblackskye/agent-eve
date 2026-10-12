@@ -34,10 +34,20 @@ export function normalizeRunDateRange(
 }
 
 export type RunStatus =
-  "queued" | "running" | "blocked" | "aborted" | "succeeded" | "failed";
+  | "queued"
+  | "running"
+  | "blocked"
+  | "aborted"
+  | "succeeded"
+  | "failed";
 
 export type RunStage =
-  "trigger" | "dispatch" | "worker" | "review" | "pull-request" | "terminal";
+  | "trigger"
+  | "dispatch"
+  | "worker"
+  | "review"
+  | "pull-request"
+  | "terminal";
 
 export type RunEventType =
   | "run.accepted"
@@ -481,7 +491,11 @@ function optionalBreakerTrip(value: unknown): BreakerTrip | undefined {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return invalid("breakerTrip", value, "to be a circuit-breaker trip");
   }
-  const obj = value as { reason?: unknown; limit?: unknown; workerMinutes?: unknown };
+  const obj = value as {
+    reason?: unknown;
+    limit?: unknown;
+    workerMinutes?: unknown;
+  };
   if (
     typeof obj.reason !== "string" ||
     !BREAKER_TRIP_REASONS.includes(obj.reason as TripReason)
@@ -850,4 +864,24 @@ export function applyRunEvent(
     ...(event.costUsd !== undefined ? { costUsd: event.costUsd } : {}),
     ...(event.prUrl !== undefined ? { prUrl: event.prUrl } : {}),
   });
+}
+
+/**
+ * #328 — name the runs a duplicate-active-run repair terminated, for the operator log.
+ *
+ * A bare count ("3 runs terminated") cannot be acted on: an operator needs to know WHICH runs the
+ * claim removed in order to trace what depended on them. The list is bounded so one pathological
+ * database cannot emit an unbounded log line.
+ */
+export function formatTerminatedRuns(
+  runs: { repo: string; issue: number; runId: string }[],
+  limit = 10,
+): string {
+  const shown = runs
+    .slice(0, limit)
+    .map((run) => `${run.repo}#${run.issue} (${run.runId})`);
+  const hidden = runs.length - shown.length;
+  return hidden > 0
+    ? `${shown.join(", ")}, and ${hidden} more`
+    : shown.join(", ");
 }
