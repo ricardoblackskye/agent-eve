@@ -82,7 +82,7 @@ describe("notification provider selection (#317)", () => {
 
   it("throws on an unknown driver rather than losing notifications silently", () => {
     expect(() =>
-      createNotificationProvider({ DF_NOTIFY_DRIVER: "slackk" }),
+      createNotificationProvider({ DF_NOTIFY_DRIVER: "carrier-pigeon" }),
     ).toThrow(/supported/i);
   });
 });
