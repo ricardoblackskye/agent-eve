@@ -37,7 +37,7 @@ available today.
    `entry.ts` can return held/refused per AC1 instead of a generic error.
 4. **Migration on EXISTING data** — the risk that most likely killed the index before:
    `CREATE UNIQUE INDEX` FAILS if the deployed table already holds two active runs for one
-   (repo, issue). The migration must therefore be tolerant: a bounded pre-pass that terminalises older
+   (repo, issue). The migration must therefore be tolerant: a bounded pre-pass that terminates older
    active duplicates (newest wins) BEFORE the index is created, idempotent and logged. → ADR `0026`.
 
 ## Tasks (RED → GREEN)
