@@ -84,3 +84,6 @@ changes, write a new one that supersedes it.
 | [0028](0028-df-sandbox-execution-seam.md)                         | The sandbox execution backend is a fail-closed, configuration-selected seam       | Accepted |
 | [0029](0029-df-code-author-seam.md)                                | The code author is a fail-closed, configuration-selected seam                    | Accepted |
 | [0030](0030-df-llm-gateway.md)                                    | Sandbox model calls are governed at an in-repo gateway                           | Accepted |
+| [0031](0031-df-runner-consumes-author-seam.md)                        | The runner consumes the code-author seam (fail-closed)                          | Accepted |
+| [0032](0032-df-sandbox-lifecycle-owned-by-runner.md)                   | Sandbox lifecycle is the runner's responsibility, force-disposed                | Accepted |
+| [0033](0033-df-gateway-spend-is-run-history-event.md)                  | Sandbox spend is a first-class run-history event                                | Accepted |

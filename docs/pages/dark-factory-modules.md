@@ -254,6 +254,16 @@ Dark Factory — record a cost refusal on a run (#270). Appends a terminal, fail
 
 **Decisions:** [ADR 0020](../../docs/adr/0020-cost-governance-is-live-on-every-llm-call.md)
 
+## gateway-recorder
+
+Dark Factory — record the governed gateway's decisions into run-history (#281, R2b/B3). Adapts the gateway's optional `recordUsage`/`recordRefusal` hooks (invoked by the core with the run id from the lease) to run-history writes: a forwarded call appends a `run.cost` event carrying the estimated USD, and a refusal appends the machine-readable `CostGovernorRefusal` code. A history outage is swallowed, so it can never fail a forwarded call.
+
+**Source:** [`agent/lib/dark-factory/gateway-recorder.ts`](../../agent/lib/dark-factory/gateway-recorder.ts)
+
+**Exports:** `GatewayRecorder`, `createGatewayRecorder`
+
+**Decisions:** [ADR 0030](../../docs/adr/0030-df-llm-gateway.md)
+
 ## credentials
 
 Dark Factory — Credential ingress / worker privilege boundary (issues #141 / story #142). A BROKER, not a token dispenser: it holds the operator's token, mints opaque short-lived leases (handle + TTL + repo allow-list) and adjudicates every worker access request. The token is never handed to a sandbox — which is what makes #142 AC4 ("MUST NOT deliver a broad long-lived PAT to any worker sandbox") true by construction rather than by policy. R2 scope: this is the policy/adjudication seam. It performs NO GitHub API call itself — the concrete privileged operation that consumes the token is wired by the R3 worker. `mode: "live"` therefore means "a token is configured and leases may be issued", not "GitHub has been contacted".

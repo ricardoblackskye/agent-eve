@@ -59,7 +59,8 @@ export type RunEventType =
   | "worker.completed"
   | "review.round"
   | "pr.opened"
-  | "run.terminal";
+  | "run.terminal"
+  | "run.cost";
 
 /** One current, provider-neutral projection for a single execution. */
 export interface RunSummary {
@@ -257,6 +258,7 @@ const RUN_EVENT_TYPES: readonly RunEventType[] = [
   "review.round",
   "pr.opened",
   "run.terminal",
+  "run.cost",
 ];
 const TERMINAL_STATUSES: readonly RunStatus[] = [
   "aborted",
