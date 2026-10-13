@@ -17,6 +17,9 @@ test.describe("Dark Factory overview styling", () => {
   test("the usage table is styled, not bare", async ({ page }) => {
     await page.goto("/dark-factory");
     const table = page.locator("table.df-usage-table").first();
+    // Documentation: names the empty state at the point of use. The locator assertions above are
+    // what actually fail when the store is empty — proven by re-running this file against an empty
+    // DF_USAGE_DB_PATH, where both tests fail with "element(s) not found".
     await expect(table).toBeVisible();
 
     // The bug was "no styles at all", so assert the computed properties that
@@ -62,9 +65,9 @@ test.describe("Dark Factory overview styling", () => {
     // table box cut the top off "Totals" / "By model" / "By day" / "By run",
     // because a `<caption>` sits outside the table's box.
     await expect(table.locator("caption").first()).toBeVisible();
-    expect(await table.evaluate((node) => getComputedStyle(node).overflow)).toBe(
-      "visible",
-    );
+    expect(
+      await table.evaluate((node) => getComputedStyle(node).overflow),
+    ).toBe("visible");
   });
 
   test("recent executions is a table with a header per column", async ({
@@ -113,5 +116,63 @@ test.describe("Dark Factory overview styling", () => {
         document.documentElement.clientWidth,
     );
     expect(overflow).toBeLessThanOrEqual(1);
+  });
+});
+
+/**
+ * #278 T3 — the cost panels added by #277/#339 asserted in the BROWSER.
+ *
+ * The unit tests (#339) prove the absent-not-zero rule in isolation; this proves the panels actually
+ * render data on a real page. Only stores the browser-test job configures are used here — the usage and
+ * tenant stores — because the cost-budget driver is deliberately absent from that job (arming it
+ * without caps refuses every model call, ADR 0015).
+ *
+ * Anti-vacuity is PROVEN here, not assumed. Against the seeded usage store this file passes;
+ * pointed at an EMPTY usage store these two tests FAIL on the chart and table locators, because an
+ * empty store makes the panel render its empty state and nothing matches. The LOCATORS are therefore
+ * the load-bearing assertions.
+ *
+ * The `Nothing measured for this window` check at the end of each test is DOCUMENTATION rather than the
+ * guard: it names the empty state at the point of use. It does not fire in practice, because the
+ * locator above it fails first whenever the data is absent.
+ */
+test.describe("#278 the cost panels render data, not empty states", () => {
+  test.beforeEach(async ({ page }) => {
+    await signInAsAllowed(page);
+  });
+
+  test("the daily cost and cost-by-model charts render as charts", async ({
+    page,
+  }) => {
+    await page.goto("/dark-factory");
+
+    const daily = page.locator('svg[aria-label="Daily cost"]');
+    await expect(daily).toBeVisible();
+    expect(await daily.locator("circle").count()).toBeGreaterThan(0);
+
+    const byModel = page.locator('svg[aria-label="Cost by model"]');
+    await expect(byModel).toBeVisible();
+    expect(await byModel.locator("rect").count()).toBeGreaterThan(0);
+
+    await expect(
+      page.getByText("Nothing measured for this window"),
+    ).toHaveCount(0);
+  });
+
+  test("the by-task-type breakdown renders rows", async ({ page }) => {
+    await page.goto("/dark-factory");
+
+    const table = page.locator("table", {
+      has: page.locator("caption", { hasText: "By task type" }),
+    });
+    // Documentation: names the empty state at the point of use. The locator assertions above are
+    // what actually fail when the store is empty — proven by re-running this file against an empty
+    // DF_USAGE_DB_PATH, where both tests fail with "element(s) not found".
+    await expect(table).toBeVisible();
+    expect(await table.locator("tbody tr").count()).toBeGreaterThan(0);
+
+    await expect(
+      page.getByText("Nothing measured for this window"),
+    ).toHaveCount(0);
   });
 });

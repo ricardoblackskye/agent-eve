@@ -23,7 +23,10 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { decideDarkFactoryTrigger, TRIGGER_LABELS } from "../../agent/lib/dark-factory/trigger";
+import {
+  decideDarkFactoryTrigger,
+  TRIGGER_LABELS,
+} from "../../agent/lib/dark-factory/trigger";
 import {
   runDarkFactoryDispatch,
   type EntryDeps,
@@ -31,13 +34,23 @@ import {
 } from "../../agent/lib/dark-factory/entry";
 import { SqliteRunHistoryStore } from "../../agent/lib/dark-factory/run-history-store";
 import { SqliteStateAdapter } from "../../agent/lib/dark-factory/state";
-import { Dispatcher, toDispatchEvent } from "../../agent/lib/dark-factory/dispatch";
+import {
+  Dispatcher,
+  toDispatchEvent,
+} from "../../agent/lib/dark-factory/dispatch";
 import {
   createDispatchHandler,
   type FactoryStages,
 } from "../../agent/lib/dark-factory/dispatch-handler";
-import { createWorkspaceTools, runMultiFileCodingLoop } from "../../agent/lib/dark-factory/developer-agent";
-import { TesterAgent, toValidationRequest, type CommandRunner } from "../../agent/lib/dark-factory/tester-agent";
+import {
+  createWorkspaceTools,
+  runMultiFileCodingLoop,
+} from "../../agent/lib/dark-factory/developer-agent";
+import {
+  TesterAgent,
+  toValidationRequest,
+  type CommandRunner,
+} from "../../agent/lib/dark-factory/tester-agent";
 import {
   runDefinitionOfDone,
   type DefinitionOfDoneDeps,
@@ -47,6 +60,7 @@ import {
 } from "../../agent/lib/dark-factory/definition-of-done";
 import type { ExecutionPlan } from "../../agent/lib/dark-factory/plan-validator";
 import { GitHubPrWriter } from "../../agent/lib/dark-factory/pr-writer";
+import { applyTerminalLifecycle } from "../../agent/lib/dark-factory/run-finalizer";
 
 // --- helpers (mirror tests/dark-factory/entry.test.ts) ---------------------------------
 
@@ -106,7 +120,11 @@ function triggerPayload(over: Record<string, unknown> = {}) {
     label: { name: "dark-factory" },
     sender: { login: "ricardoblackskye" },
     repository: { full_name: REPO },
-    issue: { number: 269, title: "Prove the pipeline", body: "Intent: prove it." },
+    issue: {
+      number: 269,
+      title: "Prove the pipeline",
+      body: "Intent: prove it.",
+    },
     ...over,
   } as never;
 }
@@ -115,7 +133,9 @@ const PLAN: ExecutionPlan = {
   storyId: 269,
   title: "Prove the pipeline end to end",
   summary: "Wire the Dark Factory pipeline and open a PR",
-  targetFiles: [{ path: "app/feature.ts", action: "create", rationale: "the feature" }],
+  targetFiles: [
+    { path: "app/feature.ts", action: "create", rationale: "the feature" },
+  ],
   acceptanceCriteriaMap: [
     {
       acId: "AC1",
@@ -127,7 +147,11 @@ const PLAN: ExecutionPlan = {
 };
 
 /** A tester command runner that returns every check as passing. */
-const passingRunner: CommandRunner = async () => ({ exitCode: 0, stdout: "ok", stderr: "" });
+const passingRunner: CommandRunner = async () => ({
+  exitCode: 0,
+  stdout: "ok",
+  stderr: "",
+});
 
 // --- the pipeline ---------------------------------------------------------------------
 
@@ -138,7 +162,10 @@ describe("#269 end-to-end pipeline (issue -> PR)", () => {
     expect(decision.kind).toBe("trigger");
 
     // 2. ENTRY — record the run, apply df:running, hand off out of band.
-    const runHistory = new SqliteRunHistoryStore(":memory:", () => `run-269-${++runIdCount}`);
+    const runHistory = new SqliteRunHistoryStore(
+      ":memory:",
+      () => `run-269-${++runIdCount}`,
+    );
     historyStores.push(runHistory);
     const { impl: postSession, calls: postCalls } = recordingPost();
     const { writer: labels, ops: labelOps } = recordingLabels();
@@ -162,10 +189,18 @@ describe("#269 end-to-end pipeline (issue -> PR)", () => {
     const tools = createWorkspaceTools(tempDir);
 
     const testerAgent = new TesterAgent({}, { commandRunner: passingRunner });
-    const prCalls: { owner: string; repo: string; options: Record<string, unknown> }[] = [];
+    const prCalls: {
+      owner: string;
+      repo: string;
+      options: Record<string, unknown>;
+    }[] = [];
     const prWriter: PrOpener = {
       createPullRequest: async (owner, repo, options) => {
-        prCalls.push({ owner, repo, options: options as unknown as Record<string, unknown> });
+        prCalls.push({
+          owner,
+          repo,
+          options: options as unknown as Record<string, unknown>,
+        });
         return {
           ok: true,
           status: 201,
@@ -180,7 +215,9 @@ describe("#269 end-to-end pipeline (issue -> PR)", () => {
         };
       },
     };
-    const commentWriter: PrCommentWriter = { postComment: async () => ({ ok: true }) };
+    const commentWriter: PrCommentWriter = {
+      postComment: async () => ({ ok: true }),
+    };
     const dodDeps: DefinitionOfDoneDeps = {
       prWriter,
       commentWriter,
@@ -212,16 +249,22 @@ describe("#269 end-to-end pipeline (issue -> PR)", () => {
           maxIterations: 1,
           worker: async (c) => {
             for (const file of c.plan.targetFiles) {
-              await c.tools.writeFile(file.path, "// implemented by the developer stage\n");
+              await c.tools.writeFile(
+                file.path,
+                "// implemented by the developer stage\n",
+              );
             }
             return { passed: true };
           },
         });
-        if (loop.status !== "success") throw new Error("developer loop did not pass");
+        if (loop.status !== "success")
+          throw new Error("developer loop did not pass");
       },
       tester: async () => {
         order.push("tester");
-        const report = await testerAgent.runValidation(toValidationRequest({ branch: dodTask.head }));
+        const report = await testerAgent.runValidation(
+          toValidationRequest({ branch: dodTask.head }),
+        );
         return report.overall === "pass"
           ? { passed: true }
           : { passed: false, reason: `gate ${report.overall}` };
@@ -229,7 +272,8 @@ describe("#269 end-to-end pipeline (issue -> PR)", () => {
       pr: async () => {
         order.push("pr");
         const dod = await runDefinitionOfDone(dodDeps, dodTask);
-        if (!dod.ok) throw new Error(`definition of done failed: ${dod.reason}`);
+        if (!dod.ok)
+          throw new Error(`definition of done failed: ${dod.reason}`);
       },
     };
 
@@ -254,11 +298,49 @@ describe("#269 end-to-end pipeline (issue -> PR)", () => {
     expect(outcome.attempts).toBe(1);
     expect(order).toEqual(["developer", "tester", "pr"]);
     // The developer actually wrote the planned file.
-    expect(await tools.readFile("app/feature.ts")).toContain("implemented by the developer stage");
+    expect(await tools.readFile("app/feature.ts")).toContain(
+      "implemented by the developer stage",
+    );
     // The PR was opened exactly once.
     expect(prCalls).toHaveLength(1);
-    expect(prCalls[0]).toMatchObject({ owner: "ricardoblackskye", repo: "agent-eve" });
-    expect(prCalls[0].options).toMatchObject({ head: "feat/df-pipeline-e2e-269", base: "main" });
+    expect(prCalls[0]).toMatchObject({
+      owner: "ricardoblackskye",
+      repo: "agent-eve",
+    });
+    expect(prCalls[0].options).toMatchObject({
+      head: "feat/df-pipeline-e2e-269",
+      base: "main",
+    });
+
+    // 5. RUN COMPLETION — the finalizer's terminal stage (#284), which the runner drives AFTER the
+    // stages composed above. #269 proved the pipeline only up to PR-opened; the terminal stage was
+    // covered in isolation only, never on the end-to-end path (#278, T2). Composing it here makes
+    // issue -> PR -> completion a single proven path.
+    const dodResult = await runDefinitionOfDone(dodDeps, dodTask);
+    const finalised = await applyTerminalLifecycle(
+      { labelWriter: labels, runHistory },
+      {
+        repo: REPO,
+        issue: 269,
+        runId,
+        terminalStatus: "succeeded",
+        // Required for `succeeded`: `df:done` is applied ONLY when the gate passed (#271).
+        dodResult,
+        occurredAt: "2026-10-13T12:00:00.000Z",
+      },
+    );
+
+    expect(finalised.applied).toBe(true);
+
+    // Non-vacuous: step 2 asserted labelOps was EXACTLY [+df:running], so df:done appearing here is a
+    // real terminal transition and not something already true earlier in the run.
+    expect(labelOps).toContain(`+${TRIGGER_LABELS.done}`);
+
+    const runs = await runHistory.listRuns();
+    const recorded = (runs.value?.items ?? []).find(
+      (row) => row.runId === runId,
+    );
+    expect(recorded?.status).toBe("succeeded");
   });
 });
 
@@ -266,12 +348,17 @@ describe("#269 the terminal-label guard prevents a second run", () => {
   for (const terminal of [TRIGGER_LABELS.done, TRIGGER_LABELS.failed]) {
     it(`does not start a run when the issue already carries '${terminal}'`, async () => {
       const decision = decideDarkFactoryTrigger(
-        triggerPayload({ issue: { number: 269, labels: [{ name: terminal }] } }),
+        triggerPayload({
+          issue: { number: 269, labels: [{ name: terminal }] },
+        }),
         ENV,
       );
       expect(decision.kind).toBe("not-a-trigger");
 
-      const runHistory = new SqliteRunHistoryStore(":memory:", () => `run-guard-${++runIdCount}`);
+      const runHistory = new SqliteRunHistoryStore(
+        ":memory:",
+        () => `run-guard-${++runIdCount}`,
+      );
       historyStores.push(runHistory);
       const { impl: postSession, calls: postCalls } = recordingPost();
       const { writer: labels, ops: labelOps } = recordingLabels();
@@ -292,7 +379,10 @@ describe("#269 the terminal-label guard prevents a second run", () => {
   }
 
   it("holds a re-delivered trigger as a duplicate (no second run)", async () => {
-    const runHistory = new SqliteRunHistoryStore(":memory:", () => `run-dup-${++runIdCount}`);
+    const runHistory = new SqliteRunHistoryStore(
+      ":memory:",
+      () => `run-dup-${++runIdCount}`,
+    );
     historyStores.push(runHistory);
     const { impl: postSession } = recordingPost();
     const { writer: labels } = recordingLabels();
@@ -315,7 +405,10 @@ describe("#269 the terminal-label guard prevents a second run", () => {
 
 describe("#269 the PR is opened but never merged", () => {
   it("the PR writer exposes no merge verb", () => {
-    const proto = GitHubPrWriter.prototype as unknown as Record<string, unknown>;
+    const proto = GitHubPrWriter.prototype as unknown as Record<
+      string,
+      unknown
+    >;
     expect(proto.merge).toBeUndefined();
     expect(proto.mergePullRequest).toBeUndefined();
   });
