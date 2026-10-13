@@ -80,3 +80,4 @@ changes, write a new one that supersedes it.
 | [0024](0024-record-the-trip-on-the-run.md)                        | A circuit-breaker trip is recorded on the run; the breaker stamps the cap it hit | Accepted |
 | [0025](0025-filter-child-process-environments.md)                 | A shared allow-list filters the env handed to a child process                    | Accepted |
 | [0026](0026-atomic-active-run-claim.md)                           | An active-run claim is atomic: one active run per repo+issue                     | Accepted |
+| [0027](0027-model-prices-are-reservation-ceilings.md)             | Model prices are reservation ceilings, not exact rates                           | Accepted |
