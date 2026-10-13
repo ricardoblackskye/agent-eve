@@ -41,6 +41,8 @@ import {
 } from "../agent/lib/dark-factory/developer-agent";
 import { createCircuitBreaker } from "../agent/lib/dark-factory/circuit-breaker";
 import { createSandboxProvider } from "../agent/lib/dark-factory/sandbox-provider";
+import type { SandboxProvider } from "../agent/lib/dark-factory/sandbox";
+import type { WorkspaceTools } from "../agent/lib/dark-factory/developer-agent";
 import { createCodeAuthorProvider } from "../agent/lib/dark-factory/code-author-provider";
 import type { CodeAuthorProvider } from "../agent/lib/dark-factory/code-author";
 import { createCodingLoopBreaker } from "../agent/lib/dark-factory/breaker-wiring";
@@ -349,7 +351,8 @@ async function main(): Promise<void> {
   );
   // #280: the execution backend is configuration-selected. Unset DF_SANDBOX_DRIVER = the local
   // filesystem, i.e. today's behaviour; an unknown value throws before any side effect.
-  const workspaceTools = createSandboxProvider().create(process.cwd());
+  // #281 (R2b/B2): the sandbox is created once per run and force-disposed by runCodingPhase,
+  // so the runner owns the lifecycle (closing the SDK client does not terminate a sandbox).
 
   // #281 (R2b/B1): the author is configuration-selected. Unset DF_CODE_AUTHOR = in-process, i.e. the
   // governed path above, unchanged. The in-process adapter calls `generate`, which runs through the
@@ -395,49 +398,57 @@ async function main(): Promise<void> {
 
   let loopResult: LoopResult;
   try {
-    loopResult = await runMultiFileCodingLoop({
-      plan: executionPlan,
-      tools: workspaceTools,
-      maxIterations: developerAgent.maxIterations,
-      breaker: loopBreaker,
-      checkpoint,
-      worker: async (ctx) => {
-        console.log(
-          `  -> Coding Iteration ${ctx.iteration}/${developerAgent.maxIterations}...`,
-        );
+    loopResult = await runCodingPhase(
+      createSandboxProvider(),
+      process.cwd(),
+      async (workspaceTools) =>
+        runMultiFileCodingLoop({
+          plan: executionPlan,
+          tools: workspaceTools,
+          maxIterations: developerAgent.maxIterations,
+          breaker: loopBreaker,
+          checkpoint,
+          worker: async (ctx) => {
+            console.log(
+              `  -> Coding Iteration ${ctx.iteration}/${developerAgent.maxIterations}...`,
+            );
 
-        // #281 (R2b/B1): the author is configuration-selected. With DF_CODE_AUTHOR unset this is the
-        // same governed path as before; a failed author propagates as a failed iteration.
-        let authored: { files: Record<string, string>; raw: string };
-        try {
-          authored = await authorFiles(codeAuthor, ctx.plan, ctx.tools);
-        } catch (err: any) {
-          return { passed: false, output: `Authoring error: ${err.message}` };
-        }
-        for (const [filePath, content] of Object.entries(authored.files)) {
-          console.log(`     Wrote ${filePath} (${content.length} chars)`);
-        }
+            // #281 (R2b/B1): the author is configuration-selected. With DF_CODE_AUTHOR unset this is the
+            // same governed path as before; a failed author propagates as a failed iteration.
+            let authored: { files: Record<string, string>; raw: string };
+            try {
+              authored = await authorFiles(codeAuthor, ctx.plan, ctx.tools);
+            } catch (err: any) {
+              return {
+                passed: false,
+                output: `Authoring error: ${err.message}`,
+              };
+            }
+            for (const [filePath, content] of Object.entries(authored.files)) {
+              console.log(`     Wrote ${filePath} (${content.length} chars)`);
+            }
 
-        // Run vitest to verify acceptance criteria
-        const testOutcome = await ctx.tools.runTests("npx vitest run");
-        console.log(
-          `     Test result: ${testOutcome.passed ? "PASS" : "FAIL"}`,
-        );
+            // Run vitest to verify acceptance criteria
+            const testOutcome = await ctx.tools.runTests("npx vitest run");
+            console.log(
+              `     Test result: ${testOutcome.passed ? "PASS" : "FAIL"}`,
+            );
 
-        if (testOutcome.passed) {
-          // Record passing test results for each mapped AC
-          for (const ac of ctx.plan.acceptanceCriteriaMap) {
-            capturedTestResults.push({
-              testFile: ac.testFile,
-              testCaseName: ac.testCaseName,
-              passed: true,
-            });
-          }
-        }
+            if (testOutcome.passed) {
+              // Record passing test results for each mapped AC
+              for (const ac of ctx.plan.acceptanceCriteriaMap) {
+                capturedTestResults.push({
+                  testFile: ac.testFile,
+                  testCaseName: ac.testCaseName,
+                  passed: true,
+                });
+              }
+            }
 
-        return { passed: testOutcome.passed, output: testOutcome.output };
-      },
-    });
+            return { passed: testOutcome.passed, output: testOutcome.output };
+          },
+        }),
+    );
   } catch (error) {
     // #312: a trip halts fail-closed through the SAME terminal path as the runner's other
     // steps, so a tripped run is never silently left running.
@@ -613,6 +624,26 @@ export async function authorFiles(
     await tools.writeFile(filePath, content);
   }
   return { files: result.files, raw: result.raw };
+}
+
+/**
+ * #281 (R2b/B2) — the runner owns the sandbox lifecycle.
+ *
+ * One sandbox per run; it is force-disposed on success AND on throw (closing the SDK client does not
+ * terminate a sandbox, so a missing dispose is a leak and spend). The recording-double test proves the
+ * order: create -> phase -> dispose, exactly one create, dispose always fires.
+ */
+export async function runCodingPhase<T>(
+  provider: SandboxProvider,
+  workspaceDir: string,
+  phase: (tools: WorkspaceTools) => Promise<T>,
+): Promise<T> {
+  const tools = provider.create(workspaceDir);
+  try {
+    return await phase(tools);
+  } finally {
+    await provider.dispose?.();
+  }
 }
 
 // Only execute main when run as script directly
