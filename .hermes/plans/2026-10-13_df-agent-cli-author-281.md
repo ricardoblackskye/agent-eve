@@ -61,6 +61,42 @@ The platform is up and the client path is proven. Deliverables: `scripts/sandbox
    (`OPENSANDBOX_INSECURE_SERVER=YES`). The script sets it only when no key is supplied, so a
    keyed/remote server can never take the insecure path by accident.
 
+## T3 design (SETTLED — start here in a fresh context)
+
+Recon is complete; nothing below needs re-deriving.
+
+**The seam to REUSE, never re-implement:** `agent/lib/dark-factory/governed-llm-call.ts` —
+`runGovernedLlmCall<T>({ governor, category, model, inputTokens, outputTokens, tenantId?, run, costOf? })`.
+It calls `governor.admit` first, invokes `run()` ONLY after admission, then `settle`s; it RETURNS a
+refusal (`{ok:false, reason, error}`) rather than throwing, and settles conservatively if `run` throws so
+a reservation is never leaked. `costOf(result)` supplies the measured cost. `runGovernedAgentCall`
+(`governed-agent-call.ts:57`) is the runner's wrapper over it and already carries refusal recording —
+mirror that, do not duplicate the reserve/settle contract.
+
+**Shape: thin route + testable core.** `app/api/llm-gateway/route.ts` (OpenAI-compatible) stays thin;
+the decisions live in `agent/lib/dark-factory/llm-gateway.ts` so tests drive the core, not HTTP:
+1. **deny-by-default lease check** — no/invalid lease -> 401, zero side effects;
+2. **model allow-list** — a non-pinned model is rejected before any upstream call;
+3. `runGovernedLlmCall` with `category: "developer"` and **`tenantId` forwarded** (sandbox spend must
+   never fall silently to GLOBAL);
+4. forward to OpenRouter with the key held **server-side**, stream back;
+5. settle, record usage/metrics per run, and **record the refusal on the run**.
+
+**Refuse BEFORE forwarding**, so a refused call costs nothing — that is #270's acceptance criterion
+exercised through the CLI path.
+
+**Lease (decided, per the user's steer):** R3 (#282) owns the credential vault, so R2 uses a **per-run
+gateway token** — opaque, server-issued, bound to `runId` + `tenantId`, never logged or echoed. The
+runner hands it to the sandbox as its API key with the base URL pointed at the gateway. R3 then swaps
+only the DELIVERY mechanism (vault) and leaves this check unchanged. Fail-closed by construction: no
+token -> 401, and always ONE generic error, never a distinguishable message, so the endpoint is not a
+lease-state oracle (R3's acceptance criterion — do not build a shape that works against it).
+
+**Verification: mock-first.** Drive the core against a fixture upstream (fully local, no key), and keep
+the live OpenRouter leg behind the same seam as the last step. Assert: refusal -> 4xx with zero upstream
+calls; allow-list rejects a non-pinned model; tenant attributed (not GLOBAL); the provider key never
+appears in the sandbox env, argv, logs, metrics or errors.
+
 ## Tasks (RED -> GREEN)
 
 1. **T1 — author seam** `agent/lib/dark-factory/code-author.ts`: canonical `CodeAuthorTask` payload +
