@@ -37,7 +37,11 @@ function isBelow(left: number[], right: number[]): boolean {
 }
 
 /** Inside `>= floor, < ceiling` — the shape Dependabot reports as a vulnerable range. */
-function isInsideRange(version: string, floor: number[], ceiling: number[]): boolean {
+function isInsideRange(
+  version: string,
+  floor: number[],
+  ceiling: number[],
+): boolean {
   const parts = semver(version);
   return !isBelow(parts, floor) && isBelow(parts, ceiling);
 }
@@ -66,9 +70,15 @@ describe("#303 undici dependency guard", () => {
     expect(isInsideRange("8.9.0", VULNERABLE_FLOOR, PATCHED_FLOOR)).toBe(true);
     expect(isInsideRange("8.10.1", VULNERABLE_FLOOR, PATCHED_FLOOR)).toBe(true);
     // The floor is the first PATCHED version, so it must NOT be flagged.
-    expect(isInsideRange("8.10.2", VULNERABLE_FLOOR, PATCHED_FLOOR)).toBe(false);
-    expect(isInsideRange("8.11.2", VULNERABLE_FLOOR, PATCHED_FLOOR)).toBe(false);
-    expect(isInsideRange("7.30.0", VULNERABLE_FLOOR, PATCHED_FLOOR)).toBe(false);
+    expect(isInsideRange("8.10.2", VULNERABLE_FLOOR, PATCHED_FLOOR)).toBe(
+      false,
+    );
+    expect(isInsideRange("8.11.2", VULNERABLE_FLOOR, PATCHED_FLOOR)).toBe(
+      false,
+    );
+    expect(isInsideRange("7.30.0", VULNERABLE_FLOOR, PATCHED_FLOOR)).toBe(
+      false,
+    );
     expect(isInsideRange("9.0.0", VULNERABLE_FLOOR, PATCHED_FLOOR)).toBe(false);
   });
 
@@ -93,9 +103,29 @@ describe("#303 undici dependency guard", () => {
   });
 
   it("keeps the eve-scoped override that holds it there", () => {
-    // Scoped to eve on purpose: a global override would also drag the AI SDK's undici 7.x to 8.x.
+    // Scoped to eve on purpose: an unscoped override would drag the AI SDK's undici 7.x to 8.x.
     const override = pkg.overrides?.eve as Record<string, string> | undefined;
     expect(override?.undici).toBeDefined();
-    expect(isBelow(semver(String(override?.undici)), PATCHED_FLOOR)).toBe(false);
+    expect(isBelow(semver(String(override?.undici)), PATCHED_FLOOR)).toBe(
+      false,
+    );
+  });
+
+  it("stops the eve override leaking onto the AI SDK, which declares undici 7.x", () => {
+    // Observed: `{"eve":{"undici":"8.11.2"}}` ALONE also moved @ai-sdk/provider-utils' undici from
+    // 7.30.0 to 8.11.2, violating the `^7.28.0` / `^7.29.0` it declares. npm's dedupe, not ours.
+    // The explicit pin below holds the AI SDK where it was, so the eve fix stays confined to eve.
+    const guard = pkg.overrides?.["@ai-sdk/provider-utils"] as
+      | Record<string, string>
+      | undefined;
+    expect(guard?.undici).toBeDefined();
+
+    const leaked = undiciCopies().filter(
+      (copy) =>
+        (copy.path.startsWith("node_modules/ai/") ||
+          copy.path.startsWith("node_modules/@ai-sdk/")) &&
+        !isBelow(semver(copy.version), [8, 0, 0]),
+    );
+    expect(leaked).toEqual([]);
   });
 });
