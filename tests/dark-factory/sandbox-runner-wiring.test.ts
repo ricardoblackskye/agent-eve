@@ -27,7 +27,7 @@ describe("#280/#281 runner sandbox wiring (source guard)", () => {
     const calls = source.match(/createSandboxProvider\(/g) ?? [];
     expect(calls.length).toBe(1);
     // The single provider is handed to the lifecycle owner, which creates AND disposes it.
-    expect(source).toMatch(/runCodingPhase\(\s*createSandboxProvider\(\)/);
+    expect(source).toMatch(/runCodingPhase\(\s*createSandboxProvider\(/);
     expect(source).toMatch(/provider\.dispose\?\.\(\)/);
   });
 });

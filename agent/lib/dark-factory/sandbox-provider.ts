@@ -1,5 +1,8 @@
 import { createLocalSandboxProvider } from "./local-sandbox";
-import { createLiveSandbox, createOpenSandboxProvider } from "./opensandbox-driver";
+import {
+  createLiveSandbox,
+  createOpenSandboxProvider,
+} from "./opensandbox-driver";
 import { createDryRunSandboxProvider, type SandboxProvider } from "./sandbox";
 
 /**
@@ -16,7 +19,11 @@ import { createDryRunSandboxProvider, type SandboxProvider } from "./sandbox";
 
 /** The drivers this release can select. Not the same as the `SandboxDriver` union, which also
  * includes the internal `refusing` state. */
-export const SUPPORTED_SANDBOX_DRIVERS = ["local", "dry-run", "opensandbox"] as const;
+export const SUPPORTED_SANDBOX_DRIVERS = [
+  "local",
+  "dry-run",
+  "opensandbox",
+] as const;
 
 export class SandboxConfigError extends Error {
   constructor(message: string) {
@@ -36,11 +43,14 @@ export interface SandboxEnv {
 
 export function createSandboxProvider(
   env: SandboxEnv = { DF_SANDBOX_DRIVER: process.env.DF_SANDBOX_DRIVER },
+  _deps: { createSandbox?: typeof createLiveSandbox } = {},
+  runId?: string | undefined,
 ): SandboxProvider {
   const requested = (env.DF_SANDBOX_DRIVER ?? "").trim();
 
   // Absence = today's behaviour. This is the fail-closed default, not a permissive one.
-  if (requested === "" || requested === "local") return createLocalSandboxProvider();
+  if (requested === "" || requested === "local")
+    return createLocalSandboxProvider();
   if (requested === "dry-run") return createDryRunSandboxProvider();
   if (requested === "opensandbox") {
     // Live execution inside a sandbox. Egress is deny-by-default, so the gateway host is the only
@@ -52,7 +62,10 @@ export function createSandboxProvider(
         DF_SANDBOX_EGRESS_ALLOW: process.env.DF_SANDBOX_EGRESS_ALLOW,
         DF_SANDBOX_WORKSPACE: process.env.DF_SANDBOX_WORKSPACE,
       },
-      { createSandbox: createLiveSandbox },
+      {
+        createSandbox: _deps.createSandbox ?? createLiveSandbox,
+        metadata: runId ? { run: runId } : undefined,
+      },
     );
   }
 

@@ -81,9 +81,10 @@ changes, write a new one that supersedes it.
 | [0025](0025-filter-child-process-environments.md)                 | A shared allow-list filters the env handed to a child process                    | Accepted |
 | [0026](0026-atomic-active-run-claim.md)                           | An active-run claim is atomic: one active run per repo+issue                     | Accepted |
 | [0027](0027-model-prices-are-reservation-ceilings.md)             | Model prices are reservation ceilings, not exact rates                           | Accepted |
-| [0028](0028-df-sandbox-execution-seam.md)                         | The sandbox execution backend is a fail-closed, configuration-selected seam       | Accepted |
-| [0029](0029-df-code-author-seam.md)                                | The code author is a fail-closed, configuration-selected seam                    | Accepted |
+| [0028](0028-df-sandbox-execution-seam.md)                         | The sandbox execution backend is a fail-closed, configuration-selected seam      | Accepted |
+| [0029](0029-df-code-author-seam.md)                               | The code author is a fail-closed, configuration-selected seam                    | Accepted |
 | [0030](0030-df-llm-gateway.md)                                    | Sandbox model calls are governed at an in-repo gateway                           | Accepted |
-| [0031](0031-df-runner-consumes-author-seam.md)                        | The runner consumes the code-author seam (fail-closed)                          | Accepted |
-| [0032](0032-df-sandbox-lifecycle-owned-by-runner.md)                   | Sandbox lifecycle is the runner's responsibility, force-disposed                | Accepted |
-| [0033](0033-df-gateway-spend-is-run-history-event.md)                  | Sandbox spend is a first-class run-history event                                | Accepted |
+| [0031](0031-df-runner-consumes-author-seam.md)                    | The runner consumes the code-author seam (fail-closed)                           | Accepted |
+| [0032](0032-df-sandbox-lifecycle-owned-by-runner.md)              | Sandbox lifecycle is the runner's responsibility, force-disposed                 | Accepted |
+| [0033](0033-df-gateway-spend-is-run-history-event.md)             | Sandbox spend is a first-class run-history event                                 | Accepted |
+| [0034](0034-df-sandbox-reaping-by-run-id.md)                      | Sandbox reaping is keyed by run id (defense in depth)                            | Accepted |

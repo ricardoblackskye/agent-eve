@@ -41,6 +41,7 @@ import {
 } from "../agent/lib/dark-factory/developer-agent";
 import { createCircuitBreaker } from "../agent/lib/dark-factory/circuit-breaker";
 import { createSandboxProvider } from "../agent/lib/dark-factory/sandbox-provider";
+import { reapSandboxesByRun } from "../agent/lib/dark-factory/sandbox-reaper";
 import type { SandboxProvider } from "../agent/lib/dark-factory/sandbox";
 import type { WorkspaceTools } from "../agent/lib/dark-factory/developer-agent";
 import { createCodeAuthorProvider } from "../agent/lib/dark-factory/code-author-provider";
@@ -396,10 +397,27 @@ async function main(): Promise<void> {
   const breaker = createCircuitBreaker(process.env);
   const loopBreaker = createCodingLoopBreaker(breaker, issueNum);
 
+  // #281 (R2b/B4): reap orphaned sandboxes from a prior run with the same id before this one starts.
+  // The primary release is runCodingPhase's dispose(); this reclaims a sandbox a client-timeout
+  // create-leak left behind. Only runs for the opensandbox driver, and never aborts the run on failure.
+  if ((process.env.DF_SANDBOX_DRIVER ?? "").trim() === "opensandbox") {
+    try {
+      const reaped = await reapSandboxesByRun({ runId });
+      if (reaped.length)
+        console.log(
+          `[STEP 5] reaped ${reaped.length} orphaned sandbox(es) from a prior run`,
+        );
+    } catch (e) {
+      console.error(
+        `[WARN] sandbox reaping failed: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+  }
+
   let loopResult: LoopResult;
   try {
     loopResult = await runCodingPhase(
-      createSandboxProvider(),
+      createSandboxProvider(undefined, undefined, runId),
       process.cwd(),
       async (workspaceTools) =>
         runMultiFileCodingLoop({
