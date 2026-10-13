@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { beforeAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { PostgresCostBudgetAdapter } from "../../agent/lib/dark-factory/cost-budget-store-postgres";
-import { PG_TABLES, resetPgTables } from "./pg-test-helpers";
 
 /**
  * Integration tests run only when a disposable test database is provided:
@@ -13,11 +12,6 @@ const databaseUrl = process.env.DF_COST_BUDGET_TEST_DATABASE_URL;
 const integration = databaseUrl ? describe : describe.skip;
 
 integration("Postgres cost budget store (integration)", () => {
-  // #332: start from this suite's OWN empty tables, so leftovers cannot flake it.
-  beforeAll(async () => {
-    await resetPgTables(databaseUrl as string, PG_TABLES.costBudget);
-  });
-
   it("reserves, settles, and enforces the cap against a real database", async () => {
     // Namespace the period so repeated runs against a shared container do not
     // collide on the same budget row.

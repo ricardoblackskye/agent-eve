@@ -27,6 +27,7 @@ import {
 } from "vitest";
 
 import { PostgresRunHistoryStore } from "../../agent/lib/dark-factory/run-history-postgres";
+import { pgTableExists } from "./pg-test-helpers";
 import { SqliteRunHistoryStore } from "../../agent/lib/dark-factory/run-history-store";
 
 const at = "2026-10-12T10:00:00.000Z";
@@ -215,6 +216,9 @@ describePg("#328 active-run claim (postgres)", () => {
     const client = new Client({ connectionString: dsn as string });
     await client.connect();
     try {
+      // #332: CI starts from a fresh database where the stores have not created these tables yet.
+      // Nothing exists, so there is nothing to clear.
+      if (!(await pgTableExists(client, "df_run_deliveries"))) return;
       await client.query(
         `DELETE FROM df_run_deliveries WHERE run_id IN
            (SELECT run_id FROM df_run_summaries WHERE repo LIKE 'owner/claim-%')`,

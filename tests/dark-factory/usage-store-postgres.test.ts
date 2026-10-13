@@ -7,10 +7,9 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { PostgresUsageStore } from "../../agent/lib/dark-factory/usage-store-postgres";
 import type { UsageEvent } from "../../agent/lib/dark-factory/usage-ledger";
-import { PG_TABLES, resetPgTables } from "./pg-test-helpers";
 
 const connectionString = (process.env.DF_USAGE_TEST_DATABASE_URL ?? "").trim();
 const suite = connectionString ? describe : describe.skip;
@@ -39,11 +38,6 @@ function event(runId: string, over: Partial<UsageEvent> = {}): UsageEvent {
 }
 
 suite("PostgresUsageStore (integration)", () => {
-  // #332: start from this suite's OWN empty tables, so leftovers cannot flake it.
-  beforeAll(async () => {
-    await resetPgTables(connectionString as string, PG_TABLES.usage);
-  });
-
   it("records an event and reads it back", async () => {
     const runId = `it-${randomUUID()}`;
     const store = open();

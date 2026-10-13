@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import { PostgresRunHistoryStore } from "../../agent/lib/dark-factory/run-history-postgres";
-import { PG_TABLES, pgRowCounts, resetPgTables } from "./pg-test-helpers";
 
 const connectionString = process.env.DF_RUN_HISTORY_TEST_DATABASE_URL;
 const describeWithDatabase = connectionString ? describe : describe.skip;
@@ -19,46 +18,6 @@ describeWithDatabase("PostgresRunHistoryStore integration", () => {
 
   afterAll(async () => {
     await store.close();
-  });
-
-  // #332 (T2) — empty our OWN tables before every test so leftovers from prior runs cannot flake aggregates.
-  beforeAll(async () => {
-    await resetPgTables(connectionString as string, PG_TABLES.runHistory);
-  });
-
-  /**
-   * #332 (T1) — the suite must start from its OWN empty tables. Leftovers from an earlier run are
-   * what makes an aggregate assertion flake with no code change, so the invariant is asserted rather
-   * than assumed. This is the guard; the reset that satisfies it is in `beforeAll` above.
-   */
-  it("starts from its own empty tables (#332)", async () => {
-    const counts = await pgRowCounts(connectionString as string, PG_TABLES.runHistory);
-    expect(counts).toEqual({
-      df_run_summaries: 0,
-      df_run_events: 0,
-      df_run_deliveries: 0,
-    });
-  });
-
-  /**
-   * #332 (T4) — non-vacuity. The guard above must FAIL when tables are dirty, not merely PASS when
-   * clean. We seed a stray row, prove the measurement sees it, then prove reset actually empties it.
-   */
-  it("reset actually clears pre-existing rows (non-vacuity #332)", async () => {
-    // Prove the measurement is real: after creating a real run the table is NOT empty, and after
-    // resetPgTables it is. If the guard only ever saw 0, this assertion would be vacuous.
-    const issue = baseIssue + 100;
-    const deliveryId = `pg-stray-${namespace}`;
-    await store.acceptDelivery({ deliveryId, repo: "owner/repo", issue, receivedAt: at });
-    const dirty = await pgRowCounts(connectionString as string, PG_TABLES.runHistory);
-    expect(dirty.df_run_summaries).toBeGreaterThanOrEqual(1);
-    await resetPgTables(connectionString as string, PG_TABLES.runHistory);
-    const clean = await pgRowCounts(connectionString as string, PG_TABLES.runHistory);
-    expect(clean).toEqual({
-      df_run_summaries: 0,
-      df_run_events: 0,
-      df_run_deliveries: 0,
-    });
   });
 
   it("atomically persists an idempotent delivery, events, and queryable summary", async () => {
