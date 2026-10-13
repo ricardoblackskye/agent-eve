@@ -55,6 +55,13 @@ Dark Factory — Factory-level circuit breaker / cost guard (issues #143 / story
 
 **Decisions:** [ADR 0006](../../docs/adr/0006-provider-neutral-seams.md)
 
+## code-author
+
+The code AUTHOR seam (#281, R2). Declares `CodeAuthorProvider`, a fail-closed refusing default,
+and an `in-process` adapter that preserves today's prompt and JSON extraction verbatim.
+
+**Source:** [`agent/lib/dark-factory/code-author.ts`](../../agent/lib/dark-factory/code-author.ts)
+
 ## control-checkpoint
 
 (no header comment)
