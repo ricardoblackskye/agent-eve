@@ -14,6 +14,11 @@ function count(value: number | undefined): string {
   return value === undefined ? UNMEASURED : String(value);
 }
 
+/** Wall-clock duration, unmeasured as the em dash rather than "0 ms". */
+function ms(value: number | undefined): string {
+  return value === undefined ? UNMEASURED : `${value} ms`;
+}
+
 export interface UsagePanelProps {
   report: UsageReport | null;
   loading: boolean;
@@ -79,6 +84,9 @@ export function UsagePanel({
               <tr>
                 <th scope="col">Model</th>
                 <th scope="col">Calls</th>
+                <th scope="col">Tokens in</th>
+                <th scope="col">Tokens out</th>
+                <th scope="col">Duration</th>
                 <th scope="col">Cost</th>
               </tr>
             </thead>
@@ -87,6 +95,35 @@ export function UsagePanel({
                 <tr key={row.model}>
                   <th scope="row">{row.model}</th>
                   <td>{row.calls}</td>
+                  <td>{count(row.tokensIn)}</td>
+                  <td>{count(row.tokensOut)}</td>
+                  <td>{ms(row.durationMs)}</td>
+                  <td>{usd(row.costUsd)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <table className="df-usage-table">
+            <caption>By task type</caption>
+            <thead>
+              <tr>
+                <th scope="col">Task type</th>
+                <th scope="col">Calls</th>
+                <th scope="col">Tokens in</th>
+                <th scope="col">Tokens out</th>
+                <th scope="col">Duration</th>
+                <th scope="col">Cost</th>
+              </tr>
+            </thead>
+            <tbody>
+              {report.byTaskType.map((row) => (
+                <tr key={row.taskType}>
+                  <th scope="row">{row.taskType}</th>
+                  <td>{row.calls}</td>
+                  <td>{count(row.tokensIn)}</td>
+                  <td>{count(row.tokensOut)}</td>
+                  <td>{ms(row.durationMs)}</td>
                   <td>{usd(row.costUsd)}</td>
                 </tr>
               ))}

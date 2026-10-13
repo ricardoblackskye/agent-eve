@@ -14,6 +14,7 @@
 
 import type {
   UsageAggregate,
+  UsageTaskTypeTotals,
   UsageDayTotals,
   UsageModelTotals,
   UsageRunTotals,
@@ -28,6 +29,8 @@ export interface UsageReport {
   to?: string;
   totals: UsageAggregate["totals"];
   byModel: UsageModelTotals[];
+  /** By task type — the ledger records it on every event. */
+  byTaskType: UsageTaskTypeTotals[];
   byDay: UsageDayTotals[];
   byRun: UsageRunTotals[];
   /** Attributed tenants only. Unassigned usage is NOT in here. */
@@ -139,6 +142,7 @@ export async function queryUsage(
       ...(to !== undefined ? { to } : {}),
       totals: read.value.totals,
       byModel: read.value.byModel,
+      byTaskType: read.value.byTaskType,
       byDay: read.value.byDay,
       byRun: read.value.byRun,
       byTenant: read.value.byTenant,

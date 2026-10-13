@@ -28,6 +28,7 @@ const tenants: Tenant[] = [
 const report: UsageReport = {
   totals: { calls: 4, costUsd: 1.25 },
   byModel: [],
+  byTaskType: [],
   byDay: [],
   byRun: [],
   byTenant: [
@@ -122,6 +123,7 @@ describe("TenantUsagePanel", () => {
       report: {
         totals: { calls: 0 },
         byModel: [],
+        byTaskType: [],
         byDay: [],
         byRun: [],
         byTenant: [],

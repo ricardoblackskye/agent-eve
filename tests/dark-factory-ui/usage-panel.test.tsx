@@ -7,6 +7,7 @@ import type { UsageReport } from "../../agent/lib/dark-factory/usage-query";
 const report: UsageReport = {
   totals: { calls: 3, costUsd: 1.25, tokensIn: 100, tokensOut: 50 },
   byModel: [{ model: "deepseek/deepseek-chat", calls: 2, costUsd: 1 }],
+  byTaskType: [{ taskType: "developer", calls: 2, costUsd: 1 }],
   byDay: [{ date: "2026-09-30", calls: 3, costUsd: 1.25 }],
   byRun: [{ runId: "run-1", calls: 3, costUsd: 1.25 }],
   byTenant: [],
@@ -65,6 +66,7 @@ describe("UsagePanel", () => {
         report={{
           totals: { calls: 0 },
           byModel: [],
+          byTaskType: [],
           byDay: [],
           byRun: [],
           byTenant: [],
