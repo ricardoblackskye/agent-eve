@@ -117,6 +117,13 @@ Dark Factory — cost-budget read query (#208 R1 task 7). Pure shaping for the o
 
 **Exports:** `CostBudgetQueryResult`, `CostBudgetReport`, `CostBudgetTotals`, `CostBudgetView`, `queryCostBudgets`
 
+## llm-gateway
+
+The governed model gateway core (#281, R2): deny-by-default lease check, model allow-list, and
+the existing `runGovernedLlmCall` seam. Refuses rather than forwarding ungoverned.
+
+**Source:** [`agent/lib/dark-factory/llm-gateway.ts`](../../agent/lib/dark-factory/llm-gateway.ts)
+
 ## tenant-budget-query
 
 Dark Factory — per-tenant budget reporting (#231, epic #212 R2). Pure shaping for the operator dashboard: turns the tenant registry plus the tenant-scoped budget rows into a per-customer view. An absent measurement stays absent (the UI renders an em dash, never 0), and an unreadable store or an unconfigured customer is kept DISTINCT from zero spend. Counts only — no prompt or completion content.
