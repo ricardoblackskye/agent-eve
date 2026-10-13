@@ -28,7 +28,7 @@ and measured sums`) and #329 (`1 failed | 34 passed` → `35 passed`). Also hit 
 Aggregate-style assertions count rows across a whole table, so they are sensitive to anything left
 behind. Several suites already work around this by using run-scoped ids their rows per run (added in #328), but
 that only protects tests that filter by their own namespace — it cannot protect a test that asserts a
-table-wide aggregate or an order-dependent walk. Namespacing is a workaround for one symptom; the
+table-wide aggregate or an order-dependent walk. Per-run scoping is a workaround for one symptom; the
 shared, never-reset state is the condition.
 
 ## Tasks (RED → GREEN) — ALL DONE

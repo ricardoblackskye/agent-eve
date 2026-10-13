@@ -10,7 +10,7 @@ import { assertDisposableDsn } from "./pg-test-helpers";
  */
 describe("#332 reset safety rail", () => {
   it("refuses a DSN that does not look like a disposable test database", () => {
-    expect(() => assertDisposableDsn("postgresql://user:pw@db.example.com:5432/production")).toThrow(
+    expect(() => assertDisposableDsn("postgresql://user@db.example.com:5432/production")).toThrow(
       /does not look like a disposable test database/,
     );
   });
@@ -20,7 +20,7 @@ describe("#332 reset safety rail", () => {
       assertDisposableDsn("postgres://postgres@localhost:5432/darkfactory?sslmode=disable"),
     ).not.toThrow();
     expect(() =>
-      assertDisposableDsn("postgresql://df_test:pw@127.0.0.1:55432/df_run_history"),
+      assertDisposableDsn("postgresql://df_test@127.0.0.1:55432/df_run_history"),
     ).not.toThrow();
   });
 });
