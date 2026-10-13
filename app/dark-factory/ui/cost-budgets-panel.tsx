@@ -1,6 +1,7 @@
 "use client";
 
 import { COST_CATEGORIES } from "../../../agent/lib/dark-factory/cost-budget";
+import type { CostBudgetReport } from "../../../agent/lib/dark-factory/cost-budget-query";
 import { useCostBudgets } from "./use-cost-budgets";
 
 /** A value that was never measured renders as an em dash, never as 0. */
@@ -15,15 +16,24 @@ function usd(value: number): string {
  * category; a category with no configured budget shows as an explicit gap
  * rather than a misleading zero. No prompt/completion content is ever shown.
  */
-export function CostBudgetsPanel() {
-  const { data, loading, error, refresh } = useCostBudgets();
-  const report = data?.report ?? null;
+export interface CostBudgetsPanelProps {
+  report: CostBudgetReport | null;
+  loading: boolean;
+  error: string | null;
+  onRefresh: () => void;
+}
+
+/**
+ * Presentational, like its sibling panels: the fetch lives in the container below, so this can be
+ * rendered and asserted directly (#277).
+ */
+export function CostBudgetsPanel({ report, loading, error, onRefresh }: CostBudgetsPanelProps) {
 
   return (
     <section className="df-cost-card" aria-label="LLM cost budgets">
       <header className="df-cost-head">
         <h2>LLM cost budgets</h2>
-        <button type="button" onClick={refresh}>
+        <button type="button" onClick={onRefresh}>
           Refresh
         </button>
       </header>
@@ -45,8 +55,8 @@ export function CostBudgetsPanel() {
           </thead>
           <tbody>
             {report.budgets.map((view, index) => (
-              <tr key={COST_CATEGORIES[index]}>
-                <th scope="row">{COST_CATEGORIES[index]}</th>
+              <tr key={view?.category ?? COST_CATEGORIES[index]}>
+                <th scope="row">{view?.category ?? COST_CATEGORIES[index]}</th>
                 <td>{view ? usd(view.capUsd) : UNMEASURED}</td>
                 <td>{view ? usd(view.spentUsd) : UNMEASURED}</td>
                 <td>{view ? usd(view.reservedUsd) : UNMEASURED}</td>
@@ -70,5 +80,21 @@ export function CostBudgetsPanel() {
 
       {!loading && !error && !report ? <p>No budgets configured.</p> : null}
     </section>
+  );
+}
+
+/**
+ * Operator-only cost-budget read; polls like the other panels. Separate so the panel above stays
+ * presentational and testable (#277).
+ */
+export function CostBudgetsPanelContainer() {
+  const { data, loading, error, refresh } = useCostBudgets();
+  return (
+    <CostBudgetsPanel
+      report={data?.report ?? null}
+      loading={loading}
+      error={error}
+      onRefresh={refresh}
+    />
   );
 }

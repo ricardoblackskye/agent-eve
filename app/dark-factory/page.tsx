@@ -17,7 +17,7 @@ import {
 import { DEFAULT_POLL_INTERVAL_MS, useRunQuery } from "./ui/use-run-query";
 import { useFactoryControl } from "./ui/use-factory-control";
 import { ControlPanel } from "./ui/control-panel";
-import { CostBudgetsPanel } from "./ui/cost-budgets-panel";
+import { CostBudgetsPanelContainer } from "./ui/cost-budgets-panel";
 import { UsagePanelContainer } from "./ui/usage-panel";
 import { TenantUsagePanelContainer } from "./ui/tenant-usage-panel";
 import { TenantBudgetPanelContainer } from "./ui/tenant-budget-panel";
@@ -123,7 +123,7 @@ export default function DarkFactoryOverviewPage() {
           badges={["OPERATOR ONLY", "READ ONLY"]}
         />
         <div className="df-panel-body">
-          <CostBudgetsPanel />
+          <CostBudgetsPanelContainer />
         </div>
       </section>
 
