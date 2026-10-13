@@ -86,10 +86,10 @@ function normalizeBound(
  * them: two copies would be two chances to disagree about what a valid
  * window is.
  */
-export function normalizeUsageWindow(params: {
+export function normalizeUsageWindow(params: { from?: string; to?: string }): {
   from?: string;
   to?: string;
-}): { from?: string; to?: string } {
+} {
   const from = normalizeBound(params.from, "from");
   const to = normalizeBound(params.to, "to");
   if (from !== undefined && to !== undefined && from >= to) {
@@ -122,9 +122,7 @@ export async function queryUsage(
     ...(to !== undefined ? { to } : {}),
     ...(params.runId !== undefined ? { runId: params.runId } : {}),
     ...(params.model !== undefined ? { model: params.model } : {}),
-    ...(params.tenantId !== undefined
-      ? { tenantId: params.tenantId }
-      : {}),
+    ...(params.tenantId !== undefined ? { tenantId: params.tenantId } : {}),
   });
 
   if (!read.ok || read.value === null) {

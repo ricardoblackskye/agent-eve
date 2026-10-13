@@ -39,7 +39,8 @@ export function UsagePanel({
   error,
   onRefresh,
 }: UsagePanelProps) {
-  const empty = report !== null && report.totals.calls === 0 && report.unmeasured === 0;
+  const empty =
+    report !== null && report.totals.calls === 0 && report.unmeasured === 0;
 
   return (
     <section className="df-usage-card" aria-label="LLM usage">

@@ -25,7 +25,10 @@ describe("summarizeUsage — task-type breakdown and per-model duration (#277 T2
       ev({ taskType: "tester", costUsd: 0.1, durationMs: 1200 }),
     ]);
 
-    expect(agg.byTaskType.map((row) => row.taskType)).toEqual(["developer", "tester"]);
+    expect(agg.byTaskType.map((row) => row.taskType)).toEqual([
+      "developer",
+      "tester",
+    ]);
 
     const developer = agg.byTaskType[0];
     expect(developer.calls).toBe(2);

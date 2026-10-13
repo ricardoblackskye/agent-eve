@@ -241,8 +241,7 @@ export function summarizeUsage(
     addToAccumulator(modelSum, event);
     modelSums.set(event.model, modelSum);
 
-    const taskTypeSum =
-      taskTypeSums.get(event.taskType) ?? newAccumulator();
+    const taskTypeSum = taskTypeSums.get(event.taskType) ?? newAccumulator();
     addToAccumulator(taskTypeSum, event);
     taskTypeSums.set(event.taskType, taskTypeSum);
 

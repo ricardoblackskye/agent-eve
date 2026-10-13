@@ -92,18 +92,37 @@ describe("UsagePanel", () => {
   });
 });
 
-
 describe("UsagePanel — tokens, duration and task type (#277 T2)", () => {
   const detailed: UsageReport = {
-    totals: { calls: 2, costUsd: 0.6, tokensIn: 30, tokensOut: 15, durationMs: 900 },
+    totals: {
+      calls: 2,
+      costUsd: 0.6,
+      tokensIn: 30,
+      tokensOut: 15,
+      durationMs: 900,
+    },
     byModel: [
-      { model: "a/one", calls: 1, costUsd: 0.5, tokensIn: 20, tokensOut: 10, durationMs: 800 },
+      {
+        model: "a/one",
+        calls: 1,
+        costUsd: 0.5,
+        tokensIn: 20,
+        tokensOut: 10,
+        durationMs: 800,
+      },
       { model: "b/two", calls: 1 },
     ],
     byDay: [{ date: "2026-10-01", calls: 2, costUsd: 0.6 }],
     byRun: [{ runId: "r1", calls: 2, costUsd: 0.6 }],
     byTaskType: [
-      { taskType: "developer", calls: 1, costUsd: 0.5, tokensIn: 20, tokensOut: 10, durationMs: 800 },
+      {
+        taskType: "developer",
+        calls: 1,
+        costUsd: 0.5,
+        tokensIn: 20,
+        tokensOut: 10,
+        durationMs: 800,
+      },
       { taskType: "tester", calls: 1 },
     ],
     byTenant: [],
@@ -113,7 +132,12 @@ describe("UsagePanel — tokens, duration and task type (#277 T2)", () => {
 
   it("shows tokens and duration against each model, and a dash where unmeasured", () => {
     const { container } = render(
-      <UsagePanel report={detailed} loading={false} error={null} onRefresh={vi.fn()} />,
+      <UsagePanel
+        report={detailed}
+        loading={false}
+        error={null}
+        onRefresh={vi.fn()}
+      />,
     );
 
     const modelTable = [...container.querySelectorAll("table")].find((table) =>
@@ -121,10 +145,21 @@ describe("UsagePanel — tokens, duration and task type (#277 T2)", () => {
     );
     expect(modelTable, "the by-model table should exist").toBeTruthy();
 
-    const headings = [...modelTable!.querySelectorAll("thead th")].map((th) => th.textContent);
-    expect(headings).toEqual(["Model", "Calls", "Tokens in", "Tokens out", "Duration", "Cost"]);
+    const headings = [...modelTable!.querySelectorAll("thead th")].map(
+      (th) => th.textContent,
+    );
+    expect(headings).toEqual([
+      "Model",
+      "Calls",
+      "Tokens in",
+      "Tokens out",
+      "Duration",
+      "Cost",
+    ]);
 
-    const rows = [...modelTable!.querySelectorAll("tbody tr")].map((tr) => tr.textContent);
+    const rows = [...modelTable!.querySelectorAll("tbody tr")].map(
+      (tr) => tr.textContent,
+    );
     expect(rows[0]).toContain("20");
     expect(rows[0]).toContain("800");
     // The unmeasured model must not read as zero tokens / zero duration.
@@ -133,11 +168,18 @@ describe("UsagePanel — tokens, duration and task type (#277 T2)", () => {
 
   it("renders a breakdown by task type", () => {
     const { container } = render(
-      <UsagePanel report={detailed} loading={false} error={null} onRefresh={vi.fn()} />,
+      <UsagePanel
+        report={detailed}
+        loading={false}
+        error={null}
+        onRefresh={vi.fn()}
+      />,
     );
 
     const table = [...container.querySelectorAll("table")].find((candidate) =>
-      (candidate.querySelector("caption")?.textContent ?? "").toLowerCase().includes("task type"),
+      (candidate.querySelector("caption")?.textContent ?? "")
+        .toLowerCase()
+        .includes("task type"),
     );
     expect(table, "a by-task-type table should exist").toBeTruthy();
     expect(table!.textContent).toContain("developer");

@@ -32,7 +32,14 @@ const report: UsageReport = {
   byDay: [],
   byRun: [],
   byTenant: [
-    { tenantId: T1, calls: 2, costUsd: 1.0, tokensIn: 100, tokensOut: 50, unmeasured: 1 },
+    {
+      tenantId: T1,
+      calls: 2,
+      costUsd: 1.0,
+      tokensIn: 100,
+      tokensOut: 50,
+      unmeasured: 1,
+    },
     // Globex reported calls but NO cost — so its cost must render `—`.
     { tenantId: T2, calls: 1, unmeasured: 0 },
   ],
@@ -40,7 +47,9 @@ const report: UsageReport = {
   unmeasured: 1,
 };
 
-function renderPanel(overrides: Partial<Parameters<typeof TenantUsagePanel>[0]> = {}) {
+function renderPanel(
+  overrides: Partial<Parameters<typeof TenantUsagePanel>[0]> = {},
+) {
   return render(
     <TenantUsagePanel
       report={report}
@@ -136,7 +145,12 @@ describe("TenantUsagePanel", () => {
 
   it("surfaces the error and refreshes on demand", () => {
     const onRefresh = vi.fn();
-    renderPanel({ report: null, tenants: [], error: "registry down", onRefresh });
+    renderPanel({
+      report: null,
+      tenants: [],
+      error: "registry down",
+      onRefresh,
+    });
 
     expect(screen.getByRole("alert").textContent).toBe("registry down");
     fireEvent.click(screen.getByRole("button", { name: /refresh/i }));
