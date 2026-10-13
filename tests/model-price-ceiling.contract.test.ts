@@ -13,7 +13,8 @@ import { resolvePrice } from "../agent/lib/dark-factory/cost-budget";
  * This follows the existing `model-availability.contract.test.ts` pattern exactly: read-only, no API
  * key, no token spend, and it SKIPS cleanly when offline so CI never flakes.
  */
-const ENDPOINTS = (id: string) => `https://openrouter.ai/api/v1/models/${id}/endpoints`;
+const ENDPOINTS = (id: string) =>
+  `https://openrouter.ai/api/v1/models/${id}/endpoints`;
 const OFFLINE = process.env.MODEL_CONTRACT_OFFLINE === "1";
 
 async function fetchProviderPrices(
@@ -22,12 +23,19 @@ async function fetchProviderPrices(
   if (OFFLINE) return null;
   try {
     const res = await fetch(ENDPOINTS(modelId), {
-      headers: { Accept: "application/json", "User-Agent": "agent-eve-price-ceiling-test" },
+      headers: {
+        Accept: "application/json",
+        "User-Agent": "agent-eve-price-ceiling-test",
+      },
       signal: AbortSignal.timeout(8000),
     });
     if (!res.ok) return null;
     const json = (await res.json()) as {
-      data?: { endpoints?: Array<{ pricing?: { prompt?: string; completion?: string } }> };
+      data?: {
+        endpoints?: Array<{
+          pricing?: { prompt?: string; completion?: string };
+        }>;
+      };
     };
     const endpoints = json.data?.endpoints ?? [];
     const prices = endpoints
@@ -35,7 +43,9 @@ async function fetchProviderPrices(
         prompt: Number(e.pricing?.prompt),
         completion: Number(e.pricing?.completion),
       }))
-      .filter((p) => Number.isFinite(p.prompt) && Number.isFinite(p.completion));
+      .filter(
+        (p) => Number.isFinite(p.prompt) && Number.isFinite(p.completion),
+      );
     return prices.length > 0 ? prices : null;
   } catch {
     // Network unavailable — skip rather than fail.
@@ -45,7 +55,10 @@ async function fetchProviderPrices(
 
 function declaredModelIds(): string[] {
   return Object.entries(modelConfig)
-    .filter(([name, value]) => name.endsWith("_MODEL_ID") && typeof value === "string")
+    .filter(
+      ([name, value]) =>
+        name.endsWith("_MODEL_ID") && typeof value === "string",
+    )
     .map(([, value]) => value as string);
 }
 
@@ -61,7 +74,8 @@ describe("#335 price ceiling contract (live OpenRouter catalog)", () => {
       const price = resolvePrice(id);
       expect(price, `${id} has no price in modelPriceTable`).not.toBeNull();
       const maxInputPer1k = Math.max(...prices.map((p) => p.prompt)) * 1000;
-      const maxOutputPer1k = Math.max(...prices.map((p) => p.completion)) * 1000;
+      const maxOutputPer1k =
+        Math.max(...prices.map((p) => p.completion)) * 1000;
       expect(
         price?.inputUsdPer1k,
         `${id}: table input ${price?.inputUsdPer1k} is below the dearest provider ${maxInputPer1k}`,

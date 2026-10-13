@@ -18,14 +18,23 @@ const EXPECTED_CEILINGS: Record<
   { inputUsdPer1k: number; outputUsdPer1k: number }
 > = {
   // Maximum published OpenRouter provider price per axis, measured 2026-10-13 (see ADR 0027).
-  "deepseek/deepseek-v4.1-flash": { inputUsdPer1k: 0.0006, outputUsdPer1k: 0.0024 },
-  "deepseek/deepseek-v4-pro": { inputUsdPer1k: 0.00191, outputUsdPer1k: 0.0105 },
+  "deepseek/deepseek-v4.1-flash": {
+    inputUsdPer1k: 0.0006,
+    outputUsdPer1k: 0.0024,
+  },
+  "deepseek/deepseek-v4-pro": {
+    inputUsdPer1k: 0.00191,
+    outputUsdPer1k: 0.0105,
+  },
 };
 
 /** Every model id the config module declares, whatever it is called. */
 function declaredModelIds(): string[] {
   return Object.entries(modelConfig)
-    .filter(([name, value]) => name.endsWith("_MODEL_ID") && typeof value === "string")
+    .filter(
+      ([name, value]) =>
+        name.endsWith("_MODEL_ID") && typeof value === "string",
+    )
     .map(([, value]) => value as string);
 }
 
@@ -39,7 +48,10 @@ describe("#335 shipped models are priced", () => {
 
   it("prices EVERY declared model id — an unpriced shipped model refuses every call", () => {
     for (const id of declaredModelIds()) {
-      expect(resolvePrice(id), `${id} has no price in modelPriceTable`).not.toBeNull();
+      expect(
+        resolvePrice(id),
+        `${id} has no price in modelPriceTable`,
+      ).not.toBeNull();
     }
   });
 
@@ -47,8 +59,14 @@ describe("#335 shipped models are priced", () => {
     for (const [id, expected] of Object.entries(EXPECTED_CEILINGS)) {
       const price = resolvePrice(id);
       expect(price, `${id} has no price`).not.toBeNull();
-      expect(price?.inputUsdPer1k, `${id} input`).toBeCloseTo(expected.inputUsdPer1k, 10);
-      expect(price?.outputUsdPer1k, `${id} output`).toBeCloseTo(expected.outputUsdPer1k, 10);
+      expect(price?.inputUsdPer1k, `${id} input`).toBeCloseTo(
+        expected.inputUsdPer1k,
+        10,
+      );
+      expect(price?.outputUsdPer1k, `${id} output`).toBeCloseTo(
+        expected.outputUsdPer1k,
+        10,
+      );
     }
   });
 

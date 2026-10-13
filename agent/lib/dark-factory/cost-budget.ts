@@ -54,9 +54,7 @@ export interface CostBudget {
  * Validates a fully materialized `CostBudget`. Kept distinct from `createCostBudget`
  * so callers can reuse this pure check on values read back from a store.
  */
-export function isCostBudget(
-  value: unknown,
-): value is CostBudget {
+export function isCostBudget(value: unknown): value is CostBudget {
   if (typeof value !== "object" || value === null) return false;
   const v = value as Record<string, unknown>;
   if (typeof v.category !== "string") return false;
@@ -65,19 +63,23 @@ export function isCostBudget(
   if (v.period.trim() === "") return false;
   if (typeof v.capUsd !== "number" || !Number.isFinite(v.capUsd)) return false;
   if (v.capUsd < 0) return false;
-  if (typeof v.spentUsd !== "number" || !Number.isFinite(v.spentUsd)) return false;
+  if (typeof v.spentUsd !== "number" || !Number.isFinite(v.spentUsd))
+    return false;
   if (v.spentUsd < 0) return false;
-  if (typeof v.callCount !== "number" || !Number.isInteger(v.callCount)) return false;
+  if (typeof v.callCount !== "number" || !Number.isInteger(v.callCount))
+    return false;
   if (v.callCount < 0) return false;
   if (v.reservedUsd !== undefined) {
-      if (typeof v.reservedUsd !== "number" || !Number.isFinite(v.reservedUsd)) return false;
-      if (v.reservedUsd < 0) return false;
-    }
-    if (v.tenantId !== undefined) {
-      if (typeof v.tenantId !== "string" || v.tenantId.trim() === "") return false;
-    }
-    return true;
+    if (typeof v.reservedUsd !== "number" || !Number.isFinite(v.reservedUsd))
+      return false;
+    if (v.reservedUsd < 0) return false;
   }
+  if (v.tenantId !== undefined) {
+    if (typeof v.tenantId !== "string" || v.tenantId.trim() === "")
+      return false;
+  }
+  return true;
+}
 
 /** Name of the env var holding the unsecured cost-unit price table. */
 const DF_MODEL_PRICE_PREFIX = "DF_MODEL_PRICE_";
@@ -93,10 +95,27 @@ export interface ModelPrice {
 }
 
 /**
- * Default price table for known models. Operators may override individual
- * entries via `DF_MODEL_PRICE_<stableId>` env, or keep the defaults here.
+ * Reservation CEILINGS, not exact rates (#335).
+ *
+ * `admit()` reserves against these before a call and `settle()` trues up from the measured cost
+ * afterwards, so the number here must be an UPPER BOUND: under-reserving lets a cap be passed before
+ * anything reconciles, while over-reserving is only transient. We pin no OpenRouter provider and a
+ * model's published price differs per provider (up to ~14x for `deepseek/deepseek-v4.1-flash`), so
+ * each entry is the DEAREST published provider price — never the headline `/models` price, which is
+ * the cheapest. See ADR 0027. An operator who knows the provider in use can set an exact rate with
+ * `DF_MODEL_PRICE_<stableId>` (see `.env.example`), which overrides these.
  */
 export const modelPriceTable: Record<string, ModelPrice> = {
+  // The project's current default and fallback (agent/model-config.ts).
+  "deepseek/deepseek-v4.1-flash": {
+    inputUsdPer1k: 0.0006,
+    outputUsdPer1k: 0.0024,
+  },
+  "deepseek/deepseek-v4-pro": {
+    inputUsdPer1k: 0.00191,
+    outputUsdPer1k: 0.0105,
+  },
+  // Retained: an accurate price for a real model, though the agent no longer uses it since #121/#122.
   "deepseek/deepseek-chat": {
     inputUsdPer1k: 0.0001,
     outputUsdPer1k: 0.0003,
@@ -107,12 +126,20 @@ export const modelPriceTable: Record<string, ModelPrice> = {
  * Normalize and look up a model id. Strips surrounding whitespace; unknown
  * returns null.
  */
-export function resolvePrice(model: string | null | undefined): ModelPrice | null {
+export function resolvePrice(
+  model: string | null | undefined,
+): ModelPrice | null {
   if (typeof model !== "string" || model.trim() === "") return null;
   const normalized = model.trim().toLowerCase();
-  const envOverride = process.env[`${DF_MODEL_PRICE_PREFIX}${normalized.replace(/[^A-Za-z0-9]/g, "_")}`];
+  const envOverride =
+    process.env[
+      `${DF_MODEL_PRICE_PREFIX}${normalized.replace(/[^A-Za-z0-9]/g, "_")}`
+    ];
   if (envOverride !== undefined) {
-    const parts = envOverride.split(",").map((s) => s.trim()).filter(Boolean);
+    const parts = envOverride
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
     if (parts.length !== 2) return null;
     const [inStr, outStr] = parts;
     const inP = parseFloat(inStr);
@@ -183,17 +210,30 @@ export function createCostGovernanceEnv(
   env: Record<string, string | undefined> = {},
 ): ResolvedCostBudgetEnv {
   const period =
-    typeof env.DF_COST_BUDGET_PERIOD === "string" && env.DF_COST_BUDGET_PERIOD.trim() !== ""
+    typeof env.DF_COST_BUDGET_PERIOD === "string" &&
+    env.DF_COST_BUDGET_PERIOD.trim() !== ""
       ? env.DF_COST_BUDGET_PERIOD.trim()
       : DEFAULT_COST_BUDGET_PERIOD;
 
   return {
     period,
     categories: {
-      orchestrator: parseCap("DF_COST_BUDGET_ORCHESTRATOR_USD", env.DF_COST_BUDGET_ORCHESTRATOR_USD),
-      developer: parseCap("DF_COST_BUDGET_DEVELOPER_USD", env.DF_COST_BUDGET_DEVELOPER_USD),
-      tester: parseCap("DF_COST_BUDGET_TESTER_USD", env.DF_COST_BUDGET_TESTER_USD),
-      "pr-review": parseCap("DF_COST_BUDGET_PR_REVIEW_USD", env.DF_COST_BUDGET_PR_REVIEW_USD),
+      orchestrator: parseCap(
+        "DF_COST_BUDGET_ORCHESTRATOR_USD",
+        env.DF_COST_BUDGET_ORCHESTRATOR_USD,
+      ),
+      developer: parseCap(
+        "DF_COST_BUDGET_DEVELOPER_USD",
+        env.DF_COST_BUDGET_DEVELOPER_USD,
+      ),
+      tester: parseCap(
+        "DF_COST_BUDGET_TESTER_USD",
+        env.DF_COST_BUDGET_TESTER_USD,
+      ),
+      "pr-review": parseCap(
+        "DF_COST_BUDGET_PR_REVIEW_USD",
+        env.DF_COST_BUDGET_PR_REVIEW_USD,
+      ),
     },
   };
 }
