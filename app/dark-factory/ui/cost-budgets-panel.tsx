@@ -27,8 +27,12 @@ export interface CostBudgetsPanelProps {
  * Presentational, like its sibling panels: the fetch lives in the container below, so this can be
  * rendered and asserted directly (#277).
  */
-export function CostBudgetsPanel({ report, loading, error, onRefresh }: CostBudgetsPanelProps) {
-
+export function CostBudgetsPanel({
+  report,
+  loading,
+  error,
+  onRefresh,
+}: CostBudgetsPanelProps) {
   return (
     <section className="df-cost-card" aria-label="LLM cost budgets">
       <header className="df-cost-head">

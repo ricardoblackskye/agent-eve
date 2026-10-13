@@ -35,13 +35,24 @@ const report: CostBudgetReport = {
       callCount: 2,
     },
   ],
-  totals: { capUsd: 15, spentUsd: 5, reservedUsd: 2, remainingUsd: 8, callCount: 9 },
+  totals: {
+    capUsd: 15,
+    spentUsd: 5,
+    reservedUsd: 2,
+    remainingUsd: 8,
+    callCount: 9,
+  },
 };
 
 describe("CostBudgetsPanel (#277)", () => {
   it("renders a row per canonical category with reserved kept distinct from spent", () => {
     const { container } = render(
-      <CostBudgetsPanel report={report} loading={false} error={null} onRefresh={() => {}} />,
+      <CostBudgetsPanel
+        report={report}
+        loading={false}
+        error={null}
+        onRefresh={() => {}}
+      />,
     );
     const text = container.textContent ?? "";
     expect(text).toContain("orchestrator");
@@ -53,11 +64,21 @@ describe("CostBudgetsPanel (#277)", () => {
 
   it("shows a category with no budget as the honesty em dash, never as $0.00", () => {
     const { container } = render(
-      <CostBudgetsPanel report={report} loading={false} error={null} onRefresh={() => {}} />,
+      <CostBudgetsPanel
+        report={report}
+        loading={false}
+        error={null}
+        onRefresh={() => {}}
+      />,
     );
     const rows = [...container.querySelectorAll("tbody tr")];
-    const gapRow = rows.find((row) => (row.textContent ?? "").startsWith("developer"));
-    expect(gapRow, "developer row should exist as an explicit gap").toBeTruthy();
+    const gapRow = rows.find((row) =>
+      (row.textContent ?? "").startsWith("developer"),
+    );
+    expect(
+      gapRow,
+      "developer row should exist as an explicit gap",
+    ).toBeTruthy();
     expect(gapRow?.textContent).toContain("—");
     // The whole point: an unconfigured category must not look like one that spent nothing.
     expect(gapRow?.textContent).not.toContain("$0.00");
@@ -89,25 +110,49 @@ describe("CostBudgetsPanel (#277)", () => {
       ],
     };
     const { container } = render(
-      <CostBudgetsPanel report={shuffled} loading={false} error={null} onRefresh={() => {}} />,
+      <CostBudgetsPanel
+        report={shuffled}
+        loading={false}
+        error={null}
+        onRefresh={() => {}}
+      />,
     );
-    const labels = [...container.querySelectorAll("tbody th")].map((th) => th.textContent);
+    const labels = [...container.querySelectorAll("tbody th")].map(
+      (th) => th.textContent,
+    );
     expect(labels).toEqual(["pr-review", "orchestrator"]);
   });
 
   it("reports loading, error and the empty state distinctly", () => {
     const loading = render(
-      <CostBudgetsPanel report={null} loading error={null} onRefresh={() => {}} />,
+      <CostBudgetsPanel
+        report={null}
+        loading
+        error={null}
+        onRefresh={() => {}}
+      />,
     );
     expect(loading.container.textContent).toMatch(/loading/i);
 
     const errored = render(
-      <CostBudgetsPanel report={null} loading={false} error="Cost budget store is unavailable" onRefresh={() => {}} />,
+      <CostBudgetsPanel
+        report={null}
+        loading={false}
+        error="Cost budget store is unavailable"
+        onRefresh={() => {}}
+      />,
     );
-    expect(errored.container.querySelector("[role=alert]")?.textContent).toMatch(/unavailable/i);
+    expect(
+      errored.container.querySelector("[role=alert]")?.textContent,
+    ).toMatch(/unavailable/i);
 
     const empty = render(
-      <CostBudgetsPanel report={null} loading={false} error={null} onRefresh={() => {}} />,
+      <CostBudgetsPanel
+        report={null}
+        loading={false}
+        error={null}
+        onRefresh={() => {}}
+      />,
     );
     expect(empty.container.textContent).toMatch(/no budgets configured/i);
   });
