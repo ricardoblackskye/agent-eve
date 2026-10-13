@@ -193,7 +193,8 @@
     "metacharacters",
     "exfiltration",
     "opensandbox",
-    "execd"
+    "execd",
+    "nohup"
   ],
   "ignorePaths": [
     "node_modules/**",

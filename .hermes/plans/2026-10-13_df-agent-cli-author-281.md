@@ -27,6 +27,40 @@ The platform comes up before any seam code exists:
 - **Why first:** every later task is unverifiable without it, and it needs no key — so it is the one
   part of R2 that can be proven real rather than mocked.
 
+## T0 — DONE, verified on this host
+
+The platform is up and the client path is proven. Deliverables: `scripts/sandbox-server-up.sh`
+(idempotent bring-up + health wait), `scripts/sandbox-smoke.ts` (`npm run df:sandbox-smoke`), and the
+`@alibaba-group/opensandbox` client dependency.
+
+**Measured evidence** (Docker 29.6.1, Windows/Docker Desktop):
+- `bash scripts/sandbox-server-up.sh` -> starts the server, `{"status":"healthy"}`; a second run reports
+  `already healthy` and exits 0 (idempotent).
+- Smoke: created `baed7782-...`, ran `python -c 'print(41 + 1)'` -> `42`, wrote and read a file back,
+  then `kill()` + `close()`.
+- **No orphans**: `docker ps -a` shows no sandbox containers afterwards, and the server log confirms
+  `kill sandbox container` / `remove sandbox container` / `DELETE /v1/sandboxes/<id>` 204.
+- The TS SDK used `use_server_proxy=false` and reached the container directly, so the config's
+  `resolve_internal` caveat (a macOS launchd/systemd issue) does not apply here.
+
+### Four findings that change R2's implementation
+
+1. **A client timeout during CREATE leaks the sandbox.** The first attempt hit the SDK's 30s default
+   while the server was still building the container; the server returned 202 and finished anyway,
+   leaving `sandbox-5c118427-...` running with no id known to the client — an orphan, i.e. a leak AND
+   spend. It had to be reaped by hand. **R2 requirement:** bound create with a generous client timeout
+   (raised to 180s here) AND reap by label/run-id (or a short server-side TTL), so a leaked sandbox
+   cannot survive a failed create.
+2. **The JS SDK tears down with `kill()` + `close()`, not `destroy()`** (the Python API's name). The
+   issue text says `destroy()`; corrected here and in the issue.
+3. **Native-tool paths are not translated.** Passing `$HOME/.sandbox.toml` to native `uvx` makes the
+   server silently miss the config and die with a misleading `AppConfig: runtime Field required`. The
+   script converts via `cygpath -w` when available — this is why the automation, not a hand-run, is the
+   deliverable.
+4. **An empty `api_key` needs explicit acknowledgment** for a non-interactive start
+   (`OPENSANDBOX_INSECURE_SERVER=YES`). The script sets it only when no key is supplied, so a
+   keyed/remote server can never take the insecure path by accident.
+
 ## Tasks (RED -> GREEN)
 
 1. **T1 — author seam** `agent/lib/dark-factory/code-author.ts`: canonical `CodeAuthorTask` payload +
