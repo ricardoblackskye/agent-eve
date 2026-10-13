@@ -444,6 +444,14 @@ Dark Factory — PR Writer (#164). Provides the GitHub pull request creation pri
 
 **Decisions:** [ADR 0004](../../docs/adr/0004-story-publish-is-fail-closed.md)
 
+## local-sandbox
+
+The local execution adapter for the sandbox seam. It delegates to `createWorkspaceTools`, so every
+existing guard (path traversal, symlink containment, extension allowlist, test-command allowlist)
+keeps running unchanged.
+
+**Source:** [`agent/lib/dark-factory/local-sandbox.ts`](../../agent/lib/dark-factory/local-sandbox.ts)
+
 ## run-attribution
 
 Resolve the tenant a newly accepted run is attributed to (#213, epic #212 R1). Resolution is TOTAL, and that is the point: an unconfigured registry, an unassigned repository, a registry outage, or a store that throws all degrade to UNASSIGNED (undefined) rather than failing. R1 only RECORDS attribution — refusing to accept a run because it cannot be attributed would break existing operator flows before the repository seed has been applied everywhere. The refusal half of the contract belongs to R2, and is enforced there. An INACTIVE tenant still attributes. The run genuinely belongs to them, and historical attribution must not be rewritten when they are re-activated.
@@ -521,6 +529,20 @@ Dark Factory — open a run's record at the start of a run (#316). A run driven 
 **Source:** [`agent/lib/dark-factory/run-record.ts`](../../agent/lib/dark-factory/run-record.ts)
 
 **Exports:** `BeginRunRecordInput`, `BeginRunRecordResult`, `beginRunRecord`, `runnerDeliveryId`
+
+## sandbox
+
+The provider-agnostic sandbox execution seam (#280, R1). Declares `SandboxProvider`, the fail-closed
+refusing default and the `dry-run` provider. Nothing here is on by default.
+
+**Source:** [`agent/lib/dark-factory/sandbox.ts`](../../agent/lib/dark-factory/sandbox.ts)
+
+## sandbox-provider
+
+Resolves the sandbox provider from `DF_SANDBOX_DRIVER`. Unset or blank means the local filesystem;
+an unknown value refuses at startup before any side effect.
+
+**Source:** [`agent/lib/dark-factory/sandbox-provider.ts`](../../agent/lib/dark-factory/sandbox-provider.ts)
 
 ## self-improve-state
 
