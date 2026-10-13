@@ -160,3 +160,26 @@ unstaged — learned the hard way) · changed-markdown checks · the three repo 
 
 Credential-vault secret injection (R3 #282). Until then the provider key stays gateway-side and the git
 push token keeps its current mechanism.
+
+## Status — T0–T6 landed, T5b deferred
+
+| task | state |
+|---|---|
+| T0 provisioning + smoke | **done**, verified live (no orphans, idempotent) |
+| T1 code author seam | **done**, prompt pinned byte-for-byte |
+| T2 author switch | **done**, off by default, fail-closed |
+| T3 governed gateway | **done**, refuse-before-forward, fails closed when unconfigured |
+| T4 sandbox driver + egress | **done**, verified LIVE (found a real bug the fake missed) |
+| T5 agent-cli adapter core | **done**, lease-wired, lifecycle-safe |
+| T6 ADRs + docs | **done** (0029 author seam, 0030 gateway) |
+| **T5b** | **DEFERRED, stated not accidental** |
+
+**T5b (follow-up before the feature is usable end to end):**
+1. wire the runner/coordinator to drive the `CodeAuthorProvider` (T5 built the seam and adapter; nothing
+   calls them in the runner yet);
+2. wire the gateway's `recordUsage` / `recordRefusal` into run-history (the run context belongs there);
+3. label-based sandbox reaping for the create-leak finding — needs the SDK list API, and the current
+   mitigations are a generous create timeout, lazy creation, and `dispose()` in a `finally`.
+
+**Honest limit for reviewers:** the seams, adapters and gateway are built and tested, but the feature is
+NOT end-to-end operable until T5b lands.
