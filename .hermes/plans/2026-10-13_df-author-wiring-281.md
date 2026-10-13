@@ -7,7 +7,7 @@ inside the Dark Factory loop, so the `agent-cli` author can be armed for real ru
 is recorded — closing the four remaining acceptance criteria (B1–B4) left when R2 merged.
 
 **Architecture:** Today the runner authors code inline (build prompt → governed `streamText` →
-regex-extract JSON → write files) and never disposes the execution sandbox. R2 shipped the *seams*
+regex-extract JSON → write files) and never disposes the execution sandbox. R2 shipped the _seams_
 (`createCodeAuthorProvider`, the `opensandbox` driver, `withSandbox`, `handleGatewayRequest`) but the
 runner still calls none of them. T5b is the wiring: B1 swaps the inline authoring block for the seam;
 B2 makes the runner own the sandbox lifecycle (create once per run, dispose on every exit); B3 connects
@@ -45,7 +45,7 @@ reaps orphans from the create-leak.
   is the only change for #281's remaining ACs. Do NOT create a separate issue.
 - **Prompt parity:** B1 uses `buildCodeAuthorPrompt(executionPlan)` so the in-process path is identical
   to the inline one. The agent-cli path uses the same builder (already wired in `agent-cli-author.ts`).
-- **Lifecycle boundary:** the sandbox is used for `runTests` *inside* the loop, so it must live for the
+- **Lifecycle boundary:** the sandbox is used for `runTests` _inside_ the loop, so it must live for the
   whole STEP 5, not just authoring. "One sandbox per run, disposed on success/throw" = create before the
   loop, `dispose()` in a `finally` after it (or `withSandbox` wrapping the whole phase).
 - **No new behaviour when unset:** every change is gated on `DF_CODE_AUTHOR`/`DF_SANDBOX_DRIVER` being at
@@ -59,6 +59,7 @@ reaps orphans from the create-leak.
 `in-process` and behaving byte-for-byte as today.
 
 **Files:**
+
 - Modify: `scripts/dark-factory-runner.ts` (import + build provider + swap the `worker` block)
 - Modify: `agent/lib/dark-factory/code-author-provider.ts` (if a `generate` shim is needed for parity)
 - Test: `tests/dark-factory/runner-authoring.test.ts` (new; pure, no sandbox)
@@ -75,8 +76,15 @@ raw output is returned. Also test: when `author.write` throws, the function lets
 ```ts
 it("writes every authored file via the workspace tools", async () => {
   const written: Record<string, string> = {};
-  const author = { author: "in-process" as const, write: async () => ({ files: { "a.ts": "x" }, raw: "r" }) };
-  const result = await authorFiles(author, { summary: "p" }, { writeFile: async (p, c) => { written[p] = c; } } as any);
+  const author = {
+    author: "in-process" as const,
+    write: async () => ({ files: { "a.ts": "x" }, raw: "r" }),
+  };
+  const result = await authorFiles(author, { summary: "p" }, {
+    writeFile: async (p, c) => {
+      written[p] = c;
+    },
+  } as any);
   expect(written).toEqual({ "a.ts": "x" });
   expect(result.raw).toBe("r");
 });
@@ -86,15 +94,28 @@ it("writes every authored file via the workspace tools", async () => {
 **Step 3: Implement `authorFiles`** extracting the JSON-write logic from the inline block.
 **Step 4: Run test** → PASS.
 **Step 5: Swap the inline block in the runner.** Build the provider near the other setup:
+
 ```ts
 const codeAuthor = createCodeAuthorProvider(process.env, {
-  generate: (prompt) => runGovernedAgentCall({ governor, runHistory, runId }, {
-    category: "developer", model: modelId,
-    inputTokens: Math.ceil(prompt.length / 4), outputTokens: 8_000,
-    run: async () => { const s = streamText({ model, prompt }); let o = ""; for await (const c of s.textStream) o += c; return o; },
-  }),
+  generate: (prompt) =>
+    runGovernedAgentCall(
+      { governor, runHistory, runId },
+      {
+        category: "developer",
+        model: modelId,
+        inputTokens: Math.ceil(prompt.length / 4),
+        outputTokens: 8_000,
+        run: async () => {
+          const s = streamText({ model, prompt });
+          let o = "";
+          for await (const c of s.textStream) o += c;
+          return o;
+        },
+      },
+    ),
 });
 ```
+
 and in the `worker`, replace lines 378-419's prompt-build/parse/write with `const { files, raw } = await authorFiles(codeAuthor, ctx.plan, ctx.tools);`.
 **Step 6: Run the FULL suite + `tsc --noEmit --incremental false`** — no regressions; the in-process
 path still produces identical output (assert by reusing `buildCodeAuthorPrompt` in `authorFiles`'s
@@ -109,26 +130,47 @@ underlying adapter, not in the runner).
 abort. Prove the ORDER with a recording double.
 
 **Files:**
+
 - Modify: `scripts/dark-factory-runner.ts` (wrap STEP 5 in a lifecycle helper)
 - Test: `tests/dark-factory/runner-sandbox-lifecycle.test.ts` (new)
 
 **Step 1: Write failing test** — a recording `SandboxProvider` double records `create`/`dispose`:
+
 ```ts
 function recordingProvider() {
   const log: string[] = [];
   const provider = {
-    driver: "local" as const, isolated: false,
-    create: () => { log.push("create"); return { writeFile: async () => {}, runTests: async () => ({ passed: true, output: "" }), readFile: async () => "", listFiles: async () => [] }; },
-    dispose: async () => { log.push("dispose"); },
+    driver: "local" as const,
+    isolated: false,
+    create: () => {
+      log.push("create");
+      return {
+        writeFile: async () => {},
+        runTests: async () => ({ passed: true, output: "" }),
+        readFile: async () => "",
+        listFiles: async () => [],
+      };
+    },
+    dispose: async () => {
+      log.push("dispose");
+    },
   };
   return { provider, log };
 }
 it("disposes the sandbox even when the phase throws", async () => {
   const { provider, log } = recordingProvider();
-  await expect(runCodingPhase({ provider, work: async () => { throw new Error("boom"); } })).rejects.toThrow("boom");
-  expect(log).toEqual(["create", "dispose"]);   // exactly one create, dispose on throw
+  await expect(
+    runCodingPhase({
+      provider,
+      work: async () => {
+        throw new Error("boom");
+      },
+    }),
+  ).rejects.toThrow("boom");
+  expect(log).toEqual(["create", "dispose"]); // exactly one create, dispose on throw
 });
 ```
+
 **Step 2: Run** → FAIL (`runCodingPhase` undefined).
 **Step 3: Extract `runCodingPhase({ provider, author, loopConfig, work })`** from the runner's STEP 5,
 where `provider.create(process.cwd())` is called at the top and `await provider.dispose?.()` runs in a
@@ -138,7 +180,7 @@ where `provider.create(process.cwd())` is called at the top and `await provider.
 **Step 6: Commit** `feat(#281): B2 runner owns sandbox lifecycle, dispose on every exit`.
 
 > Note: B2 does not change the `opensandbox` driver's `dispose()` (already idempotent, never throws).
-> It only makes the *runner* call it. This is the acceptance criterion defending "closing the client
+> It only makes the _runner_ call it. This is the acceptance criterion defending "closing the client
 > does not terminate the sandbox".
 
 ---
@@ -149,21 +191,33 @@ where `provider.create(process.cwd())` is called at the top and `await provider.
 sandbox call records a usage row and a refusal records a refusal row (not a silent no-op).
 
 **Files:**
+
 - Modify: `app/api/llm-gateway/route.ts` (set `recordUsage`/`recordRefusal` deps)
 - New: `agent/lib/dark-factory/gateway-recorder.ts` — `createGatewayRecorder(store, runId)` returning
   `{ recordUsage, recordRefusal }` adapting `GatewayUsageRecord`/`GatewayRefusalRecord` to run-history writes.
 - Test: `tests/dark-factory/gateway-recorder.test.ts` (new; in-memory store double)
 
 **Step 1: Write failing test** using an in-memory `RunHistoryStore` double that records writes:
+
 ```ts
 it("records a usage row and a refusal row", async () => {
   const store = inMemoryHistory();
   const rec = createGatewayRecorder(store, "run-1");
-  await rec.recordUsage({ runId: "run-1", model: "m", reservationId: "r", estimatedUsd: 0.01 });
-  await rec.recordRefusal({ runId: "run-1", model: "m", reason: "over-budget" });
+  await rec.recordUsage({
+    runId: "run-1",
+    model: "m",
+    reservationId: "r",
+    estimatedUsd: 0.01,
+  });
+  await rec.recordRefusal({
+    runId: "run-1",
+    model: "m",
+    reason: "over-budget",
+  });
   expect(store.writes).toHaveLength(2);
 });
 ```
+
 **Step 2: Run** → FAIL (module missing).
 **Step 3: Implement `createGatewayRecorder`** — `recordRefusal` reuses `recordCostRefusal`; `recordUsage`
 writes via the run-history write method confirmed in Risks below. Thread `runId` from the lease into the
@@ -187,6 +241,7 @@ add the run-history adapter to an integration assertion).
 id, so a client-timeout create-leak does not leave an unterminated, spending sandbox.
 
 **Files:**
+
 - Modify: `agent/lib/dark-factory/sandbox-provider.ts` (`createSandboxProvider` accepts `runId`, passes
   `metadata: { runId }` to the opensandbox driver)
 - Modify: `agent/lib/dark-factory/opensandbox-driver.ts` (`SandboxCreateSpec` gains optional `metadata`)
