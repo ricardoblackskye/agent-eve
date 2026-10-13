@@ -2,6 +2,7 @@
 
 import type { UsageReport } from "../../../agent/lib/dark-factory/usage-query";
 import { useUsage } from "./use-usage";
+import { BarChart, CostTrendChart } from "./components";
 
 /** A value that was never measured renders as an em dash, never as 0. */
 const UNMEASURED = "—";
@@ -78,6 +79,20 @@ export function UsagePanel({
               </tr>
             </tbody>
           </table>
+
+          <CostTrendChart points={report.byDay} />
+
+          <BarChart
+            label="Cost by model"
+            bars={report.byModel
+              .filter((row) => row.costUsd !== undefined)
+              .map((row) => ({
+                key: row.model,
+                label: row.model,
+                value: row.costUsd ?? 0,
+                display: usd(row.costUsd),
+              }))}
+          />
 
           <table className="df-usage-table">
             <caption>By model</caption>

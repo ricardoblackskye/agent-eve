@@ -1,5 +1,6 @@
 "use client";
 
+import { BarChart } from "./components";
 import { useState } from "react";
 import type { UsageReport } from "../../../agent/lib/dark-factory/usage-query";
 import type { UsageTenantTotals } from "../../../agent/lib/dark-factory/usage-store";
@@ -104,8 +105,21 @@ export function TenantUsagePanel({
       {empty ? <p>No usage recorded.</p> : null}
 
       {report && !empty ? (
-        <table className="df-usage-table">
-          <caption>By customer</caption>
+        <>
+          <BarChart
+            label="Spend by tenant"
+            bars={report.byTenant
+              .filter((bucket) => bucket.costUsd !== undefined)
+              .map((bucket) => ({
+                key: bucket.tenantId ?? "unassigned",
+                label: label(bucket.tenantId),
+                value: bucket.costUsd ?? 0,
+                display: formatCostUsd(bucket.costUsd),
+              }))}
+          />
+
+          <table className="df-usage-table">
+            <caption>By customer</caption>
           <thead>
             <tr>
               <th scope="col">Customer</th>
@@ -131,7 +145,8 @@ export function TenantUsagePanel({
               "df-tenant-unassigned",
             )}
           </tbody>
-        </table>
+          </table>
+        </>
       ) : null}
     </section>
   );
