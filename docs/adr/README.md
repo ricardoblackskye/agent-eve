@@ -82,3 +82,5 @@ changes, write a new one that supersedes it.
 | [0026](0026-atomic-active-run-claim.md)                           | An active-run claim is atomic: one active run per repo+issue                     | Accepted |
 | [0027](0027-model-prices-are-reservation-ceilings.md)             | Model prices are reservation ceilings, not exact rates                           | Accepted |
 | [0028](0028-df-sandbox-execution-seam.md)                         | The sandbox execution backend is a fail-closed, configuration-selected seam       | Accepted |
+| [0029](0029-df-code-author-seam.md)                                | The code author is a fail-closed, configuration-selected seam                    | Accepted |
+| [0030](0030-df-llm-gateway.md)                                    | Sandbox model calls are governed at an in-repo gateway                           | Accepted |

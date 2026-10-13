@@ -15,7 +15,7 @@ import type { WorkspaceTools } from "./developer-agent";
  * `sandbox-provider.ts`).
  */
 
-export type SandboxDriver = "local" | "dry-run" | "refusing";
+export type SandboxDriver = "local" | "dry-run" | "opensandbox" | "refusing";
 
 export interface SandboxProvider {
   /** Short driver name, for logs and diagnostics. */
@@ -27,6 +27,14 @@ export interface SandboxProvider {
   readonly isolated: boolean;
   /** Build the tools for a workspace directory. `local` must reproduce existing behaviour exactly. */
   create(workspaceDir: string): WorkspaceTools;
+  /**
+   * Release any REMOTE resource this provider owns. Optional, because local/dry-run/refusing own none.
+   *
+   * This exists because closing a sandbox client does NOT terminate the sandbox: an orphan is both a
+   * leak and spend, and a client timeout during create leaves one with no id the caller ever saw. The
+   * coordinator calls this on success, on throw and on abort.
+   */
+  dispose?(): Promise<void>;
 }
 
 export class SandboxRefusedError extends Error {

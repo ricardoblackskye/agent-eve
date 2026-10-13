@@ -17,10 +17,13 @@
     "operator": "tsx scripts/self-improve-operator.ts",
     "seed:tenants": "tsx scripts/seed-tenant-assignments.ts",
     "seed:test-data": "tsx scripts/seed-test-data.ts",
-    "df:membership": "tsx scripts/df-membership.ts"
+    "df:membership": "tsx scripts/df-membership.ts",
+    "df:sandbox-up": "bash scripts/sandbox-server-up.sh",
+    "df:sandbox-smoke": "tsx scripts/sandbox-smoke.ts"
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.45",
+    "@alibaba-group/opensandbox": "^1.1.1",
     "@vercel/connect": "0.4.3",
     "ai": "^7.0.58",
     "eve": "^0.44.0",

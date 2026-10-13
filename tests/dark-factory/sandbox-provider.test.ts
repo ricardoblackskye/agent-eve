@@ -30,6 +30,12 @@ describe("#280 createSandboxProvider", () => {
     expect(provider.isolated).toBe(false);
   });
 
+  it("resolves the live sandbox arm without creating anything (creation is lazy)", () => {
+    const provider = createSandboxProvider({ DF_SANDBOX_DRIVER: "opensandbox" });
+    expect(provider.driver).toBe("opensandbox");
+    expect(provider.isolated).toBe(true);
+  });
+
   it("throws on an unknown driver, naming the supported values", () => {
     expect(() => createSandboxProvider({ DF_SANDBOX_DRIVER: "remote-sandbox" })).toThrow(
       /Supported values: local, dry-run/,
@@ -37,6 +43,7 @@ describe("#280 createSandboxProvider", () => {
   });
 
   it("offers only the documented drivers (no boolean that could default open)", () => {
-    expect([...SUPPORTED_SANDBOX_DRIVERS]).toEqual(["local", "dry-run"]);
+    // #281 T4 adds the live sandbox arm; this assertion is the guard on the SET.
+    expect([...SUPPORTED_SANDBOX_DRIVERS]).toEqual(["local", "dry-run", "opensandbox"]);
   });
 });

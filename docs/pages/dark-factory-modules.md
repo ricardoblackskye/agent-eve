@@ -11,6 +11,14 @@
 
 _82 modules._
 
+## agent-cli-author
+
+The sandbox CLI author (#281, R2): runs a coding-agent CLI inside the sandbox with its base URL
+pointed at the governed gateway and a per-run LEASE as its credential. A failed CLI run is
+never treated as authored code, and `withSandbox` always releases the sandbox.
+
+**Source:** [`agent/lib/dark-factory/agent-cli-author.ts`](../../agent/lib/dark-factory/agent-cli-author.ts)
+
 ## architect-agent
 
 Dark Factory — Architect Agent (#179). Pre-code planning agent that inspects the repository file tree, analyzes the User Story and Acceptance Criteria, and synthesizes an ExecutionPlan. Self-corrects via feedback loops when generated plans fail domain validation.
@@ -54,6 +62,20 @@ Dark Factory — Factory-level circuit breaker / cost guard (issues #143 / story
 **Exports:** `CircuitBreaker`, `CircuitBreakerConfig`, `DFLT_MAX_STATE_ENTRIES`, `DFLT_MAX_TOTAL_TRIP_EVENTS`, `DFLT_MAX_TRIPS_PER_PBI`, `DFLT_MAX_WORKER_MINUTES`, `DFLT_MIN_DURATION_MS`, `EnvConfigError`, `InvalidTripEventError`, `MIN_AUTO_CLEANUP_MS`, `PBI_ID_MAX_LENGTH`, `TripEvent`, `TripReason`, `TripTimestamp`, `WorkerActivity`, `WorkerActivitySink`, `createCircuitBreaker`, `createWorkerActivityObserver`, `toTripEvent`, `validateWorkerActivity`
 
 **Decisions:** [ADR 0006](../../docs/adr/0006-provider-neutral-seams.md)
+
+## code-author
+
+The code AUTHOR seam (#281, R2). Declares `CodeAuthorProvider`, a fail-closed refusing default,
+and an `in-process` adapter that preserves today's prompt and JSON extraction verbatim.
+
+**Source:** [`agent/lib/dark-factory/code-author.ts`](../../agent/lib/dark-factory/code-author.ts)
+
+## code-author-provider
+
+Resolves the code AUTHOR from `DF_CODE_AUTHOR`. Unset or blank means `in-process`; an unknown
+value refuses at startup. There is no boolean flag, so the default cannot be flipped open by accident.
+
+**Source:** [`agent/lib/dark-factory/code-author-provider.ts`](../../agent/lib/dark-factory/code-author-provider.ts)
 
 ## control-checkpoint
 
@@ -102,6 +124,21 @@ Dark Factory — cost-budget read query (#208 R1 task 7). Pure shaping for the o
 **Source:** [`agent/lib/dark-factory/cost-budget-query.ts`](../../agent/lib/dark-factory/cost-budget-query.ts)
 
 **Exports:** `CostBudgetQueryResult`, `CostBudgetReport`, `CostBudgetTotals`, `CostBudgetView`, `queryCostBudgets`
+
+## llm-gateway
+
+The governed model gateway core (#281, R2): deny-by-default lease check, model allow-list, and
+the existing `runGovernedLlmCall` seam. Refuses rather than forwarding ungoverned.
+
+**Source:** [`agent/lib/dark-factory/llm-gateway.ts`](../../agent/lib/dark-factory/llm-gateway.ts)
+
+## opensandbox-driver
+
+The live sandbox execution driver (#281, R2): serves `WorkspaceTools` from inside an OpenSandbox,
+re-applying the same extension and test-command guards, with deny-by-default egress and an
+explicit `dispose()` because closing a sandbox client does not terminate the sandbox.
+
+**Source:** [`agent/lib/dark-factory/opensandbox-driver.ts`](../../agent/lib/dark-factory/opensandbox-driver.ts)
 
 ## tenant-budget-query
 
