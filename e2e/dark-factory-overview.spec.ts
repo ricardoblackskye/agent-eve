@@ -17,6 +17,9 @@ test.describe("Dark Factory overview styling", () => {
   test("the usage table is styled, not bare", async ({ page }) => {
     await page.goto("/dark-factory");
     const table = page.locator("table.df-usage-table").first();
+    // Documentation: names the empty state at the point of use. The locator assertions above are
+    // what actually fail when the store is empty — proven by re-running this file against an empty
+    // DF_USAGE_DB_PATH, where both tests fail with "element(s) not found".
     await expect(table).toBeVisible();
 
     // The bug was "no styles at all", so assert the computed properties that
@@ -124,9 +127,14 @@ test.describe("Dark Factory overview styling", () => {
  * tenant stores — because the cost-budget driver is deliberately absent from that job (arming it
  * without caps refuses every model call, ADR 0015).
  *
- * The last assertion in each test is the vacuity guard: these panels render
- * "Nothing measured for this window" when their store is empty, so if the fixture ever loses its rows
- * the suite FAILS rather than quietly asserting things about an empty state.
+ * Anti-vacuity is PROVEN here, not assumed. Against the seeded usage store this file passes;
+ * pointed at an EMPTY usage store these two tests FAIL on the chart and table locators, because an
+ * empty store makes the panel render its empty state and nothing matches. The LOCATORS are therefore
+ * the load-bearing assertions.
+ *
+ * The `Nothing measured for this window` check at the end of each test is DOCUMENTATION rather than the
+ * guard: it names the empty state at the point of use. It does not fire in practice, because the
+ * locator above it fails first whenever the data is absent.
  */
 test.describe("#278 the cost panels render data, not empty states", () => {
   test.beforeEach(async ({ page }) => {
@@ -157,6 +165,9 @@ test.describe("#278 the cost panels render data, not empty states", () => {
     const table = page.locator("table", {
       has: page.locator("caption", { hasText: "By task type" }),
     });
+    // Documentation: names the empty state at the point of use. The locator assertions above are
+    // what actually fail when the store is empty — proven by re-running this file against an empty
+    // DF_USAGE_DB_PATH, where both tests fail with "element(s) not found".
     await expect(table).toBeVisible();
     expect(await table.locator("tbody tr").count()).toBeGreaterThan(0);
 
