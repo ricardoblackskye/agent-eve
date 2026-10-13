@@ -62,6 +62,13 @@ and an `in-process` adapter that preserves today's prompt and JSON extraction ve
 
 **Source:** [`agent/lib/dark-factory/code-author.ts`](../../agent/lib/dark-factory/code-author.ts)
 
+## code-author-provider
+
+Resolves the code AUTHOR from `DF_CODE_AUTHOR`. Unset or blank means `in-process`; an unknown
+value refuses at startup. There is no boolean flag, so the default cannot be flipped open by accident.
+
+**Source:** [`agent/lib/dark-factory/code-author-provider.ts`](../../agent/lib/dark-factory/code-author-provider.ts)
+
 ## control-checkpoint
 
 (no header comment)
