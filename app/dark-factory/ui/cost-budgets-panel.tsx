@@ -55,8 +55,10 @@ export function CostBudgetsPanel({
                 ? []
                 : [
                     {
-                      key: view.category ?? COST_CATEGORIES[index] ?? "category",
-                      label: view.category ?? COST_CATEGORIES[index] ?? "category",
+                      key:
+                        view.category ?? COST_CATEGORIES[index] ?? "category",
+                      label:
+                        view.category ?? COST_CATEGORIES[index] ?? "category",
                       value: view.spentUsd + view.reservedUsd,
                       display: `${usd(view.spentUsd + view.reservedUsd)} of ${usd(view.capUsd)} committed`,
                     },
@@ -65,38 +67,40 @@ export function CostBudgetsPanel({
           />
 
           <table className="df-cost-table">
-          <thead>
-            <tr>
-              <th scope="col">Category</th>
-              <th scope="col">Cap</th>
-              <th scope="col">Spent</th>
-              <th scope="col">Reserved</th>
-              <th scope="col">Remaining</th>
-              <th scope="col">Calls</th>
-            </tr>
-          </thead>
-          <tbody>
-            {report.budgets.map((view, index) => (
-              <tr key={view?.category ?? COST_CATEGORIES[index]}>
-                <th scope="row">{view?.category ?? COST_CATEGORIES[index]}</th>
-                <td>{view ? usd(view.capUsd) : UNMEASURED}</td>
-                <td>{view ? usd(view.spentUsd) : UNMEASURED}</td>
-                <td>{view ? usd(view.reservedUsd) : UNMEASURED}</td>
-                <td>{view ? usd(view.remainingUsd) : UNMEASURED}</td>
-                <td>{view ? view.callCount : UNMEASURED}</td>
+            <thead>
+              <tr>
+                <th scope="col">Category</th>
+                <th scope="col">Cap</th>
+                <th scope="col">Spent</th>
+                <th scope="col">Reserved</th>
+                <th scope="col">Remaining</th>
+                <th scope="col">Calls</th>
               </tr>
-            ))}
-          </tbody>
-          <tfoot>
-            <tr>
-              <th scope="row">Total</th>
-              <td>{usd(report.totals.capUsd)}</td>
-              <td>{usd(report.totals.spentUsd)}</td>
-              <td>{usd(report.totals.reservedUsd)}</td>
-              <td>{usd(report.totals.remainingUsd)}</td>
-              <td>{report.totals.callCount}</td>
-            </tr>
-          </tfoot>
+            </thead>
+            <tbody>
+              {report.budgets.map((view, index) => (
+                <tr key={view?.category ?? COST_CATEGORIES[index]}>
+                  <th scope="row">
+                    {view?.category ?? COST_CATEGORIES[index]}
+                  </th>
+                  <td>{view ? usd(view.capUsd) : UNMEASURED}</td>
+                  <td>{view ? usd(view.spentUsd) : UNMEASURED}</td>
+                  <td>{view ? usd(view.reservedUsd) : UNMEASURED}</td>
+                  <td>{view ? usd(view.remainingUsd) : UNMEASURED}</td>
+                  <td>{view ? view.callCount : UNMEASURED}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr>
+                <th scope="row">Total</th>
+                <td>{usd(report.totals.capUsd)}</td>
+                <td>{usd(report.totals.spentUsd)}</td>
+                <td>{usd(report.totals.reservedUsd)}</td>
+                <td>{usd(report.totals.remainingUsd)}</td>
+                <td>{report.totals.callCount}</td>
+              </tr>
+            </tfoot>
           </table>
         </>
       ) : null}

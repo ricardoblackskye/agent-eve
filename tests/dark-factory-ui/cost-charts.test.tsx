@@ -46,7 +46,9 @@ describe("BarChart (#277 T3)", () => {
 
     expect(container.querySelectorAll("rect.df-bar").length).toBe(2);
     expect(container.querySelector("svg")?.getAttribute("role")).toBe("img");
-    expect(container.querySelector("svg")?.getAttribute("aria-label")).toBe("Cost by model");
+    expect(container.querySelector("svg")?.getAttribute("aria-label")).toBe(
+      "Cost by model",
+    );
     expect(container.textContent).toContain("$2.00");
   });
 
@@ -76,7 +78,9 @@ describe("CostTrendChart (#277 T3)", () => {
   });
 
   it("shows an empty state when no day carried a measurement", () => {
-    const { container } = render(<CostTrendChart points={[{ date: "2026-10-02" }]} />);
+    const { container } = render(
+      <CostTrendChart points={[{ date: "2026-10-02" }]} />,
+    );
 
     expect(container.textContent).toMatch(/nothing measured/i);
   });
@@ -85,10 +89,17 @@ describe("CostTrendChart (#277 T3)", () => {
 describe("charts in the operator panels (#277 T3)", () => {
   it("the usage panel charts daily cost and cost by model, excluding unmeasured entries", () => {
     const { container } = render(
-      <UsagePanel report={usage} loading={false} error={null} onRefresh={vi.fn()} />,
+      <UsagePanel
+        report={usage}
+        loading={false}
+        error={null}
+        onRefresh={vi.fn()}
+      />,
     );
 
-    const labels = [...container.querySelectorAll("svg")].map((svg) => svg.getAttribute("aria-label"));
+    const labels = [...container.querySelectorAll("svg")].map((svg) =>
+      svg.getAttribute("aria-label"),
+    );
     expect(labels).toContain("Daily cost");
     expect(labels).toContain("Cost by model");
 
@@ -116,10 +127,21 @@ describe("charts in the operator panels (#277 T3)", () => {
         },
         null, // unconfigured: no cap to burn down against
       ],
-      totals: { capUsd: 10, spentUsd: 4, reservedUsd: 2, remainingUsd: 4, callCount: 7 },
+      totals: {
+        capUsd: 10,
+        spentUsd: 4,
+        reservedUsd: 2,
+        remainingUsd: 4,
+        callCount: 7,
+      },
     };
     const { container } = render(
-      <CostBudgetsPanel report={report} loading={false} error={null} onRefresh={vi.fn()} />,
+      <CostBudgetsPanel
+        report={report}
+        loading={false}
+        error={null}
+        onRefresh={vi.fn()}
+      />,
     );
 
     const chart = [...container.querySelectorAll("svg")].find(
@@ -134,7 +156,10 @@ describe("charts in the operator panels (#277 T3)", () => {
   it("the tenant panel charts spend per customer", () => {
     const { container } = render(
       <TenantUsagePanel
-        report={{ ...usage, byTenant: [{ tenantId: "t-a", calls: 3, costUsd: 3, unmeasured: 0 }] }}
+        report={{
+          ...usage,
+          byTenant: [{ tenantId: "t-a", calls: 3, costUsd: 3, unmeasured: 0 }],
+        }}
         tenants={[]}
         loading={false}
         error={null}

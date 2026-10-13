@@ -208,9 +208,17 @@ export interface BarDatum {
  * world ("this cost nothing"), and for an unmeasured value that claim is false. An empty set shows
  * an explicit state rather than an empty frame.
  */
-export function BarChart({ label, bars }: { label: string; bars: BarDatum[] }): ReactNode {
+export function BarChart({
+  label,
+  bars,
+}: {
+  label: string;
+  bars: BarDatum[];
+}): ReactNode {
   if (bars.length === 0) {
-    return <StatePanel state="empty" message="Nothing measured for this window" />;
+    return (
+      <StatePanel state="empty" message="Nothing measured for this window" />
+    );
   }
 
   const width = 320;
@@ -228,9 +236,18 @@ export function BarChart({ label, bars }: { label: string; bars: BarDatum[] }): 
     >
       {bars.map((bar, index) => {
         const y = index * (rowHeight + gap);
-        const drawn = max > 0 ? Math.max((bar.value / max) * (width - 4), 1) : 0;
+        const drawn =
+          max > 0 ? Math.max((bar.value / max) * (width - 4), 1) : 0;
         return (
-          <rect className="df-bar" key={bar.key} x={0} y={y} width={drawn} height={rowHeight} rx={2}>
+          <rect
+            className="df-bar"
+            key={bar.key}
+            x={0}
+            y={y}
+            width={drawn}
+            height={rowHeight}
+            rx={2}
+          >
             <title>{`${bar.label}: ${bar.display}`}</title>
           </rect>
         );
@@ -254,11 +271,16 @@ export function CostTrendChart({
   label?: string;
 }): ReactNode {
   const series = points
-    .filter((point): point is { date: string; costUsd: number } => point.costUsd !== undefined)
+    .filter(
+      (point): point is { date: string; costUsd: number } =>
+        point.costUsd !== undefined,
+    )
     .sort((left, right) => left.date.localeCompare(right.date));
 
   if (series.length === 0) {
-    return <StatePanel state="empty" message="Nothing measured for this window" />;
+    return (
+      <StatePanel state="empty" message="Nothing measured for this window" />
+    );
   }
 
   const width = 320;
@@ -272,7 +294,9 @@ export function CostTrendChart({
     date: point.date,
     costUsd: point.costUsd,
   }));
-  const line = coords.map(({ x, y }) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
+  const line = coords
+    .map(({ x, y }) => `${x.toFixed(1)},${y.toFixed(1)}`)
+    .join(" ");
 
   return (
     <svg

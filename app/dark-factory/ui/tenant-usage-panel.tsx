@@ -49,7 +49,8 @@ export function TenantUsagePanel({
 }: TenantUsagePanelProps) {
   const rows = report
     ? report.byTenant.filter(
-        (row) => selectedTenantId === undefined || row.tenantId === selectedTenantId,
+        (row) =>
+          selectedTenantId === undefined || row.tenantId === selectedTenantId,
       )
     : [];
   const empty =
@@ -61,7 +62,12 @@ export function TenantUsagePanel({
     return tenants.find((tenant) => tenant.id === tenantId)?.name ?? tenantId;
   }
 
-  function row(key: string, bucket: UsageTenantTotals, name: string, className?: string) {
+  function row(
+    key: string,
+    bucket: UsageTenantTotals,
+    name: string,
+    className?: string,
+  ) {
     return (
       <tr key={key} className={className}>
         <th scope="row">{name}</th>
@@ -88,7 +94,9 @@ export function TenantUsagePanel({
         <select
           value={selectedTenantId ?? ""}
           onChange={(event) =>
-            onSelectTenant?.(event.target.value === "" ? undefined : event.target.value)
+            onSelectTenant?.(
+              event.target.value === "" ? undefined : event.target.value,
+            )
           }
         >
           <option value="">All customers</option>
@@ -120,31 +128,31 @@ export function TenantUsagePanel({
 
           <table className="df-usage-table">
             <caption>By customer</caption>
-          <thead>
-            <tr>
-              <th scope="col">Customer</th>
-              <th scope="col">Calls</th>
-              <th scope="col">Tokens in</th>
-              <th scope="col">Tokens out</th>
-              <th scope="col">Cost</th>
-              <th scope="col">Unmeasured</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((bucket) =>
-              row(
-                bucket.tenantId ?? "unassigned-row",
-                bucket,
-                label(bucket.tenantId),
-              ),
-            )}
-            {row(
-              "unassigned",
-              report.unassigned,
-              "Unassigned",
-              "df-tenant-unassigned",
-            )}
-          </tbody>
+            <thead>
+              <tr>
+                <th scope="col">Customer</th>
+                <th scope="col">Calls</th>
+                <th scope="col">Tokens in</th>
+                <th scope="col">Tokens out</th>
+                <th scope="col">Cost</th>
+                <th scope="col">Unmeasured</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((bucket) =>
+                row(
+                  bucket.tenantId ?? "unassigned-row",
+                  bucket,
+                  label(bucket.tenantId),
+                ),
+              )}
+              {row(
+                "unassigned",
+                report.unassigned,
+                "Unassigned",
+                "df-tenant-unassigned",
+              )}
+            </tbody>
           </table>
         </>
       ) : null}
