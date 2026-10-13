@@ -46,6 +46,23 @@ export interface UsageModelTotals {
   tokensIn?: number;
   tokensOut?: number;
   costUsd?: number;
+  durationMs?: number;
+}
+
+/**
+ * Totals for one task type.
+ *
+ * `taskType` is REQUIRED on every event, so unlike tenants there is no
+ * "unassigned" bucket to account for. Every sum stays absent unless something
+ * was actually measured.
+ */
+export interface UsageTaskTypeTotals {
+  taskType: string;
+  calls: number;
+  tokensIn?: number;
+  tokensOut?: number;
+  costUsd?: number;
+  durationMs?: number;
 }
 
 export interface UsageDayTotals {
@@ -93,6 +110,8 @@ export interface UsageAggregate {
     durationMs?: number;
   };
   byModel: UsageModelTotals[];
+  /** One entry per task type, sorted. */
+  byTaskType: UsageTaskTypeTotals[];
   byDay: UsageDayTotals[];
   byRun: UsageRunTotals[];
   /** Attributed tenants only. Unassigned usage is NOT in here. */
@@ -201,6 +220,7 @@ export function summarizeUsage(
 
   const totalAcc = newAccumulator();
   const modelSums = new Map<string, Accumulator>();
+  const taskTypeSums = new Map<string, Accumulator>();
   const daySums = new Map<string, Accumulator>();
   const runSums = new Map<string, Accumulator>();
   const tenantSums = new Map<string, Accumulator>();
@@ -220,6 +240,10 @@ export function summarizeUsage(
     const modelSum = modelSums.get(event.model) ?? newAccumulator();
     addToAccumulator(modelSum, event);
     modelSums.set(event.model, modelSum);
+
+    const taskTypeSum = taskTypeSums.get(event.taskType) ?? newAccumulator();
+    addToAccumulator(taskTypeSum, event);
+    taskTypeSums.set(event.taskType, taskTypeSum);
 
     const day = event.ts.slice(0, 10);
     const daySum = daySums.get(day) ?? newAccumulator();
@@ -243,6 +267,7 @@ export function summarizeUsage(
       if (acc.hasTokensIn) entry.tokensIn = acc.tokensIn;
       if (acc.hasTokensOut) entry.tokensOut = acc.tokensOut;
       if (acc.hasCost) entry.costUsd = acc.costUsd;
+      if (acc.hasDuration) entry.durationMs = acc.durationMs;
       return entry;
     })
     .sort((left, right) => left.model.localeCompare(right.model));
@@ -263,6 +288,17 @@ export function summarizeUsage(
     })
     .sort((left, right) => left.runId.localeCompare(right.runId));
 
+  const byTaskType: UsageTaskTypeTotals[] = [...taskTypeSums.entries()]
+    .map(([taskType, acc]) => {
+      const entry: UsageTaskTypeTotals = { taskType, calls: acc.calls };
+      if (acc.hasTokensIn) entry.tokensIn = acc.tokensIn;
+      if (acc.hasTokensOut) entry.tokensOut = acc.tokensOut;
+      if (acc.hasCost) entry.costUsd = acc.costUsd;
+      if (acc.hasDuration) entry.durationMs = acc.durationMs;
+      return entry;
+    })
+    .sort((left, right) => left.taskType.localeCompare(right.taskType));
+
   const byTenant: UsageTenantTotals[] = [...tenantSums.entries()]
     .map(([tenantId, acc]) => tenantEntry(tenantId, acc))
     .sort((left, right) =>
@@ -272,6 +308,7 @@ export function summarizeUsage(
   return {
     totals,
     byModel,
+    byTaskType,
     byDay,
     byRun,
     byTenant,

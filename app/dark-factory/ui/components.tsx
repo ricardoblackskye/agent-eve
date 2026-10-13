@@ -194,6 +194,130 @@ export function TrendChart({ points }: { points: RunTrendPoint[] }): ReactNode {
   );
 }
 
+export interface BarDatum {
+  key: string;
+  label: string;
+  value: number;
+  display: string;
+}
+
+/**
+ * Bar chart over MEASURED entries only (#277 T3).
+ *
+ * The caller decides what is measurable and excludes the rest: a bar at zero is a claim about the
+ * world ("this cost nothing"), and for an unmeasured value that claim is false. An empty set shows
+ * an explicit state rather than an empty frame.
+ */
+export function BarChart({
+  label,
+  bars,
+}: {
+  label: string;
+  bars: BarDatum[];
+}): ReactNode {
+  if (bars.length === 0) {
+    return (
+      <StatePanel state="empty" message="Nothing measured for this window" />
+    );
+  }
+
+  const width = 320;
+  const rowHeight = 18;
+  const gap = 4;
+  const height = bars.length * (rowHeight + gap);
+  const max = Math.max(...bars.map((bar) => bar.value));
+
+  return (
+    <svg
+      className="df-bar-chart"
+      viewBox={`0 0 ${width} ${height}`}
+      role="img"
+      aria-label={label}
+    >
+      {bars.map((bar, index) => {
+        const y = index * (rowHeight + gap);
+        const drawn =
+          max > 0 ? Math.max((bar.value / max) * (width - 4), 1) : 0;
+        return (
+          <rect
+            className="df-bar"
+            key={bar.key}
+            x={0}
+            y={y}
+            width={drawn}
+            height={rowHeight}
+            rx={2}
+          >
+            <title>{`${bar.label}: ${bar.display}`}</title>
+          </rect>
+        );
+      })}
+    </svg>
+  );
+}
+
+/**
+ * Daily cost as a line chart (#277 T3).
+ *
+ * Only days that actually carried a measured cost are plotted. A day nobody measured is ABSENT from
+ * the series — plotting it at zero would draw a spend of nothing that never happened. No measured
+ * day at all is an explicit empty state, not a flat line at zero.
+ */
+export function CostTrendChart({
+  points,
+  label = "Daily cost",
+}: {
+  points: Array<{ date: string; costUsd?: number }>;
+  label?: string;
+}): ReactNode {
+  const series = points
+    .filter(
+      (point): point is { date: string; costUsd: number } =>
+        point.costUsd !== undefined,
+    )
+    .sort((left, right) => left.date.localeCompare(right.date));
+
+  if (series.length === 0) {
+    return (
+      <StatePanel state="empty" message="Nothing measured for this window" />
+    );
+  }
+
+  const width = 320;
+  const height = 90;
+  const pad = 8;
+  const max = Math.max(...series.map((point) => point.costUsd), Number.EPSILON);
+  const step = series.length > 1 ? (width - pad * 2) / (series.length - 1) : 0;
+  const coords = series.map((point, index) => ({
+    x: series.length > 1 ? pad + index * step : width / 2,
+    y: height - pad - (point.costUsd / max) * (height - pad * 2),
+    date: point.date,
+    costUsd: point.costUsd,
+  }));
+  const line = coords
+    .map(({ x, y }) => `${x.toFixed(1)},${y.toFixed(1)}`)
+    .join(" ");
+
+  return (
+    <svg
+      className="df-cost-chart"
+      viewBox={`0 0 ${width} ${height}`}
+      preserveAspectRatio="none"
+      role="img"
+      aria-label={label}
+    >
+      {coords.length > 1 ? (
+        <polyline className="df-cost-line" points={line} fill="none" />
+      ) : null}
+      {coords.map(({ x, y, date, costUsd }) => (
+        <circle className="df-cost-point" key={date} cx={x} cy={y} r={2.5}>
+          <title>{`${date}: $${costUsd.toFixed(2)}`}</title>
+        </circle>
+      ))}
+    </svg>
+  );
+}
+
 export function ResourceSnapshot({
   snapshot,
 }: {

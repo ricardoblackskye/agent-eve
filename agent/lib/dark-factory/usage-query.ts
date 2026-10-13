@@ -14,6 +14,7 @@
 
 import type {
   UsageAggregate,
+  UsageTaskTypeTotals,
   UsageDayTotals,
   UsageModelTotals,
   UsageRunTotals,
@@ -28,6 +29,8 @@ export interface UsageReport {
   to?: string;
   totals: UsageAggregate["totals"];
   byModel: UsageModelTotals[];
+  /** By task type — the ledger records it on every event. */
+  byTaskType: UsageTaskTypeTotals[];
   byDay: UsageDayTotals[];
   byRun: UsageRunTotals[];
   /** Attributed tenants only. Unassigned usage is NOT in here. */
@@ -83,10 +86,10 @@ function normalizeBound(
  * them: two copies would be two chances to disagree about what a valid
  * window is.
  */
-export function normalizeUsageWindow(params: {
+export function normalizeUsageWindow(params: { from?: string; to?: string }): {
   from?: string;
   to?: string;
-}): { from?: string; to?: string } {
+} {
   const from = normalizeBound(params.from, "from");
   const to = normalizeBound(params.to, "to");
   if (from !== undefined && to !== undefined && from >= to) {
@@ -119,9 +122,7 @@ export async function queryUsage(
     ...(to !== undefined ? { to } : {}),
     ...(params.runId !== undefined ? { runId: params.runId } : {}),
     ...(params.model !== undefined ? { model: params.model } : {}),
-    ...(params.tenantId !== undefined
-      ? { tenantId: params.tenantId }
-      : {}),
+    ...(params.tenantId !== undefined ? { tenantId: params.tenantId } : {}),
   });
 
   if (!read.ok || read.value === null) {
@@ -139,6 +140,7 @@ export async function queryUsage(
       ...(to !== undefined ? { to } : {}),
       totals: read.value.totals,
       byModel: read.value.byModel,
+      byTaskType: read.value.byTaskType,
       byDay: read.value.byDay,
       byRun: read.value.byRun,
       byTenant: read.value.byTenant,

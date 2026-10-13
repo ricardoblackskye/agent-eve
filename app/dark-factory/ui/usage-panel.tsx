@@ -2,6 +2,7 @@
 
 import type { UsageReport } from "../../../agent/lib/dark-factory/usage-query";
 import { useUsage } from "./use-usage";
+import { BarChart, CostTrendChart } from "./components";
 
 /** A value that was never measured renders as an em dash, never as 0. */
 const UNMEASURED = "—";
@@ -12,6 +13,11 @@ function usd(value: number | undefined): string {
 
 function count(value: number | undefined): string {
   return value === undefined ? UNMEASURED : String(value);
+}
+
+/** Wall-clock duration, unmeasured as the em dash rather than "0 ms". */
+function ms(value: number | undefined): string {
+  return value === undefined ? UNMEASURED : `${value} ms`;
 }
 
 export interface UsagePanelProps {
@@ -34,7 +40,8 @@ export function UsagePanel({
   error,
   onRefresh,
 }: UsagePanelProps) {
-  const empty = report !== null && report.totals.calls === 0 && report.unmeasured === 0;
+  const empty =
+    report !== null && report.totals.calls === 0 && report.unmeasured === 0;
 
   return (
     <section className="df-usage-card" aria-label="LLM usage">
@@ -73,12 +80,29 @@ export function UsagePanel({
             </tbody>
           </table>
 
+          <CostTrendChart points={report.byDay} />
+
+          <BarChart
+            label="Cost by model"
+            bars={report.byModel
+              .filter((row) => row.costUsd !== undefined)
+              .map((row) => ({
+                key: row.model,
+                label: row.model,
+                value: row.costUsd ?? 0,
+                display: usd(row.costUsd),
+              }))}
+          />
+
           <table className="df-usage-table">
             <caption>By model</caption>
             <thead>
               <tr>
                 <th scope="col">Model</th>
                 <th scope="col">Calls</th>
+                <th scope="col">Tokens in</th>
+                <th scope="col">Tokens out</th>
+                <th scope="col">Duration</th>
                 <th scope="col">Cost</th>
               </tr>
             </thead>
@@ -87,6 +111,35 @@ export function UsagePanel({
                 <tr key={row.model}>
                   <th scope="row">{row.model}</th>
                   <td>{row.calls}</td>
+                  <td>{count(row.tokensIn)}</td>
+                  <td>{count(row.tokensOut)}</td>
+                  <td>{ms(row.durationMs)}</td>
+                  <td>{usd(row.costUsd)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <table className="df-usage-table">
+            <caption>By task type</caption>
+            <thead>
+              <tr>
+                <th scope="col">Task type</th>
+                <th scope="col">Calls</th>
+                <th scope="col">Tokens in</th>
+                <th scope="col">Tokens out</th>
+                <th scope="col">Duration</th>
+                <th scope="col">Cost</th>
+              </tr>
+            </thead>
+            <tbody>
+              {report.byTaskType.map((row) => (
+                <tr key={row.taskType}>
+                  <th scope="row">{row.taskType}</th>
+                  <td>{row.calls}</td>
+                  <td>{count(row.tokensIn)}</td>
+                  <td>{count(row.tokensOut)}</td>
+                  <td>{ms(row.durationMs)}</td>
                   <td>{usd(row.costUsd)}</td>
                 </tr>
               ))}
