@@ -57,7 +57,36 @@ and churning `developer-agent.ts` for a zero-behaviour release.
 Off by default; **absence = today's safe behaviour**. There is deliberately no boolean "enable"
 flag, because a boolean can default open. An unknown value throws **before any side effect**.
 
-## Tasks (RED -> GREEN)
+## Tasks (RED -> GREEN) — ALL DONE
+
+**Outcome:** 4 new suites, 17 new tests. RED was a genuine RED: 12 tests failing against
+real-signature stubs (the modules existed and threw `not implemented`), so Vitest COLLECTED and ran
+them — not a "cannot find module" collection error masquerading as RED.
+
+- **T1 DONE** — `refusing` provider: every operation throws `SandboxRefusedError`; asserted for all
+  four methods, plus that the reason is named so a misconfiguration is diagnosable.
+- **T2 DONE** — unset/blank -> `local`; explicit `local`; `dry-run` with `isolated: false`; unknown
+  value throws naming `Supported values: local, dry-run`; and the supported set is exactly those two.
+- **T3 DONE** — contract test drives the SEAM: read/write/list round-trip, byte-for-byte parity with
+  `createWorkspaceTools` in both directions, and all four guards still fire through it.
+- **T4 DONE** — runner resolves the provider at the single call site; a source guard asserts the seam
+  is invoked exactly once and that the direct `createWorkspaceTools(process.cwd())` call is gone.
+- **T5 DONE** — ADR 0028 + index row, three catalog rows, active `DF_SANDBOX_DRIVER=` row; the three
+  repo guards (`doc-drift-guards`, `adr-integrity`, `env-example-coverage`) pass 20/20.
+
+**Verification (all local):** full suite **2015 passed / 31 skipped** (was 1998/31 — the +17 is
+exactly the new tests), `tsc --noEmit --incremental false` clean, `DF_PLATFORM_PROVIDER=generic
+npm run build` exit 0, **cspell 0 issues across all 13 changed files**, repo guards 20/20.
+
+### Two implementation notes found by the gates
+- `tsc` rejected `NodeJS.ProcessEnv` as a parameter type: this repo augments `ProcessEnv` to require
+  `NODE_ENV`, so a test fixture could not construct one. The factory now takes a one-property
+  `SandboxEnv`, and its default is explicit (`{ DF_SANDBOX_DRIVER: process.env.DF_SANDBOX_DRIVER }`)
+  — which also exposes the `process.env` read to the env-coverage guard.
+- `dry-run` REFUSES rather than returning no-op successes. A dry run that reported "tests passed"
+  without running anything is the same failure mode this repo already rejects elsewhere.
+
+## Original task list (as planned)
 
 1. **T1 — the refusing default (fail-closed).** RED: a provider that reports it cannot execute must
    make every `WorkspaceTools` method fail closed with zero side effects (no file read/write, no
