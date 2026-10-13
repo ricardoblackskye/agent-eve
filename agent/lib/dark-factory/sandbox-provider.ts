@@ -1,4 +1,5 @@
 import { createLocalSandboxProvider } from "./local-sandbox";
+import { createLiveSandbox, createOpenSandboxProvider } from "./opensandbox-driver";
 import { createDryRunSandboxProvider, type SandboxProvider } from "./sandbox";
 
 /**
@@ -15,7 +16,7 @@ import { createDryRunSandboxProvider, type SandboxProvider } from "./sandbox";
 
 /** The drivers this release can select. Not the same as the `SandboxDriver` union, which also
  * includes the internal `refusing` state. */
-export const SUPPORTED_SANDBOX_DRIVERS = ["local", "dry-run"] as const;
+export const SUPPORTED_SANDBOX_DRIVERS = ["local", "dry-run", "opensandbox"] as const;
 
 export class SandboxConfigError extends Error {
   constructor(message: string) {
@@ -41,6 +42,19 @@ export function createSandboxProvider(
   // Absence = today's behaviour. This is the fail-closed default, not a permissive one.
   if (requested === "" || requested === "local") return createLocalSandboxProvider();
   if (requested === "dry-run") return createDryRunSandboxProvider();
+  if (requested === "opensandbox") {
+    // Live execution inside a sandbox. Egress is deny-by-default, so the gateway host is the only
+    // reachable destination unless explicitly widened.
+    return createOpenSandboxProvider(
+      {
+        DF_SANDBOX_IMAGE: process.env.DF_SANDBOX_IMAGE,
+        DF_SANDBOX_TIMEOUT_SECONDS: process.env.DF_SANDBOX_TIMEOUT_SECONDS,
+        DF_SANDBOX_EGRESS_ALLOW: process.env.DF_SANDBOX_EGRESS_ALLOW,
+        DF_SANDBOX_WORKSPACE: process.env.DF_SANDBOX_WORKSPACE,
+      },
+      { createSandbox: createLiveSandbox },
+    );
+  }
 
   throw new SandboxConfigError(
     `Unsupported DF_SANDBOX_DRIVER '${requested}'. Supported values: ${SUPPORTED_SANDBOX_DRIVERS.join(", ")}.`,

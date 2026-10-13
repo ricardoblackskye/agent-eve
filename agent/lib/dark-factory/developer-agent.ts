@@ -479,6 +479,16 @@ export type CommandRunnerFn = (
   cmd: string,
 ) => Promise<{ exitCode: number; stdout: string; stderr: string }>;
 
+/**
+ * The ONLY test commands either execution backend will run. Exported so the sandbox driver shares this
+ * single list: two copies would drift, and drift here means a command becoming runnable on one backend.
+ */
+export const ALLOWED_TEST_COMMAND_PREFIXES: readonly string[] = [
+  "npx vitest",
+  "npm test",
+  "npx tsc",
+];
+
 export const ALLOWED_WORKSPACE_EXTENSIONS: ReadonlySet<string> = new Set([
   ".ts",
   ".tsx",
@@ -675,7 +685,7 @@ export function createWorkspaceTools(
       }
 
       // Security: Allowlist permitted test commands
-      const ALLOWED_TEST_PREFIXES = ["npx vitest", "npm test", "npx tsc"];
+      const ALLOWED_TEST_PREFIXES = ALLOWED_TEST_COMMAND_PREFIXES;
       const isAllowed = ALLOWED_TEST_PREFIXES.some(
         (prefix) => testCmd === prefix || testCmd.startsWith(`${prefix} `),
       );
