@@ -191,7 +191,9 @@
     "unwired",
     "metacharacter",
     "metacharacters",
-    "exfiltration"
+    "exfiltration",
+    "opensandbox",
+    "execd"
   ],
   "ignorePaths": [
     "node_modules/**",
