@@ -318,3 +318,22 @@ event** recording that decision.)
 ## GATE 1
 
 Plan committed and pushed to `feat/df-author-wiring-281` BEFORE any implementation. Await approval.
+
+---
+
+## Implementation Status (completed)
+
+All four acceptance criteria are implemented, unit- and end-to-end-tested, and pushed to
+`feat/df-author-wiring-281`. Full suite 2075 passed / 31 skipped; `tsc`, prettier 3.5.3, cspell,
+doc-drift / ADR-integrity / env-example guards all green.
+
+| Task | What landed | Commit |
+|------|-------------|--------|
+| **B1** | runner drives `CodeAuthorProvider` (`authorFiles`), in-process parity preserved via `buildCodeAuthorPrompt` | `475b9cb` |
+| **B2** | `runCodingPhase` owns the sandbox lifecycle — create once per run, force-`dispose()` on success AND throw | `1842f6a` |
+| **B3** | gateway `recordUsage`/`recordRefusal` → run-history (`gateway-recorder.ts`, new `run.cost` event type, ADR 0033) | `ea883f5` |
+| **B4** | label sandboxes by `metadata.run`; `reapSandboxesByRun` reclaims orphans (ADR 0034) | `157cb35` |
+
+ADRs added: 0031 (runner consumes the seam), 0032 (lifecycle is the runner's), 0033 (sandbox spend is a
+first-class run-history event), 0034 (reaping by run id). `df-runner` source-guard retightened to the
+new `runCodingPhase(createSandboxProvider(...))` wiring.
