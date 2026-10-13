@@ -35,12 +35,12 @@ import { resolveWorkerAllowedRepos } from "../agent/lib/dark-factory/credentials
 import {
   CircuitTrippedError,
   DeveloperAgent,
-  createWorkspaceTools,
   runMultiFileCodingLoop,
   toTaskAssignment,
   type LoopResult,
 } from "../agent/lib/dark-factory/developer-agent";
 import { createCircuitBreaker } from "../agent/lib/dark-factory/circuit-breaker";
+import { createSandboxProvider } from "../agent/lib/dark-factory/sandbox-provider";
 import { createCodingLoopBreaker } from "../agent/lib/dark-factory/breaker-wiring";
 import { recordBreakerTrip } from "../agent/lib/dark-factory/breaker-trip-recorder";
 import { createMetricsStore } from "../agent/lib/dark-factory/metrics";
@@ -345,7 +345,9 @@ async function main(): Promise<void> {
   console.log(
     `\n[STEP 5] Dispatched Multi-File Developer Agent with Workspace Tools...`,
   );
-  const workspaceTools = createWorkspaceTools(process.cwd());
+  // #280: the execution backend is configuration-selected. Unset DF_SANDBOX_DRIVER = the local
+  // filesystem, i.e. today's behaviour; an unknown value throws before any side effect.
+  const workspaceTools = createSandboxProvider().create(process.cwd());
   const capturedTestResults: {
     testFile: string;
     testCaseName: string;
