@@ -1,10 +1,16 @@
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import { PostgresControlAdapter } from "../../agent/lib/dark-factory/control-postgres";
+import { PG_TABLES, resetPgTables } from "./pg-test-helpers";
 
 const databaseUrl = process.env.DF_CONTROL_DATABASE_URL ?? process.env.DF_RUN_HISTORY_DATABASE_URL;
 const integration = databaseUrl ? describe : describe.skip;
 
 integration("PostgresControlAdapter", () => {
+  // #332: start from this suite's OWN empty tables, so leftovers cannot flake it.
+  beforeAll(async () => {
+    await resetPgTables(databaseUrl as string, PG_TABLES.control);
+  });
+
   it("upserts factory/run state and persists audit events", async () => {
     const store = new PostgresControlAdapter(databaseUrl!);
     const now = new Date().toISOString();

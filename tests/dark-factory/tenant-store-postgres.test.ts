@@ -7,9 +7,10 @@
  * Run against a scratch database only: the suite writes and then removes rows.
  */
 
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PostgresTenantStore } from "../../agent/lib/dark-factory/tenant-store-postgres";
 import { InvalidTenantError } from "../../agent/lib/dark-factory/tenant";
+import { PG_TABLES, resetPgTables } from "./pg-test-helpers";
 
 const DSN = process.env.DF_TENANT_TEST_DATABASE_URL;
 const suite = DSN ? describe : describe.skip;
@@ -21,6 +22,11 @@ const SLUG_B = `tenant-b-${STAMP}`;
 const REPO = `tenant-org-${STAMP}/widgets`;
 
 suite("PostgresTenantStore (integration)", () => {
+  // #332: start from this suite's OWN empty tables, so leftovers cannot flake it.
+  beforeAll(async () => {
+    await resetPgTables(DSN as string, PG_TABLES.tenants);
+  });
+
   const store = new PostgresTenantStore(DSN ?? "");
 
   afterAll(async () => {

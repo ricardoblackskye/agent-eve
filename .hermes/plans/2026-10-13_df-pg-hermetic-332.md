@@ -31,23 +31,29 @@ that only protects tests that filter by their own namespace — it cannot protec
 table-wide aggregate or an order-dependent walk. Namespacing is a workaround for one symptom; the
 shared, never-reset state is the condition.
 
-## Tasks (RED → GREEN)
+## Tasks (RED → GREEN) — ALL DONE
 
-**T1 (RED) — a hermetic-start guard per suite.** Assert each suite begins from its own empty tables.
-Today this fails whenever leftovers exist, and it is reproducible on demand by inserting a stray row and
-re-running. This is the assertion that makes the whole issue testable rather than from a single observation.
+**T1 (RED) — hermetic-start guard.** `pg-test-helpers.ts` ships `pgRowCounts` + a `beforeAll` reset in
+every suite. The guard `it("starts from its own empty tables (#332)")` in run-history **RED-failed
+measurably**: `expected { df_run_summaries: 222, df_run_events: 326, df_run_deliveries: 222 } to deeply
+equal { …0 }` against the shared fixture (it had 222/326/222 accumulated rows at the time).
 
-**T2 (GREEN) — reset each suite's own tables.** Extend the shared database helper so a suite declares
-the tables it owns and those are `TRUNCATE`d (`RESTART IDENTITY CASCADE`) before it runs. Wire it into
-all five suites with their real table names.
+**T2 (GREEN) — reset each suite's own tables.** New `tests/dark-factory/pg-test-helpers.ts` with
+`PG_TABLES` (per-suite ownership) and `resetPgTables` (`TRUNCATE … RESTART IDENTITY CASCADE`, then a
+self-verifying re-count that throws if anything remains). Wired into all five suites:
+`runHistory`, `usage`, `costBudget`, `tenants`, `control`. No production code, no cross-suite tables.
 
-**T3 — prove it on a developer machine.** Run the Postgres suites **twice back-to-back** and show the
-second run green. That is the acceptance evidence the issue asks for, and it is the standard the rest of
-this epic has been held to.
+**T3 — proven twice back-to-back.** With `DF_*_TEST_DATABASE_URL` pointed at the local
+`df-run-history-pg-test` container, all five suites pass **26/26 on RUN 1 and 26/26 on RUN 2**
+immediately after, with no code change between. `tsc -p tsconfig.json --noEmit` is clean.
 
-**T4 — non-vacuity.** Insert a stray row into a suite's table, re-run, and confirm it is still green
-(i.e. the truncate genuinely resets, rather than the suite happening to pass). Without this, "it stopped
-flaking" is unproven either way.
+**T4 — non-vacuity.** `it("reset actually clears pre-existing rows (non-vacuity #332)")` creates a real
+run via the store, asserts the table is NOT empty (`>= 1`), then asserts `resetPgTables` brings it back
+to 0. The guard is therefore proven to fail on dirtiness, not merely pass on emptiness.
+
+> Note: each run truncates at `beforeAll` (start-clean), so the fixture is left dirty *after* a run but is
+> emptied again at the next run's start — that start-clean invariant is what removes the flake. Truncate is
+> scoped per suite's own tables; no whole-schema reset, so adjacent suites cannot be affected.
 
 ## Constraints
 
