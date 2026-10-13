@@ -1,3 +1,4 @@
+import { createAgentCliCodeAuthor, type AgentCliDeps } from "./agent-cli-author";
 import { createInProcessCodeAuthor, type CodeAuthorProvider } from "./code-author";
 
 /**
@@ -17,11 +18,20 @@ export type AgentCli = (typeof SUPPORTED_AGENT_CLI_NAMES)[number];
 export interface CodeAuthorEnv {
   DF_CODE_AUTHOR?: string | undefined;
   DF_AGENT_CLI?: string | undefined;
+  /** Operator-supplied invocation template for the sandbox CLI (must contain `{prompt}`). */
+  DF_AGENT_CLI_COMMAND?: string | undefined;
 }
 
 export interface CodeAuthorFactoryDeps {
   /** The governed model call that the `in-process` author uses. */
   generate: (prompt: string) => Promise<string>;
+  /**
+   * Dependencies for the sandbox CLI author. Absent means "cannot honour agent-cli", which REFUSES:
+   * silently falling back to the in-process author would contradict an explicit operator choice.
+   */
+  agentCli?:
+    | (Omit<AgentCliDeps, "commandTemplate"> & { commandTemplate?: string | undefined })
+    | undefined;
 }
 
 export class CodeAuthorConfigError extends Error {
@@ -46,6 +56,7 @@ export function createCodeAuthorProvider(
   env: CodeAuthorEnv = {
     DF_CODE_AUTHOR: process.env.DF_CODE_AUTHOR,
     DF_AGENT_CLI: process.env.DF_AGENT_CLI,
+    DF_AGENT_CLI_COMMAND: process.env.DF_AGENT_CLI_COMMAND,
   },
   deps: CodeAuthorFactoryDeps,
 ): CodeAuthorProvider {
@@ -57,14 +68,16 @@ export function createCodeAuthorProvider(
   }
 
   if (requested === "agent-cli") {
-    // Validate the CLI choice first so a bad value reports its own reason...
-    resolveAgentCli(env);
-    // ...then REFUSE, because this release does not ship the sandbox CLI adapter yet. Refusing is
-    // the point: silently running the in-process author would contradict an explicit operator choice
-    // and hide the gap behind a green run.
-    throw new CodeAuthorConfigError(
-      "DF_CODE_AUTHOR=agent-cli requires the sandbox CLI adapter, which this release does not ship yet. Refusing rather than silently authoring in-process.",
-    );
+    const cli = resolveAgentCli(env);
+    if (!deps.agentCli) {
+      throw new CodeAuthorConfigError(
+        "DF_CODE_AUTHOR=agent-cli requires the sandbox CLI adapter dependencies; refusing rather than silently authoring in-process.",
+      );
+    }
+    return createAgentCliCodeAuthor(cli, {
+      ...deps.agentCli,
+      commandTemplate: deps.agentCli.commandTemplate ?? (env.DF_AGENT_CLI_COMMAND ?? ""),
+    });
   }
 
   throw new CodeAuthorConfigError(

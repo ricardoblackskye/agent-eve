@@ -11,6 +11,14 @@
 
 _82 modules._
 
+## agent-cli-author
+
+The sandbox CLI author (#281, R2): runs a coding-agent CLI inside the sandbox with its base URL
+pointed at the governed gateway and a per-run LEASE as its credential. A failed CLI run is
+never treated as authored code, and `withSandbox` always releases the sandbox.
+
+**Source:** [`agent/lib/dark-factory/agent-cli-author.ts`](../../agent/lib/dark-factory/agent-cli-author.ts)
+
 ## architect-agent
 
 Dark Factory — Architect Agent (#179). Pre-code planning agent that inspects the repository file tree, analyzes the User Story and Acceptance Criteria, and synthesizes an ExecutionPlan. Self-corrects via feedback loops when generated plans fail domain validation.

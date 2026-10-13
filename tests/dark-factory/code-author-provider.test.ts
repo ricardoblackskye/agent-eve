@@ -37,6 +37,34 @@ describe("#281 createCodeAuthorProvider", () => {
     ).toThrow(/agent-cli/);
   });
 
+  it("builds the agent-cli author when its dependencies ARE supplied", () => {
+    const provider = createCodeAuthorProvider(
+      {
+        DF_CODE_AUTHOR: "agent-cli",
+        DF_AGENT_CLI: "codex",
+        DF_AGENT_CLI_COMMAND: "codex exec {prompt}",
+      },
+      {
+        ...deps,
+        agentCli: {
+          runInSandbox: async () => ({ exitCode: 0, output: "ok" }),
+          collectFiles: async () => ({ "app/a.ts": "x" }),
+          lease: { token: "lease-1", gatewayUrl: "https://gateway.example" },
+        },
+      },
+    );
+    expect(provider.author).toBe("agent-cli");
+  });
+
+  it("refuses agent-cli when the deps are absent, even with a template configured", () => {
+    expect(() =>
+      createCodeAuthorProvider(
+        { DF_CODE_AUTHOR: "agent-cli", DF_AGENT_CLI: "codex", DF_AGENT_CLI_COMMAND: "codex exec {prompt}" },
+        deps,
+      ),
+    ).toThrow(/dependencies/);
+  });
+
   it("throws on an unknown DF_CODE_AUTHOR, naming the supported authors", () => {
     expect(() => createCodeAuthorProvider({ DF_CODE_AUTHOR: "sandbox-cli" }, deps)).toThrow(
       /Supported values: in-process, agent-cli/,
