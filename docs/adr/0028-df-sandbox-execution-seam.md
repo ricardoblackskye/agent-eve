@@ -23,7 +23,7 @@ selected by `DF_SANDBOX_DRIVER`, and make it **fail-closed**:
 - **There is no boolean enable flag.** A boolean can default open; a driver *name* cannot. The knob
   names the backend rather than asserting that one exists.
 - **An unknown value throws before any side effect.** It never falls back to something permissive.
-- **The seam refuses rather than silently no-opping.** A sandbox that cannot execute throws on every
+- **The seam refuses rather than silently doing nothing.** A sandbox that cannot execute throws on every
   operation. An operation that reports success without executing would let a run claim progress it
   never made — the same reasoning as "never report tests passed when nothing ran".
 - **`local` delegates to `createWorkspaceTools`** instead of reimplementing it, so the existing

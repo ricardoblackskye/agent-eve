@@ -9,7 +9,7 @@ import { createDryRunSandboxProvider, type SandboxProvider } from "./sandbox";
  * a boolean can default open while a driver NAME cannot. An unknown value throws BEFORE any side
  * effect rather than falling back to something permissive.
  *
- * `opensandbox` is added in R2 (#281); until then it lands in the unknown-value branch, which
+ * The sandbox-backed driver is added in R2 (#281); until then it lands in the unknown-value branch, which
  * refuses.
  */
 
