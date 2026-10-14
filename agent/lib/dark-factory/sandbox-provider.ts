@@ -39,6 +39,8 @@ export class SandboxConfigError extends Error {
  */
 export interface SandboxEnv {
   DF_SANDBOX_DRIVER?: string | undefined;
+  /** #282 (R3) — opt-in gate for the OpenSandbox credential proxy (vault-backed sandbox wiring). */
+  DF_SANDBOX_VAULT_ENABLED?: string | undefined;
 }
 
 export function createSandboxProvider(

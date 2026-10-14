@@ -69,6 +69,8 @@ export interface OpenSandboxDriverEnv {
   DF_SANDBOX_EGRESS_GATEWAY_HOST?: string | undefined;
   DF_SANDBOX_EGRESS_GIT_HOST?: string | undefined;
   DF_SANDBOX_WORKSPACE?: string | undefined;
+  /** #282 (R3) — opt-in gate for the OpenSandbox credential proxy. Unset/blank = today's behaviour. */
+  DF_SANDBOX_VAULT_ENABLED?: string | undefined;
 }
 
 export const DEFAULT_SANDBOX_WORKSPACE = "/workspace";

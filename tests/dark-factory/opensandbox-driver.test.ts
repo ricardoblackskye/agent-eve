@@ -145,3 +145,38 @@ describe("#281 opensandbox driver", () => {
     expect(matchesPattern("a?.ts", "a1.ts")).toBe(true);
   });
 });
+
+/**
+ * #282 (R3) — the credential-proxy gate on the sandbox SPEC.
+ *
+ * The sandbox must request the credential proxy ONLY when the operator opts in. An unset (or blank)
+ * gate keeps today's behaviour, and the flag is never silently enabled: a deployment that did not ask
+ * for the vault path must not have secrets injected into its sandboxes.
+ */
+describe("#282 R3 credential-proxy gate", () => {
+  /** Creates a sandbox through the provider and returns the spec the driver handed to the API. */
+  const specForGate = async (gate: string | undefined) => {
+    const { handle } = fakeHandle();
+    const createSandbox = vi.fn(async (_spec: SandboxCreateSpec) => handle);
+    const provider = createOpenSandboxProvider(
+      gate === undefined ? env : { ...env, DF_SANDBOX_VAULT_ENABLED: gate },
+      { createSandbox },
+    );
+    await provider.create("/workspace").readFile("a.ts");
+    return createSandbox.mock.calls[0]![0] as unknown as {
+      credentialProxy?: unknown;
+    };
+  };
+
+  it("requests the credential proxy when the gate is set", async () => {
+    expect((await specForGate("1")).credentialProxy).toEqual({ enabled: true });
+  });
+
+  it("omits the credential proxy when the gate is unset (default closed)", async () => {
+    expect((await specForGate(undefined)).credentialProxy).toBeUndefined();
+  });
+
+  it("treats a blank gate value as off", async () => {
+    expect((await specForGate("   ")).credentialProxy).toBeUndefined();
+  });
+});
