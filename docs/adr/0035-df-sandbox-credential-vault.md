@@ -9,7 +9,7 @@
 argv, shell strings, sandbox env, logs, or errors:
 
 - the model-provider key, read by the LLM gateway from `process.env` per request; and
-- the git push token, embedded in a `https://x-access-token:${token}@github.com/...`
+- the git push token, embedded in a `x-access-token:${token}@github.com/...`
   shell string the runner builds at push time.
 
 Both leak by construction. OpenSandbox exposes a Credential Vault API (write-only

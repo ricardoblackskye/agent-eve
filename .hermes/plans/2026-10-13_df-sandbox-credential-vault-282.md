@@ -17,7 +17,7 @@
 Make the sandbox **secret-free**. Today two raw secrets are visible in process arguments / shell strings:
 
 1. **Git push token** — `scripts/dark-factory-runner.ts:533`
-   `const pushUrl = \`https://x-access-token:${token}@github.com/...\`` then
+   `const pushUrl = \`x-access-token:${token}@github.com/...\`` then
    `execSync(\`git push ${pushUrl} ${branchName}\`, ...)`. The token sits in a shell string + argv.
 2. **Model-provider key** — `app/api/llm-gateway/route.ts:50`
    `authorization: *** ${env.OPENROUTER_API_KEY ?? ""}` inside `forwardUpstream`, which **already closes
@@ -85,7 +85,7 @@ R3 changes **only where secrets live** — it does not alter authoring or gatewa
 - Unit tests with a fake vault + fake broker (no live secret).
 
 ### T2 — Git push-token vault (secret-free push)
-- Remove `https://x-access-token:${token}@github.com` at runner line 533; inject via vault / credential
+- Remove `x-access-token:${token}@github.com` at runner line 533; inject via vault / credential
   helper. Preserve `git ls-remote` HEAD check + single-background-push rule.
 - Decide in-sandbox vs host-side injection from T0's server capability.
 - Unit test asserts no token in the constructed command string / argv (parse `execSync` args, not actually run).
