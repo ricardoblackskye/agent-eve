@@ -57,7 +57,7 @@ export function gitBasicCredentialValue(
   username: string,
   token: string,
 ): string {
-  throw new Error("not implemented");
+  return Buffer.from(`${username}:${token}`, "utf8").toString("base64");
 }
 
 export interface GitPushCredentialOptions {
@@ -82,5 +82,40 @@ export async function provisionGitPushCredential(
   vault: SdkCredentialVault,
   opts: GitPushCredentialOptions,
 ): Promise<void> {
-  throw new Error("not implemented");
+  const token = opts.token.trim();
+  // Fail closed: an empty credential would make the binding inject garbage auth headers, and a
+  // caller that lost its token must hear about it rather than push unauthenticated.
+  if (token === "") {
+    throw new Error(
+      "refusing to provision a git push credential with a blank token",
+    );
+  }
+  const credentialName = opts.credentialName ?? "git-push-token";
+  const bindingName = opts.bindingName ?? "git-push";
+  await vault.create({
+    credentials: [
+      {
+        name: credentialName,
+        source: {
+          value: gitBasicCredentialValue(
+            opts.username ?? "x-access-token",
+            token,
+          ),
+        },
+      },
+    ],
+    bindings: [
+      {
+        name: bindingName,
+        // Narrow on purpose: this credential is injected for HTTPS requests to this host AND path
+        // only, so an unrelated request (or a redirect) cannot receive the push token.
+        match: {
+          schemes: ["https"],
+          hosts: [opts.host.trim()],
+          paths: [opts.path.trim()],
+        },
+        auth: { type: "basic", credential: credentialName },
+      },
+    ],
+  });
 }
