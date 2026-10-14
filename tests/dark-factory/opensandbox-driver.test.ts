@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createOpenSandboxProvider,
   matchesPattern,
+  sandboxConnectionConfig,
   sandboxNetworkPolicy,
   type SandboxCreateSpec,
   type SandboxHandle,
@@ -143,5 +144,184 @@ describe("#281 opensandbox driver", () => {
     expect(matchesPattern("*.ts", "a.ts")).toBe(true);
     expect(matchesPattern("*.ts", "a.md")).toBe(false);
     expect(matchesPattern("a?.ts", "a1.ts")).toBe(true);
+  });
+});
+
+/**
+ * #282 (R3) — the credential-proxy gate on the sandbox SPEC.
+ *
+ * The sandbox must request the credential proxy ONLY when the operator opts in. An unset (or blank)
+ * gate keeps today's behaviour, and the flag is never silently enabled: a deployment that did not ask
+ * for the vault path must not have secrets injected into its sandboxes.
+ */
+describe("#282 R3 credential-proxy gate", () => {
+  /** Creates a sandbox through the provider and returns the spec the driver handed to the API. */
+  const specForGate = async (gate: string | undefined) => {
+    const { handle } = fakeHandle();
+    const createSandbox = vi.fn(async (_spec: SandboxCreateSpec) => handle);
+    const provider = createOpenSandboxProvider(
+      gate === undefined ? env : { ...env, DF_SANDBOX_VAULT_ENABLED: gate },
+      { createSandbox },
+    );
+    await provider.create("/workspace").readFile("a.ts");
+    return createSandbox.mock.calls[0]![0] as unknown as {
+      credentialProxy?: unknown;
+    };
+  };
+
+  it("requests the credential proxy when the gate is set", async () => {
+    expect((await specForGate("1")).credentialProxy).toEqual({ enabled: true });
+  });
+
+  it("omits the credential proxy when the gate is unset (default closed)", async () => {
+    expect((await specForGate(undefined)).credentialProxy).toBeUndefined();
+  });
+
+  it("treats a blank gate value as off", async () => {
+    expect((await specForGate("   ")).credentialProxy).toBeUndefined();
+  });
+});
+
+/**
+ * #354 — in-sandbox git on the VAULT path.
+ *
+ * The sidecar injects the Authorization header for the matched repo path, so the sandbox runs a bare
+ * `git push` with NO credential of its own. Two properties matter and are pinned here: the capability
+ * exists ONLY when the operator opted in, and the arguments cannot escape into the sandbox shell.
+ */
+describe("#282 R3 in-sandbox git (vault path)", () => {
+  const vaultEnv = { ...env, DF_SANDBOX_VAULT_ENABLED: "1" };
+  const repoUrl = "https://github.com/ricardoblackskye/agent-eve.git";
+
+  const vaultProvider = (handle: SandboxHandle) =>
+    createOpenSandboxProvider(vaultEnv, { createSandbox: async () => handle });
+
+  it("exposes NO git capability when the gate is off (today's host-side push)", () => {
+    const provider = createOpenSandboxProvider(env, { createSandbox: vi.fn() });
+    expect(provider.runGit).toBeUndefined();
+  });
+
+  it("runs git INSIDE the sandbox on the vault path, never prompting for credentials", async () => {
+    const { handle, calls } = fakeHandle();
+    const provider = vaultProvider(handle);
+    expect(typeof provider.runGit).toBe("function");
+    const res = await provider.runGit!(["push", repoUrl, "feat/df-sandbox-vault-push-354"]);
+    expect(res.exitCode).toBe(0);
+    // A bare URL with no userinfo, and a non-interactive git: nothing to leak, nothing to prompt for.
+    expect(calls.run).toEqual([
+      `GIT_TERMINAL_PROMPT=0 git push ${repoUrl} feat/df-sandbox-vault-push-354`,
+    ]);
+    expect(calls.run[0]).not.toContain("@");
+  });
+
+  /**
+   * REVISED at T4: a commit message legitimately contains spaces, `:` and `#`, so the guard cannot
+   * REJECT everything it cannot interpolate bare. It single-quotes instead, which is why the first
+   * assertion below pins the quoted form exactly.
+   */
+  it("QUOTES an argument carrying shell metacharacters so it stays literal text", async () => {
+    const { handle, calls } = fakeHandle();
+    const provider = vaultProvider(handle);
+    const res = await provider.runGit!([
+      "commit",
+      "-m",
+      `feat: #354 vault push; rm -rf ${repoUrl}`,
+    ]);
+    expect(res.exitCode).toBe(0);
+    // ONE single-quoted shell word: the sidecar shell cannot execute the `;` or the `$`.
+    expect(calls.run).toEqual([
+      `GIT_TERMINAL_PROMPT=0 git commit -m 'feat: #354 vault push; rm -rf ${repoUrl}'`,
+    ]);
+  });
+
+  it("escapes an embedded single quote so it cannot terminate the quoted word", async () => {
+    const { handle, calls } = fakeHandle();
+    const provider = vaultProvider(handle);
+    await provider.runGit!(["commit", "-m", "it's safe"]);
+    expect(calls.run).toEqual([
+      "GIT_TERMINAL_PROMPT=0 git commit -m 'it'\\''s safe'",
+    ]);
+  });
+
+  it("still refuses an empty argument list (no bare `git` with no subcommand)", async () => {
+    const { handle, calls } = fakeHandle();
+    const provider = vaultProvider(handle);
+    await expect(provider.runGit!([])).rejects.toThrow();
+    expect(calls.run).toEqual([]);
+  });
+});
+
+/**
+ * #354 — the push credential is seeded into the sandbox-local (write-only) vault on create, and its
+ * ABSENCE on the vault path is fatal: pushing without it would be an unauthenticated push that reads
+ * as a mysterious 401 rather than a configuration error.
+ */
+describe("#282 R3 vault credential seeding", () => {
+  const credential = {
+    host: "github.com",
+    path: "/ricardoblackskye/agent-eve.git*",
+    token: "fixture-push-token-value",
+  };
+
+  it("seeds the credential + binding into the sandbox vault on create", async () => {
+    const { handle } = fakeHandle();
+    const create = vi.fn(async (_req: unknown) => ({ revision: 1 }));
+    (handle as unknown as { credentialVault: unknown }).credentialVault = {
+      create,
+    };
+    const provider = createOpenSandboxProvider(
+      { ...env, DF_SANDBOX_VAULT_ENABLED: "1" },
+      { createSandbox: async () => handle, gitPushCredential: credential },
+    );
+    await provider.create("/workspace").readFile("a.ts");
+    expect(create).toHaveBeenCalledTimes(1);
+    const req = create.mock.calls[0]![0] as {
+      bindings: { name: string; auth: unknown }[];
+    };
+    expect(req.bindings[0]!.name).toBe("git-push");
+    expect(req.bindings[0]!.auth).toEqual({
+      type: "basic",
+      credential: "git-push-token",
+    });
+    // Only the basic-auth encoding enters the vault; the raw token never appears.
+    expect(JSON.stringify(req)).not.toContain(credential.token);
+  });
+
+  it("REFUSES when the credential was requested but the sandbox exposes no vault", async () => {
+    const { handle } = fakeHandle(); // no credentialVault: not a vault-capable server
+    const provider = createOpenSandboxProvider(
+      { ...env, DF_SANDBOX_VAULT_ENABLED: "1" },
+      { createSandbox: async () => handle, gitPushCredential: credential },
+    );
+    await expect(provider.create("/workspace").readFile("a.ts")).rejects.toThrow(
+      /vault/i,
+    );
+  });
+});
+
+/**
+ * #354 — discovered by running the vault path against the LOCAL K8s harness, where it failed with
+ * `Sandbox health check timed out after 30s ... Connection context: useServerProxy=false`.
+ *
+ * Wherever the client cannot reach a sandbox directly — the local harness, because the SDK otherwise
+ * resolves the sandbox's ingress-gateway host — every process call (health, execd, files) must be
+ * routed through the API server. The flag is opt-in, so a deployment whose client CAN reach its
+ * sandboxes keeps talking to them directly.
+ */
+describe("#354 sandbox connection config (server proxy)", () => {
+  it("routes through the server proxy when DF_SANDBOX_USE_SERVER_PROXY is set", () => {
+    expect(
+      sandboxConnectionConfig({ DF_SANDBOX_USE_SERVER_PROXY: "1" }).useServerProxy,
+    ).toBe(true);
+  });
+
+  it("leaves the server proxy off by default", () => {
+    expect(sandboxConnectionConfig({}).useServerProxy).toBe(false);
+  });
+
+  it("treats a blank value as off", () => {
+    expect(
+      sandboxConnectionConfig({ DF_SANDBOX_USE_SERVER_PROXY: "   " }).useServerProxy,
+    ).toBe(false);
   });
 });

@@ -1,6 +1,15 @@
 import { extname } from "node:path";
 
-import { ConnectionConfig, Sandbox } from "@alibaba-group/opensandbox";
+import {
+  ConnectionConfig,
+  Sandbox,
+  type CredentialVault as SdkCredentialVault,
+} from "@alibaba-group/opensandbox";
+
+import {
+  provisionGitPushCredential,
+  type GitPushCredentialOptions,
+} from "./opensandbox-credential-vault";
 
 import {
   ALLOWED_TEST_COMMAND_PREFIXES,
@@ -24,6 +33,12 @@ import { SandboxRefusedError, type SandboxProvider } from "./sandbox";
 
 export interface SandboxHandle {
   readonly id: string;
+  /**
+   * #354 — the sandbox-local, WRITE-ONLY credential vault. Present only on a vault-capable server, so
+   * its absence on the vault path means the push credential cannot be injected and the run must
+   * refuse rather than push unauthenticated.
+   */
+  credentialVault?: SdkCredentialVault | undefined;
   commands: {
     run(command: string): Promise<{
       exitCode?: number;
@@ -51,6 +66,12 @@ export interface SandboxCreateSpec {
   image: string;
   timeoutSeconds: number;
   networkPolicy: SandboxNetworkPolicy;
+  /**
+   * #282 (R3) — when set, the sandbox requests the OpenSandbox credential proxy so outbound calls
+   * carry a PLACEHOLDER that the egress sidecar substitutes with the real credential. OMITTED unless
+   * the operator opted in, so secret injection is never enabled by accident.
+   */
+  credentialProxy?: { enabled: true } | undefined;
   /** Run-scoped label so orphans can be reaped by run id (T5b/B4). Optional for non-run contexts. */
   metadata?: Record<string, string> | undefined;
 }
@@ -60,6 +81,12 @@ export interface OpenSandboxDriverDeps {
   createSandbox(spec: SandboxCreateSpec): Promise<SandboxHandle>;
   /** Run-scoped label attached to the created sandbox; enables reaping by run id. */
   metadata?: Record<string, string> | undefined;
+  /**
+   * #354 — the git push credential to seed into the sandbox-local vault immediately after create.
+   * Only meaningful with the credential proxy enabled: the vault is write-only, and the egress
+   * sidecar injects the value, so the sandbox process never receives it.
+   */
+  gitPushCredential?: GitPushCredentialOptions | undefined;
 }
 
 export interface OpenSandboxDriverEnv {
@@ -69,6 +96,8 @@ export interface OpenSandboxDriverEnv {
   DF_SANDBOX_EGRESS_GATEWAY_HOST?: string | undefined;
   DF_SANDBOX_EGRESS_GIT_HOST?: string | undefined;
   DF_SANDBOX_WORKSPACE?: string | undefined;
+  /** #282 (R3) — opt-in gate for the OpenSandbox credential proxy. Unset/blank = today's behaviour. */
+  DF_SANDBOX_VAULT_ENABLED?: string | undefined;
 }
 
 export const DEFAULT_SANDBOX_WORKSPACE = "/workspace";
@@ -109,6 +138,15 @@ export function sandboxNetworkPolicy(
   };
 }
 
+/**
+ * #282 (R3) — the credential-proxy gate is OPT-IN and fail-closed: only a non-blank
+ * `DF_SANDBOX_VAULT_ENABLED` turns it on, so an unset variable keeps today's behaviour and a
+ * deployment that never asked for the vault path cannot have secrets injected into its sandboxes.
+ */
+export function vaultEnabled(env: OpenSandboxDriverEnv): boolean {
+  return (env.DF_SANDBOX_VAULT_ENABLED ?? "").trim().length > 0;
+}
+
 function joinInsideWorkspace(root: string, relPath: string): string {
   if (
     relPath.startsWith("/") ||
@@ -147,6 +185,42 @@ function assertAllowedTestCommand(command: string): void {
   }
 }
 
+/**
+ * #354 — arguments that may pass through the sandbox shell BARE. `*`, `~` and every quoting
+ * metacharacter are absent, so an argument matching this needs no quoting; everything else is
+ * single-quoted by `shellQuote`.
+ */
+const SAFE_GIT_ARG = /^[A-Za-z0-9._/@:^+-]+$/;
+
+/**
+ * POSIX single-quoting: inside `'...'` every character is literal, so the sandbox shell cannot act on
+ * a metacharacter. An embedded single quote is closed, escaped and reopened (`'\''`) — the only
+ * sequence that can leave the quoted word.
+ */
+function shellQuote(arg: string): string {
+  return `'${arg.replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * #354 — the arguments are interpolated into ONE shell command, so each is either provably safe and
+ * passed bare, or single-quoted. This cannot be a blanket REJECT: a commit message legitimately
+ * carries spaces, `:` and `#`. Only what no shell word can represent (a NUL byte) is refused.
+ */
+function assertQuotableGitArgs(args: string[]): void {
+  if (args.length === 0) {
+    throw new InvalidTaskError(
+      "git requires at least one argument; refusing an empty call.",
+    );
+  }
+  for (const arg of args) {
+    if (arg.includes("\0")) {
+      throw new InvalidTaskError(
+        "git argument contains a NUL byte and cannot be passed to the sandbox shell.",
+      );
+    }
+  }
+}
+
 /** Minimal glob: `*` and `?` only, which is all the workspace listing needs. */
 export function matchesPattern(pattern: string, name: string): boolean {
   const escaped = pattern
@@ -162,18 +236,27 @@ export function matchesPattern(pattern: string, name: string): boolean {
  * casts below map that richness down to what this driver uses, rather than widening our interface.
  */
 /** Builds the lifecycle-API connection config from the environment. Shared by the live driver and the reaper. */
-export function sandboxConnectionConfig(): ConnectionConfig {
-  const domain = (process.env.DF_SANDBOX_ENDPOINT ?? "127.0.0.1:8080").trim();
-  const protocol = (process.env.DF_SANDBOX_PROTOCOL ?? "http").trim();
-  const apiKey = (process.env.OPEN_SANDBOX_API_KEY ?? "").trim();
+export function sandboxConnectionConfig(
+  env: Record<string, string | undefined> = process.env,
+): ConnectionConfig {
+  const domain = (env.DF_SANDBOX_ENDPOINT ?? "127.0.0.1:8080").trim();
+  const protocol = (env.DF_SANDBOX_PROTOCOL ?? "http").trim();
+  const apiKey = (env.OPEN_SANDBOX_API_KEY ?? "").trim();
   const requestTimeoutSeconds = Number.parseInt(
-    process.env.DF_SANDBOX_REQUEST_TIMEOUT_SECONDS ?? "180",
+    env.DF_SANDBOX_REQUEST_TIMEOUT_SECONDS ?? "180",
     10,
   );
+  // #354 — where the client cannot reach a sandbox directly, the SDK resolves the sandbox's ingress
+  // host and EVERY process call fails. Observed live against the local K8s harness: "Sandbox health
+  // check timed out after 30s ... Connection context: useServerProxy=false". Opt-in, because routing
+  // through the API server costs a hop.
+  const useServerProxy =
+    (env.DF_SANDBOX_USE_SERVER_PROXY ?? "").trim().length > 0;
   return new ConnectionConfig({
     domain,
     protocol: protocol as "http" | "https",
     requestTimeoutSeconds,
+    useServerProxy,
     ...(apiKey ? { apiKey } : {}),
   });
 }
@@ -187,6 +270,8 @@ export async function createLiveSandbox(
     timeoutSeconds: spec.timeoutSeconds,
     // Deny-by-default egress: the SDK's own default is "deny", so widening is always explicit.
     networkPolicy: spec.networkPolicy,
+    // #282 (R3): only present when the operator opted in; the SDK's default is off.
+    ...(spec.credentialProxy ? { credentialProxy: spec.credentialProxy } : {}),
     ...(spec.metadata ? { metadata: spec.metadata } : {}),
   };
   // The SDK types rules as open records and accepts more than this driver sets; the assertion maps our
@@ -202,8 +287,15 @@ export async function createLiveSandbox(
         }))
       : [];
 
+  // #354 — the sandbox-local credential vault, when the server is vault-capable. Its ABSENCE is fatal
+  // on the vault path (see the provider): nothing else can inject the push credential.
+  const sandboxVault = (
+    sandbox as unknown as { credentialVault?: SdkCredentialVault }
+  ).credentialVault;
+
   return {
     id: String((sandbox as unknown as { id?: unknown }).id ?? ""),
+    ...(sandboxVault ? { credentialVault: sandboxVault } : {}),
     commands: {
       run: async (command: string) => {
         const execution = await sandbox.commands.run(command);
@@ -249,6 +341,7 @@ export function createOpenSandboxProvider(
     DF_SANDBOX_EGRESS_GATEWAY_HOST: process.env.DF_SANDBOX_EGRESS_GATEWAY_HOST,
     DF_SANDBOX_EGRESS_GIT_HOST: process.env.DF_SANDBOX_EGRESS_GIT_HOST,
     DF_SANDBOX_WORKSPACE: process.env.DF_SANDBOX_WORKSPACE,
+    DF_SANDBOX_VAULT_ENABLED: process.env.DF_SANDBOX_VAULT_ENABLED,
   },
   deps: OpenSandboxDriverDeps,
 ): SandboxProvider {
@@ -258,24 +351,81 @@ export function createOpenSandboxProvider(
     10,
   );
   const networkPolicy = sandboxNetworkPolicy(env);
+  const credentialProxy = vaultEnabled(env)
+    ? ({ enabled: true } as const)
+    : undefined;
   let pending: Promise<SandboxHandle> | undefined;
   let disposed = false;
 
-  /** Created lazily, once per run: cold start (image pull + execd injection) is per RUN, not per file. */
+  /**
+   * Created lazily, once per run: cold start (image pull + execd injection) is per RUN, not per file.
+   *
+   * #354: on the vault path the push credential is seeded into the sandbox-local vault IMMEDIATELY
+   * after create, because the egress sidecar can only inject what the vault already holds. A server
+   * exposing no vault cannot honour the request, so the run REFUSES rather than pushing
+   * unauthenticated — a 401 from GitHub hours later is not an acceptable failure mode.
+   */
   const sandbox = (): Promise<SandboxHandle> => {
     if (disposed) throw new SandboxRefusedError("sandbox was already disposed");
-    pending ??= deps.createSandbox({
-      image,
-      timeoutSeconds,
-      networkPolicy,
-      ...(deps.metadata ? { metadata: deps.metadata } : {}),
-    });
+    pending ??= (async () => {
+      const handle = await deps.createSandbox({
+        image,
+        timeoutSeconds,
+        networkPolicy,
+        ...(credentialProxy ? { credentialProxy } : {}),
+        ...(deps.metadata ? { metadata: deps.metadata } : {}),
+      });
+      const credential = deps.gitPushCredential;
+      if (credential) {
+        if (!handle.credentialVault) {
+          throw new SandboxRefusedError(
+            "the sandbox exposes no credential vault, so the git push credential cannot be " +
+              "injected; refusing to run (fail-closed).",
+          );
+        }
+        await provisionGitPushCredential(handle.credentialVault, credential);
+      }
+      return handle;
+    })();
     return pending;
   };
+
+  // #354 — in-sandbox git exists ONLY on the vault path: the egress sidecar supplies the credential,
+  // so the sandbox runs a bare command. Every other driver keeps the host-side push unchanged.
+  const gitCapability: Pick<SandboxProvider, "runGit"> = vaultEnabled(env)
+    ? {
+        runGit: async (args: string[]) => {
+          // Validate BEFORE creating or touching the sandbox, so a refused call costs nothing.
+          assertQuotableGitArgs(args);
+          const handle = await sandbox();
+          // Safe args stay readable; anything else is single-quoted, never interpolated raw.
+          const command = args
+            .map((arg) => (SAFE_GIT_ARG.test(arg) ? arg : shellQuote(arg)))
+            .join(" ");
+          // GIT_TERMINAL_PROMPT=0: git must never block on a credential prompt it cannot answer — the
+          // credential arrives as a header the egress sidecar injects.
+          const execution = await handle.commands.run(
+            `GIT_TERMINAL_PROMPT=0 git ${command}`,
+          );
+          const stdout = execution.logs.stdout
+            .map((line) => line.text)
+            .join("");
+          const stderr = execution.logs.stderr
+            .map((line) => line.text)
+            .join("");
+          // An unreadable exit code is NOT a pass.
+          return {
+            exitCode: execution.exitCode ?? 1,
+            output: stdout || stderr,
+          };
+        },
+      }
+    : {};
 
   return {
     driver: "opensandbox",
     isolated: true,
+    ...gitCapability,
     create: (workspaceDir: string): WorkspaceTools => {
       const root = (
         workspaceDir ||

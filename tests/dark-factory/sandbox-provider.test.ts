@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   createSandboxProvider,
+  SandboxConfigError,
   SUPPORTED_SANDBOX_DRIVERS,
 } from "../../agent/lib/dark-factory/sandbox-provider";
 
@@ -45,5 +46,45 @@ describe("#280 createSandboxProvider", () => {
   it("offers only the documented drivers (no boolean that could default open)", () => {
     // #281 T4 adds the live sandbox arm; this assertion is the guard on the SET.
     expect([...SUPPORTED_SANDBOX_DRIVERS]).toEqual(["local", "dry-run", "opensandbox"]);
+  });
+});
+
+/**
+ * #282 (R3) — the vault gate is FAIL-CLOSED.
+ *
+ * Vault-backed wiring needs a vault-capable execution backend. Asking for the gate while the driver
+ * cannot honour it must refuse the run with an explicit error, never silently fall back to a
+ * host-side push (a silent fallback is how an operator believes a secret is contained while it is
+ * not).
+ */
+describe("#282 R3 vault gate is fail-closed", () => {
+  it("accepts the gate on the vault-capable opensandbox driver", () => {
+    const provider = createSandboxProvider({
+      DF_SANDBOX_DRIVER: "opensandbox",
+      DF_SANDBOX_VAULT_ENABLED: "1",
+    });
+    expect(provider.driver).toBe("opensandbox");
+  });
+
+  it("refuses when the gate is set but the driver cannot honour it", () => {
+    expect(() =>
+      createSandboxProvider({
+        DF_SANDBOX_DRIVER: "local",
+        DF_SANDBOX_VAULT_ENABLED: "1",
+      }),
+    ).toThrow(SandboxConfigError);
+  });
+
+  it("refuses when the gate is set with no driver configured", () => {
+    expect(() =>
+      createSandboxProvider({ DF_SANDBOX_VAULT_ENABLED: "1" }),
+    ).toThrow(/vault/i);
+  });
+
+  it("treats a blank gate value as off (no accidental refusal)", () => {
+    expect(
+      createSandboxProvider({ DF_SANDBOX_DRIVER: "local", DF_SANDBOX_VAULT_ENABLED: "   " })
+        .driver,
+    ).toBe("local");
   });
 });

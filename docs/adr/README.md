@@ -89,3 +89,4 @@ changes, write a new one that supersedes it.
 | [0033](0033-df-gateway-spend-is-run-history-event.md)             | Sandbox spend is a first-class run-history event                                 | Accepted |
 | [0034](0034-df-sandbox-reaping-by-run-id.md)                      | Sandbox reaping is keyed by run id (defense in depth)                            | Accepted |
 | [0035](0035-df-sandbox-credential-vault.md)                     | Sandbox credentials live in a write-only vault; leases opaque, egress deny-by-default | Accepted |
+| [0036](0036-df-sandbox-vault-push-wiring.md)                     | Vault push is fail-closed and runs inside the sandbox whose image carries the project | Accepted |
