@@ -430,9 +430,12 @@ async function main(): Promise<void> {
   // A path INSIDE the container: process.cwd() is a HOST path, so the vault path roots both the loop
   // and the git flow at the same container directory the driver uses.
   const sandboxWorkspace =
-    (process.env.DF_SANDBOX_WORKSPACE ?? "").trim() || DEFAULT_SANDBOX_WORKSPACE;
+    (process.env.DF_SANDBOX_WORKSPACE ?? "").trim() ||
+    DEFAULT_SANDBOX_WORKSPACE;
   const [repoOwner, repoName] = targetRepo.split("/");
-  const gitHost = (process.env.DF_SANDBOX_EGRESS_GIT_HOST ?? "github.com").trim();
+  const gitHost = (
+    process.env.DF_SANDBOX_EGRESS_GIT_HOST ?? "github.com"
+  ).trim();
   const sandboxRemoteUrl = `https://${gitHost}/${repoOwner}/${repoName}.git`;
 
   let loopResult: LoopResult;
@@ -592,7 +595,9 @@ async function main(): Promise<void> {
     console.log(
       `\n[STEP 6] Committing changes to '${branchName}' and pushing to GitHub...`,
     );
-    const filesToCommit = executionPlan.targetFiles.map((f) => f.path).join(" ");
+    const filesToCommit = executionPlan.targetFiles
+      .map((f) => f.path)
+      .join(" ");
     await checkpoint();
     execSync(`git add ${filesToCommit}`, { stdio: "inherit" });
     await checkpoint();
@@ -603,7 +608,9 @@ async function main(): Promise<void> {
 
     // R3 (#282/T2): the push token lives write-only in the credential vault; the authed URL is never built.
     const ownerRepo = targetRepo.split("/");
-    const pushVault = createInMemoryCredentialVault({ allowList: ["git-push"] });
+    const pushVault = createInMemoryCredentialVault({
+      allowList: ["git-push"],
+    });
     await pushVault.put("git-push-token", token);
     try {
       await gitPushWithVault({

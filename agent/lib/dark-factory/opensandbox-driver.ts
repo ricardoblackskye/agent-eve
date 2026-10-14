@@ -208,7 +208,9 @@ function shellQuote(arg: string): string {
  */
 function assertQuotableGitArgs(args: string[]): void {
   if (args.length === 0) {
-    throw new InvalidTaskError("git requires at least one argument; refusing an empty call.");
+    throw new InvalidTaskError(
+      "git requires at least one argument; refusing an empty call.",
+    );
   }
   for (const arg of args) {
     if (arg.includes("\0")) {
