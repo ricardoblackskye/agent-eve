@@ -1,75 +1,15 @@
-"use client";
+import React from 'react';
 
-import { useEveAgent } from "eve/react";
-import { useState, type FormEvent } from "react";
-import { getEveChatHeaders } from "./chat-auth";
-
-export function Chat() {
-  const agent = useEveAgent({
-    // The proxy is mounted at /api/eve/v1; useEveAgent appends /eve/v1.
-    host: "/api",
-    headers: getEveChatHeaders(),
-  });
-  const [input, setInput] = useState("");
-  const isBusy = agent.status === "submitted" || agent.status === "streaming";
-
-  function onSubmit(e: FormEvent) {
-    e.preventDefault();
-    const text = input.trim();
-    if (text && !isBusy) {
-      agent.send(text);
-      setInput("");
-    }
-  }
-
+const ChatPage = () => {
   return (
-    <div className="chat-container">
-      <header>
-        <h1>Eve Agent</h1>
-        <span className={`status ${agent.status}`}>
-          {agent.status === "ready" ? "Ready" : agent.status}
-        </span>
-        <img
-          className="eve-avatar"
-          src="/images/eve-avatar.jpg"
-          alt="Eve"
-          width={150}
-          height={150}
-        />
-      </header>
-
-      {agent.error && (
-        <p className="error-message" role="alert">
-          {agent.error.message}
-        </p>
-      )}
-
-      <main className="messages">
-        {agent.data.messages.length === 0 && (
-          <p className="placeholder">Send a message to start chatting.</p>
-        )}
-        {agent.data.messages.map((msg) => (
-          <article key={msg.id} className={`message ${msg.role}`}>
-            <strong>{msg.role === "assistant" ? "Eve" : msg.role}</strong>
-            {msg.parts.map((part, i) =>
-              part.type === "text" ? <p key={i}>{part.text}</p> : null,
-            )}
-          </article>
-        ))}
-      </main>
-
-      <form onSubmit={onSubmit} className="composer">
-        <input
-          name="message"
-          placeholder="Type your message..."
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          disabled={isBusy}
-        />
-        <button type="submit" disabled={isBusy || !input.trim()}>
-          Send
-        </button>
-      </form>
+    <div className="chat-page">
+      <div className="main-icon">
+        {/* Main Icon */}
+      </div>
+      <h1 style={{ fontWeight: 'bold', textAlign: 'center', marginTop: '10px' }}>Welcome to Eve</h1>
+      {/* Rest of the chat page content */}
     </div>
   );
-}
+};
+
+export default ChatPage;
