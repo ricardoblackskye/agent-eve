@@ -164,6 +164,27 @@ function assertAllowedTestCommand(command: string): void {
   }
 }
 
+/**
+ * #354 — the characters a git argument may contain when it is interpolated into the sandbox's shell
+ * command. `*` and `~` are deliberately EXCLUDED: the sandbox runs the command through a shell, where
+ * both expand. Rejecting an argument is louder than a clever escape, and the runner's git arguments
+ * (a bare URL, a branch name, a workspace path, `-F <file>`) never need them.
+ */
+const SAFE_GIT_ARG = /^[A-Za-z0-9._/@:^+-]+$/;
+
+function assertSafeGitArgs(args: string[]): void {
+  if (args.length === 0) {
+    throw new InvalidTaskError("git requires at least one argument; refusing an empty call.");
+  }
+  for (const arg of args) {
+    if (arg === "" || !SAFE_GIT_ARG.test(arg)) {
+      throw new InvalidTaskError(
+        `git argument ${JSON.stringify(arg)} is not shell-safe; refusing to run it in the sandbox.`,
+      );
+    }
+  }
+}
+
 /** Minimal glob: `*` and `?` only, which is all the workspace listing needs. */
 export function matchesPattern(pattern: string, name: string): boolean {
   const escaped = pattern
@@ -297,9 +318,38 @@ export function createOpenSandboxProvider(
     return pending;
   };
 
+  // #354 — in-sandbox git exists ONLY on the vault path: the egress sidecar supplies the credential,
+  // so the sandbox runs a bare command. Every other driver keeps the host-side push unchanged.
+  const gitCapability: Pick<SandboxProvider, "runGit"> = vaultEnabled(env)
+    ? {
+        runGit: async (args: string[]) => {
+          // Guard BEFORE creating or touching the sandbox, so a refused call costs nothing.
+          assertSafeGitArgs(args);
+          const handle = await sandbox();
+          // GIT_TERMINAL_PROMPT=0: git must never block on a credential prompt it cannot answer — the
+          // credential arrives as a header the egress sidecar injects.
+          const execution = await handle.commands.run(
+            `GIT_TERMINAL_PROMPT=0 git ${args.join(" ")}`,
+          );
+          const stdout = execution.logs.stdout
+            .map((line) => line.text)
+            .join("");
+          const stderr = execution.logs.stderr
+            .map((line) => line.text)
+            .join("");
+          // An unreadable exit code is NOT a pass.
+          return {
+            exitCode: execution.exitCode ?? 1,
+            output: stdout || stderr,
+          };
+        },
+      }
+    : {};
+
   return {
     driver: "opensandbox",
     isolated: true,
+    ...gitCapability,
     create: (workspaceDir: string): WorkspaceTools => {
       const root = (
         workspaceDir ||
