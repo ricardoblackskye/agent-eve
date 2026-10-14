@@ -276,8 +276,15 @@ export async function createLiveSandbox(
         }))
       : [];
 
+  // #354 — the sandbox-local credential vault, when the server is vault-capable. Its ABSENCE is fatal
+  // on the vault path (see the provider): nothing else can inject the push credential.
+  const sandboxVault = (
+    sandbox as unknown as { credentialVault?: SdkCredentialVault }
+  ).credentialVault;
+
   return {
     id: String((sandbox as unknown as { id?: unknown }).id ?? ""),
+    ...(sandboxVault ? { credentialVault: sandboxVault } : {}),
     commands: {
       run: async (command: string) => {
         const execution = await sandbox.commands.run(command);
@@ -339,16 +346,36 @@ export function createOpenSandboxProvider(
   let pending: Promise<SandboxHandle> | undefined;
   let disposed = false;
 
-  /** Created lazily, once per run: cold start (image pull + execd injection) is per RUN, not per file. */
+  /**
+   * Created lazily, once per run: cold start (image pull + execd injection) is per RUN, not per file.
+   *
+   * #354: on the vault path the push credential is seeded into the sandbox-local vault IMMEDIATELY
+   * after create, because the egress sidecar can only inject what the vault already holds. A server
+   * exposing no vault cannot honour the request, so the run REFUSES rather than pushing
+   * unauthenticated — a 401 from GitHub hours later is not an acceptable failure mode.
+   */
   const sandbox = (): Promise<SandboxHandle> => {
     if (disposed) throw new SandboxRefusedError("sandbox was already disposed");
-    pending ??= deps.createSandbox({
-      image,
-      timeoutSeconds,
-      networkPolicy,
-      ...(credentialProxy ? { credentialProxy } : {}),
-      ...(deps.metadata ? { metadata: deps.metadata } : {}),
-    });
+    pending ??= (async () => {
+      const handle = await deps.createSandbox({
+        image,
+        timeoutSeconds,
+        networkPolicy,
+        ...(credentialProxy ? { credentialProxy } : {}),
+        ...(deps.metadata ? { metadata: deps.metadata } : {}),
+      });
+      const credential = deps.gitPushCredential;
+      if (credential) {
+        if (!handle.credentialVault) {
+          throw new SandboxRefusedError(
+            "the sandbox exposes no credential vault, so the git push credential cannot be " +
+              "injected; refusing to run (fail-closed).",
+          );
+        }
+        await provisionGitPushCredential(handle.credentialVault, credential);
+      }
+      return handle;
+    })();
     return pending;
   };
 

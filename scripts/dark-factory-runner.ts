@@ -33,7 +33,12 @@ import {
 } from "../agent/lib/dark-factory/issue-writer";
 import { resolveWorkerAllowedRepos } from "../agent/lib/dark-factory/credentials";
 import { createInMemoryCredentialVault } from "../agent/lib/dark-factory/credential-vault";
-import { gitPushWithVault } from "../agent/lib/dark-factory/git-push";
+import {
+  commitAndPushFromSandbox,
+  ensureSandboxRepo,
+  gitPushWithVault,
+} from "../agent/lib/dark-factory/git-push";
+import { DEFAULT_SANDBOX_WORKSPACE } from "../agent/lib/dark-factory/opensandbox-driver";
 import {
   CircuitTrippedError,
   DeveloperAgent,
@@ -416,13 +421,53 @@ async function main(): Promise<void> {
     }
   }
 
+  // #354 — the vault path runs git INSIDE the sandbox, where the egress sidecar injects the push
+  // credential. That forces the git flow into the coding phase, because runCodingPhase disposes the
+  // sandbox in a `finally`; the phase therefore needs the provider, not just its tools.
+  const vaultPath =
+    (process.env.DF_SANDBOX_VAULT_ENABLED ?? "").trim() !== "" &&
+    (process.env.DF_SANDBOX_DRIVER ?? "").trim() === "opensandbox";
+  // A path INSIDE the container: process.cwd() is a HOST path, so the vault path roots both the loop
+  // and the git flow at the same container directory the driver uses.
+  const sandboxWorkspace =
+    (process.env.DF_SANDBOX_WORKSPACE ?? "").trim() || DEFAULT_SANDBOX_WORKSPACE;
+  const [repoOwner, repoName] = targetRepo.split("/");
+  const gitHost = (process.env.DF_SANDBOX_EGRESS_GIT_HOST ?? "github.com").trim();
+  const sandboxRemoteUrl = `https://${gitHost}/${repoOwner}/${repoName}.git`;
+
   let loopResult: LoopResult;
   try {
     loopResult = await runCodingPhase(
-      createSandboxProvider(undefined, undefined, runId),
-      process.cwd(),
-      async (workspaceTools) =>
-        runMultiFileCodingLoop({
+      createSandboxProvider(
+        undefined,
+        vaultPath
+          ? {
+              gitPushCredential: {
+                host: gitHost,
+                // Narrow on purpose: this repo's push endpoint only.
+                path: `/${repoOwner}/${repoName}.git*`,
+                token,
+              },
+            }
+          : undefined,
+        runId,
+      ),
+      vaultPath ? sandboxWorkspace : process.cwd(),
+      async (workspaceTools, sandboxProvider) => {
+        // BEFORE the loop writes anything: `git clone` refuses a non-empty target directory.
+        if (sandboxProvider.runGit) {
+          const prepared = await ensureSandboxRepo({
+            runGit: sandboxProvider.runGit,
+            remoteUrl: sandboxRemoteUrl,
+            workspaceDir: sandboxWorkspace,
+          });
+          if (!prepared.ok) {
+            throw new Error(
+              `sandbox repository preparation failed: ${prepared.error}`,
+            );
+          }
+        }
+        const loopOutcome = await runMultiFileCodingLoop({
           plan: executionPlan,
           tools: workspaceTools,
           maxIterations: developerAgent.maxIterations,
@@ -467,7 +512,23 @@ async function main(): Promise<void> {
 
             return { passed: testOutcome.passed, output: testOutcome.output };
           },
-        }),
+        });
+        // AFTER the loop, and BEFORE runCodingPhase disposes the sandbox.
+        if (sandboxProvider.runGit && loopOutcome.status === "success") {
+          const pushed = await commitAndPushFromSandbox({
+            runGit: sandboxProvider.runGit,
+            remoteUrl: sandboxRemoteUrl,
+            workspaceDir: sandboxWorkspace,
+            branchName,
+            commitMessage: `feat: #${issueNum} ${executionPlan.title}`,
+            filesToAdd: executionPlan.targetFiles.map((f) => f.path),
+          });
+          if (!pushed.ok) {
+            throw new Error(`sandbox push failed: ${pushed.error}`);
+          }
+        }
+        return loopOutcome;
+      },
     );
   } catch (error) {
     // #312: a trip halts fail-closed through the SAME terminal path as the runner's other
@@ -520,40 +581,49 @@ async function main(): Promise<void> {
   }
 
   // STEP 6: Commit and Push Task Branch
-  console.log(
-    `\n[STEP 6] Committing changes to '${branchName}' and pushing to GitHub...`,
-  );
-  const filesToCommit = executionPlan.targetFiles.map((f) => f.path).join(" ");
-  await checkpoint();
-  execSync(`git add ${filesToCommit}`, { stdio: "inherit" });
-  await checkpoint();
-  execSync(`git commit -m "feat: #${issueNum} ${executionPlan.title}"`, {
-    stdio: "inherit",
-  });
-  await checkpoint();
-
-  // R3 (#282/T2): the push token lives write-only in the credential vault; the authed URL is never built.
-  const ownerRepo = targetRepo.split("/");
-  const pushVault = createInMemoryCredentialVault({ allowList: ["git-push"] });
-  await pushVault.put("git-push-token", token);
-  try {
-    await gitPushWithVault({
-      owner: ownerRepo[0],
-      repo: ownerRepo[1],
-      branchName,
-      vault: pushVault,
+  if (vaultPath) {
+    // #354: on the vault path the commit AND the push already happened inside the sandbox, before it
+    // was disposed, using the vault-injected credential. The host working tree is untouched (the loop
+    // wrote into the sandbox), so there is nothing to stage, commit or push here.
+    console.log(
+      `\n[STEP 6] Branch '${branchName}' was committed and pushed from inside the sandbox.`,
+    );
+  } else {
+    console.log(
+      `\n[STEP 6] Committing changes to '${branchName}' and pushing to GitHub...`,
+    );
+    const filesToCommit = executionPlan.targetFiles.map((f) => f.path).join(" ");
+    await checkpoint();
+    execSync(`git add ${filesToCommit}`, { stdio: "inherit" });
+    await checkpoint();
+    execSync(`git commit -m "feat: #${issueNum} ${executionPlan.title}"`, {
+      stdio: "inherit",
     });
-  } catch (pushError) {
-    console.error(
-      `[ERROR] Failed to push branch '${branchName}': ${pushError instanceof Error ? pushError.message : String(pushError)}`,
-    );
-    await applyTerminalLifecycle(
-      { labelWriter, runHistory },
-      { repo: targetRepo, issue: issueNum, runId, terminalStatus: "failed" },
-    );
-    throw new Error("Dark Factory Runner stopped after the preceding error.");
+    await checkpoint();
+
+    // R3 (#282/T2): the push token lives write-only in the credential vault; the authed URL is never built.
+    const ownerRepo = targetRepo.split("/");
+    const pushVault = createInMemoryCredentialVault({ allowList: ["git-push"] });
+    await pushVault.put("git-push-token", token);
+    try {
+      await gitPushWithVault({
+        owner: ownerRepo[0],
+        repo: ownerRepo[1],
+        branchName,
+        vault: pushVault,
+      });
+    } catch (pushError) {
+      console.error(
+        `[ERROR] Failed to push branch '${branchName}': ${pushError instanceof Error ? pushError.message : String(pushError)}`,
+      );
+      await applyTerminalLifecycle(
+        { labelWriter, runHistory },
+        { repo: targetRepo, issue: issueNum, runId, terminalStatus: "failed" },
+      );
+      throw new Error("Dark Factory Runner stopped after the preceding error.");
+    }
+    console.log(`  -> Pushed '${branchName}' successfully!`);
   }
-  console.log(`  -> Pushed '${branchName}' successfully!`);
 
   // STEP 7: Definition of DONE with AC Traceability Matrix
   console.log(`\n[STEP 7] Executing Hardened Definition of DONE (#179)...`);
@@ -664,11 +734,14 @@ export async function authorFiles(
 export async function runCodingPhase<T>(
   provider: SandboxProvider,
   workspaceDir: string,
-  phase: (tools: WorkspaceTools) => Promise<T>,
+  phase: (tools: WorkspaceTools, provider: SandboxProvider) => Promise<T>,
 ): Promise<T> {
   const tools = provider.create(workspaceDir);
   try {
-    return await phase(tools);
+    // #354: the phase receives the PROVIDER as well as its tools, because the vault path pushes from
+    // INSIDE the phase (this function disposes the sandbox the moment it returns) and `runGit` is a
+    // provider capability.
+    return await phase(tools, provider);
   } finally {
     await provider.dispose?.();
   }
