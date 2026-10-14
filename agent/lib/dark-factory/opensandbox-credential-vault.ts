@@ -22,11 +22,15 @@ export interface OpenSandboxVaultDeps {
  * Live use requires a vault-capable OpenSandbox server (the docker-example deployment currently 404s on
  * /credential-vault); until then this is SDK-typed and unit-tested against a fake vault.
  */
-export function createOpenSandboxCredentialVault(deps: OpenSandboxVaultDeps): CredentialVault {
+export function createOpenSandboxCredentialVault(
+  deps: OpenSandboxVaultDeps,
+): CredentialVault {
   const { vault } = deps;
   return {
     async put(name, value) {
-      const req: CredentialVaultPatchRequest = { credentials: { add: [{ name, source: { value } }] } };
+      const req: CredentialVaultPatchRequest = {
+        credentials: { add: [{ name, source: { value } }] },
+      };
       await vault.patch(req);
     },
     async issueLease(name, scope) {

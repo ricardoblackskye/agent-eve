@@ -3,7 +3,10 @@ import { createLeaseBroker } from "../../agent/lib/dark-factory/lease-broker";
 
 describe("createLeaseBroker", () => {
   it("issues an opaque lease that does NOT contain the secret", () => {
-    const broker = createLeaseBroker({ secret: "super-secret-key", allowList: ["repo:a"] });
+    const broker = createLeaseBroker({
+      secret: "super-secret-key",
+      allowList: ["repo:a"],
+    });
     const lease = broker.issue({ repos: ["repo:a"] });
     expect(lease.id).toBeTruthy();
     expect(lease.id).not.toContain("super-secret-key");
@@ -54,7 +57,10 @@ describe("createLeaseBroker", () => {
   });
 
   it("redeems server-side only and throws for an absent lease", () => {
-    const broker = createLeaseBroker({ secret: "super-secret-key", allowList: ["repo:a"] });
+    const broker = createLeaseBroker({
+      secret: "super-secret-key",
+      allowList: ["repo:a"],
+    });
     const lease = broker.issue({ repos: ["repo:a"] });
     expect(broker.redeem(lease.id)).toBe("super-secret-key");
     expect(() => broker.redeem("missing")).toThrow();

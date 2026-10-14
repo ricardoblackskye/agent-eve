@@ -1,10 +1,17 @@
-import { createLeaseBroker, type LeaseBroker, type LeaseScope } from "./lease-broker";
+import {
+  createLeaseBroker,
+  type LeaseBroker,
+  type LeaseScope,
+} from "./lease-broker";
 
 export interface CredentialVault {
   /** Write-only store. The value is never readable back through the public API. */
   put(name: string, value: string): Promise<void>;
   /** Issue an opaque lease for a stored credential, scoped to `scope`. */
-  issueLease(name: string, scope: LeaseScope): Promise<{ id: string; scope: LeaseScope }>;
+  issueLease(
+    name: string,
+    scope: LeaseScope,
+  ): Promise<{ id: string; scope: LeaseScope }>;
   /** Server-side redemption only — returns the value. Never handed to a client/sandbox. */
   redeem(leaseId: string): Promise<string>;
   /** Revoke a lease; an absent lease is a no-op (404-as-success). */
@@ -42,8 +49,13 @@ export function createInMemoryCredentialVault(
         );
       }
       const secret = secrets.get(name);
-      if (secret === undefined) throw new Error(`credential not found: ${name}`);
-      const broker = createLeaseBroker({ secret, allowList: opts.allowList, now: opts.now });
+      if (secret === undefined)
+        throw new Error(`credential not found: ${name}`);
+      const broker = createLeaseBroker({
+        secret,
+        allowList: opts.allowList,
+        now: opts.now,
+      });
       const lease = broker.issue(scope);
       brokers.set(lease.id, broker);
       return { id: lease.id, scope: lease.scope };

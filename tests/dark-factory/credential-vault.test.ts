@@ -26,6 +26,8 @@ describe("createInMemoryCredentialVault", () => {
   it("fails closed when the allow-list is empty", async () => {
     const vault = createInMemoryCredentialVault();
     await vault.put("provider-key", "sk-x");
-    await expect(vault.issueLease("provider-key", { repos: ["repo:a"] })).rejects.toThrow();
+    await expect(
+      vault.issueLease("provider-key", { repos: ["repo:a"] }),
+    ).rejects.toThrow();
   });
 });

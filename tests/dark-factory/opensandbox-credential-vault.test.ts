@@ -4,9 +4,12 @@ import type { CredentialVault as SdkCredentialVault } from "@alibaba-group/opens
 
 function fakeSdkVault() {
   return {
-    patch: vi.fn(async (_req: unknown) => ({}) as unknown as SdkCredentialVault extends never
-      ? never
-      : { revision: 1, bindings: [] }),
+    patch: vi.fn(
+      async (_req: unknown) =>
+        ({}) as unknown as SdkCredentialVault extends never
+          ? never
+          : { revision: 1; bindings: [] },
+    ),
   } as unknown as SdkCredentialVault;
 }
 
@@ -15,8 +18,12 @@ describe("createOpenSandboxCredentialVault", () => {
     const sdk = fakeSdkVault();
     const vault = createOpenSandboxCredentialVault({ vault: sdk });
     await vault.put("provider-key", "sk-secret");
-    expect((sdk as unknown as { patch: ReturnType<typeof vi.fn> }).patch).toHaveBeenCalledWith({
-      credentials: { add: [{ name: "provider-key", source: { value: "sk-secret" } }] },
+    expect(
+      (sdk as unknown as { patch: ReturnType<typeof vi.fn> }).patch,
+    ).toHaveBeenCalledWith({
+      credentials: {
+        add: [{ name: "provider-key", source: { value: "sk-secret" } }],
+      },
     });
     // write-only: the host cannot redeem (the proxy injects it into the sandbox instead)
     await expect(vault.redeem("provider-key")).rejects.toThrow(/write-only/);
@@ -26,7 +33,9 @@ describe("createOpenSandboxCredentialVault", () => {
     const sdk = fakeSdkVault();
     const vault = createOpenSandboxCredentialVault({ vault: sdk });
     await vault.revoke("provider-key");
-    expect((sdk as unknown as { patch: ReturnType<typeof vi.fn> }).patch).toHaveBeenCalledWith({
+    expect(
+      (sdk as unknown as { patch: ReturnType<typeof vi.fn> }).patch,
+    ).toHaveBeenCalledWith({
       credentials: { delete: ["provider-key"] },
     });
   });
