@@ -256,7 +256,7 @@ describe("#282 R3 in-sandbox git (vault path)", () => {
  * as a mysterious 401 rather than a configuration error.
  */
 describe("#282 R3 vault credential seeding", () => {
-  const creds = {
+  const credential = {
     host: "github.com",
     path: "/ricardoblackskye/agent-eve.git*",
     token: "fixture-push-token-value",
@@ -270,7 +270,7 @@ describe("#282 R3 vault credential seeding", () => {
     };
     const provider = createOpenSandboxProvider(
       { ...env, DF_SANDBOX_VAULT_ENABLED: "1" },
-      { createSandbox: async () => handle, gitPushCredential: creds },
+      { createSandbox: async () => handle, gitPushCredential: credential },
     );
     await provider.create("/workspace").readFile("a.ts");
     expect(create).toHaveBeenCalledTimes(1);
@@ -283,14 +283,14 @@ describe("#282 R3 vault credential seeding", () => {
       credential: "git-push-token",
     });
     // Only the basic-auth encoding enters the vault; the raw token never appears.
-    expect(JSON.stringify(req)).not.toContain(creds.token);
+    expect(JSON.stringify(req)).not.toContain(credential.token);
   });
 
   it("REFUSES when the credential was requested but the sandbox exposes no vault", async () => {
     const { handle } = fakeHandle(); // no credentialVault: not a vault-capable server
     const provider = createOpenSandboxProvider(
       { ...env, DF_SANDBOX_VAULT_ENABLED: "1" },
-      { createSandbox: async () => handle, gitPushCredential: creds },
+      { createSandbox: async () => handle, gitPushCredential: credential },
     );
     await expect(provider.create("/workspace").readFile("a.ts")).rejects.toThrow(
       /vault/i,
