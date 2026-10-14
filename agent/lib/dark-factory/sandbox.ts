@@ -17,9 +17,24 @@ import type { WorkspaceTools } from "./developer-agent";
 
 export type SandboxDriver = "local" | "dry-run" | "opensandbox" | "refusing";
 
+/** #354 — the outcome of a git operation executed INSIDE the sandbox. */
+export interface GitRunResult {
+  exitCode: number;
+  output: string;
+}
+
 export interface SandboxProvider {
   /** Short driver name, for logs and diagnostics. */
   readonly driver: SandboxDriver;
+  /**
+   * #354 — run a git operation INSIDE the sandbox. Present ONLY on the vault path, where the egress
+   * sidecar injects the push credential, so the sandbox runs a bare CREDENTIAL-FREE command.
+   *
+   * Absent means git is the caller's job (the host-side push), which keeps every non-vault driver
+   * byte-identical to today. Arguments are host-constructed and shell-quoting is the provider's
+   * problem, so an implementation MUST reject anything it cannot quote safely.
+   */
+  runGit?(args: string[]): Promise<GitRunResult>;
   /**
    * True when generated code executes somewhere other than the runner's own filesystem. `local`,
    * `dry-run` and `refusing` are all NOT isolated — none of them executes anywhere else.

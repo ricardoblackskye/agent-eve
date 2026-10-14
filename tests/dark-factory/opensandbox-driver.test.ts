@@ -180,3 +180,46 @@ describe("#282 R3 credential-proxy gate", () => {
     expect((await specForGate("   ")).credentialProxy).toBeUndefined();
   });
 });
+
+/**
+ * #354 — in-sandbox git on the VAULT path.
+ *
+ * The sidecar injects the Authorization header for the matched repo path, so the sandbox runs a bare
+ * `git push` with NO credential of its own. Two properties matter and are pinned here: the capability
+ * exists ONLY when the operator opted in, and the arguments cannot escape into the sandbox shell.
+ */
+describe("#282 R3 in-sandbox git (vault path)", () => {
+  const vaultEnv = { ...env, DF_SANDBOX_VAULT_ENABLED: "1" };
+  const repoUrl = "https://github.com/ricardoblackskye/agent-eve.git";
+
+  const vaultProvider = (handle: SandboxHandle) =>
+    createOpenSandboxProvider(vaultEnv, { createSandbox: async () => handle });
+
+  it("exposes NO git capability when the gate is off (today's host-side push)", () => {
+    const provider = createOpenSandboxProvider(env, { createSandbox: vi.fn() });
+    expect(provider.runGit).toBeUndefined();
+  });
+
+  it("runs git INSIDE the sandbox on the vault path, never prompting for credentials", async () => {
+    const { handle, calls } = fakeHandle();
+    const provider = vaultProvider(handle);
+    expect(typeof provider.runGit).toBe("function");
+    const res = await provider.runGit!(["push", repoUrl, "feat/df-sandbox-vault-push-354"]);
+    expect(res.exitCode).toBe(0);
+    // A bare URL with no userinfo, and a non-interactive git: nothing to leak, nothing to prompt for.
+    expect(calls.run).toEqual([
+      `GIT_TERMINAL_PROMPT=0 git push ${repoUrl} feat/df-sandbox-vault-push-354`,
+    ]);
+    expect(calls.run[0]).not.toContain("@");
+  });
+
+  it("rejects an argument carrying shell metacharacters BEFORE running anything", async () => {
+    const { handle, calls } = fakeHandle();
+    const provider = vaultProvider(handle);
+    await expect(
+      provider.runGit!(["push", `${repoUrl}; rm -rf /workspace`]),
+    ).rejects.toThrow();
+    await expect(provider.runGit!(["push", "$(whoami)"])).rejects.toThrow();
+    expect(calls.run).toEqual([]);
+  });
+});
