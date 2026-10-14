@@ -1,5 +1,13 @@
 # Dark Factory sandbox image (#358).
 #
+# kics-scan disable=aa93e17f-b6db-4162-9334-c70334e7ac28
+#
+# The disabled query is "Chown Flag Exists" (CWE-282), which wants container files to stay owned by
+# root so a compromised process cannot modify them. That is the OPPOSITE of this image's requirement:
+# the sandbox runs as an unprivileged user, and the loop writes files and commits INSIDE /workspace,
+# so the workspace must be owned by that user. `COPY --chown` is what sets that ownership without a
+# recursive chown layer over node_modules, which would double the image size.
+#
 # ADR 0036 makes an image carrying the project a DEPLOYMENT REQUIREMENT: the developer loop writes
 # authored files into the workspace and then runs its tests there, so the sandbox needs the repository
 # AND its installed dependencies. The default `python:3.12` has no Node toolchain at all.
