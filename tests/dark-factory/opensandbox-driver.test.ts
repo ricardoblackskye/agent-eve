@@ -213,13 +213,39 @@ describe("#282 R3 in-sandbox git (vault path)", () => {
     expect(calls.run[0]).not.toContain("@");
   });
 
-  it("rejects an argument carrying shell metacharacters BEFORE running anything", async () => {
+  /**
+   * REVISED at T4: a commit message legitimately contains spaces, `:` and `#`, so the guard cannot
+   * REJECT everything it cannot interpolate bare. It single-quotes instead, which is why the first
+   * assertion below pins the quoted form exactly.
+   */
+  it("QUOTES an argument carrying shell metacharacters so it stays literal text", async () => {
     const { handle, calls } = fakeHandle();
     const provider = vaultProvider(handle);
-    await expect(
-      provider.runGit!(["push", `${repoUrl}; rm -rf /workspace`]),
-    ).rejects.toThrow();
-    await expect(provider.runGit!(["push", "$(whoami)"])).rejects.toThrow();
+    const res = await provider.runGit!([
+      "commit",
+      "-m",
+      `feat: #354 vault push; rm -rf ${repoUrl}`,
+    ]);
+    expect(res.exitCode).toBe(0);
+    // ONE single-quoted shell word: the sidecar shell cannot execute the `;` or the `$`.
+    expect(calls.run).toEqual([
+      `GIT_TERMINAL_PROMPT=0 git commit -m 'feat: #354 vault push; rm -rf ${repoUrl}'`,
+    ]);
+  });
+
+  it("escapes an embedded single quote so it cannot terminate the quoted word", async () => {
+    const { handle, calls } = fakeHandle();
+    const provider = vaultProvider(handle);
+    await provider.runGit!(["commit", "-m", "it's safe"]);
+    expect(calls.run).toEqual([
+      "GIT_TERMINAL_PROMPT=0 git commit -m 'it'\\''s safe'",
+    ]);
+  });
+
+  it("still refuses an empty argument list (no bare `git` with no subcommand)", async () => {
+    const { handle, calls } = fakeHandle();
+    const provider = vaultProvider(handle);
+    await expect(provider.runGit!([])).rejects.toThrow();
     expect(calls.run).toEqual([]);
   });
 });
