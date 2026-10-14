@@ -44,11 +44,26 @@ export interface SandboxEnv {
 }
 
 export function createSandboxProvider(
-  env: SandboxEnv = { DF_SANDBOX_DRIVER: process.env.DF_SANDBOX_DRIVER },
+  env: SandboxEnv = {
+    DF_SANDBOX_DRIVER: process.env.DF_SANDBOX_DRIVER,
+    DF_SANDBOX_VAULT_ENABLED: process.env.DF_SANDBOX_VAULT_ENABLED,
+  },
   _deps: { createSandbox?: typeof createLiveSandbox } = {},
   runId?: string | undefined,
 ): SandboxProvider {
   const requested = (env.DF_SANDBOX_DRIVER ?? "").trim();
+  const vaultRequested = (env.DF_SANDBOX_VAULT_ENABLED ?? "").trim().length > 0;
+
+  // #282 (R3) — FAIL-CLOSED: vault-backed wiring needs a vault-capable backend. Asking for the gate
+  // while the resolved driver cannot honour it REFUSES before any selection, rather than silently
+  // running a push whose token was never vault-injected.
+  if (vaultRequested && requested !== "opensandbox") {
+    throw new SandboxConfigError(
+      `DF_SANDBOX_VAULT_ENABLED requires DF_SANDBOX_DRIVER=opensandbox (` +
+        `${requested === "" ? "no driver is set" : `received '${requested}'`}). Refusing to fall ` +
+        `back to a non-vault sandbox: the push token would not be vault-injected.`,
+    );
+  }
 
   // Absence = today's behaviour. This is the fail-closed default, not a permissive one.
   if (requested === "" || requested === "local")
@@ -66,6 +81,7 @@ export function createSandboxProvider(
           process.env.DF_SANDBOX_EGRESS_GATEWAY_HOST,
         DF_SANDBOX_EGRESS_GIT_HOST: process.env.DF_SANDBOX_EGRESS_GIT_HOST,
         DF_SANDBOX_WORKSPACE: process.env.DF_SANDBOX_WORKSPACE,
+        DF_SANDBOX_VAULT_ENABLED: process.env.DF_SANDBOX_VAULT_ENABLED,
       },
       {
         createSandbox: _deps.createSandbox ?? createLiveSandbox,

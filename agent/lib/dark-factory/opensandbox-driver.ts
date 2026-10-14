@@ -51,6 +51,12 @@ export interface SandboxCreateSpec {
   image: string;
   timeoutSeconds: number;
   networkPolicy: SandboxNetworkPolicy;
+  /**
+   * #282 (R3) — when set, the sandbox requests the OpenSandbox credential proxy so outbound calls
+   * carry a PLACEHOLDER that the egress sidecar substitutes with the real credential. OMITTED unless
+   * the operator opted in, so secret injection is never enabled by accident.
+   */
+  credentialProxy?: { enabled: true } | undefined;
   /** Run-scoped label so orphans can be reaped by run id (T5b/B4). Optional for non-run contexts. */
   metadata?: Record<string, string> | undefined;
 }
@@ -109,6 +115,15 @@ export function sandboxNetworkPolicy(
       target,
     })),
   };
+}
+
+/**
+ * #282 (R3) — the credential-proxy gate is OPT-IN and fail-closed: only a non-blank
+ * `DF_SANDBOX_VAULT_ENABLED` turns it on, so an unset variable keeps today's behaviour and a
+ * deployment that never asked for the vault path cannot have secrets injected into its sandboxes.
+ */
+export function vaultEnabled(env: OpenSandboxDriverEnv): boolean {
+  return (env.DF_SANDBOX_VAULT_ENABLED ?? "").trim().length > 0;
 }
 
 function joinInsideWorkspace(root: string, relPath: string): string {
@@ -189,6 +204,8 @@ export async function createLiveSandbox(
     timeoutSeconds: spec.timeoutSeconds,
     // Deny-by-default egress: the SDK's own default is "deny", so widening is always explicit.
     networkPolicy: spec.networkPolicy,
+    // #282 (R3): only present when the operator opted in; the SDK's default is off.
+    ...(spec.credentialProxy ? { credentialProxy: spec.credentialProxy } : {}),
     ...(spec.metadata ? { metadata: spec.metadata } : {}),
   };
   // The SDK types rules as open records and accepts more than this driver sets; the assertion maps our
@@ -251,6 +268,7 @@ export function createOpenSandboxProvider(
     DF_SANDBOX_EGRESS_GATEWAY_HOST: process.env.DF_SANDBOX_EGRESS_GATEWAY_HOST,
     DF_SANDBOX_EGRESS_GIT_HOST: process.env.DF_SANDBOX_EGRESS_GIT_HOST,
     DF_SANDBOX_WORKSPACE: process.env.DF_SANDBOX_WORKSPACE,
+    DF_SANDBOX_VAULT_ENABLED: process.env.DF_SANDBOX_VAULT_ENABLED,
   },
   deps: OpenSandboxDriverDeps,
 ): SandboxProvider {
@@ -260,6 +278,9 @@ export function createOpenSandboxProvider(
     10,
   );
   const networkPolicy = sandboxNetworkPolicy(env);
+  const credentialProxy = vaultEnabled(env)
+    ? ({ enabled: true } as const)
+    : undefined;
   let pending: Promise<SandboxHandle> | undefined;
   let disposed = false;
 
@@ -270,6 +291,7 @@ export function createOpenSandboxProvider(
       image,
       timeoutSeconds,
       networkPolicy,
+      ...(credentialProxy ? { credentialProxy } : {}),
       ...(deps.metadata ? { metadata: deps.metadata } : {}),
     });
     return pending;
