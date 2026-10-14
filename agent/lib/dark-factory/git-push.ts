@@ -122,7 +122,24 @@ export interface SandboxRepoResult {
 export async function ensureSandboxRepo(
   deps: SandboxRepoDeps,
 ): Promise<SandboxRepoResult> {
-  throw new Error("not implemented");
+  const inside = await deps.runGit([
+    "-C",
+    deps.workspaceDir,
+    "rev-parse",
+    "--is-inside-work-tree",
+  ]);
+  // The documented image already carries the repo; only clone when it does not.
+  if (inside.exitCode === 0) return { ok: true, cloned: false };
+
+  const clone = await deps.runGit(["clone", deps.remoteUrl, deps.workspaceDir]);
+  if (clone.exitCode !== 0) {
+    return {
+      ok: false,
+      cloned: false,
+      error: `git clone failed (exit ${clone.exitCode}): ${clone.output}`,
+    };
+  }
+  return { ok: true, cloned: true };
 }
 
 export interface SandboxCommitDeps extends SandboxRepoDeps {
@@ -140,5 +157,44 @@ export interface SandboxCommitDeps extends SandboxRepoDeps {
 export async function commitAndPushFromSandbox(
   deps: SandboxCommitDeps,
 ): Promise<SandboxRepoResult> {
-  throw new Error("not implemented");
+  const run = (...args: string[]) =>
+    deps.runGit(["-C", deps.workspaceDir, ...args]);
+
+  // A throwaway branch per run, so a re-run cannot accumulate onto a previous attempt.
+  const checkout = await run("checkout", "-B", deps.branchName);
+  if (checkout.exitCode !== 0) {
+    return {
+      ok: false,
+      cloned: false,
+      error: `git checkout failed (exit ${checkout.exitCode}): ${checkout.output}`,
+    };
+  }
+  // EXPLICIT paths: an untracked helper in the workspace must not be swept into the commit.
+  const add = await run("add", "--", ...deps.filesToAdd);
+  if (add.exitCode !== 0) {
+    return {
+      ok: false,
+      cloned: false,
+      error: `git add failed (exit ${add.exitCode}): ${add.output}`,
+    };
+  }
+  const commit = await run("commit", "-m", deps.commitMessage);
+  if (commit.exitCode !== 0) {
+    return {
+      ok: false,
+      cloned: false,
+      error: `git commit failed (exit ${commit.exitCode}): ${commit.output}`,
+    };
+  }
+  // The ONLY step that needs a credential, and it carries none: the egress sidecar injects the
+  // Authorization header for the host+path the vault binding is scoped to.
+  const push = await run("push", deps.remoteUrl, deps.branchName);
+  if (push.exitCode !== 0) {
+    return {
+      ok: false,
+      cloned: false,
+      error: `git push failed (exit ${push.exitCode}): ${push.output}`,
+    };
+  }
+  return { ok: true, cloned: false };
 }
