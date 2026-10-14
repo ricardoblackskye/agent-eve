@@ -15,6 +15,7 @@
 
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
+import { pathToFileURL } from "node:url";
 import { execSync } from "node:child_process";
 import { streamText } from "ai";
 import { resolveChatModel } from "../agent/chat-model";
@@ -754,11 +755,23 @@ export async function runCodingPhase<T>(
   }
 }
 
-// Only execute main when run as script directly
-if (
-  require.main === module ||
-  process.argv[1]?.endsWith("dark-factory-runner.ts")
-) {
+/**
+ * Only execute when this file is the entry point.
+ *
+ * The previous check used the CommonJS `require` identifier, which does not exist inside an ES
+ * module. Because this package is `"type": "module"`, evaluating it threw
+ * `ReferenceError: require is not defined in ES module scope` at load -- before the check's own
+ * `|| process.argv[1]` fallback could take effect -- so the documented
+ * `npx tsx scripts/dark-factory-runner.ts` could not start the runner at all.
+ *
+ * Comparing the module URL with the entry URL behaves identically under tsx, plain node and vitest,
+ * so importing this module from a test still does not run `main`.
+ */
+const isDirectRun =
+  process.argv[1] !== undefined &&
+  import.meta.url === pathToFileURL(process.argv[1]).href;
+
+if (isDirectRun) {
   void main().catch(async (error: unknown) => {
     console.error(
       `[ERROR] Runner aborted: ${error instanceof Error ? error.message : String(error)}`,
