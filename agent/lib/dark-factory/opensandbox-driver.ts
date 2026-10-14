@@ -165,21 +165,34 @@ function assertAllowedTestCommand(command: string): void {
 }
 
 /**
- * #354 — the characters a git argument may contain when it is interpolated into the sandbox's shell
- * command. `*` and `~` are deliberately EXCLUDED: the sandbox runs the command through a shell, where
- * both expand. Rejecting an argument is louder than a clever escape, and the runner's git arguments
- * (a bare URL, a branch name, a workspace path, `-F <file>`) never need them.
+ * #354 — arguments that may pass through the sandbox shell BARE. `*`, `~` and every quoting
+ * metacharacter are absent, so an argument matching this needs no quoting; everything else is
+ * single-quoted by `shellQuote`.
  */
 const SAFE_GIT_ARG = /^[A-Za-z0-9._/@:^+-]+$/;
 
-function assertSafeGitArgs(args: string[]): void {
+/**
+ * POSIX single-quoting: inside `'...'` every character is literal, so the sandbox shell cannot act on
+ * a metacharacter. An embedded single quote is closed, escaped and reopened (`'\''`) — the only
+ * sequence that can leave the quoted word.
+ */
+function shellQuote(arg: string): string {
+  return `'${arg.replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * #354 — the arguments are interpolated into ONE shell command, so each is either provably safe and
+ * passed bare, or single-quoted. This cannot be a blanket REJECT: a commit message legitimately
+ * carries spaces, `:` and `#`. Only what no shell word can represent (a NUL byte) is refused.
+ */
+function assertQuotableGitArgs(args: string[]): void {
   if (args.length === 0) {
     throw new InvalidTaskError("git requires at least one argument; refusing an empty call.");
   }
   for (const arg of args) {
-    if (arg === "" || !SAFE_GIT_ARG.test(arg)) {
+    if (arg.includes("\0")) {
       throw new InvalidTaskError(
-        `git argument ${JSON.stringify(arg)} is not shell-safe; refusing to run it in the sandbox.`,
+        "git argument contains a NUL byte and cannot be passed to the sandbox shell.",
       );
     }
   }
@@ -323,13 +336,17 @@ export function createOpenSandboxProvider(
   const gitCapability: Pick<SandboxProvider, "runGit"> = vaultEnabled(env)
     ? {
         runGit: async (args: string[]) => {
-          // Guard BEFORE creating or touching the sandbox, so a refused call costs nothing.
-          assertSafeGitArgs(args);
+          // Validate BEFORE creating or touching the sandbox, so a refused call costs nothing.
+          assertQuotableGitArgs(args);
           const handle = await sandbox();
+          // Safe args stay readable; anything else is single-quoted, never interpolated raw.
+          const command = args
+            .map((arg) => (SAFE_GIT_ARG.test(arg) ? arg : shellQuote(arg)))
+            .join(" ");
           // GIT_TERMINAL_PROMPT=0: git must never block on a credential prompt it cannot answer — the
           // credential arrives as a header the egress sidecar injects.
           const execution = await handle.commands.run(
-            `GIT_TERMINAL_PROMPT=0 git ${args.join(" ")}`,
+            `GIT_TERMINAL_PROMPT=0 git ${command}`,
           );
           const stdout = execution.logs.stdout
             .map((line) => line.text)
