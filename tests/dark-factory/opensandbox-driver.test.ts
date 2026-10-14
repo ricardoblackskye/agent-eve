@@ -249,3 +249,51 @@ describe("#282 R3 in-sandbox git (vault path)", () => {
     expect(calls.run).toEqual([]);
   });
 });
+
+/**
+ * #354 — the push credential is seeded into the sandbox-local (write-only) vault on create, and its
+ * ABSENCE on the vault path is fatal: pushing without it would be an unauthenticated push that reads
+ * as a mysterious 401 rather than a configuration error.
+ */
+describe("#282 R3 vault credential seeding", () => {
+  const creds = {
+    host: "github.com",
+    path: "/ricardoblackskye/agent-eve.git*",
+    token: "fixture-push-token-value",
+  };
+
+  it("seeds the credential + binding into the sandbox vault on create", async () => {
+    const { handle } = fakeHandle();
+    const create = vi.fn(async (_req: unknown) => ({ revision: 1 }));
+    (handle as unknown as { credentialVault: unknown }).credentialVault = {
+      create,
+    };
+    const provider = createOpenSandboxProvider(
+      { ...env, DF_SANDBOX_VAULT_ENABLED: "1" },
+      { createSandbox: async () => handle, gitPushCredential: creds },
+    );
+    await provider.create("/workspace").readFile("a.ts");
+    expect(create).toHaveBeenCalledTimes(1);
+    const req = create.mock.calls[0]![0] as {
+      bindings: { name: string; auth: unknown }[];
+    };
+    expect(req.bindings[0]!.name).toBe("git-push");
+    expect(req.bindings[0]!.auth).toEqual({
+      type: "basic",
+      credential: "git-push-token",
+    });
+    // Only the basic-auth encoding enters the vault; the raw token never appears.
+    expect(JSON.stringify(req)).not.toContain(creds.token);
+  });
+
+  it("REFUSES when the credential was requested but the sandbox exposes no vault", async () => {
+    const { handle } = fakeHandle(); // no credentialVault: not a vault-capable server
+    const provider = createOpenSandboxProvider(
+      { ...env, DF_SANDBOX_VAULT_ENABLED: "1" },
+      { createSandbox: async () => handle, gitPushCredential: creds },
+    );
+    await expect(provider.create("/workspace").readFile("a.ts")).rejects.toThrow(
+      /vault/i,
+    );
+  });
+});

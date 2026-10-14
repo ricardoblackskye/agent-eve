@@ -31,3 +31,24 @@ describe("#280/#281 runner sandbox wiring (source guard)", () => {
     expect(source).toMatch(/provider\.dispose\?\.\(\)/);
   });
 });
+
+/**
+ * #354 — the VAULT path pushes from INSIDE the sandbox, which forces the git flow into the coding
+ * phase: `runCodingPhase` disposes the sandbox in a `finally` the moment the phase returns, so a
+ * push placed at STEP 6 would run against a destroyed sandbox. These guards keep the ordering that
+ * makes the design work, and keep the host-side push alive for every other driver.
+ */
+describe("#354 vault-path git wiring (source guard)", () => {
+  it("runs the in-sandbox git flow INSIDE the coding phase", () => {
+    expect(source).toMatch(/ensureSandboxRepo\(/);
+    expect(source).toMatch(/commitAndPushFromSandbox\(/);
+    const phaseAt = source.indexOf("runCodingPhase(");
+    const pushAt = source.indexOf("commitAndPushFromSandbox(");
+    expect(phaseAt).toBeGreaterThan(-1);
+    expect(pushAt).toBeGreaterThan(phaseAt);
+  });
+
+  it("keeps the host-side push for the non-vault path", () => {
+    expect(source).toMatch(/gitPushWithVault\(/);
+  });
+});

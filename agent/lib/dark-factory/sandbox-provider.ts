@@ -1,4 +1,5 @@
 import { createLocalSandboxProvider } from "./local-sandbox";
+import type { GitPushCredentialOptions } from "./opensandbox-credential-vault";
 import {
   createLiveSandbox,
   createOpenSandboxProvider,
@@ -48,7 +49,11 @@ export function createSandboxProvider(
     DF_SANDBOX_DRIVER: process.env.DF_SANDBOX_DRIVER,
     DF_SANDBOX_VAULT_ENABLED: process.env.DF_SANDBOX_VAULT_ENABLED,
   },
-  _deps: { createSandbox?: typeof createLiveSandbox } = {},
+  _deps: {
+    createSandbox?: typeof createLiveSandbox;
+    /** #354 — the push credential seeded into the sandbox-local vault on the vault path. */
+    gitPushCredential?: GitPushCredentialOptions;
+  } = {},
   runId?: string | undefined,
 ): SandboxProvider {
   const requested = (env.DF_SANDBOX_DRIVER ?? "").trim();
@@ -86,6 +91,9 @@ export function createSandboxProvider(
       {
         createSandbox: _deps.createSandbox ?? createLiveSandbox,
         metadata: runId ? { run: runId } : undefined,
+        ...(_deps.gitPushCredential
+          ? { gitPushCredential: _deps.gitPushCredential }
+          : {}),
       },
     );
   }

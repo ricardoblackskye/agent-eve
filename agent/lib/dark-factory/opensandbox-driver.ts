@@ -1,6 +1,15 @@
 import { extname } from "node:path";
 
-import { ConnectionConfig, Sandbox } from "@alibaba-group/opensandbox";
+import {
+  ConnectionConfig,
+  Sandbox,
+  type CredentialVault as SdkCredentialVault,
+} from "@alibaba-group/opensandbox";
+
+import {
+  provisionGitPushCredential,
+  type GitPushCredentialOptions,
+} from "./opensandbox-credential-vault";
 
 import {
   ALLOWED_TEST_COMMAND_PREFIXES,
@@ -24,6 +33,12 @@ import { SandboxRefusedError, type SandboxProvider } from "./sandbox";
 
 export interface SandboxHandle {
   readonly id: string;
+  /**
+   * #354 — the sandbox-local, WRITE-ONLY credential vault. Present only on a vault-capable server, so
+   * its absence on the vault path means the push credential cannot be injected and the run must
+   * refuse rather than push unauthenticated.
+   */
+  credentialVault?: SdkCredentialVault | undefined;
   commands: {
     run(command: string): Promise<{
       exitCode?: number;
@@ -66,6 +81,12 @@ export interface OpenSandboxDriverDeps {
   createSandbox(spec: SandboxCreateSpec): Promise<SandboxHandle>;
   /** Run-scoped label attached to the created sandbox; enables reaping by run id. */
   metadata?: Record<string, string> | undefined;
+  /**
+   * #354 — the git push credential to seed into the sandbox-local vault immediately after create.
+   * Only meaningful with the credential proxy enabled: the vault is write-only, and the egress
+   * sidecar injects the value, so the sandbox process never receives it.
+   */
+  gitPushCredential?: GitPushCredentialOptions | undefined;
 }
 
 export interface OpenSandboxDriverEnv {
