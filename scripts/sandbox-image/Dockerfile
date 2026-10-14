@@ -4,8 +4,8 @@
 # authored files into the workspace and then runs its tests there, so the sandbox needs the repository
 # AND its installed dependencies. The default `python:3.12` has no Node toolchain at all.
 #
-# Dependencies are installed INSIDE the image on purpose: the host's `node_modules` is Windows-native
-# and its binaries (esbuild, lightningcss, ...) would be the wrong platform for a Linux sandbox.
+# Dependencies are installed INSIDE the image on purpose: the host's `node_modules` is Windows-native,
+# so its compiled native binaries would be the wrong platform for a Linux sandbox.
 #
 # .git is included deliberately. The sandbox must already be a work tree, because the run's git flow
 # only clones when `rev-parse` says the workspace is not one — and a clone inside the sandbox would

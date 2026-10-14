@@ -36,6 +36,21 @@ DF_SANDBOX_VAULT_ENABLED=1       # the vault-injected push token (#354)
 DF_SANDBOX_EGRESS_GIT_HOST=<git host>
 ```
 
+## Verify
+
+`verify-image.ts` drives the REAL driver code against a live control plane and runs the loop's test
+command inside a sandbox created from the image. It needs no push token and writes nothing to the
+repository, because the vault gate stays off for this check.
+
+```bash
+kubectl -n opensandbox-system port-forward svc/opensandbox-server 18082:80
+DF_SANDBOX_ENDPOINT=127.0.0.1:18082 DF_SANDBOX_USE_SERVER_PROXY=1 \
+  npx tsx scripts/sandbox-image/verify-image.ts --image df-sandbox-agent-eve:358
+```
+
+Exit code 0 means the tests executed inside the sandbox. Pass `--command "npx vitest run"` to run the
+whole suite exactly as the runner does, which takes roughly three and a half minutes.
+
 ## Why the image carries `.git`
 
 The run's git flow probes `git rev-parse --is-inside-work-tree` and clones **only** when the workspace
