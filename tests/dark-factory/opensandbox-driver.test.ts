@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createOpenSandboxProvider,
   matchesPattern,
+  sandboxConnectionConfig,
   sandboxNetworkPolicy,
   type SandboxCreateSpec,
   type SandboxHandle,
@@ -295,5 +296,32 @@ describe("#282 R3 vault credential seeding", () => {
     await expect(provider.create("/workspace").readFile("a.ts")).rejects.toThrow(
       /vault/i,
     );
+  });
+});
+
+/**
+ * #354 — discovered by running the vault path against the LOCAL K8s harness, where it failed with
+ * `Sandbox health check timed out after 30s ... Connection context: useServerProxy=false`.
+ *
+ * Wherever the client cannot reach a sandbox directly — the local harness, because the SDK otherwise
+ * resolves the sandbox's ingress-gateway host — every process call (health, execd, files) must be
+ * routed through the API server. The flag is opt-in, so a deployment whose client CAN reach its
+ * sandboxes keeps talking to them directly.
+ */
+describe("#354 sandbox connection config (server proxy)", () => {
+  it("routes through the server proxy when DF_SANDBOX_USE_SERVER_PROXY is set", () => {
+    expect(
+      sandboxConnectionConfig({ DF_SANDBOX_USE_SERVER_PROXY: "1" }).useServerProxy,
+    ).toBe(true);
+  });
+
+  it("leaves the server proxy off by default", () => {
+    expect(sandboxConnectionConfig({}).useServerProxy).toBe(false);
+  });
+
+  it("treats a blank value as off", () => {
+    expect(
+      sandboxConnectionConfig({ DF_SANDBOX_USE_SERVER_PROXY: "   " }).useServerProxy,
+    ).toBe(false);
   });
 });

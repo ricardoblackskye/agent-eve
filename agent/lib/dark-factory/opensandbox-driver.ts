@@ -236,18 +236,27 @@ export function matchesPattern(pattern: string, name: string): boolean {
  * casts below map that richness down to what this driver uses, rather than widening our interface.
  */
 /** Builds the lifecycle-API connection config from the environment. Shared by the live driver and the reaper. */
-export function sandboxConnectionConfig(): ConnectionConfig {
-  const domain = (process.env.DF_SANDBOX_ENDPOINT ?? "127.0.0.1:8080").trim();
-  const protocol = (process.env.DF_SANDBOX_PROTOCOL ?? "http").trim();
-  const apiKey = (process.env.OPEN_SANDBOX_API_KEY ?? "").trim();
+export function sandboxConnectionConfig(
+  env: Record<string, string | undefined> = process.env,
+): ConnectionConfig {
+  const domain = (env.DF_SANDBOX_ENDPOINT ?? "127.0.0.1:8080").trim();
+  const protocol = (env.DF_SANDBOX_PROTOCOL ?? "http").trim();
+  const apiKey = (env.OPEN_SANDBOX_API_KEY ?? "").trim();
   const requestTimeoutSeconds = Number.parseInt(
-    process.env.DF_SANDBOX_REQUEST_TIMEOUT_SECONDS ?? "180",
+    env.DF_SANDBOX_REQUEST_TIMEOUT_SECONDS ?? "180",
     10,
   );
+  // #354 — where the client cannot reach a sandbox directly, the SDK resolves the sandbox's ingress
+  // host and EVERY process call fails. Observed live against the local K8s harness: "Sandbox health
+  // check timed out after 30s ... Connection context: useServerProxy=false". Opt-in, because routing
+  // through the API server costs a hop.
+  const useServerProxy =
+    (env.DF_SANDBOX_USE_SERVER_PROXY ?? "").trim().length > 0;
   return new ConnectionConfig({
     domain,
     protocol: protocol as "http" | "https",
     requestTimeoutSeconds,
+    useServerProxy,
     ...(apiKey ? { apiKey } : {}),
   });
 }
