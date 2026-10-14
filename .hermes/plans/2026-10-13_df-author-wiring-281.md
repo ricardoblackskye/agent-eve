@@ -249,11 +249,11 @@ id, so a client-timeout create-leak does not leave an unterminated, spending san
 - Test: `tests/dark-factory/sandbox-reaper.test.ts` (new; fake list + kill)
 
 **Step 1: Recon the SDK list API shape** (`SandboxManager` / `Sandbox.list`) — this is the one external
-unknown; do it first, in code, before writing the adapter. The fake in the test mirrors the reconned shape.
+unknown; do it first, in code, before writing the adapter. The fake in the test mirrors the verified shape.
 **Step 2: Write failing test** — a fake manager returns two sandboxes (one matching `runId`, one not);
 `reapSandboxesByRun` kills only the matching one.
 **Step 3: Run** → FAIL.
-**Step 4: Implement `reapSandboxesByRun`** from the reconned API; set `metadata` in the create spec;
+**Step 4: Implement `reapSandboxesByRun`** from the verified API; set `metadata` in the create spec;
 call `reapSandboxesByRun(runId)` at runner start (before `createSandboxProvider`).
 **Step 5: Run test + full suite + tsc** → green.
 **Step 6: Commit** `feat(#281): B4 label sandboxes by run id and reap orphans`.
@@ -335,5 +335,5 @@ doc-drift / ADR-integrity / env-example guards all green.
 | **B4** | label sandboxes by `metadata.run`; `reapSandboxesByRun` reclaims orphans (ADR 0034) | `157cb35` |
 
 ADRs added: 0031 (runner consumes the seam), 0032 (lifecycle is the runner's), 0033 (sandbox spend is a
-first-class run-history event), 0034 (reaping by run id). `df-runner` source-guard retightened to the
+first-class run-history event), 0034 (reaping by run id). `df-runner` source-guard tightened to the
 new `runCodingPhase(createSandboxProvider(...))` wiring.
