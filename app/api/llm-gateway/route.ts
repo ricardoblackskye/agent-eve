@@ -7,6 +7,8 @@ import { createCostGovernor } from "../../../agent/lib/dark-factory/cost-governo
 import {
   createInMemoryLeaseAuthority,
   handleGatewayRequest,
+  LEASE_REFUSED_MESSAGE,
+  bearerToken,
   type LlmGatewayDeps,
 } from "../../../agent/lib/dark-factory/llm-gateway";
 import { createRunHistoryStore } from "../../../agent/lib/dark-factory/run-history-provider";
@@ -30,7 +32,9 @@ const gatewayRecorder = createGatewayRecorder(runHistory);
 
 // #282 (R3/T1): provider key lives write-only in the vault. Seeded once at startup from env; it is
 // then retrieved server-side via a lease and never read from process.env at request time, never logged.
-const providerVault = createInMemoryCredentialVault({ allowList: ["llm-gateway"] });
+const providerVault = createInMemoryCredentialVault({
+  allowList: ["llm-gateway"],
+});
 if (process.env.OPENROUTER_API_KEY) {
   void providerVault.put("openrouter", process.env.OPENROUTER_API_KEY);
 }
@@ -106,11 +110,23 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   if (result.status === 200)
     return NextResponse.json(result.body, { status: 200 });
+  // One generic message for every refusal; never expose lease state (no oracle).
   return NextResponse.json(
-    {
-      error: result.error,
-      ...(result.reason ? { reason: result.reason } : {}),
-    },
+    { error: result.status === 401 ? LEASE_REFUSED_MESSAGE : result.error },
     { status: result.status },
   );
+}
+
+export async function DELETE(request: NextRequest): Promise<NextResponse> {
+  const token =
+    new URL(request.url).searchParams.get("token") ??
+    bearerToken(request.headers.get("authorization"));
+  if (!token)
+    return NextResponse.json({ error: "missing token" }, { status: 400 });
+  // Revoking an absent lease is idempotent: 404 signals "already not usable" (success-as-404).
+  const existed = leases.resolve(token) !== undefined;
+  leases.revoke(token);
+  return existed
+    ? new NextResponse(null, { status: 204 })
+    : new NextResponse(null, { status: 404 });
 }
