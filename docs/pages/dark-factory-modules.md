@@ -1,4 +1,5 @@
 <!-- markdownlint-disable MD013 MD049 -->
+
 # Dark Factory module catalog
 
 > The authoritative index of every module under `agent/lib/dark-factory/`. Each
@@ -55,7 +56,7 @@ Dark Factory — the ONE allow-list of environment variables an agent may hand t
 
 ## circuit-breaker
 
-Dark Factory — Factory-level circuit breaker / cost guard (issues #143 / story #144). A cross-task safety guard that caps cumulative worker-minutes per PBI and escalates after a configured number of failed self-correct cycles. Independent additive guard on top of the per-task retry/iteration bounds in #138 and #133. DESIGN DECISIONS: - State is IN-MEMORY (no persistence). Trip events are emitted for external logging; the breaker only needs the PBI's *current* state, not historical data. - Math.ceil() for ms→min conversion ensures we NEVER under-count toward the budget. A minimum duration threshold (5 seconds) prevents sub-second exploitation. Maximum over-count is: 59,999ms rounds up to 1 minute (59,999 < 60,000 < 120,000). - PBI_ID_PATTERN allows only alphanumeric, underscores, and hyphens (no periods) to prevent path traversal attacks if IDs are used in file paths or URLs. **IMPORTANT**: When constructing file paths or URLs, use encodeURIComponent() or similar encoding for additional safety, even with pattern restrictions. - Trip events are capped at 100 per PBI to prevent DoS attacks via event flooding.
+Dark Factory — Factory-level circuit breaker / cost guard (issues #143 / story #144). A cross-task safety guard that caps cumulative worker-minutes per PBI and escalates after a configured number of failed self-correct cycles. Independent additive guard on top of the per-task retry/iteration bounds in #138 and #133. DESIGN DECISIONS: - State is IN-MEMORY (no persistence). Trip events are emitted for external logging; the breaker only needs the PBI's _current_ state, not historical data. - Math.ceil() for ms→min conversion ensures we NEVER under-count toward the budget. A minimum duration threshold (5 seconds) prevents sub-second exploitation. Maximum over-count is: 59,999ms rounds up to 1 minute (59,999 < 60,000 < 120,000). - PBI_ID_PATTERN allows only alphanumeric, underscores, and hyphens (no periods) to prevent path traversal attacks if IDs are used in file paths or URLs. **IMPORTANT**: When constructing file paths or URLs, use encodeURIComponent() or similar encoding for additional safety, even with pattern restrictions. - Trip events are capped at 100 per PBI to prevent DoS attacks via event flooding.
 
 **Source:** [`agent/lib/dark-factory/circuit-breaker.ts`](../../agent/lib/dark-factory/circuit-breaker.ts)
 
@@ -254,6 +255,16 @@ Dark Factory — record a cost refusal on a run (#270). Appends a terminal, fail
 
 **Decisions:** [ADR 0020](../../docs/adr/0020-cost-governance-is-live-on-every-llm-call.md)
 
+## gateway-recorder
+
+Dark Factory — record the governed gateway's decisions into run-history (#281, R2b/B3). Adapts the gateway's optional `recordUsage`/`recordRefusal` hooks (invoked by the core with the run id from the lease) to run-history writes: a forwarded call appends a `run.cost` event carrying the estimated USD, and a refusal appends the machine-readable `CostGovernorRefusal` code. A history outage is swallowed, so it can never fail a forwarded call.
+
+**Source:** [`agent/lib/dark-factory/gateway-recorder.ts`](../../agent/lib/dark-factory/gateway-recorder.ts)
+
+**Exports:** `GatewayRecorder`, `createGatewayRecorder`
+
+**Decisions:** [ADR 0030](../../docs/adr/0030-df-llm-gateway.md)
+
 ## credentials
 
 Dark Factory — Credential ingress / worker privilege boundary (issues #141 / story #142). A BROKER, not a token dispenser: it holds the operator's token, mints opaque short-lived leases (handle + TTL + repo allow-list) and adjudicates every worker access request. The token is never handed to a sandbox — which is what makes #142 AC4 ("MUST NOT deliver a broad long-lived PAT to any worker sandbox") true by construction rather than by policy. R2 scope: this is the policy/adjudication seam. It performs NO GitHub API call itself — the concrete privileged operation that consumes the token is wired by the R3 worker. `mode: "live"` therefore means "a token is configured and leases may be issued", not "GitHub has been contacted".
@@ -287,6 +298,7 @@ Dark Factory — git diff capture (#295). After the developer-agent finishes edi
 **Source:** [`agent/lib/dark-factory/diff-capture.ts`](../../agent/lib/dark-factory/diff-capture.ts)
 
 **Exports:** `CaptureWorkspaceDiffOptions`, `GitRunner`, `MAX_GIT_DIFF_CHARS`, `captureWorkspaceDiff`, `recordRunDiff`, `sanitizeDiff`
+
 ## dispatch
 
 Dark Factory — Orchestration Core (issues #137 / story #138). The `Dispatcher`: at-most-once delivery, retry/backoff via a `RetryPolicy`, human-parking (`ParkedRunError` → `blocked`), per-run status persistence, a live control gate, and a per-invocation deadline. The pipeline it drives is sequenced by `dispatch-handler`.
@@ -567,6 +579,14 @@ Dark Factory — open a run's record at the start of a run (#316). A run driven 
 
 **Exports:** `BeginRunRecordInput`, `BeginRunRecordResult`, `beginRunRecord`, `runnerDeliveryId`
 
+## sandbox-reaper
+
+Dark Factory — reap orphaned sandboxes by run id (#281, R2b/B4). Lists sandboxes labelled `metadata.run` and deletes them, reclaiming any sandbox left behind by a client-timeout create-leak. Defense in depth behind runCodingPhase's dispose; never aborts the run on a stuck orphan.
+
+**Source:** [`agent/lib/dark-factory/sandbox-reaper.ts`](../../agent/lib/dark-factory/sandbox-reaper.ts)
+
+**Exports:** `SandboxManagerLike`, `reapSandboxesByRun`
+
 ## sandbox
 
 The provider-agnostic sandbox execution seam (#280, R1). Declares `SandboxProvider`, the fail-closed
@@ -599,7 +619,7 @@ Dark Factory — Measurable Recursive Self-Improvement (#146, R4a). One bounded,
 
 ## skill-set-surface
 
-Dark Factory — the skill-set tunable surface (#157). The concrete surface that #146 AC8 only *seamed*: a real `TunableSurface` whose value is the set of enabled skills, persisted through the `StateStore` so that a restart does not forget it. Two constraints come straight from the interfaces it must satisfy: - `TunableSurface.read()` is **synchronous**, so the store cannot be read on every call: `createSkillSetSurface` loads the snapshot once (async) and caches it. That is why this is a factory rather than a constructor. - `VersionHandle` requires `previous`/`next` and an **idempotent** `revert()`, plus the superseded-handle guard `IterationBoundSurface` established: a stale handle must not be able to silently undo a newer change. Widening capability is the gated class: adding a skill is `access-widening`, so the controller cannot apply it without an armed operator decision (#159's CLI is how one is armed).
+Dark Factory — the skill-set tunable surface (#157). The concrete surface that #146 AC8 only _seamed_: a real `TunableSurface` whose value is the set of enabled skills, persisted through the `StateStore` so that a restart does not forget it. Two constraints come straight from the interfaces it must satisfy: - `TunableSurface.read()` is **synchronous**, so the store cannot be read on every call: `createSkillSetSurface` loads the snapshot once (async) and caches it. That is why this is a factory rather than a constructor. - `VersionHandle` requires `previous`/`next` and an **idempotent** `revert()`, plus the superseded-handle guard `IterationBoundSurface` established: a stale handle must not be able to silently undo a newer change. Widening capability is the gated class: adding a skill is `access-widening`, so the controller cannot apply it without an armed operator decision (#159's CLI is how one is armed).
 
 **Source:** [`agent/lib/dark-factory/skill-set-surface.ts`](../../agent/lib/dark-factory/skill-set-surface.ts)
 
@@ -703,7 +723,7 @@ Dark Factory — canonical customer tenant model (#213, epic #212 R1). A tenant 
 
 ## tester-agent
 
-Dark Factory — Tester Agent (issues #132 / story #136). A pre-PR validation gate that runs static analysis, smoke tests, and security scans to catch quality and security regressions before merge. DESIGN DECISIONS: - Fail-closed defaults: missing config = no validation, failed check = block PR - Canonical payload pattern: ValidationRequest/ValidationReport for seams - Metrics emission: reports pass/fail via MetricsStore for observability - Dependency injection: CommandRunner interface for testability - Command whitelist: only allow npx commands (tsc, cspell, vitest, gitleaks) REQUIRED DEPENDENCIES: - `tsc` (TypeScript compiler, via npx) for static analysis - `cspell` (spell checker, via npx) for documentation quality - `vitest` (test runner, via npx) for smoke tests - `gitleaks` (secret scanner, via npx) for security scan (optional) EXPECTED PROJECT STRUCTURE: - agent/lib/dark-factory/*.ts — source under test - tests/dark-factory/*.test.ts — corresponding test files ENVIRONMENT VARIABLES (read by createTesterAgent): - DF_SECURITY_SCAN_ENABLED: "true" to enable gitleaks scan (default: false) - DF_TESTER_TIMEOUT_MS: per-check timeout in ms (default: 60000) - DF_SECURITY_TOOLS: comma-separated security tools (default: "gitleaks", only "gitleaks" allowed) SECURITY CONSIDERATIONS: - MAX_BUFFER_BYTES: Limited to 10MB to prevent memory exhaustion from malicious output. For very large outputs, output is truncated at this limit (tsc/cspell typically produce <1MB output). - Command whitelist: Only npx is allowed as the executable; specific args form the allowed command set (tsc, cspell, vitest, gitleaks). - Environment filtering: ONLY explicitly allow-listed env vars (NODE_PATH, PATH, HOME, LANG, LC_ALL) are passed to child processes. All other variables (including DF_* secrets) are explicitly blocked to prevent credential leakage into spawned subprocesses.
+Dark Factory — Tester Agent (issues #132 / story #136). A pre-PR validation gate that runs static analysis, smoke tests, and security scans to catch quality and security regressions before merge. DESIGN DECISIONS: - Fail-closed defaults: missing config = no validation, failed check = block PR - Canonical payload pattern: ValidationRequest/ValidationReport for seams - Metrics emission: reports pass/fail via MetricsStore for observability - Dependency injection: CommandRunner interface for testability - Command whitelist: only allow npx commands (tsc, cspell, vitest, gitleaks) REQUIRED DEPENDENCIES: - `tsc` (TypeScript compiler, via npx) for static analysis - `cspell` (spell checker, via npx) for documentation quality - `vitest` (test runner, via npx) for smoke tests - `gitleaks` (secret scanner, via npx) for security scan (optional) EXPECTED PROJECT STRUCTURE: - agent/lib/dark-factory/_.ts — source under test - tests/dark-factory/_.test.ts — corresponding test files ENVIRONMENT VARIABLES (read by createTesterAgent): - DF*SECURITY_SCAN_ENABLED: "true" to enable gitleaks scan (default: false) - DF_TESTER_TIMEOUT_MS: per-check timeout in ms (default: 60000) - DF_SECURITY_TOOLS: comma-separated security tools (default: "gitleaks", only "gitleaks" allowed) SECURITY CONSIDERATIONS: - MAX_BUFFER_BYTES: Limited to 10MB to prevent memory exhaustion from malicious output. For very large outputs, output is truncated at this limit (tsc/cspell typically produce <1MB output). - Command whitelist: Only npx is allowed as the executable; specific args form the allowed command set (tsc, cspell, vitest, gitleaks). - Environment filtering: ONLY explicitly allow-listed env vars (NODE_PATH, PATH, HOME, LANG, LC_ALL) are passed to child processes. All other variables (including DF*\* secrets) are explicitly blocked to prevent credential leakage into spawned subprocesses.
 
 **Source:** [`agent/lib/dark-factory/tester-agent.ts`](../../agent/lib/dark-factory/tester-agent.ts)
 

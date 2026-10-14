@@ -33,9 +33,10 @@ export interface SandboxHandle {
   files: {
     readFile(path: string): Promise<unknown>;
     writeFiles(entries: { path: string; data: string }[]): Promise<void>;
-    listDirectory(entry: { path: string; depth?: number }): Promise<
-      { path: string; type?: string; name?: string }[]
-    >;
+    listDirectory(entry: {
+      path: string;
+      depth?: number;
+    }): Promise<{ path: string; type?: string; name?: string }[]>;
   };
   kill(): Promise<void>;
   close(): Promise<void>;
@@ -50,11 +51,15 @@ export interface SandboxCreateSpec {
   image: string;
   timeoutSeconds: number;
   networkPolicy: SandboxNetworkPolicy;
+  /** Run-scoped label so orphans can be reaped by run id (T5b/B4). Optional for non-run contexts. */
+  metadata?: Record<string, string> | undefined;
 }
 
 export interface OpenSandboxDriverDeps {
   /** Creates the sandbox. Injected so the driver is testable with no live sandbox. */
   createSandbox(spec: SandboxCreateSpec): Promise<SandboxHandle>;
+  /** Run-scoped label attached to the created sandbox; enables reaping by run id. */
+  metadata?: Record<string, string> | undefined;
 }
 
 export interface OpenSandboxDriverEnv {
@@ -77,7 +82,9 @@ export const SANDBOX_LIST_DEPTH = 10;
  * Egress is DENY by default and allows ONLY what is listed. The gateway host is the only intended
  * destination, so a missing base-URL override cannot silently reach a provider and spend.
  */
-export function sandboxNetworkPolicy(env: OpenSandboxDriverEnv): SandboxNetworkPolicy {
+export function sandboxNetworkPolicy(
+  env: OpenSandboxDriverEnv,
+): SandboxNetworkPolicy {
   const allow = (env.DF_SANDBOX_EGRESS_ALLOW ?? "")
     .split(",")
     .map((entry) => entry.trim())
@@ -89,11 +96,19 @@ export function sandboxNetworkPolicy(env: OpenSandboxDriverEnv): SandboxNetworkP
 }
 
 function joinInsideWorkspace(root: string, relPath: string): string {
-  if (relPath.startsWith("/") || /^[A-Za-z]:/.test(relPath) || relPath.includes("\0")) {
-    throw new InvalidTaskError(`Path '${relPath}' must be relative to the sandbox workspace.`);
+  if (
+    relPath.startsWith("/") ||
+    /^[A-Za-z]:/.test(relPath) ||
+    relPath.includes("\0")
+  ) {
+    throw new InvalidTaskError(
+      `Path '${relPath}' must be relative to the sandbox workspace.`,
+    );
   }
   if (relPath.split(/[\\/]+/).includes("..")) {
-    throw new InvalidTaskError(`Path '${relPath}' escapes the sandbox workspace; rejected.`);
+    throw new InvalidTaskError(
+      `Path '${relPath}' escapes the sandbox workspace; rejected.`,
+    );
   }
   return `${root.replace(/\/$/, "")}/${relPath}`;
 }
@@ -101,7 +116,9 @@ function joinInsideWorkspace(root: string, relPath: string): string {
 function assertAllowedExtension(relPath: string): void {
   const ext = extname(relPath).toLowerCase();
   if (!ALLOWED_WORKSPACE_EXTENSIONS.has(ext)) {
-    throw new InvalidTaskError(`Extension '${ext}' is not allowed in the workspace.`);
+    throw new InvalidTaskError(
+      `Extension '${ext}' is not allowed in the workspace.`,
+    );
   }
 }
 
@@ -130,7 +147,8 @@ export function matchesPattern(pattern: string, name: string): boolean {
  * visibly the same contract. The SDK's own types are richer than the slice declared above; the small
  * casts below map that richness down to what this driver uses, rather than widening our interface.
  */
-export async function createLiveSandbox(spec: SandboxCreateSpec): Promise<SandboxHandle> {
+/** Builds the lifecycle-API connection config from the environment. Shared by the live driver and the reaper. */
+export function sandboxConnectionConfig(): ConnectionConfig {
   const domain = (process.env.DF_SANDBOX_ENDPOINT ?? "127.0.0.1:8080").trim();
   const protocol = (process.env.DF_SANDBOX_PROTOCOL ?? "http").trim();
   const apiKey = (process.env.OPEN_SANDBOX_API_KEY ?? "").trim();
@@ -138,26 +156,36 @@ export async function createLiveSandbox(spec: SandboxCreateSpec): Promise<Sandbo
     process.env.DF_SANDBOX_REQUEST_TIMEOUT_SECONDS ?? "180",
     10,
   );
+  return new ConnectionConfig({
+    domain,
+    protocol: protocol as "http" | "https",
+    requestTimeoutSeconds,
+    ...(apiKey ? { apiKey } : {}),
+  });
+}
 
+export async function createLiveSandbox(
+  spec: SandboxCreateSpec,
+): Promise<SandboxHandle> {
   const createOptions = {
-    connectionConfig: new ConnectionConfig({
-      domain,
-      protocol: protocol as "http" | "https",
-      requestTimeoutSeconds,
-      ...(apiKey ? { apiKey } : {}),
-    }),
+    connectionConfig: sandboxConnectionConfig(),
     image: spec.image,
     timeoutSeconds: spec.timeoutSeconds,
     // Deny-by-default egress: the SDK's own default is "deny", so widening is always explicit.
     networkPolicy: spec.networkPolicy,
+    ...(spec.metadata ? { metadata: spec.metadata } : {}),
   };
   // The SDK types rules as open records and accepts more than this driver sets; the assertion maps our
   // structural subset onto its richer type without widening what we actually send.
-  const sandbox = await Sandbox.create(createOptions as unknown as Parameters<typeof Sandbox.create>[0]);
+  const sandbox = await Sandbox.create(
+    createOptions as unknown as Parameters<typeof Sandbox.create>[0],
+  );
 
   const readLines = (lines: unknown): { text: string }[] =>
     Array.isArray(lines)
-      ? lines.map((line) => ({ text: String((line as { text?: unknown })?.text ?? "") }))
+      ? lines.map((line) => ({
+          text: String((line as { text?: unknown })?.text ?? ""),
+        }))
       : [];
 
   return {
@@ -165,10 +193,17 @@ export async function createLiveSandbox(spec: SandboxCreateSpec): Promise<Sandbo
     commands: {
       run: async (command: string) => {
         const execution = await sandbox.commands.run(command);
-        const logs = (execution as unknown as { logs?: { stdout?: unknown; stderr?: unknown } }).logs;
+        const logs = (
+          execution as unknown as {
+            logs?: { stdout?: unknown; stderr?: unknown };
+          }
+        ).logs;
         return {
           exitCode: (execution as unknown as { exitCode?: number }).exitCode,
-          logs: { stdout: readLines(logs?.stdout), stderr: readLines(logs?.stderr) },
+          logs: {
+            stdout: readLines(logs?.stdout),
+            stderr: readLines(logs?.stderr),
+          },
         };
       },
     },
@@ -178,7 +213,10 @@ export async function createLiveSandbox(spec: SandboxCreateSpec): Promise<Sandbo
         await sandbox.files.writeFiles(entries as never);
       },
       listDirectory: async (entry) =>
-        (await sandbox.files.listDirectory(entry)) as unknown as { path: string; name?: string }[],
+        (await sandbox.files.listDirectory(entry)) as unknown as {
+          path: string;
+          name?: string;
+        }[],
     },
     kill: async () => {
       await sandbox.kill();
@@ -199,7 +237,10 @@ export function createOpenSandboxProvider(
   deps: OpenSandboxDriverDeps,
 ): SandboxProvider {
   const image = (env.DF_SANDBOX_IMAGE ?? "python:3.12").trim();
-  const timeoutSeconds = Number.parseInt(env.DF_SANDBOX_TIMEOUT_SECONDS ?? "900", 10);
+  const timeoutSeconds = Number.parseInt(
+    env.DF_SANDBOX_TIMEOUT_SECONDS ?? "900",
+    10,
+  );
   const networkPolicy = sandboxNetworkPolicy(env);
   let pending: Promise<SandboxHandle> | undefined;
   let disposed = false;
@@ -207,7 +248,12 @@ export function createOpenSandboxProvider(
   /** Created lazily, once per run: cold start (image pull + execd injection) is per RUN, not per file. */
   const sandbox = (): Promise<SandboxHandle> => {
     if (disposed) throw new SandboxRefusedError("sandbox was already disposed");
-    pending ??= deps.createSandbox({ image, timeoutSeconds, networkPolicy });
+    pending ??= deps.createSandbox({
+      image,
+      timeoutSeconds,
+      networkPolicy,
+      ...(deps.metadata ? { metadata: deps.metadata } : {}),
+    });
     return pending;
   };
 
@@ -215,11 +261,17 @@ export function createOpenSandboxProvider(
     driver: "opensandbox",
     isolated: true,
     create: (workspaceDir: string): WorkspaceTools => {
-      const root = (workspaceDir || env.DF_SANDBOX_WORKSPACE || DEFAULT_SANDBOX_WORKSPACE).trim();
+      const root = (
+        workspaceDir ||
+        env.DF_SANDBOX_WORKSPACE ||
+        DEFAULT_SANDBOX_WORKSPACE
+      ).trim();
       return {
         readFile: async (relPath: string): Promise<string> => {
           const handle = await sandbox();
-          return String(await handle.files.readFile(joinInsideWorkspace(root, relPath)));
+          return String(
+            await handle.files.readFile(joinInsideWorkspace(root, relPath)),
+          );
         },
         writeFile: async (relPath: string, content: string): Promise<void> => {
           // Guard BEFORE creating or touching the sandbox, so a refused write costs nothing.
@@ -230,22 +282,41 @@ export function createOpenSandboxProvider(
         },
         listFiles: async (pattern?: string): Promise<string[]> => {
           const handle = await sandbox();
-          const entries = await handle.files.listDirectory({ path: root, depth: SANDBOX_LIST_DEPTH });
+          const entries = await handle.files.listDirectory({
+            path: root,
+            depth: SANDBOX_LIST_DEPTH,
+          });
           const prefix = `${root.replace(/\/$/, "")}/`;
           const names = entries
             // Directories are not files, and the local path never returned them.
             .filter((entry) => entry.type !== "directory")
-            .map((entry) => (entry.path.startsWith(prefix) ? entry.path.slice(prefix.length) : entry.path))
+            .map((entry) =>
+              entry.path.startsWith(prefix)
+                ? entry.path.slice(prefix.length)
+                : entry.path,
+            )
             .filter((name) => name.length > 0);
-          return pattern ? names.filter((name) => matchesPattern(pattern, name)) : names;
+          return pattern
+            ? names.filter((name) => matchesPattern(pattern, name))
+            : names;
         },
-        runTests: async (cmd?: string): Promise<{ passed: boolean; output: string }> => {
-          const command = (cmd ?? ALLOWED_TEST_COMMAND_PREFIXES[0] ?? "npx vitest").trim();
+        runTests: async (
+          cmd?: string,
+        ): Promise<{ passed: boolean; output: string }> => {
+          const command = (
+            cmd ??
+            ALLOWED_TEST_COMMAND_PREFIXES[0] ??
+            "npx vitest"
+          ).trim();
           assertAllowedTestCommand(command);
           const handle = await sandbox();
           const execution = await handle.commands.run(command);
-          const stdout = execution.logs.stdout.map((line) => line.text).join("");
-          const stderr = execution.logs.stderr.map((line) => line.text).join("");
+          const stdout = execution.logs.stdout
+            .map((line) => line.text)
+            .join("");
+          const stderr = execution.logs.stderr
+            .map((line) => line.text)
+            .join("");
           // An unknown exit code is NOT a pass: never report success for a command whose outcome we
           // could not read.
           return { passed: execution.exitCode === 0, output: stdout || stderr };

@@ -41,6 +41,11 @@ import {
 } from "../agent/lib/dark-factory/developer-agent";
 import { createCircuitBreaker } from "../agent/lib/dark-factory/circuit-breaker";
 import { createSandboxProvider } from "../agent/lib/dark-factory/sandbox-provider";
+import { reapSandboxesByRun } from "../agent/lib/dark-factory/sandbox-reaper";
+import type { SandboxProvider } from "../agent/lib/dark-factory/sandbox";
+import type { WorkspaceTools } from "../agent/lib/dark-factory/developer-agent";
+import { createCodeAuthorProvider } from "../agent/lib/dark-factory/code-author-provider";
+import type { CodeAuthorProvider } from "../agent/lib/dark-factory/code-author";
 import { createCodingLoopBreaker } from "../agent/lib/dark-factory/breaker-wiring";
 import { recordBreakerTrip } from "../agent/lib/dark-factory/breaker-trip-recorder";
 import { createMetricsStore } from "../agent/lib/dark-factory/metrics";
@@ -347,7 +352,37 @@ async function main(): Promise<void> {
   );
   // #280: the execution backend is configuration-selected. Unset DF_SANDBOX_DRIVER = the local
   // filesystem, i.e. today's behaviour; an unknown value throws before any side effect.
-  const workspaceTools = createSandboxProvider().create(process.cwd());
+  // #281 (R2b/B2): the sandbox is created once per run and force-disposed by runCodingPhase,
+  // so the runner owns the lifecycle (closing the SDK client does not terminate a sandbox).
+
+  // #281 (R2b/B1): the author is configuration-selected. Unset DF_CODE_AUTHOR = in-process, i.e. the
+  // governed path above, unchanged. The in-process adapter calls `generate`, which runs through the
+  // cost gate, so the seam cannot bypass governance.
+  const codeAuthor = createCodeAuthorProvider(
+    {
+      DF_CODE_AUTHOR: process.env.DF_CODE_AUTHOR,
+      DF_AGENT_CLI: process.env.DF_AGENT_CLI,
+      DF_AGENT_CLI_COMMAND: process.env.DF_AGENT_CLI_COMMAND,
+    },
+    {
+      generate: (prompt) =>
+        runGovernedAgentCall(
+          { governor, runHistory, runId },
+          {
+            category: "developer",
+            model: modelId,
+            inputTokens: Math.ceil(prompt.length / 4),
+            outputTokens: 8_000,
+            run: async () => {
+              const stream = streamText({ model, prompt });
+              let output = "";
+              for await (const chunk of stream.textStream) output += chunk;
+              return output;
+            },
+          },
+        ),
+    },
+  );
   const capturedTestResults: {
     testFile: string;
     testCaseName: string;
@@ -362,82 +397,76 @@ async function main(): Promise<void> {
   const breaker = createCircuitBreaker(process.env);
   const loopBreaker = createCodingLoopBreaker(breaker, issueNum);
 
+  // #281 (R2b/B4): reap orphaned sandboxes from a prior run with the same id before this one starts.
+  // The primary release is runCodingPhase's dispose(); this reclaims a sandbox a client-timeout
+  // create-leak left behind. Only runs for the opensandbox driver, and never aborts the run on failure.
+  if ((process.env.DF_SANDBOX_DRIVER ?? "").trim() === "opensandbox") {
+    try {
+      const reaped = await reapSandboxesByRun({ runId });
+      if (reaped.length)
+        console.log(
+          `[STEP 5] reaped ${reaped.length} orphaned sandbox(es) from a prior run`,
+        );
+    } catch (e) {
+      console.error(
+        `[WARN] sandbox reaping failed: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+  }
+
   let loopResult: LoopResult;
   try {
-    loopResult = await runMultiFileCodingLoop({
-      plan: executionPlan,
-      tools: workspaceTools,
-      maxIterations: developerAgent.maxIterations,
-      breaker: loopBreaker,
-      checkpoint,
-      worker: async (ctx) => {
-        console.log(
-          `  -> Coding Iteration ${ctx.iteration}/${developerAgent.maxIterations}...`,
-        );
+    loopResult = await runCodingPhase(
+      createSandboxProvider(undefined, undefined, runId),
+      process.cwd(),
+      async (workspaceTools) =>
+        runMultiFileCodingLoop({
+          plan: executionPlan,
+          tools: workspaceTools,
+          maxIterations: developerAgent.maxIterations,
+          breaker: loopBreaker,
+          checkpoint,
+          worker: async (ctx) => {
+            console.log(
+              `  -> Coding Iteration ${ctx.iteration}/${developerAgent.maxIterations}...`,
+            );
 
-        const workerPrompt = [
-          `You are Eve's Developer Agent. Execute the following ExecutionPlan:`,
-          JSON.stringify(ctx.plan, null, 2),
-          ``,
-          `For each target file, provide the code to write.`,
-          `Return a JSON object where keys are relative file paths and values are string file contents.`,
-          `Example: { "app/chat.tsx": "export ...", "tests/chat.test.ts": "import ..." }`,
-        ].join("\n");
+            // #281 (R2b/B1): the author is configuration-selected. With DF_CODE_AUTHOR unset this is the
+            // same governed path as before; a failed author propagates as a failed iteration.
+            let authored: { files: Record<string, string>; raw: string };
+            try {
+              authored = await authorFiles(codeAuthor, ctx.plan, ctx.tools);
+            } catch (err: any) {
+              return {
+                passed: false,
+                output: `Authoring error: ${err.message}`,
+              };
+            }
+            for (const [filePath, content] of Object.entries(authored.files)) {
+              console.log(`     Wrote ${filePath} (${content.length} chars)`);
+            }
 
-        const output = await runGovernedAgentCall(
-          { governor, runHistory, runId },
-          {
-            category: "developer",
-            model: modelId,
-            inputTokens: Math.ceil(workerPrompt.length / 4),
-            outputTokens: 8_000,
-            run: async () => {
-              const stream = streamText({ model, prompt: workerPrompt });
-              let acc = "";
-              for await (const chunk of stream.textStream) {
-                acc += chunk;
+            // Run vitest to verify acceptance criteria
+            const testOutcome = await ctx.tools.runTests("npx vitest run");
+            console.log(
+              `     Test result: ${testOutcome.passed ? "PASS" : "FAIL"}`,
+            );
+
+            if (testOutcome.passed) {
+              // Record passing test results for each mapped AC
+              for (const ac of ctx.plan.acceptanceCriteriaMap) {
+                capturedTestResults.push({
+                  testFile: ac.testFile,
+                  testCaseName: ac.testCaseName,
+                  passed: true,
+                });
               }
-              return acc;
-            },
+            }
+
+            return { passed: testOutcome.passed, output: testOutcome.output };
           },
-        );
-
-        try {
-          const jsonMatch = output.match(/\{[\s\S]*\}/);
-          const filesMap = JSON.parse(
-            jsonMatch ? jsonMatch[0] : output,
-          ) as Record<string, string>;
-          for (const [filePath, content] of Object.entries(filesMap)) {
-            await ctx.tools.writeFile(filePath, content);
-            console.log(`     Wrote ${filePath} (${content.length} chars)`);
-          }
-        } catch (err: any) {
-          return {
-            passed: false,
-            output: `JSON parsing error: ${err.message}`,
-          };
-        }
-
-        // Run vitest to verify acceptance criteria
-        const testOutcome = await ctx.tools.runTests("npx vitest run");
-        console.log(
-          `     Test result: ${testOutcome.passed ? "PASS" : "FAIL"}`,
-        );
-
-        if (testOutcome.passed) {
-          // Record passing test results for each mapped AC
-          for (const ac of ctx.plan.acceptanceCriteriaMap) {
-            capturedTestResults.push({
-              testFile: ac.testFile,
-              testCaseName: ac.testCaseName,
-              passed: true,
-            });
-          }
-        }
-
-        return { passed: testOutcome.passed, output: testOutcome.output };
-      },
-    });
+        }),
+    );
   } catch (error) {
     // #312: a trip halts fail-closed through the SAME terminal path as the runner's other
     // steps, so a tripped run is never silently left running.
@@ -594,6 +623,45 @@ async function main(): Promise<void> {
   );
   await activeControlStore?.close?.();
   activeControlStore = null;
+}
+
+/**
+ * #281 (R2b/B1) — write the authored files into the workspace.
+ *
+ * The author seam deliberately does NOT write files (it returns the map, keeping the seam pure), so
+ * the caller writes them through the SAME workspace tools as before. A failed author propagates: the
+ * coding loop records a failed iteration rather than silently writing nothing.
+ */
+export async function authorFiles(
+  author: CodeAuthorProvider,
+  plan: unknown,
+  tools: { writeFile(relPath: string, content: string): Promise<void> },
+): Promise<{ files: Record<string, string>; raw: string }> {
+  const result = await author.write({ plan });
+  for (const [filePath, content] of Object.entries(result.files)) {
+    await tools.writeFile(filePath, content);
+  }
+  return { files: result.files, raw: result.raw };
+}
+
+/**
+ * #281 (R2b/B2) — the runner owns the sandbox lifecycle.
+ *
+ * One sandbox per run; it is force-disposed on success AND on throw (closing the SDK client does not
+ * terminate a sandbox, so a missing dispose is a leak and spend). The recording-double test proves the
+ * order: create -> phase -> dispose, exactly one create, dispose always fires.
+ */
+export async function runCodingPhase<T>(
+  provider: SandboxProvider,
+  workspaceDir: string,
+  phase: (tools: WorkspaceTools) => Promise<T>,
+): Promise<T> {
+  const tools = provider.create(workspaceDir);
+  try {
+    return await phase(tools);
+  } finally {
+    await provider.dispose?.();
+  }
 }
 
 // Only execute main when run as script directly
