@@ -54,7 +54,7 @@ describe("#354 vault-path git wiring (source guard)", () => {
 });
 
 /**
- * #358 — the runner must be STARTABLE.
+ * #358 — the runner must be able to start.
  *
  * Its entrypoint guard was `require.main === module`, a CommonJS construct. This package is
  * `"type": "module"`, so evaluating it threw `ReferenceError: require is not defined in ES module
