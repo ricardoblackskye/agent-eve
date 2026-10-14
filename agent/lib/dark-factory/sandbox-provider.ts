@@ -60,6 +60,9 @@ export function createSandboxProvider(
         DF_SANDBOX_IMAGE: process.env.DF_SANDBOX_IMAGE,
         DF_SANDBOX_TIMEOUT_SECONDS: process.env.DF_SANDBOX_TIMEOUT_SECONDS,
         DF_SANDBOX_EGRESS_ALLOW: process.env.DF_SANDBOX_EGRESS_ALLOW,
+        DF_SANDBOX_EGRESS_GATEWAY_HOST:
+          process.env.DF_SANDBOX_EGRESS_GATEWAY_HOST,
+        DF_SANDBOX_EGRESS_GIT_HOST: process.env.DF_SANDBOX_EGRESS_GIT_HOST,
         DF_SANDBOX_WORKSPACE: process.env.DF_SANDBOX_WORKSPACE,
       },
       {

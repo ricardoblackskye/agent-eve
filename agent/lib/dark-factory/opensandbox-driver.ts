@@ -66,6 +66,8 @@ export interface OpenSandboxDriverEnv {
   DF_SANDBOX_IMAGE?: string | undefined;
   DF_SANDBOX_TIMEOUT_SECONDS?: string | undefined;
   DF_SANDBOX_EGRESS_ALLOW?: string | undefined;
+  DF_SANDBOX_EGRESS_GATEWAY_HOST?: string | undefined;
+  DF_SANDBOX_EGRESS_GIT_HOST?: string | undefined;
   DF_SANDBOX_WORKSPACE?: string | undefined;
 }
 
@@ -85,13 +87,25 @@ export const SANDBOX_LIST_DEPTH = 10;
 export function sandboxNetworkPolicy(
   env: OpenSandboxDriverEnv,
 ): SandboxNetworkPolicy {
-  const allow = (env.DF_SANDBOX_EGRESS_ALLOW ?? "")
+  const explicit = (env.DF_SANDBOX_EGRESS_ALLOW ?? "")
     .split(",")
     .map((entry) => entry.trim())
     .filter((entry) => entry.length > 0);
+  // The gateway is the only intended destination for the sandbox CLI (its base-URL override points
+  // here). It is ALWAYS allowed so an operator mistake in the allow-list cannot silently open egress
+  // to a model provider. The git host is allowed only when explicitly configured.
+  const targets = new Set<string>();
+  const gatewayHost = env.DF_SANDBOX_EGRESS_GATEWAY_HOST?.trim();
+  const gitHost = env.DF_SANDBOX_EGRESS_GIT_HOST?.trim();
+  if (gatewayHost) targets.add(gatewayHost);
+  if (gitHost) targets.add(gitHost);
+  for (const target of explicit) targets.add(target);
   return {
     defaultAction: "deny",
-    egress: allow.map((target) => ({ action: "allow" as const, target })),
+    egress: [...targets].map((target) => ({
+      action: "allow" as const,
+      target,
+    })),
   };
 }
 
@@ -232,6 +246,8 @@ export function createOpenSandboxProvider(
     DF_SANDBOX_IMAGE: process.env.DF_SANDBOX_IMAGE,
     DF_SANDBOX_TIMEOUT_SECONDS: process.env.DF_SANDBOX_TIMEOUT_SECONDS,
     DF_SANDBOX_EGRESS_ALLOW: process.env.DF_SANDBOX_EGRESS_ALLOW,
+    DF_SANDBOX_EGRESS_GATEWAY_HOST: process.env.DF_SANDBOX_EGRESS_GATEWAY_HOST,
+    DF_SANDBOX_EGRESS_GIT_HOST: process.env.DF_SANDBOX_EGRESS_GIT_HOST,
     DF_SANDBOX_WORKSPACE: process.env.DF_SANDBOX_WORKSPACE,
   },
   deps: OpenSandboxDriverDeps,
