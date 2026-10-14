@@ -846,3 +846,54 @@ Dark Factory — worker usage recording (#209, epic #206 R7.3). The worker-side 
 **Exports:** `WorkerUsageContext`, `WorkerUsageMeasurement`, `WorkerUsageRecorder`, `createWorkerUsageRecorder`
 
 **Decisions:** [ADR 0002](../../docs/adr/0002-r1-records-r2-refuses.md)
+
+
+## lease-broker
+
+Dark Factory — credential lease broker (#282 R3/T4). Opaque, run-scoped leases: issuance is separated from adjudication, redemption is server-side only, and revoking an absent lease is a no-op (404-as-success). The allow-list is enforced at the seam and fails closed when empty.
+
+**Source:** [`agent/lib/dark-factory/lease-broker.ts`](../../agent/lib/dark-factory/lease-broker.ts)
+
+**Exports:** `createLeaseBroker`, `LeaseScope`, `Lease`, `Adjudication`, `LeaseBroker`, `LeaseBrokerOptions`
+
+**Decisions:** [ADR 0035](../../docs/adr/0035-df-sandbox-credential-vault.md)
+
+## credential-vault
+
+Dark Factory — write-only credential vault (#282 R3). A secret is stored once and can never be read back through the public surface; it is retrieved only via an opaque, server-side lease. The host-side `InMemoryCredentialVault` backs the gateway provider key and the runner push token.
+
+**Source:** [`agent/lib/dark-factory/credential-vault.ts`](../../agent/lib/dark-factory/credential-vault.ts)
+
+**Exports:** `createInMemoryCredentialVault`, `CredentialVault`, `InMemoryCredentialVaultOptions`
+
+**Decisions:** [ADR 0035](../../docs/adr/0035-df-sandbox-credential-vault.md)
+
+## opensandbox-credential-vault
+
+Dark Factory — OpenSandbox Credential Vault adapter (#282 R3). An SDK-typed backend implementing `CredentialVault` against OpenSandbox's write-only vault; `redeem` intentionally throws because the host never reads a secret back — it is injected into the sandbox via the credential proxy. Live use is gated on a vault-capable server.
+
+**Source:** [`agent/lib/dark-factory/opensandbox-credential-vault.ts`](../../agent/lib/dark-factory/opensandbox-credential-vault.ts)
+
+**Exports:** `createOpenSandboxCredentialVault`, `OpenSandboxVaultDeps`
+
+**Decisions:** [ADR 0035](../../docs/adr/0035-df-sandbox-credential-vault.md)
+
+## provider-key
+
+Dark Factory — server-side provider-key resolver (#282 R3/T1). Issues then redeems an opaque lease so the gateway's `forwardUpstream` reads the model-provider key from the write-only vault rather than from `process.env` at request time, and never logs it.
+
+**Source:** [`agent/lib/dark-factory/provider-key.ts`](../../agent/lib/dark-factory/provider-key.ts)
+
+**Exports:** `resolveProviderKey`, `ProviderKeyResolverDeps`
+
+**Decisions:** [ADR 0035](../../docs/adr/0035-df-sandbox-credential-vault.md)
+
+## git-push
+
+Dark Factory — secret-free git push (#282 R3/T2). Builds a bare-URL push command and supplies the token only through a `GIT_ASKPASS` helper; the authed push URL is never constructed, so the token never appears in argv, the URL, or logs.
+
+**Source:** [`agent/lib/dark-factory/git-push.ts`](../../agent/lib/dark-factory/git-push.ts)
+
+**Exports:** `buildGitPushCommand`, `gitPushWithVault`, `GitPushCommand`, `BuildGitPushCommandArgs`, `GitPushWithVaultArgs`
+
+**Decisions:** [ADR 0035](../../docs/adr/0035-df-sandbox-credential-vault.md)

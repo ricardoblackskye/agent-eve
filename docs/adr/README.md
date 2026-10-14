@@ -88,3 +88,4 @@ changes, write a new one that supersedes it.
 | [0032](0032-df-sandbox-lifecycle-owned-by-runner.md)              | Sandbox lifecycle is the runner's responsibility, force-disposed                 | Accepted |
 | [0033](0033-df-gateway-spend-is-run-history-event.md)             | Sandbox spend is a first-class run-history event                                 | Accepted |
 | [0034](0034-df-sandbox-reaping-by-run-id.md)                      | Sandbox reaping is keyed by run id (defense in depth)                            | Accepted |
+| [0035](0035-df-sandbox-credential-vault.md)                     | Sandbox credentials live in a write-only vault; leases opaque, egress deny-by-default | Accepted |

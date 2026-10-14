@@ -32,6 +32,8 @@ import {
   resolveIssueToken,
 } from "../agent/lib/dark-factory/issue-writer";
 import { resolveWorkerAllowedRepos } from "../agent/lib/dark-factory/credentials";
+import { createInMemoryCredentialVault } from "../agent/lib/dark-factory/credential-vault";
+import { gitPushWithVault } from "../agent/lib/dark-factory/git-push";
 import {
   CircuitTrippedError,
   DeveloperAgent,
@@ -530,9 +532,17 @@ async function main(): Promise<void> {
   });
   await checkpoint();
 
-  const pushUrl = `https://x-access-token:${token}@github.com/${targetRepo}.git`;
+  // R3 (#282/T2): the push token lives write-only in the credential vault; the authed URL is never built.
+  const ownerRepo = targetRepo.split("/");
+  const pushVault = createInMemoryCredentialVault({ allowList: ["git-push"] });
+  await pushVault.put("git-push-token", token);
   try {
-    execSync(`git push ${pushUrl} ${branchName}`, { stdio: "pipe" });
+    await gitPushWithVault({
+      owner: ownerRepo[0],
+      repo: ownerRepo[1],
+      branchName,
+      vault: pushVault,
+    });
   } catch (pushError) {
     console.error(
       `[ERROR] Failed to push branch '${branchName}': ${pushError instanceof Error ? pushError.message : String(pushError)}`,
