@@ -53,26 +53,31 @@ async function main(): Promise<number> {
   console.log(`command: ${command}`);
   const tools = provider.create(WORKSPACE);
 
-  console.log("[1] is the project present in the image?");
-  const manifest = await tools.listFiles("package.json");
-  const lockfile = await tools.listFiles("package-lock.json");
-  console.log(
-    `    package.json: ${JSON.stringify(manifest)} | package-lock.json: ${JSON.stringify(lockfile)}`,
-  );
+  // try/finally, not a trailing call: a rejected command (the runTests allowlist refuses anything
+  // that is not a test command) threw straight past a bare dispose() and left a Sandbox object
+  // running in the cluster. Observed, not hypothetical.
+  try {
+    console.log("[1] is the project present in the image?");
+    const manifest = await tools.listFiles("package.json");
+    const lockfile = await tools.listFiles("package-lock.json");
+    console.log(
+      `    package.json: ${JSON.stringify(manifest)} | package-lock.json: ${JSON.stringify(lockfile)}`,
+    );
 
-  console.log("[2] running the loop's test step INSIDE the sandbox ...");
-  const result = await tools.runTests(command);
-  console.log(`    passed: ${result.passed}`);
-  console.log(`    output tail:\n${result.output.slice(-1400)}`);
+    console.log("[2] running the loop's test step INSIDE the sandbox ...");
+    const result = await tools.runTests(command);
+    console.log(`    passed: ${result.passed}`);
+    console.log(`    output tail:\n${result.output.slice(-1400)}`);
 
-  console.log(
-    result.passed
-      ? "[3] PASS - the tests executed inside the sandbox"
-      : "[3] FAIL - the tests did not run inside the sandbox",
-  );
-
-  await provider.dispose?.();
-  return result.passed ? 0 : 1;
+    console.log(
+      result.passed
+        ? "[3] PASS - the tests executed inside the sandbox"
+        : "[3] FAIL - the tests did not run inside the sandbox",
+    );
+    return result.passed ? 0 : 1;
+  } finally {
+    await provider.dispose?.();
+  }
 }
 
 main()
