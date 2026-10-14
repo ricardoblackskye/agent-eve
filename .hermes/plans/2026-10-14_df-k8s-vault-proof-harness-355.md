@@ -8,7 +8,7 @@ secret-injection property re-verified without re-deriving hours of diagnosis.
 
 ## Why this exists (verified context)
 
-#353 was closed because the blocker was removed and verified live: the Credential Vault runs on
+Issue #353 was closed because the blocker was removed and verified live: the Credential Vault runs on
 Kubernetes and transparent secret injection was observed end-to-end (a sandbox that only ever held
 a placeholder caused the upstream to receive the real secret). The entire diagnosis lived in
 throwaway scripts under `%LOCALAPPDATA%\Temp` and imperative `kubectl` calls, so nothing about the

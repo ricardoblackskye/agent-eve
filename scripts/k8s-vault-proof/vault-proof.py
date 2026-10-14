@@ -1,10 +1,12 @@
 #!/usr/bin/env python
+# pyright: reportMissingImports=false
+# pylint: disable=import-error
 """End-to-end proof of OpenSandbox Credential Vault transparent injection.
 
 Proves the property the dark-factory depends on: a sandbox created with
 ``credentialProxy.enabled=true`` NEVER sees the real secret. The sandbox is given a
-placeholder; the egress sidecar MITMs outbound HTTPS and substitutes the real value, so
-the upstream receives the secret while the sandbox only ever held the placeholder.
+placeholder; the egress sidecar MITMs outbound HTTPS and substitutes the real value,
+so the upstream receives the secret while the sandbox only ever held the placeholder.
 
 Prerequisites
   - a local cluster bootstrapped by ``bootstrap.sh`` (control plane deployed)
@@ -17,9 +19,11 @@ Usage
 Exit code 0 means substitution was proven; 1 means it was not.
 """
 
+# The only shell call in this script uses a fixed argv list with shell=False and no
+# untrusted interpolation, so the generic subprocess warnings are suppressed.
 import argparse
 import datetime
-import subprocess
+import subprocess  # nosec B404
 import sys
 
 PLACEHOLDER = "__VAULT_SECRET__"
@@ -27,8 +31,7 @@ REAL = "REALVAULT-9f3a2b"
 HOST = "httpbin.org"
 
 
-def main():
-    # type: () -> int
+def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=18082)
     parser.add_argument("--domain", default="127.0.0.1")
@@ -45,9 +48,9 @@ def main():
         NetworkRule,
     )
 
-    # use_server_proxy=True is required locally: the SDK otherwise derives the vault URL
-    # from the sandbox endpoint (the ingress-gateway host, e.g. opensandbox.example.com),
-    # which does not resolve on the host machine.
+    # use_server_proxy=True is required locally: the SDK otherwise derives the vault
+    # URL from the sandbox endpoint (the ingress-gateway host), which does not
+    # resolve from the host machine.
     conn = ConnectionConfigSync(
         domain=f"{args.domain}:{args.port}",
         protocol="http",
@@ -56,7 +59,7 @@ def main():
         use_server_proxy=True,
     )
 
-    print(f"[1/4] creating sandbox with credentialProxy.enabled (host={HOST}) ...")
+    print(f"[1/4] creating a credential-proxy sandbox (host={HOST}) ...")
     sandbox = SandboxSync.create(
         image="alpine:3.19",
         entrypoint=["sleep", "900"],
@@ -72,7 +75,7 @@ def main():
     )
     print(f"       sandbox id: {sandbox.id}")
 
-    print("[2/4] writing the real secret into the vault plus a substitution binding ...")
+    print("[2/4] writing the real secret to the vault plus a binding ...")
     state = sandbox.credential_vault.create(
         credentials=[Credential(name="vault-secret", source={"value": REAL})],
         bindings=[
@@ -97,11 +100,16 @@ def main():
             )
         ],
     )
+    credentials = [c.name for c in sandbox.credential_vault.list_credentials()]
+    bindings = [b.name for b in sandbox.credential_vault.list_bindings()]
     print(
-        f"       vault revision: {state.revision} | credentials: {[c.name for c in sandbox.credential_vault.list_credentials()]} | bindings: {[b.name for b in sandbox.credential_vault.list_bindings()]}"
+        f"       vault revision: {state.revision} |"
+        f" credentials: {credentials} | bindings: {bindings}"
     )
 
-    print("[3/4] sandbox sends only the placeholder; the upstream should see the secret ...")
+    print(
+        "[3/4] sandbox sends only the placeholder; upstream should see the secret ..."
+    )
     pod = f"{sandbox.id}-0"
     command = [
         "kubectl",
@@ -119,22 +127,24 @@ def main():
             f"--header='Authorization: Bearer {PLACEHOLDER}' https://{HOST}/headers"
         ),
     ]
-    output = subprocess.run(command, check=False, capture_output=True, text=True).stdout
-    print(output.strip()[:500])
-
-    proven = f"Bearer {REAL}" in output
-    print(
-        "[4/4] {}".format(
-            "PASS - real secret injected by MITM substitution"
-            if proven
-            else "FAIL - placeholder was not substituted"
-        )
+    # Fixed argv list with shell=False and no untrusted interpolation.
+    completed = subprocess.run(  # nosec B603
+        command, check=False, capture_output=True, text=True
     )
+    print(completed.stdout.strip()[:500])
+
+    proven = f"Bearer {REAL}" in completed.stdout
+    verdict = (
+        "PASS - real secret injected by MITM substitution"
+        if proven
+        else "FAIL - placeholder was not substituted"
+    )
+    print(f"[4/4] {verdict}")
 
     try:
         sandbox.destroy()
     except Exception:  # noqa: BLE001
-        print("warning: sandbox teardown failed; the verdict above still stands")
+        print("warning: teardown failed; the verdict above still stands")
     return 0 if proven else 1
 
 
