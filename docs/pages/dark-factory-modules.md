@@ -10,7 +10,7 @@
 > is [Dark Factory (R1)](dark-factory.md) and the flow walkthroughs in the
 > [flow deep-dives](flow-run-lifecycle.md).
 
-_98 modules._
+_99 modules._
 
 ## agent-cli-author
 
@@ -457,6 +457,14 @@ Operator CLI for the self-improvement gate (#159). The gate in `self-improve.ts`
 
 **Exports:** `OPERATOR_CLI_USAGE`, `OperatorCliCommand`, `OperatorCliDeps`, `OperatorCliResult`, `OperatorCliUsageError`, `OperatorDecisionValue`, `ProposalKind`, `parseOperatorArgs`, `runOperatorCli`
 
+## plan-file
+
+Dark Factory — Plan File Renderer (#361). Renders an ExecutionPlan as reviewable markdown, so a run that fails before its commit still leaves its intent on the branch. The output is constrained by this repository's markdown linting (MegaLinter lints changed markdown in the pull request): every fenced block carries a language (MD040), task headings are numbered so they never repeat (MD024), heading text is stripped of trailing punctuation (MD026), and table cells have their pipes escaped. `approach` and `tasks` are optional, so a plan that does not carry them renders without those sections.
+
+**Source:** [`agent/lib/dark-factory/plan-file.ts`](../../agent/lib/dark-factory/plan-file.ts)
+
+**Exports:** `PlanFileInput`, `PlanTask`, `renderPlanFile`
+
 ## plan-validator
 
 Dark Factory — Execution Plan Domain Validator (#179). Pre-flight validation gate that evaluates an ExecutionPlan produced by the Architect Agent before code generation begins. Ensures plans touch appropriate repository domains (e.g. UI/Chat stories modify UI entrypoints) and that every Acceptance Criterion from the User Story is mapped to an automated test case.
@@ -854,7 +862,6 @@ Dark Factory — worker usage recording (#209, epic #206 R7.3). The worker-side 
 **Exports:** `WorkerUsageContext`, `WorkerUsageMeasurement`, `WorkerUsageRecorder`, `createWorkerUsageRecorder`
 
 **Decisions:** [ADR 0002](../../docs/adr/0002-r1-records-r2-refuses.md)
-
 
 ## lease-broker
 

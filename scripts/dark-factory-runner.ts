@@ -57,6 +57,7 @@ import {
   assessPreservation,
   type PlanFileAction,
 } from "../agent/lib/dark-factory/preservation-guard";
+import { renderPlanFile } from "../agent/lib/dark-factory/plan-file";
 import type { CodeAuthorProvider } from "../agent/lib/dark-factory/code-author";
 import { createCodingLoopBreaker } from "../agent/lib/dark-factory/breaker-wiring";
 import { recordBreakerTrip } from "../agent/lib/dark-factory/breaker-trip-recorder";
@@ -444,6 +445,14 @@ async function main(): Promise<void> {
   const sandboxRemoteUrl = `https://${gitHost}/${repoOwner}/${repoName}.git`;
 
   let loopResult: LoopResult;
+  // #361 (R2): what the coding loop actually wrote, captured across the phase callback so BOTH commit
+  // paths can stage it - the in-sandbox commit (inside the callback) and the host STEP 6 commit
+  // (after it). It has to be declared in THIS scope: a declaration inside the callback is invisible to
+  // STEP 6, which is exactly where the compile error was.
+  let lastAuthored: AuthorFilesResult | undefined;
+  // #361 (Task 10): the rendered plan's path once it has been written, so both commit paths include it
+  // and the pull request body can link to it.
+  let planArtifactPath: string | undefined;
   try {
     loopResult = await runCodingPhase(
       createSandboxProvider(
@@ -491,6 +500,8 @@ async function main(): Promise<void> {
             let authored: AuthorFilesResult;
             try {
               authored = await authorFiles(codeAuthor, ctx.plan, ctx.tools);
+            // #361 (R2): the commit after the loop stages `lastAuthored`, not just the plan's targets.
+            lastAuthored = authored;
             } catch (err: any) {
               return {
                 passed: false,
@@ -526,6 +537,18 @@ async function main(): Promise<void> {
             return { passed: testOutcome.passed, output: testOutcome.output };
           },
         });
+        // #361 (Task 10): render the plan into the workspace BEFORE either commit path runs, so the
+        // run's intent reaches the branch even though it was produced before any code was written.
+        if (loopOutcome.status === "success") {
+          planArtifactPath = planFilePath(issueNum);
+          await workspaceTools.writeFile(
+            planArtifactPath,
+            renderPlanFile(executionPlan, {
+              issueUrl: `https://github.com/${targetRepo}/issues/${issueNum}`,
+            }),
+          );
+          console.log(`\n[PLAN] Wrote ${planArtifactPath} for review.`);
+        }
         // AFTER the loop, and BEFORE runCodingPhase disposes the sandbox.
         if (sandboxProvider.runGit && loopOutcome.status === "success") {
           const pushed = await commitAndPushFromSandbox({
@@ -534,7 +557,11 @@ async function main(): Promise<void> {
             workspaceDir: sandboxWorkspace,
             branchName,
             commitMessage: `feat: #${issueNum} ${executionPlan.title}`,
-            filesToAdd: executionPlan.targetFiles.map((f) => f.path),
+            filesToAdd: filesToCommitFromRun(
+              lastAuthored,
+              executionPlan,
+              planArtifactPath ? [planArtifactPath] : [],
+            ),
           });
           if (!pushed.ok) {
             throw new Error(`sandbox push failed: ${pushed.error}`);
@@ -605,9 +632,11 @@ async function main(): Promise<void> {
     console.log(
       `\n[STEP 6] Committing changes to '${branchName}' and pushing to GitHub...`,
     );
-    const filesToCommit = executionPlan.targetFiles
-      .map((f) => f.path)
-      .join(" ");
+    const filesToCommit = filesToCommitFromRun(
+      lastAuthored,
+      executionPlan,
+      planArtifactPath ? [planArtifactPath] : [],
+    ).join(" ");
     await checkpoint();
     execSync(`git add ${filesToCommit}`, { stdio: "inherit" });
     await checkpoint();
@@ -652,7 +681,12 @@ async function main(): Promise<void> {
     head: branchName,
     base: "main",
     title: `feat: #${issueNum} ${executionPlan.title}`,
-    body: `Autonomous pull request opened by Eve's Developer Agent.\n\nCloses #${issueNum}`,
+    body: pullRequestBody({
+      issueNum,
+      planPath: planArtifactPath,
+      repo: targetRepo,
+      branch: branchName,
+    }),
     plan: executionPlan,
     testResults: capturedTestResults,
   };
@@ -861,6 +895,60 @@ export async function authorFiles(
     written.push(filePath);
   }
   return { files: result.files, raw: result.raw, written, skipped };
+}
+
+/**
+ * #361 (R2) — the files a successful run must commit.
+ *
+ * The plan's `targetFiles` are what the run INTENDED to touch. What the author actually WROTE can
+ * differ: it may add a file the plan never listed (e.g. an authored test), or skip a `create` whose
+ * target already existed. Committing the plan's list alone is how an authored test file was lost in
+ * #361 — it was written into the sandbox but never staged. The union of the two is what the run
+ * produced, and is the honest artifact to stage.
+ */
+export function filesToCommitFromRun(
+  authored: { written: string[] } | undefined,
+  plan: { targetFiles: { path: string }[] },
+  extraPaths: string[] = [],
+): string[] {
+  const set = new Set<string>();
+  if (authored) for (const path of authored.written) set.add(path);
+  for (const target of plan.targetFiles) set.add(target.path);
+  // #361 (Task 10): artifacts the run produced itself, e.g. the rendered plan, which is not a target.
+  for (const extra of extraPaths) set.add(extra);
+  return Array.from(set);
+}
+
+/** #361 (Task 10) - where a run commits its rendered plan. */
+export function planFilePath(issueNum: number): string {
+  return `.hermes/plans/df-${issueNum}.md`;
+}
+
+export interface PullRequestBodyOptions {
+  issueNum: number;
+  planPath?: string;
+  repo?: string;
+  branch?: string;
+}
+
+/**
+ * #361 (Task 10) - the pull request body.
+ *
+ * The plan is linked so a reviewer can read the run's intent without leaving GitHub. The link MUST be
+ * absolute: a relative path in a PR body resolves against the pull request page, not the repository, so
+ * it would 404.
+ */
+export function pullRequestBody(options: PullRequestBodyOptions): string {
+  const lines = [
+    "Autonomous pull request opened by Eve's Developer Agent.",
+    "",
+    `Closes #${options.issueNum}`,
+  ];
+  if (options.planPath && options.repo && options.branch) {
+    const url = `https://github.com/${options.repo}/blob/${options.branch}/${options.planPath}`;
+    lines.push("", `Plan: [\`${options.planPath}\`](${url})`);
+  }
+  return lines.join("\n");
 }
 
 /**
