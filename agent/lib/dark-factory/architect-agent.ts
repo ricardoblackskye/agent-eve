@@ -14,6 +14,7 @@ import {
   type PlanValidationResult,
   type PlanParser,
 } from "./plan-validator";
+import { planningGuidanceForPrompt } from "./planning-guidance";
 
 /**
  * Dedicated process-level timer registry following SRP and the Singleton pattern.
@@ -303,12 +304,17 @@ export class ArchitectAgent {
       `Existing files:`,
       safeFiles.map((f) => `- ${f}`).join("\n"),
       ``,
+      `### HOW TO WRITE THE PLAN:`,
+      planningGuidanceForPrompt(),
+      ``,
       `### EXECUTION PLAN REQUIREMENTS:`,
       `You must output a JSON object with:`,
       `- "storyId": ${story.number}`,
       `- "title": ${JSON.stringify(sanitizedTitle)}`,
       `- "summary": high-level summary of architectural changes`,
-      `- "targetFiles": array of { "path": string, "action": "create" | "modify", "rationale": string }`,
+      `- "approach": how the change will be made, in prose - the plan a reviewer reads BEFORE any code exists`,
+      `- "tasks": array of { "title": string, "objective": string, "files": string[], "steps": string[], "verification": string } - the work broken into reviewable tasks, each naming how it will be verified`,
+      `- "targetFiles": array of { "path": string, "action": "create" | "modify" | "replace", "rationale": string }`,
       `- "acceptanceCriteriaMap": array of { "acId": string, "description": string, "testFile": string, "testCaseName": string }`,
       `- "dependencies": optional array of npm packages to add`,
       ``,

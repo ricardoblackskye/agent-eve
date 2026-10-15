@@ -10,7 +10,7 @@
 > is [Dark Factory (R1)](dark-factory.md) and the flow walkthroughs in the
 > [flow deep-dives](flow-run-lifecycle.md).
 
-_99 modules._
+_101 modules._
 
 ## agent-cli-author
 
@@ -457,6 +457,14 @@ Operator CLI for the self-improvement gate (#159). The gate in `self-improve.ts`
 
 **Exports:** `OPERATOR_CLI_USAGE`, `OperatorCliCommand`, `OperatorCliDeps`, `OperatorCliResult`, `OperatorCliUsageError`, `OperatorDecisionValue`, `ProposalKind`, `parseOperatorArgs`, `runOperatorCli`
 
+## plan-comment
+
+Dark Factory — Plan Comment (#365). Posts the rendered plan on the ticket right after planning and before the coding loop, so a run that later fails still leaves reviewable intent. The comment carries a marker, which makes it idempotent: a retry finds its own comment and updates it rather than stacking another one on the ticket.
+
+**Source:** [`agent/lib/dark-factory/plan-comment.ts`](../../agent/lib/dark-factory/plan-comment.ts)
+
+**Exports:** `PLAN_COMMENT_MARKER`, `PlanCommentRecord`, `PlanCommentResult`, `PlanCommentTarget`, `PostPlanCommentOptions`, `findPlanComment`, `planCommentBody`, `postPlanComment`
+
 ## plan-file
 
 Dark Factory — Plan File Renderer (#361). Renders an ExecutionPlan as reviewable markdown, so a run that fails before its commit still leaves its intent on the branch. The output is constrained by this repository's markdown linting (MegaLinter lints changed markdown in the pull request): every fenced block carries a language (MD040), task headings are numbered so they never repeat (MD024), heading text is stripped of trailing punctuation (MD026), and table cells have their pipes escaped. `approach` and `tasks` are optional, so a plan that does not carry them renders without those sections.
@@ -490,6 +498,14 @@ Platform-specific runtime facts consumed by Dark Factory. Provider-specific envi
 **Source:** [`agent/lib/dark-factory/platform.ts`](../../agent/lib/dark-factory/platform.ts)
 
 **Exports:** `DeploymentStage`, `PlatformAdapter`, `PlatformConfigurationError`, `PlatformContext`, `PlatformProviderId`, `createPlatformAdapter`
+
+## planning-guidance
+
+Dark Factory — Planning Guidance (#361). Supplies the vendored Superpowers "writing-plans" guidance to the Architect Agent's prompt, so a plan arrives with an approach and a task breakdown instead of a bare list of files. The guidance is vendored rather than fetched, because the architect runs in a sandbox with no outbound access to GitHub; `docs/superpowers/writing-plans.md` holds a verbatim copy pinned to an upstream commit, with its source, license and sync instructions. `planningGuidanceForPrompt` strips that maintainer-facing header before the model sees it.
+
+**Source:** [`agent/lib/dark-factory/planning-guidance.ts`](../../agent/lib/dark-factory/planning-guidance.ts)
+
+**Exports:** `PLANNING_GUIDANCE_SOURCE`, `WRITING_PLANS_GUIDANCE`, `planningGuidanceForPrompt`
 
 ## preservation-guard
 

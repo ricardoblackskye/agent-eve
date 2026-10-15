@@ -406,6 +406,28 @@ A user must authenticate via Google OAuth before accessing the Eve Chat UI.
     // Exactly all 5 files included
     expect(listedFiles.length).toBe(5);
   });
+
+  it("asks the model for an approach and a task breakdown (#365 Task 8)", async () => {
+    // A plan with no approach gives a reviewer nothing to assess before code appears, which is the whole
+    // point of the release. The prompt asks for the fields AND names the task shape, because asking for a
+    // field without its shape is what produced the flat file list in the first place.
+    let capturedPrompt = "";
+    const agent = new ArchitectAgent({
+      listFiles: vi.fn().mockResolvedValue(["app/chat.tsx", "app/page.tsx"]),
+      readFile: vi.fn().mockResolvedValue(""),
+      generateText: vi.fn().mockImplementation(async (prompt: string) => {
+        capturedPrompt = prompt;
+        return JSON.stringify(validPlan);
+      }),
+    });
+
+    await agent.planStory(sampleStory);
+
+    expect(capturedPrompt).toContain('"approach"');
+    expect(capturedPrompt).toContain('"tasks"');
+    expect(capturedPrompt).toContain("objective");
+    expect(capturedPrompt).toContain("verification");
+  });
 });
 
 

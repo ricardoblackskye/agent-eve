@@ -58,6 +58,7 @@ import {
   type PlanFileAction,
 } from "../agent/lib/dark-factory/preservation-guard";
 import { renderPlanFile } from "../agent/lib/dark-factory/plan-file";
+import { postPlanComment } from "../agent/lib/dark-factory/plan-comment";
 import type { CodeAuthorProvider } from "../agent/lib/dark-factory/code-author";
 import { createCodingLoopBreaker } from "../agent/lib/dark-factory/breaker-wiring";
 import { recordBreakerTrip } from "../agent/lib/dark-factory/breaker-trip-recorder";
@@ -443,6 +444,23 @@ async function main(): Promise<void> {
     process.env.DF_SANDBOX_EGRESS_GIT_HOST ?? "github.com"
   ).trim();
   const sandboxRemoteUrl = `https://${gitHost}/${repoOwner}/${repoName}.git`;
+
+  // #365 Task 11: put the plan on the ticket BEFORE the coding loop, so the intent is reviewable even if
+  // the run fails during coding. Idempotent: a retry updates its own comment instead of adding another.
+  // Fail-closed, because a plan nobody can read before coding is the defect this exists to fix, and every
+  // other ticket write in this run already has to succeed.
+  const planComment = await postPlanComment(issueWriter, {
+    owner: repoOwner,
+    repo: repoName,
+    issue: issueNum,
+    markdown: renderPlanFile(executionPlan, {
+      issueUrl: `https://github.com/${targetRepo}/issues/${issueNum}`,
+    }),
+  });
+  if (!planComment.ok) {
+    throw new Error(`the plan comment could not be posted: ${planComment.error}`);
+  }
+  console.log(`\n[PLAN] Posted the plan on #${issueNum} (${planComment.action}).`);
 
   let loopResult: LoopResult;
   // #361 (R2): what the coding loop actually wrote, captured across the phase callback so BOTH commit
