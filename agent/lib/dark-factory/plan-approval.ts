@@ -129,12 +129,21 @@ export async function parkForApproval(
   };
 }
 
-/** Not implemented yet (RED stub for #365 R4 Task 4). */
+/**
+ * The human-facing reason a run stopped at planning, written for the ticket rather than the log.
+ *
+ * A resume that cannot read its plan needs a different story from a fresh run whose planning failed: on a
+ * resume nobody planned, so "Architect Agent planning failed" sends a reader looking in the wrong place -
+ * when the real answer is that a fresh plan would not be the plan they approved.
+ */
 export function explainPlanFailure(
-  _error: string,
-  _options: { resuming: boolean },
+  error: string,
+  options: { resuming: boolean },
 ): string {
-  throw new Error("explainPlanFailure is not implemented");
+  return options.resuming
+    ? "This resumed run could not read back the plan it was approved against, so it stopped rather than " +
+        "plan again: a fresh plan would not be the one that was approved.\n\n" + error
+    : `Planning failed, so this run stopped before writing any code.\n\n${error}`;
 }
 
 /** The ticket reader this needs, structurally, so it can be tested without any network. */

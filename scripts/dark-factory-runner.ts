@@ -60,6 +60,7 @@ import {
 import { renderPlanFile } from "../agent/lib/dark-factory/plan-file";
 import { postPlanComment } from "../agent/lib/dark-factory/plan-comment";
 import {
+  explainPlanFailure,
   loadApprovedPlan,
   parkForApproval,
 } from "../agent/lib/dark-factory/plan-approval";
@@ -361,14 +362,25 @@ async function main(): Promise<void> {
   await checkpoint();
 
   if (!planResult.ok || !planResult.plan) {
-    console.error(
-      `[ERROR] Architect Agent planning failed: ${planResult.error}`,
+    // #365 R4 Task 4: say WHY, on the ticket. A blocked ticket carrying only a label leaves a human guessing
+    // whether the Factory is broken or the plan simply predates the feature - and on a resume the story is
+    // about the approval, not about the architect.
+    const explanation = explainPlanFailure(
+      String(planResult.error ?? "no reason given"),
+      { resuming: isResume },
+    );
+    console.error(`[ERROR] ${explanation}`);
+    await issueWriter.postComment(
+      repoOwner,
+      repoName,
+      issueNum,
+      `🤖 **Eve** (Dark Factory) — ${explanation}`,
     );
     await issueWriter.addLabel(
       repoOwner,
       repoName,
       issueNum,
-      "needs-answer",
+      TRIGGER_LABELS.question,
     );
     await applyTerminalLifecycle(
       { labelWriter, runHistory },
