@@ -863,7 +863,6 @@ Dark Factory — worker usage recording (#209, epic #206 R7.3). The worker-side 
 
 **Decisions:** [ADR 0002](../../docs/adr/0002-r1-records-r2-refuses.md)
 
-
 ## lease-broker
 
 Dark Factory — credential lease broker (#282 R3/T4). Opaque, run-scoped leases: issuance is separated from adjudication, redemption is server-side only, and revoking an absent lease is a no-op (404-as-success). The allow-list is enforced at the seam and fails closed when empty.

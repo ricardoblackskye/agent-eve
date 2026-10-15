@@ -90,10 +90,17 @@ export function renderPlanFile(
 ): string {
   const lines: string[] = [];
 
+  // MD013 (line-length, 80 columns) cannot be satisfied for model-authored prose or for table cells,
+  // which must not be wrapped without corrupting them. This repository silences that one rule in its own
+  // generated catalogue (docs/pages/dark-factory-modules.md), so the generated plan follows the same
+  // precedent. The rules this renderer CAN satisfy - MD040, MD024, MD026 - are deliberately left on.
+  lines.push("<!-- markdownlint-disable MD013 -->", "");
+
   lines.push(`# Plan: ${headingText(plan.title)}`, "");
   lines.push(`Story: #${plan.storyId}`);
   if (options.issueUrl) {
-    lines.push(`Issue: ${options.issueUrl}`);
+    // A markdown link, never a bare URL: MD034 flags bare URLs, and the factory's own PR is linted.
+    lines.push(`Issue: [#${plan.storyId}](${options.issueUrl})`);
   }
   lines.push("");
 
