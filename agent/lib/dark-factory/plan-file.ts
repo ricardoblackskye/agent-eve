@@ -53,9 +53,20 @@ function headingText(text: string): string {
     .trim();
 }
 
-/** A table cell cannot hold a raw pipe (it would end the cell) or a newline (it would end the row). */
+/**
+ * A table cell cannot hold a raw pipe (it would end the cell) or a newline (it would end the row).
+ *
+ * Backslashes are escaped BEFORE pipes, and the order matters: escaping only the pipe leaves a
+ * backslash able to escape the next character, so a value ending in one swallows the cell separator and
+ * the row stops being the table it claims to be. CodeQL flags the reverse order as
+ * js/incomplete-sanitization, and it is right to.
+ */
 function cell(text: string): string {
-  return text.replace(/\s+/g, " ").replace(/\|/g, "\\|").trim();
+  return text
+    .replace(/\s+/g, " ")
+    .replace(/\\/g, "\\\\")
+    .replace(/\|/g, "\\|")
+    .trim();
 }
 
 /**
