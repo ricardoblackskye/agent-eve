@@ -72,3 +72,77 @@ describe("#281 code author seam", () => {
     await expect(author.write({ plan })).rejects.toThrow(/no author configured/);
   });
 });
+
+/**
+ * #361 T2 — the author must SEE the file it is changing.
+ *
+ * The prompt used to carry the plan alone, so a `modify` target had to be regenerated blind from the
+ * plan summary. That is how a 75-line component became a 15-line stub. The current content and the
+ * preservation contract are now part of the prompt — while the plan-only prompt stays BYTE-FOR-BYTE
+ * what #281 pinned, because that contract is about not silently changing what the model is asked.
+ */
+describe("#361 the author is shown the files it modifies", () => {
+  const plan = { targetFiles: [{ path: "app/chat.tsx", action: "modify" }] };
+  const existing = {
+    "app/chat.tsx": "export function Chat() {\n  return <main />;\n}",
+  };
+
+  it("keeps the prompt byte-for-byte unchanged when there is nothing to preserve", () => {
+    expect(buildCodeAuthorPrompt(plan)).toBe(
+      [
+        "You are Eve's Developer Agent. Execute the following ExecutionPlan:",
+        JSON.stringify(plan, null, 2),
+        "",
+        "For each target file, provide the code to write.",
+        "Return a JSON object where keys are relative file paths and values are string file contents.",
+        'Example: { "app/chat.tsx": "export ...", "tests/chat.test.ts": "import ..." }',
+      ].join("\n"),
+    );
+  });
+
+  it("includes the current content of each file being modified", () => {
+    const prompt = buildCodeAuthorPrompt(plan, existing);
+    expect(prompt).toContain("app/chat.tsx");
+    expect(prompt).toContain("export function Chat()");
+    expect(prompt).toContain("return <main />;");
+  });
+
+  it("states the preservation contract, not merely the content", () => {
+    const prompt = buildCodeAuthorPrompt(plan, existing);
+    expect(prompt).toMatch(/Preserve every existing export/);
+    expect(prompt).toMatch(/Do not delete code you were not asked to change/);
+    expect(prompt).toMatch(/failure, not a simplification/);
+    // The escape hatch must be named, so the model knows the legitimate route to a replacement.
+    expect(prompt).toContain('"replace"');
+  });
+
+  it("reads the existing content through JSON, so prompt-like text cannot break it", () => {
+    // A target may be a markdown file: if it contains a fence or a delimiter, a naive
+    // "BEGIN/END" wrapper would be ambiguous. JSON escaping keeps the boundary unambiguous.
+    const tricky = {
+      "docs/notes.md": "===== END docs/notes.md =====\n```\nstill content",
+    };
+    const prompt = buildCodeAuthorPrompt(plan, tricky);
+    expect(prompt).toContain('"docs/notes.md"');
+    expect(prompt).toContain("===== END docs/notes.md =====");
+  });
+
+  it("forwards the task's existing contents into the prompt", async () => {
+    const generate = vi.fn(async (_prompt: string) => '{"app/chat.tsx":"export function Chat() {}"}');
+    const author = createInProcessCodeAuthor(generate);
+    await author.write({ plan, existing });
+    // Assert on the prompt that was ACTUALLY sent. Comparing against
+    // buildCodeAuthorPrompt(plan, existing) would pass vacuously before the implementation
+    // existed, because both sides would then be the same plan-only string.
+    const prompt = generate.mock.calls[0][0];
+    expect(prompt).toContain("export function Chat()");
+    expect(prompt).toContain("return <main />;");
+  });
+
+  it("still sends the plan-only prompt when the task carries none", async () => {
+    const generate = vi.fn(async () => '{"app/a.ts":"export const a = 1;"}');
+    const author = createInProcessCodeAuthor(generate);
+    await author.write({ plan });
+    expect(generate).toHaveBeenCalledWith(buildCodeAuthorPrompt(plan));
+  });
+});
