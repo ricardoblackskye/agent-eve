@@ -864,6 +864,20 @@ export async function authorFiles(
 }
 
 /**
+ * #361 (R2) RED stub - the files a successful run must commit.
+ *
+ * Returns ONLY the plan's declared targets, which is exactly the bug: an authored file the plan never
+ * listed (e.g. an authored test) is dropped from the commit. GREEN replaces this with the union of what
+ * the author wrote and what the plan declared.
+ */
+export function filesToCommitFromRun(
+  _authored: { written: string[] } | undefined,
+  plan: { targetFiles: { path: string }[] },
+): string[] {
+  return plan.targetFiles.map((f) => f.path);
+}
+
+/**
  * #281 (R2b/B2) — the runner owns the sandbox lifecycle.
  *
  * One sandbox per run; it is force-disposed on success AND on throw (closing the SDK client does not
