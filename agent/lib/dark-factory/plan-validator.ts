@@ -25,8 +25,8 @@ export interface AcceptanceCriteriaTestMapping {
 /**
  * A task within the plan's approach (#365 Task 8).
  *
- * The canonical definition lives here, with the rest of the plan schema; the plan-file renderer
- * imports it rather than declaring its own, so the two cannot drift apart.
+ * The canonical definition lives here, with the rest of the plan schema; the plan-file renderer imports
+ * it rather than declaring its own, so the two cannot drift apart.
  */
 export interface PlanTask {
   title: string;
@@ -43,8 +43,8 @@ export interface ExecutionPlan {
   /**
    * How the change will be made, in prose.
    *
-   * Optional on purpose: plans in flight and existing fixtures predate it, and the architect prompt
-   * is what asks the model for it. The validator checks its shape when it is present.
+   * Optional on purpose: plans in flight and existing fixtures predate it, and the architect prompt is
+   * what asks the model for it. The validator checks its shape when it is present.
    */
   approach?: string;
   /** The work broken into reviewable tasks. Optional for the same reason as `approach`. */
@@ -150,6 +150,32 @@ export function validateExecutionPlan(
     const norm = normalize(p).replace(/\\/g, "/");
     if (norm === ".." || norm.startsWith("../") || norm.includes("/../")) {
       errors.push(`Target file '${p}' contains illegal path traversal ('..').`);
+    }
+  }
+
+  // 2b. Plan structure (#365 Task 8): the shape of the approach and the tasks is checked when provided.
+  // Both fields are OPTIONAL, so plans that predate them keep validating; the architect PROMPT is what
+  // asks the model for them, and a malformed value is still refused.
+  if (plan.approach !== undefined && String(plan.approach).trim() === "") {
+    errors.push("Plan 'approach' must be a non-empty string when provided.");
+  }
+  if (plan.tasks !== undefined) {
+    if (!Array.isArray(plan.tasks) || plan.tasks.length === 0) {
+      errors.push("Plan 'tasks' must contain at least one task when provided.");
+    } else {
+      plan.tasks.forEach((task, index) => {
+        const position = index + 1;
+        if (!task || typeof task !== "object") {
+          errors.push(`Plan task ${position} must be an object.`);
+          return;
+        }
+        if (!task.title || String(task.title).trim() === "") {
+          errors.push(`Plan task ${position} must have a non-empty 'title'.`);
+        }
+        if (!task.objective || String(task.objective).trim() === "") {
+          errors.push(`Plan task ${position} must have a non-empty 'objective'.`);
+        }
+      });
     }
   }
 
