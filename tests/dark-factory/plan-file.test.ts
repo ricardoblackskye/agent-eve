@@ -149,4 +149,35 @@ describe("renderPlanFile", () => {
     });
     expect(md).toContain("https://github.com/ricardoblackskye/agent-eve/issues/361");
   });
+
+  // --- found by running the REAL linter over real output, not by reasoning about rules -----
+  //
+  // markdownlint over a rendered plan reported MD034 and MD013, which the first version missed. Both
+  // are asserted now, because the factory's own pull request is linted.
+
+  it("never emits a bare URL, so markdownlint MD034 passes", () => {
+    const md = renderPlanFile(base, {
+      issueUrl: "https://github.com/ricardoblackskye/agent-eve/issues/361",
+    });
+    for (const line of md.split("\n")) {
+      // Remove markdown link targets and autolinks; no URL may remain bare in the prose.
+      const bare = line.replace(/\]\([^)]*\)/g, "").replace(/<[^>]*>/g, "");
+      expect(bare).not.toMatch(/https?:\/\//);
+    }
+  });
+
+  it("silences only the line-length rule, which arbitrary generated content cannot satisfy", () => {
+    // MD013 (80 columns) cannot be met for model-authored prose and table cells that must not be
+    // wrapped. This repository silences it exactly the same way in its own generated catalogue
+    // (docs/pages/dark-factory-modules.md), so the generated plan follows that precedent rather than
+    // inventing a different one. The rules this renderer CAN satisfy stay enabled.
+    const md = renderPlanFile(base);
+    const firstLine = md.split("\n")[0];
+    expect(firstLine).toContain("markdownlint-disable");
+    expect(firstLine).toContain("MD013");
+    // MD040/MD024/MD026 must NOT be silenced by that comment.
+    expect(firstLine).not.toContain("MD040");
+    expect(firstLine).not.toContain("MD024");
+    expect(firstLine).not.toContain("MD026");
+  });
 });
