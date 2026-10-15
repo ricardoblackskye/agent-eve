@@ -488,7 +488,7 @@ async function main(): Promise<void> {
 
             // #281 (R2b/B1): the author is configuration-selected. With DF_CODE_AUTHOR unset this is the
             // same governed path as before; a failed author propagates as a failed iteration.
-            let authored: { files: Record<string, string>; raw: string };
+            let authored: AuthorFilesResult;
             try {
               authored = await authorFiles(codeAuthor, ctx.plan, ctx.tools);
             } catch (err: any) {
@@ -497,8 +497,13 @@ async function main(): Promise<void> {
                 output: `Authoring error: ${err.message}`,
               };
             }
-            for (const [filePath, content] of Object.entries(authored.files)) {
-              console.log(`     Wrote ${filePath} (${content.length} chars)`);
+            for (const filePath of authored.written) {
+              console.log(
+                `     Wrote ${filePath} (${authored.files[filePath].length} chars)`,
+              );
+            }
+            for (const { path: skippedPath, reason } of authored.skipped) {
+              console.log(`     Skipped ${skippedPath}: ${reason}`);
             }
 
             // Run vitest to verify acceptance criteria
@@ -737,6 +742,8 @@ export interface AuthorFilesResult {
   raw: string;
   /** The paths actually written, in the order they were written. */
   written: string[];
+  /** Authored entries that were NOT written, with the reason. */
+  skipped: { path: string; reason: string }[];
 }
 
 /**
@@ -838,11 +845,22 @@ export async function authorFiles(
   }
 
   const written: string[] = [];
+  const skipped: { path: string; reason: string }[] = [];
   for (const [filePath, content] of Object.entries(result.files)) {
+    // #361: a plan saying `create` for a path that already exists is a contradiction, and the file
+    // that is already there wins. Recorded rather than thrown, so the mismatch is visible without
+    // failing an otherwise valid iteration.
+    if (actions.get(filePath) === "create" && (before.get(filePath) ?? "") !== "") {
+      skipped.push({
+        path: filePath,
+        reason: `'${filePath}' already exists, so the plan's 'create' action was ignored.`,
+      });
+      continue;
+    }
     await tools.writeFile(filePath, content);
     written.push(filePath);
   }
-  return { files: result.files, raw: result.raw, written };
+  return { files: result.files, raw: result.raw, written, skipped };
 }
 
 /**

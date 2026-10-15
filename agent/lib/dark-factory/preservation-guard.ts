@@ -106,6 +106,20 @@ export function assessPreservation(
     };
   }
 
+  // `create` is exempt from the ratio rule on purpose. Whether the path already exists is a
+  // plan-versus-reality question, and the caller ENFORCES it with an existence check that refuses to
+  // overwrite; duplicating that as a line ratio here would refuse a case the caller is meant to ignore.
+  if (input.action === "create") {
+    return {
+      ok: true,
+      beforeLines,
+      afterLines,
+      removedLines,
+      removedRatio,
+      reason: `'${input.path}' is declared a new file; its existence is checked by the caller.`,
+    };
+  }
+
   if (removedRatio > MAX_REMOVED_RATIO) {
     const percent = Math.round(removedRatio * 100);
     const limit = Math.round(MAX_REMOVED_RATIO * 100);
