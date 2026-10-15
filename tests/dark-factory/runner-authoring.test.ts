@@ -176,3 +176,60 @@ describe("#361 authorFiles refuses a destructive rewrite", () => {
     );
   });
 });
+
+/**
+ * #361 T4 — a `create` must never overwrite a file that is already there.
+ *
+ * The check is existence, not content: a plan saying `create` for a path that already has a file is a
+ * contradiction, and on this evidence the safe reading is that it must not silently win. The action is
+ * IGNORED rather than refused, and recorded, so the mismatch is visible without failing the run.
+ */
+describe("#361 a create never overwrites an existing file", () => {
+  const createPlan = {
+    targetFiles: [
+      { path: "app/new.ts", action: "create", rationale: "add the module" },
+    ],
+  };
+
+  it("ignores a create whose file already exists, and records it", async () => {
+    const existing = "// already here, and not the author's to replace";
+    const ws = workspace({ "app/new.ts": existing });
+    const author = authorReturning({ "app/new.ts": "// the author's version" });
+
+    const result = await authorFiles(author, createPlan, ws.tools);
+
+    expect(ws.writes).toEqual([]);
+    expect(ws.files["app/new.ts"]).toBe(existing);
+    expect(result.written).toEqual([]);
+    expect(result.skipped).toHaveLength(1);
+    expect(result.skipped[0].path).toBe("app/new.ts");
+    expect(result.skipped[0].reason).toMatch(/already exists/);
+  });
+
+  it("creates the file when it is genuinely new", async () => {
+    const ws = workspace();
+    const author = authorReturning({ "app/new.ts": "// brand new" });
+
+    const result = await authorFiles(author, createPlan, ws.tools);
+
+    expect(result.written).toEqual(["app/new.ts"]);
+    expect(result.skipped).toEqual([]);
+    // Nothing existed to show it, so the prompt must not carry an empty existing map.
+    const task = author.seen[0] as { existing?: Record<string, string> };
+    expect(task.existing).toBeUndefined();
+  });
+
+  it("does not skip a modify target that happens to exist", async () => {
+    // The skip is specific to `create`: a modify target is EXPECTED to exist.
+    const ws = workspace({ "app/chat.tsx": fileOf(40) });
+    const author = authorReturning({ "app/chat.tsx": `${fileOf(40)}\n// added` });
+    const modifyPlan = {
+      targetFiles: [{ path: "app/chat.tsx", action: "modify" }],
+    };
+
+    const result = await authorFiles(author, modifyPlan, ws.tools);
+
+    expect(result.written).toEqual(["app/chat.tsx"]);
+    expect(result.skipped).toEqual([]);
+  });
+});

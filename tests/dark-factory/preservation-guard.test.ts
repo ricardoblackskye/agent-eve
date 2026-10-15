@@ -116,4 +116,15 @@ describe("preservation guard (#361)", () => {
     expect(verdict.beforeLines).toBe(2);
     expect(verdict.removedLines).toBe(0);
   });
+
+  it("exempts a create from the ratio rule, because existence is the caller's check", () => {
+    // A `create` for a path that already exists is a plan-versus-reality mismatch, and the caller
+    // IGNORES it rather than refusing. Measuring it here as lines deleted would refuse exactly the case
+    // the caller is meant to ignore, which is how these two rules deadlocked once already.
+    const verdict = assessPreservation(
+      input({ action: "create", before: fileOf(75), after: fileOf(15, "stub") }),
+    );
+    expect(verdict.ok).toBe(true);
+    expect(verdict.reason).toMatch(/checked by the caller/);
+  });
 });
