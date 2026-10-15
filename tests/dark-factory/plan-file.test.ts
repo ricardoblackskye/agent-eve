@@ -160,10 +160,37 @@ describe("renderPlanFile", () => {
       issueUrl: "https://github.com/ricardoblackskye/agent-eve/issues/361",
     });
     for (const line of md.split("\n")) {
-      // Remove markdown link targets and angle-bracket links; no URL may remain bare in the prose.
-      const bare = line.replace(/\]\([^)]*\)/g, "").replace(/<[^>]*>/g, "");
-      expect(bare).not.toMatch(/https?:\/\//);
+      // Count rather than strip. Counting is stricter - a line carrying both a link and a bare URL is
+      // caught, where stripping the link out would have hidden it - and it avoids the tag-stripping
+      // regex that the security scan flags as incomplete sanitisation (js/incomplete-sanitization).
+      const urls = line.match(/https?:\/\//g) ?? [];
+      const linked = line.match(/\]\(https?:\/\/[^)\s]+\)/g) ?? [];
+      expect(linked.length).toBe(urls.length);
     }
+  });
+
+  it("escapes a backslash before the pipe, so a crafted cell cannot break out of the table", () => {
+    // The security scan caught this (js/incomplete-sanitization): escaping only the pipe leaves a
+    // backslash able to escape the NEXT character, so a value ending in one swallows the cell
+    // separator and the row is no longer the table it claims to be.
+    const md = renderPlanFile({
+      ...base,
+      targetFiles: [
+        { path: "a\\", action: "modify", rationale: "value ending in a backslash" },
+      ],
+    });
+    const row = md.split("\n").find((l) => l.includes("value ending in a backslash")) ?? "";
+    // The backslash must be doubled, and the separator must still be there.
+    expect(row).toContain("a\\\\");
+    expect(row.endsWith("|")).toBe(true);
+  });
+
+  it("still escapes the pipe itself, after the backslash change", () => {
+    const md = renderPlanFile({
+      ...base,
+      targetFiles: [{ path: "a|b", action: "modify", rationale: "pipe" }],
+    });
+    expect(md).toContain("a\\|b");
   });
 
   it("silences only the line-length rule, which arbitrary generated content cannot satisfy", () => {
