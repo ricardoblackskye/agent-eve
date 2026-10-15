@@ -880,11 +880,33 @@ export async function authorFiles(
 export function filesToCommitFromRun(
   authored: { written: string[] } | undefined,
   plan: { targetFiles: { path: string }[] },
+  _extraPaths: string[] = [],
 ): string[] {
   const set = new Set<string>();
   if (authored) for (const path of authored.written) set.add(path);
   for (const target of plan.targetFiles) set.add(target.path);
   return Array.from(set);
+}
+
+/**
+ * #361 (Task 10) RED stub - the path the rendered plan is committed to.
+ * Returns "" so the tests fail on behaviour rather than on a missing export.
+ */
+export function planFilePath(_issueNum: number): string {
+  return "";
+}
+
+/** #361 (Task 10) RED stub - the pull request body. */
+export interface PullRequestBodyOptions {
+  issueNum: number;
+  planPath?: string;
+  repo?: string;
+  branch?: string;
+}
+
+/** #361 (Task 10) RED stub - renders no body at all yet. */
+export function pullRequestBody(_options: PullRequestBodyOptions): string {
+  return "";
 }
 
 /**
