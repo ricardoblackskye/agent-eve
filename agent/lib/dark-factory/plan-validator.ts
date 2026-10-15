@@ -11,7 +11,7 @@ import { normalize, isAbsolute } from "node:path";
 
 export interface PlanTargetFile {
   path: string;
-  action: "create" | "modify";
+  action: "create" | "modify" | "replace";
   rationale: string;
 }
 
@@ -111,8 +111,10 @@ export function validateExecutionPlan(
       errors.push("Target file path cannot be empty.");
       continue;
     }
-    if (file.action !== "create" && file.action !== "modify") {
-      errors.push(`Target file '${p}' action must be 'create' or 'modify' (received '${file.action}').`);
+    if (file.action !== "create" && file.action !== "modify" && file.action !== "replace") {
+      errors.push(
+        `Target file '${p}' action must be 'create', 'modify', or 'replace' (received '${file.action}').`,
+      );
     }
     if (p.includes("\0")) {
       errors.push(`Target file '${p}' contains a null byte.`);
