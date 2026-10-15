@@ -2,10 +2,12 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import {
   PLAN_APPROVAL_QUESTION,
+  loadApprovedPlan,
   parkForApproval,
   planApprovalEventId,
   type PlanApprovalDeps,
 } from "../../agent/lib/dark-factory/plan-approval";
+import { planCommentBody } from "../../agent/lib/dark-factory/plan-comment";
 
 /**
  * #365 R4 Task 2 — the run parks between planning and coding.
@@ -147,5 +149,67 @@ describe("the park (#365 R4 Task 2)", () => {
     const parkAt = runner.indexOf("parkForApproval(");
     expect(guardAt).toBeGreaterThan(-1);
     expect(parkAt).toBeGreaterThan(guardAt);
+  });
+});
+
+/**
+ * #365 R4 Task 3 — a resumed dispatch codes against the plan a human approved.
+ *
+ * Re-planning on a resume would code against a DIFFERENT plan than the one that was reviewed: the human
+ * approved a specific plan, not the architect's next attempt. So the plan is read back off the ticket.
+ */
+describe("resuming against the approved plan (#365 R4 Task 3)", () => {
+  const APPROVED = { storyId: 365, summary: "the plan a human read" };
+
+  const comments = (list: { id: number; body: string }[]) => ({
+    listComments: vi.fn().mockResolvedValue({ ok: true, comments: list }),
+  });
+
+  it("reads the plan back from the Factory's own comment, among other people's", async () => {
+    const deps = comments([
+      { id: 1, body: "someone else's discussion" },
+      { id: 2, body: planCommentBody("# Plan: approved\n", APPROVED) },
+      { id: 3, body: "another reply" },
+    ]);
+    const result = await loadApprovedPlan(deps, { owner: "o", repo: "r", issue: 365 });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.plan).toEqual(APPROVED);
+  });
+
+  it("fails closed when the ticket carries no plan comment", async () => {
+    const result = await loadApprovedPlan(comments([{ id: 1, body: "just a reply" }]), {
+      owner: "o",
+      repo: "r",
+      issue: 365,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/no approved plan/);
+  });
+
+  it("fails closed when the comments cannot be read at all", async () => {
+    const deps = { listComments: vi.fn().mockResolvedValue({ ok: false, error: "GitHub responded 403" }) };
+    const result = await loadApprovedPlan(deps, { owner: "o", repo: "r", issue: 365 });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain("403");
+  });
+
+  it("fails closed on a plan comment with no machine-readable block", async () => {
+    // A comment posted before the block existed. Falling back to re-planning would be worse: it would code
+    // against something nobody approved.
+    const deps = comments([{ id: 1, body: planCommentBody("# Plan: posted before the block existed\n") }]);
+    const result = await loadApprovedPlan(deps, { owner: "o", repo: "r", issue: 365 });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/machine-readable/);
+  });
+
+  it("has the runner read the approved plan instead of re-planning on a resume", () => {
+    const runner = readFileSync("scripts/dark-factory-runner.ts", "utf8");
+    const resumeAt = runner.indexOf("loadApprovedPlan(");
+    const planAt = runner.indexOf("architectAgent.planStory(");
+    // The approved plan is read back BEFORE the architect is reached, so a resume can never re-plan - and
+    // the architect is still reached on a fresh run, which the next assertion pins.
+    expect(resumeAt).toBeGreaterThan(-1);
+    expect(planAt).toBeGreaterThan(-1);
+    expect(resumeAt).toBeLessThan(planAt);
   });
 });

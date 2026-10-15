@@ -13,6 +13,12 @@
  * This module is the park half's entry point.
  */
 
+import {
+  findPlanComment,
+  parsePlanFromComment,
+  type PlanCommentRecord,
+} from "./plan-comment";
+
 /** What the human is asked. One place, so the ticket and the tests agree on the wording. */
 export const PLAN_APPROVAL_QUESTION =
   "Approve this plan and I will start coding. Reply on this issue, or remove the `needs-answer` label, to " +
@@ -121,4 +127,25 @@ export async function parkForApproval(
     commentUrl: reported.commentUrl,
     labelApplied: true,
   };
+}
+
+/** The ticket reader this needs, structurally, so it can be tested without any network. */
+export interface ApprovedPlanDeps {
+  listComments(
+    owner: string,
+    repo: string,
+    issue: number,
+  ): Promise<{ ok: boolean; comments?: PlanCommentRecord[]; error?: string }>;
+}
+
+export type ApprovedPlanResult =
+  | { ok: true; plan: unknown }
+  | { ok: false; error: string };
+
+/** Not implemented yet (RED stub for #365 R4 Task 3). */
+export async function loadApprovedPlan(
+  _deps: ApprovedPlanDeps,
+  _options: { owner: string; repo: string; issue: number },
+): Promise<ApprovedPlanResult> {
+  throw new Error("loadApprovedPlan is not implemented");
 }
