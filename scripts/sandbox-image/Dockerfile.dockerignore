@@ -1,0 +1,17 @@
+# Build context is the repository root. These are EXCLUDED; everything else (including .git) ships.
+#
+# node_modules is excluded so the image's own Linux install survives the `COPY . .` step -- the
+# host's copy is Windows-native and would shadow it.
+node_modules
+.next
+.vercel
+.eve
+coverage
+*.log
+
+# Local env files are untracked, so nothing stops `COPY . .` from baking real credentials into an
+# image. Exclude them by pattern rather than by name: `.env.example` IS tracked and is read by the
+# test suite, so it deliberately stays.
+.env
+.env.local
+.env.*.local

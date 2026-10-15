@@ -52,3 +52,27 @@ describe("#354 vault-path git wiring (source guard)", () => {
     expect(source).toMatch(/gitPushWithVault\(/);
   });
 });
+
+/**
+ * #358 — the runner must be able to start.
+ *
+ * Its entrypoint guard was `require.main === module`, a CommonJS construct. This package is
+ * `"type": "module"`, so evaluating it threw `ReferenceError: require is not defined in ES module
+ * scope` at module load — BEFORE the guard's own `|| process.argv[1]` fallback could be reached.
+ * The documented invocation (`npx tsx scripts/dark-factory-runner.ts`) therefore failed instantly and
+ * nothing could start the runner. Nothing in package.json or CI invokes it, which is why a
+ * module-system change rotted it unnoticed.
+ *
+ * The guard compares the module URL with the entry URL instead, which behaves identically under tsx,
+ * plain node and vitest.
+ */
+describe("#358 runner entrypoint guard (source guard)", () => {
+  it("does not use the CommonJS-only require.main check", () => {
+    expect(source).not.toMatch(/require\.main/);
+  });
+
+  it("identifies a direct run through the ESM module URL", () => {
+    expect(source).toMatch(/import\.meta\.url/);
+    expect(source).toMatch(/pathToFileURL/);
+  });
+});
