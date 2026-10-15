@@ -714,6 +714,21 @@ async function main(): Promise<void> {
 }
 
 /**
+ * #361 — thrown when an authored file would destroy the content already in it.
+ *
+ * A distinct class rather than a bare Error, so the caller and the tests can tell a preservation
+ * refusal from any other authoring failure. The runner's worker turns it into a failed iteration whose
+ * message is the next iteration's context.
+ */
+export class PreservationRefusedError extends Error {
+  readonly code = "ERR_PRESERVATION_REFUSED";
+  constructor(message: string) {
+    super(message);
+    this.name = "PreservationRefusedError";
+  }
+}
+
+/**
  * #281 (R2b/B1) — write the authored files into the workspace.
  *
  * The author seam deliberately does NOT write files (it returns the map, keeping the seam pure), so
