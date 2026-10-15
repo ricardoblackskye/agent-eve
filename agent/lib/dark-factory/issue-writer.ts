@@ -85,6 +85,11 @@ export function createGitHubLabelWriter(writer?: GitHubIssueWriter): {
   };
 }
 
+/** Shared so a read and a write refuse for the same, nameable reason. */
+const NO_TOKEN_ERROR =
+  "No GitHub token configured (GH_STORY_TOKEN / GH_RELEASE_TOKEN / GITHUB_TOKEN). " +
+  "Refusing to write.";
+
 export class GitHubIssueWriter {
   private readonly token?: string;
   private readonly fetchImpl: IssueWriterFetch;
@@ -114,12 +119,7 @@ export class GitHubIssueWriter {
     body?: unknown,
   ): Promise<WriteResult> {
     if (!this.token) {
-      return {
-        ok: false,
-        error:
-          "No GitHub token configured (GH_STORY_TOKEN / GH_RELEASE_TOKEN / GITHUB_TOKEN). " +
-          "Refusing to write.",
-      };
+      return { ok: false, error: NO_TOKEN_ERROR };
     }
     try {
       const res = await this.fetchImpl(url, {
@@ -136,6 +136,45 @@ export class GitHubIssueWriter {
       }
       const parsed = (await res.json().catch(() => ({}))) as { id?: number };
       return { ok: true, status: res.status, id: parsed.id };
+    } catch (error) {
+      return { ok: false, error: (error as Error).message };
+    }
+  }
+
+  /**
+   * GET the ticket's comments (#365 Task 11).
+   *
+   * `call` only lifts an `id` out of a response, so reading needs its own path: a retry has to FIND its
+   * previous plan comment before it can update it, rather than posting a second one.
+   */
+  async listComments(
+    owner: string,
+    repo: string,
+    issue: number,
+  ): Promise<{ ok: boolean; comments?: { id: number; body: string }[]; error?: string }> {
+    if (!this.token) {
+      return { ok: false, error: NO_TOKEN_ERROR };
+    }
+    try {
+      const res = await this.fetchImpl(
+        `${this.apiBase}/repos/${owner}/${repo}/issues/${issue}/comments?per_page=100`,
+        { method: "GET", headers: this.headers() },
+      );
+      if (!res.ok) {
+        return { ok: false, error: `GitHub responded ${res.status}` };
+      }
+      const parsed = (await res.json().catch(() => [])) as
+        | { id?: number; body?: string }[]
+        | undefined;
+      if (!Array.isArray(parsed)) {
+        return { ok: true, comments: [] };
+      }
+      return {
+        ok: true,
+        comments: parsed
+          .filter((comment) => typeof comment?.id === "number")
+          .map((comment) => ({ id: comment.id as number, body: comment.body ?? "" })),
+      };
     } catch (error) {
       return { ok: false, error: (error as Error).message };
     }

@@ -10,7 +10,7 @@
 > is [Dark Factory (R1)](dark-factory.md) and the flow walkthroughs in the
 > [flow deep-dives](flow-run-lifecycle.md).
 
-_100 modules._
+_101 modules._
 
 ## agent-cli-author
 
@@ -456,6 +456,14 @@ Operator CLI for the self-improvement gate (#159). The gate in `self-improve.ts`
 **Source:** [`agent/lib/dark-factory/operator-cli.ts`](../../agent/lib/dark-factory/operator-cli.ts)
 
 **Exports:** `OPERATOR_CLI_USAGE`, `OperatorCliCommand`, `OperatorCliDeps`, `OperatorCliResult`, `OperatorCliUsageError`, `OperatorDecisionValue`, `ProposalKind`, `parseOperatorArgs`, `runOperatorCli`
+
+## plan-comment
+
+Dark Factory — Plan Comment (#365). Posts the rendered plan on the ticket right after planning and before the coding loop, so a run that later fails still leaves reviewable intent. The comment carries a marker, which makes it idempotent: a retry finds its own comment and updates it rather than stacking another one on the ticket.
+
+**Source:** [`agent/lib/dark-factory/plan-comment.ts`](../../agent/lib/dark-factory/plan-comment.ts)
+
+**Exports:** `PLAN_COMMENT_MARKER`, `PlanCommentRecord`, `PlanCommentResult`, `PlanCommentTarget`, `PostPlanCommentOptions`, `findPlanComment`, `planCommentBody`, `postPlanComment`
 
 ## plan-file
 
