@@ -167,8 +167,25 @@ describe("the plan comment (#365 Task 11)", () => {
     });
 
     it("fails closed on a corrupted block rather than guessing a plan", () => {
-      const body = planCommentBody(MARKDOWN, PLAN).replace("{", "{,,,");
-      expect(parsePlanFromComment(body).ok).toBe(false);
+      // Built explicitly rather than by patching a valid comment. Patching used a non-global `replace` with
+      // a string argument, which is itself a scan finding ("Incomplete string escaping or encoding"): it
+      // rewrites only the FIRST match, so anyone reading it has to work out whether that was intended. Here
+      // the corruption is the point, so it is written out.
+      const corrupted = [
+        PLAN_COMMENT_MARKER,
+        "",
+        "# Plan: something",
+        "",
+        "<details>",
+        "<summary>Machine-readable plan (read back when this run resumes)</summary>",
+        "",
+        "```json",
+        "{,,,}",
+        "```",
+        "",
+        "</details>",
+      ].join("\n");
+      expect(parsePlanFromComment(corrupted).ok).toBe(false);
     });
 
     it("cannot be broken out of by plan text that looks like the block", () => {
