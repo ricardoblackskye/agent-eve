@@ -1,3 +1,5 @@
+<!-- markdownlint-disable MD013 -->
+
 # Dark Factory: the coding workflow must not overwrite working code
 
 **Goal:** make the Dark Factory coding loop preserve existing code, commit the tests it authors, and
