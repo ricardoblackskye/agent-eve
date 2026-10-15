@@ -444,6 +444,11 @@ async function main(): Promise<void> {
   const sandboxRemoteUrl = `https://${gitHost}/${repoOwner}/${repoName}.git`;
 
   let loopResult: LoopResult;
+  // #361 (R2): what the coding loop actually wrote, captured across the phase callback so BOTH commit
+  // paths can stage it - the in-sandbox commit (inside the callback) and the host STEP 6 commit
+  // (after it). It has to be declared in THIS scope: a declaration inside the callback is invisible to
+  // STEP 6, which is exactly where the compile error was.
+  let lastAuthored: AuthorFilesResult | undefined;
   try {
     loopResult = await runCodingPhase(
       createSandboxProvider(
@@ -491,6 +496,8 @@ async function main(): Promise<void> {
             let authored: AuthorFilesResult;
             try {
               authored = await authorFiles(codeAuthor, ctx.plan, ctx.tools);
+            // #361 (R2): the commit after the loop stages `lastAuthored`, not just the plan's targets.
+            lastAuthored = authored;
             } catch (err: any) {
               return {
                 passed: false,
@@ -534,7 +541,7 @@ async function main(): Promise<void> {
             workspaceDir: sandboxWorkspace,
             branchName,
             commitMessage: `feat: #${issueNum} ${executionPlan.title}`,
-            filesToAdd: executionPlan.targetFiles.map((f) => f.path),
+            filesToAdd: filesToCommitFromRun(lastAuthored, executionPlan),
           });
           if (!pushed.ok) {
             throw new Error(`sandbox push failed: ${pushed.error}`);
@@ -605,9 +612,7 @@ async function main(): Promise<void> {
     console.log(
       `\n[STEP 6] Committing changes to '${branchName}' and pushing to GitHub...`,
     );
-    const filesToCommit = executionPlan.targetFiles
-      .map((f) => f.path)
-      .join(" ");
+    const filesToCommit = filesToCommitFromRun(lastAuthored, executionPlan).join(" ");
     await checkpoint();
     execSync(`git add ${filesToCommit}`, { stdio: "inherit" });
     await checkpoint();
@@ -864,17 +869,22 @@ export async function authorFiles(
 }
 
 /**
- * #361 (R2) RED stub - the files a successful run must commit.
+ * #361 (R2) — the files a successful run must commit.
  *
- * Returns ONLY the plan's declared targets, which is exactly the bug: an authored file the plan never
- * listed (e.g. an authored test) is dropped from the commit. GREEN replaces this with the union of what
- * the author wrote and what the plan declared.
+ * The plan's `targetFiles` are what the run INTENDED to touch. What the author actually WROTE can
+ * differ: it may add a file the plan never listed (e.g. an authored test), or skip a `create` whose
+ * target already existed. Committing the plan's list alone is how an authored test file was lost in
+ * #361 — it was written into the sandbox but never staged. The union of the two is what the run
+ * produced, and is the honest artifact to stage.
  */
 export function filesToCommitFromRun(
-  _authored: { written: string[] } | undefined,
+  authored: { written: string[] } | undefined,
   plan: { targetFiles: { path: string }[] },
 ): string[] {
-  return plan.targetFiles.map((f) => f.path);
+  const set = new Set<string>();
+  if (authored) for (const path of authored.written) set.add(path);
+  for (const target of plan.targetFiles) set.add(target.path);
+  return Array.from(set);
 }
 
 /**
