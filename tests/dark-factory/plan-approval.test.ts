@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import {
   PLAN_APPROVAL_QUESTION,
+  explainPlanFailure,
   loadApprovedPlan,
   parkForApproval,
   planApprovalEventId,
@@ -200,6 +201,34 @@ describe("resuming against the approved plan (#365 R4 Task 3)", () => {
     const result = await loadApprovedPlan(deps, { owner: "o", repo: "r", issue: 365 });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toMatch(/machine-readable/);
+  });
+
+  it("explains a resumed run's failure in terms of the approval, not the architect", () => {
+    // "Architect Agent planning failed" is the wrong story on a resume: nobody planned. The run could not
+    // read back the plan a human approved, and a fresh plan would not be that plan.
+    const message = explainPlanFailure("the plan comment carries no machine-readable plan", {
+      resuming: true,
+    });
+    expect(message).toMatch(/approved/);
+    expect(message).toMatch(/rather than plan again|rather plan again/);
+    expect(message).toContain("the plan comment carries no machine-readable plan");
+    expect(message).not.toMatch(/Architect/i);
+  });
+
+  it("keeps the planning wording for a fresh run", () => {
+    const message = explainPlanFailure("the model returned nothing", { resuming: false });
+    expect(message).toMatch(/planning failed/i);
+    expect(message).toContain("the model returned nothing");
+  });
+
+  it("posts that explanation on the ticket, and reaches the architect only when there is no approved plan", () => {
+    const runner = readFileSync("scripts/dark-factory-runner.ts", "utf8");
+    expect(runner).toContain("explainPlanFailure(");
+    expect(runner).toContain("postComment(");
+    // The architect is reached ONLY in the else-branch of the approved-plan ternary, which is what stops a
+    // failed read from re-planning: `approvedPlan` is truthy even when it is a failure, so the architect is
+    // short-circuited rather than merely discouraged.
+    expect(runner).toMatch(/:\s*await architectAgent\.planStory\(/);
   });
 
   it("labels and comments on the RUN's repo, not a hardcoded one (#348)", () => {

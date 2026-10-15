@@ -129,6 +129,14 @@ export async function parkForApproval(
   };
 }
 
+/** Not implemented yet (RED stub for #365 R4 Task 4). */
+export function explainPlanFailure(
+  _error: string,
+  _options: { resuming: boolean },
+): string {
+  throw new Error("explainPlanFailure is not implemented");
+}
+
 /** The ticket reader this needs, structurally, so it can be tested without any network. */
 export interface ApprovedPlanDeps {
   listComments(
