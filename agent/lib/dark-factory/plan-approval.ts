@@ -67,10 +67,58 @@ export type ParkResult =
   | { ok: true; mode: string; commentUrl?: string; labelApplied: boolean; warning?: string }
   | { ok: false; error: string };
 
-/** Not implemented yet (RED stub for #365 R4 Task 2). */
+/**
+ * Park the run and ask a human to approve the plan.
+ *
+ * The question is recorded FIRST, because recording it IS the park: run-history derives the run's status
+ * from a `worker.question`, which is what the resume path later looks for. Doing it in this order also
+ * means a label outage cannot hide the question behind a failed write.
+ */
 export async function parkForApproval(
-  _deps: PlanApprovalDeps,
-  _options: ParkForApprovalOptions,
+  deps: PlanApprovalDeps,
+  options: ParkForApprovalOptions,
 ): Promise<ParkResult> {
-  throw new Error("parkForApproval is not implemented");
+  const reported = await deps.reporter.report({
+    kind: "question",
+    runId: options.runId,
+    repo: options.repo,
+    issue: options.issue,
+    eventId: planApprovalEventId(options.runId),
+    occurredAt: options.occurredAt,
+    question: PLAN_APPROVAL_QUESTION,
+  });
+
+  if (!reported.ok) {
+    // Fail closed: nothing was parked, so the caller must NOT fall through into coding.
+    return {
+      ok: false,
+      error: `the run could not be parked: ${reported.error ?? "the question was not recorded"}`,
+    };
+  }
+
+  const labelled = await deps.labels.add(
+    options.repo,
+    options.issue,
+    options.questionLabel,
+  );
+  if (!labelled.ok) {
+    // Still parked. A failure here would contradict the ledger, which now says blocked, so this is a
+    // warning rather than an error - and a human can still reply on the ticket to resume.
+    return {
+      ok: true,
+      mode: reported.mode,
+      commentUrl: reported.commentUrl,
+      labelApplied: false,
+      warning: `the run is parked but '${options.questionLabel}' could not be applied: ${
+        labelled.error ?? "unknown error"
+      }`,
+    };
+  }
+
+  return {
+    ok: true,
+    mode: reported.mode,
+    commentUrl: reported.commentUrl,
+    labelApplied: true,
+  };
 }

@@ -59,6 +59,10 @@ import {
 } from "../agent/lib/dark-factory/preservation-guard";
 import { renderPlanFile } from "../agent/lib/dark-factory/plan-file";
 import { postPlanComment } from "../agent/lib/dark-factory/plan-comment";
+import { parkForApproval } from "../agent/lib/dark-factory/plan-approval";
+import { createWorkerReporter } from "../agent/lib/dark-factory/worker-reporter";
+import { createStateStore } from "../agent/lib/dark-factory/state-provider";
+import { TRIGGER_LABELS } from "../agent/lib/dark-factory/trigger";
 import type { CodeAuthorProvider } from "../agent/lib/dark-factory/code-author";
 import { createCodingLoopBreaker } from "../agent/lib/dark-factory/breaker-wiring";
 import { recordBreakerTrip } from "../agent/lib/dark-factory/breaker-trip-recorder";
@@ -461,6 +465,38 @@ async function main(): Promise<void> {
     throw new Error(`the plan comment could not be posted: ${planComment.error}`);
   }
   console.log(`\n[PLAN] Posted the plan on #${issueNum} (${planComment.action}).`);
+
+  // #365 R4: STOP here and wait for a human, unless this dispatch IS the human's approval. The plan is on
+  // the ticket, so it can be reviewed; nothing is coded until someone approves it. Recording the question is
+  // what marks this run "blocked", which is what the resume path looks for (entry.ts resumes only a blocked
+  // run). A resume is explicit - `--resume` - exactly as entry.ts requires ("dispatch this run with an
+  // explicit resume"), so a re-delivery can never be mistaken for approval.
+  const isResume = process.argv.includes("--resume");
+  if (!isResume) {
+    const reporter = createWorkerReporter(process.env, {
+      store: createStateStore(env),
+      runHistory,
+    });
+    const approval = await parkForApproval(
+      { reporter, labels: labelWriter },
+      {
+        runId,
+        repo: targetRepo,
+        issue: issueNum,
+        questionLabel: TRIGGER_LABELS.question,
+        occurredAt: new Date().toISOString(),
+      },
+    );
+    if (!approval.ok) {
+      throw new Error(`the run could not be parked for approval: ${approval.error}`);
+    }
+    console.log(
+      `\n[GATE] Parked on #${issueNum} awaiting approval (${approval.mode}).` +
+        (approval.warning ? ` WARNING: ${approval.warning}` : "") +
+        (approval.commentUrl ? `\n       Question: ${approval.commentUrl}` : ""),
+    );
+    return;
+  }
 
   let loopResult: LoopResult;
   // #361 (R2): what the coding loop actually wrote, captured across the phase callback so BOTH commit
