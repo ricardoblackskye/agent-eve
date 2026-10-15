@@ -14,6 +14,7 @@ import {
   type PlanValidationResult,
   type PlanParser,
 } from "./plan-validator";
+import { planningGuidanceForPrompt } from "./planning-guidance";
 
 /**
  * Dedicated process-level timer registry following SRP and the Singleton pattern.
@@ -302,6 +303,9 @@ export class ArchitectAgent {
       `### REPOSITORY STRUCTURE:`,
       `Existing files:`,
       safeFiles.map((f) => `- ${f}`).join("\n"),
+      ``,
+      `### HOW TO WRITE THE PLAN:`,
+      planningGuidanceForPrompt(),
       ``,
       `### EXECUTION PLAN REQUIREMENTS:`,
       `You must output a JSON object with:`,

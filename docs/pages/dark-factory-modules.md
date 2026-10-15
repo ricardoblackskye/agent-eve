@@ -10,7 +10,7 @@
 > is [Dark Factory (R1)](dark-factory.md) and the flow walkthroughs in the
 > [flow deep-dives](flow-run-lifecycle.md).
 
-_99 modules._
+_100 modules._
 
 ## agent-cli-author
 
@@ -490,6 +490,14 @@ Platform-specific runtime facts consumed by Dark Factory. Provider-specific envi
 **Source:** [`agent/lib/dark-factory/platform.ts`](../../agent/lib/dark-factory/platform.ts)
 
 **Exports:** `DeploymentStage`, `PlatformAdapter`, `PlatformConfigurationError`, `PlatformContext`, `PlatformProviderId`, `createPlatformAdapter`
+
+## planning-guidance
+
+Dark Factory — Planning Guidance (#361). Supplies the vendored Superpowers "writing-plans" guidance to the Architect Agent's prompt, so a plan arrives with an approach and a task breakdown instead of a bare list of files. The guidance is vendored rather than fetched, because the architect runs in a sandbox with no outbound access to GitHub; `planning-guidance/writing-plans.md` holds a verbatim copy pinned to an upstream commit, with its source, licence and sync instructions. `planningGuidanceForPrompt` strips that maintainer-facing header before the model sees it.
+
+**Source:** [`agent/lib/dark-factory/planning-guidance.ts`](../../agent/lib/dark-factory/planning-guidance.ts)
+
+**Exports:** `PLANNING_GUIDANCE_SOURCE`, `WRITING_PLANS_GUIDANCE`, `planningGuidanceForPrompt`
 
 ## preservation-guard
 
