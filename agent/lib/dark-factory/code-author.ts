@@ -13,6 +13,14 @@
 export interface CodeAuthorTask {
   /** The ExecutionPlan to implement (serialized into the prompt exactly as today). */
   plan: unknown;
+  /**
+   * The CURRENT content of each file the plan will MODIFY, keyed by relative path (#361).
+   *
+   * Without this the author must regenerate a file blind from the plan summary — which is how a
+   * 75-line component became a 15-line stub. Omit it when there is nothing to preserve and the prompt
+   * stays byte-for-byte what #281 pinned.
+   */
+  existing?: Record<string, string>;
 }
 
 export interface CodeAuthorResult {
@@ -37,16 +45,45 @@ export class CodeAuthorRefusedError extends Error {
   }
 }
 
-export function buildCodeAuthorPrompt(plan: unknown): string {
+/**
+ * The rule that stops an edit from silently becoming a deletion (#361). Its own export so the test can
+ * pin the wording, and so the guard's failure message and the prompt cannot drift apart.
+ */
+export const PRESERVATION_CONTRACT = [
+  "Preserve every existing export, import, prop, handler and markup element that the plan does not",
+  "ask you to change. Do not delete code you were not asked to change. Never replace a file with a",
+  "stub: a shorter file that drops existing behaviour is a failure, not a simplification. Return the",
+  "COMPLETE updated file for each. If a whole-file replacement really is the task, the plan must",
+  'declare action "replace" for that file.',
+].join("\n");
+
+export function buildCodeAuthorPrompt(
+  plan: unknown,
+  existing?: Record<string, string>,
+): string {
   // Byte-for-byte the text the runner sent inline before this seam existed.
-  return [
+  const lines = [
     `You are Eve's Developer Agent. Execute the following ExecutionPlan:`,
     JSON.stringify(plan, null, 2),
     ``,
     `For each target file, provide the code to write.`,
     `Return a JSON object where keys are relative file paths and values are string file contents.`,
     `Example: { "app/chat.tsx": "export ...", "tests/chat.test.ts": "import ..." }`,
-  ].join("\n");
+  ];
+
+  if (existing && Object.keys(existing).length > 0) {
+    lines.push(
+      ``,
+      `### YOU ARE MODIFYING THESE FILES: KEEP THE CODE THAT IS ALREADY IN THEM`,
+      // Rendered as JSON rather than inside a BEGIN/END wrapper: a target may itself be markdown, and
+      // prompt-like text inside it would make a hand-rolled delimiter ambiguous.
+      JSON.stringify(existing, null, 2),
+      ``,
+      PRESERVATION_CONTRACT,
+    );
+  }
+
+  return lines.join("\n");
 }
 
 /**
@@ -70,7 +107,9 @@ export function createInProcessCodeAuthor(
   return {
     author: "in-process",
     write: async (task) => {
-      const raw = await generate(buildCodeAuthorPrompt(task.plan));
+      const raw = await generate(
+        buildCodeAuthorPrompt(task.plan, task.existing),
+      );
       return { files: parseCodeAuthorOutput(raw), raw };
     },
   };

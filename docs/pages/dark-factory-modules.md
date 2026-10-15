@@ -10,7 +10,7 @@
 > is [Dark Factory (R1)](dark-factory.md) and the flow walkthroughs in the
 > [flow deep-dives](flow-run-lifecycle.md).
 
-_82 modules._
+_98 modules._
 
 ## agent-cli-author
 
@@ -482,6 +482,14 @@ Platform-specific runtime facts consumed by Dark Factory. Provider-specific envi
 **Source:** [`agent/lib/dark-factory/platform.ts`](../../agent/lib/dark-factory/platform.ts)
 
 **Exports:** `DeploymentStage`, `PlatformAdapter`, `PlatformConfigurationError`, `PlatformContext`, `PlatformProviderId`, `createPlatformAdapter`
+
+## preservation-guard
+
+Dark Factory — Preservation Guard (#361). A pure comparison of a file's content before and after the coding loop touched it, so a destructive rewrite is refused at the loop boundary rather than reported as done. Compares trimmed non-blank lines with duplicates counted, so re-indenting a file is not mistaken for deleting it.
+
+**Source:** [`agent/lib/dark-factory/preservation-guard.ts`](../../agent/lib/dark-factory/preservation-guard.ts)
+
+**Exports:** `MAX_REMOVED_RATIO`, `PlanFileAction`, `PreservationInput`, `PreservationVerdict`, `assessPreservation`
 
 ## pr-writer
 

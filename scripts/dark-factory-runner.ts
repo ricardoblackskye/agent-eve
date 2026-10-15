@@ -53,6 +53,10 @@ import { reapSandboxesByRun } from "../agent/lib/dark-factory/sandbox-reaper";
 import type { SandboxProvider } from "../agent/lib/dark-factory/sandbox";
 import type { WorkspaceTools } from "../agent/lib/dark-factory/developer-agent";
 import { createCodeAuthorProvider } from "../agent/lib/dark-factory/code-author-provider";
+import {
+  assessPreservation,
+  type PlanFileAction,
+} from "../agent/lib/dark-factory/preservation-guard";
 import type { CodeAuthorProvider } from "../agent/lib/dark-factory/code-author";
 import { createCodingLoopBreaker } from "../agent/lib/dark-factory/breaker-wiring";
 import { recordBreakerTrip } from "../agent/lib/dark-factory/breaker-trip-recorder";
@@ -484,7 +488,7 @@ async function main(): Promise<void> {
 
             // #281 (R2b/B1): the author is configuration-selected. With DF_CODE_AUTHOR unset this is the
             // same governed path as before; a failed author propagates as a failed iteration.
-            let authored: { files: Record<string, string>; raw: string };
+            let authored: AuthorFilesResult;
             try {
               authored = await authorFiles(codeAuthor, ctx.plan, ctx.tools);
             } catch (err: any) {
@@ -493,8 +497,13 @@ async function main(): Promise<void> {
                 output: `Authoring error: ${err.message}`,
               };
             }
-            for (const [filePath, content] of Object.entries(authored.files)) {
-              console.log(`     Wrote ${filePath} (${content.length} chars)`);
+            for (const filePath of authored.written) {
+              console.log(
+                `     Wrote ${filePath} (${authored.files[filePath].length} chars)`,
+              );
+            }
+            for (const { path: skippedPath, reason } of authored.skipped) {
+              console.log(`     Skipped ${skippedPath}: ${reason}`);
             }
 
             // Run vitest to verify acceptance criteria
@@ -714,22 +723,144 @@ async function main(): Promise<void> {
 }
 
 /**
+ * #361 — thrown when an authored file would destroy the content already in it.
+ *
+ * A distinct class rather than a bare Error, so the caller and the tests can tell a preservation
+ * refusal from any other authoring failure. The runner's worker turns it into a failed iteration whose
+ * message is the next iteration's context.
+ */
+export class PreservationRefusedError extends Error {
+  readonly code = "ERR_PRESERVATION_REFUSED";
+  constructor(message: string) {
+    super(message);
+    this.name = "PreservationRefusedError";
+  }
+}
+
+export interface AuthorFilesResult {
+  files: Record<string, string>;
+  raw: string;
+  /** The paths actually written, in the order they were written. */
+  written: string[];
+  /** Authored entries that were NOT written, with the reason. */
+  skipped: { path: string; reason: string }[];
+}
+
+/**
+ * The plan's declared action per target path.
+ *
+ * An entry whose action is missing or unrecognised is treated as `modify`, so an unreadable or lazy
+ * plan cannot switch the preservation rule OFF. An empty map means "no prediction to trust".
+ */
+function readPlanTargetActions(plan: unknown): Map<string, PlanFileAction> {
+  const actions = new Map<string, PlanFileAction>();
+  const targets = (plan as { targetFiles?: unknown } | null)?.targetFiles;
+  if (!Array.isArray(targets)) return actions;
+  for (const entry of targets) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const { path, action } = entry as { path?: unknown; action?: unknown };
+    if (typeof path !== "string" || path.trim() === "") continue;
+    actions.set(
+      path,
+      action === "create" || action === "replace" ? action : "modify",
+    );
+  }
+  return actions;
+}
+
+/** A file's content, or "" when it does not exist or cannot be read. */
+async function readExistingFile(
+  tools: { readFile(relPath: string): Promise<string> },
+  relPath: string,
+): Promise<string> {
+  try {
+    return await tools.readFile(relPath);
+  } catch {
+    return "";
+  }
+}
+
+/**
  * #281 (R2b/B1) — write the authored files into the workspace.
  *
  * The author seam deliberately does NOT write files (it returns the map, keeping the seam pure), so
  * the caller writes them through the SAME workspace tools as before. A failed author propagates: the
  * coding loop records a failed iteration rather than silently writing nothing.
+ *
+ * #361 — the author is shown the current content of the files it is modifying, and every write is
+ * checked against what is already there before a single byte lands. A refused write throws
+ * `PreservationRefusedError`, which the caller's worker turns into a failed iteration whose message
+ * becomes the next iteration's context.
  */
 export async function authorFiles(
   author: CodeAuthorProvider,
   plan: unknown,
-  tools: { writeFile(relPath: string, content: string): Promise<void> },
-): Promise<{ files: Record<string, string>; raw: string }> {
-  const result = await author.write({ plan });
-  for (const [filePath, content] of Object.entries(result.files)) {
-    await tools.writeFile(filePath, content);
+  tools: {
+    readFile(relPath: string): Promise<string>;
+    writeFile(relPath: string, content: string): Promise<void>;
+  },
+): Promise<AuthorFilesResult> {
+  const actions = readPlanTargetActions(plan);
+
+  // #361: show the author what is already inside the files it is changing. Without this it has to
+  // regenerate a `modify` target blind from the plan summary — which is how a 75-line component
+  // became a 15-line stub while every test still passed.
+  const existing: Record<string, string> = {};
+  for (const [path, action] of actions) {
+    if (action === "create") continue; // a create target is expected not to exist yet
+    const content = await readExistingFile(tools, path);
+    if (content !== "") existing[path] = content;
   }
-  return { files: result.files, raw: result.raw };
+
+  const result = await author.write({
+    plan,
+    ...(Object.keys(existing).length > 0 ? { existing } : {}),
+  });
+
+  // Read the pre-write content of EVERY authored path before writing any of them: the guard needs
+  // what is on disk NOW, and a path the plan did not predict is still an overwrite.
+  const before = new Map<string, string>();
+  for (const filePath of Object.keys(result.files)) {
+    before.set(filePath, await readExistingFile(tools, filePath));
+  }
+
+  const refusals: string[] = [];
+  for (const [filePath, content] of Object.entries(result.files)) {
+    const verdict = assessPreservation({
+      path: filePath,
+      action: actions.get(filePath) ?? "modify",
+      before: before.get(filePath) ?? "",
+      after: content,
+    });
+    if (!verdict.ok) refusals.push(verdict.reason);
+  }
+
+  // Fail BEFORE writing anything. A refused iteration must not half-apply itself, or the informed
+  // retry would run against a workspace that is already partly destroyed.
+  if (refusals.length > 0) {
+    throw new PreservationRefusedError(
+      `refusing to write ${refusals.length} file(s) that would lose existing code:\n` +
+        refusals.map((reason) => `  - ${reason}`).join("\n"),
+    );
+  }
+
+  const written: string[] = [];
+  const skipped: { path: string; reason: string }[] = [];
+  for (const [filePath, content] of Object.entries(result.files)) {
+    // #361: a plan saying `create` for a path that already exists is a contradiction, and the file
+    // that is already there wins. Recorded rather than thrown, so the mismatch is visible without
+    // failing an otherwise valid iteration.
+    if (actions.get(filePath) === "create" && (before.get(filePath) ?? "") !== "") {
+      skipped.push({
+        path: filePath,
+        reason: `'${filePath}' already exists, so the plan's 'create' action was ignored.`,
+      });
+      continue;
+    }
+    await tools.writeFile(filePath, content);
+    written.push(filePath);
+  }
+  return { files: result.files, raw: result.raw, written, skipped };
 }
 
 /**
