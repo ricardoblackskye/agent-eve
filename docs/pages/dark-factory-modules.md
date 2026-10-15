@@ -10,7 +10,7 @@
 > is [Dark Factory (R1)](dark-factory.md) and the flow walkthroughs in the
 > [flow deep-dives](flow-run-lifecycle.md).
 
-_101 modules._
+_102 modules._
 
 ## agent-cli-author
 
@@ -456,6 +456,14 @@ Operator CLI for the self-improvement gate (#159). The gate in `self-improve.ts`
 **Source:** [`agent/lib/dark-factory/operator-cli.ts`](../../agent/lib/dark-factory/operator-cli.ts)
 
 **Exports:** `OPERATOR_CLI_USAGE`, `OperatorCliCommand`, `OperatorCliDeps`, `OperatorCliResult`, `OperatorCliUsageError`, `OperatorDecisionValue`, `ProposalKind`, `parseOperatorArgs`, `runOperatorCli`
+
+## plan-approval
+
+Dark Factory — Plan Approval Gate (#365 R4). Parks the run after the plan is posted and before any code is written, so a human authorizes the plan first. Recording the question is the park itself: `run-history` derives the run's status from a `worker.question`, and the resume path (`trigger`, `entry`) only ever resumes a run whose status is `blocked`. The comment is recorded before the label is applied, so a label outage cannot hide the question.
+
+**Source:** [`agent/lib/dark-factory/plan-approval.ts`](../../agent/lib/dark-factory/plan-approval.ts)
+
+**Exports:** `PLAN_APPROVAL_QUESTION`, `ParkForApprovalOptions`, `ParkResult`, `PlanApprovalDeps`, `PlanApprovalLabels`, `PlanApprovalReporter`, `parkForApproval`, `planApprovalEventId`
 
 ## plan-comment
 

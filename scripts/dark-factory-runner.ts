@@ -59,6 +59,14 @@ import {
 } from "../agent/lib/dark-factory/preservation-guard";
 import { renderPlanFile } from "../agent/lib/dark-factory/plan-file";
 import { postPlanComment } from "../agent/lib/dark-factory/plan-comment";
+import {
+  explainPlanFailure,
+  loadApprovedPlan,
+  parkForApproval,
+} from "../agent/lib/dark-factory/plan-approval";
+import { createWorkerReporter } from "../agent/lib/dark-factory/worker-reporter";
+import { createStateStore } from "../agent/lib/dark-factory/state-provider";
+import { TRIGGER_LABELS } from "../agent/lib/dark-factory/trigger";
 import type { CodeAuthorProvider } from "../agent/lib/dark-factory/code-author";
 import { createCodingLoopBreaker } from "../agent/lib/dark-factory/breaker-wiring";
 import { recordBreakerTrip } from "../agent/lib/dark-factory/breaker-trip-recorder";
@@ -175,7 +183,11 @@ async function main(): Promise<void> {
   const env = initEnv();
   const token = resolveIssueToken(env);
   const allowed = resolveWorkerAllowedRepos(env);
+  // #348: the Factory currently runs against ONE repository. Replacing this literal with the repository the
+  // dispatch actually targets is the point of that issue. Until then, every repo-wide reference in this run
+  // derives from here - which is why nothing below hardcodes an owner and a name again.
   const targetRepo = "ricardoblackskye/agent-eve";
+  const [repoOwner, repoName] = targetRepo.split("/");
 
   const issueArgIdx = process.argv.indexOf("--issue");
   const issueNum =
@@ -265,14 +277,14 @@ async function main(): Promise<void> {
     `\n[STEP 2] Updating ticket lifecycle label to 'df:running' and posting progress comment...`,
   );
   await issueWriter.addLabel(
-    "ricardoblackskye",
-    "agent-eve",
+    repoOwner,
+    repoName,
     issueNum,
     "df:running",
   );
   await issueWriter.postComment(
-    "ricardoblackskye",
-    "agent-eve",
+    repoOwner,
+    repoName,
     issueNum,
     `🤖 **Eve** (Dark Factory) — Dispatched Hardened Pipeline on #${issueNum}\n\n` +
       `- **Task Branch**: \`${branchName}\`\n` +
@@ -281,8 +293,29 @@ async function main(): Promise<void> {
   );
 
   // STEP 3: Architect Agent Planning Phase
+  //
+  // #365 R4: on a RESUME the plan is NOT regenerated. A fresh plan is a different plan from the one a human
+  // approved, so the approved plan is read back off the ticket instead - and if it cannot be read, the run
+  // stops rather than guessing.
+  const isResume = process.argv.includes("--resume");
+  const approvedPlan = isResume
+    ? await loadApprovedPlan(
+        {
+          listComments: (owner, repo, issue) =>
+            issueWriter.listComments(owner, repo, issue),
+        },
+        {
+          owner: targetRepo.split("/")[0],
+          repo: targetRepo.split("/")[1],
+          issue: issueNum,
+        },
+      )
+    : undefined;
+
   console.log(
-    `\n[STEP 3] Architect Agent discovering repository structure and planning story...`,
+    isResume
+      ? `\n[STEP 3] Resuming: reading the approved plan back from the ticket...`
+      : `\n[STEP 3] Architect Agent discovering repository structure and planning story...`,
   );
   const architectAgent = new ArchitectAgent({
     listFiles: async () => scanWorkspaceFiles(process.cwd()),
@@ -312,22 +345,42 @@ async function main(): Promise<void> {
     maxPlanRetries: 2,
   });
 
-  const planResult = await architectAgent.planStory({
-    number: issueNum,
-    title: issueData.title,
-    body: issueData.body,
-  });
+  // A resume uses the approved plan; only a fresh run asks the architect. The architect is not merely
+  // ignored here - it is never called, which is the property the test pins.
+  const planResult = approvedPlan
+    ? approvedPlan.ok
+      ? { ok: true as const, plan: approvedPlan.plan as ExecutionPlan }
+      : {
+          ok: false as const,
+          error: `the approved plan could not be read: ${approvedPlan.error}`,
+        }
+    : await architectAgent.planStory({
+        number: issueNum,
+        title: issueData.title,
+        body: issueData.body,
+      });
   await checkpoint();
 
   if (!planResult.ok || !planResult.plan) {
-    console.error(
-      `[ERROR] Architect Agent planning failed: ${planResult.error}`,
+    // #365 R4 Task 4: say WHY, on the ticket. A blocked ticket carrying only a label leaves a human guessing
+    // whether the Factory is broken or the plan simply predates the feature - and on a resume the story is
+    // about the approval, not about the architect.
+    const explanation = explainPlanFailure(
+      String(planResult.error ?? "no reason given"),
+      { resuming: isResume },
+    );
+    console.error(`[ERROR] ${explanation}`);
+    await issueWriter.postComment(
+      repoOwner,
+      repoName,
+      issueNum,
+      `🤖 **Eve** (Dark Factory) — ${explanation}`,
     );
     await issueWriter.addLabel(
-      "ricardoblackskye",
-      "agent-eve",
+      repoOwner,
+      repoName,
       issueNum,
-      "needs-answer",
+      TRIGGER_LABELS.question,
     );
     await applyTerminalLifecycle(
       { labelWriter, runHistory },
@@ -439,7 +492,6 @@ async function main(): Promise<void> {
   const sandboxWorkspace =
     (process.env.DF_SANDBOX_WORKSPACE ?? "").trim() ||
     DEFAULT_SANDBOX_WORKSPACE;
-  const [repoOwner, repoName] = targetRepo.split("/");
   const gitHost = (
     process.env.DF_SANDBOX_EGRESS_GIT_HOST ?? "github.com"
   ).trim();
@@ -461,6 +513,37 @@ async function main(): Promise<void> {
     throw new Error(`the plan comment could not be posted: ${planComment.error}`);
   }
   console.log(`\n[PLAN] Posted the plan on #${issueNum} (${planComment.action}).`);
+
+  // #365 R4: STOP here and wait for a human, unless this dispatch IS the human's approval. The plan is on
+  // the ticket, so it can be reviewed; nothing is coded until someone approves it. Recording the question is
+  // what marks this run "blocked", which is what the resume path looks for (entry.ts resumes only a blocked
+  // run). A resume is explicit - `--resume` - exactly as entry.ts requires ("dispatch this run with an
+  // explicit resume"), so a re-delivery can never be mistaken for approval.
+  if (!isResume) {
+    const reporter = createWorkerReporter(process.env, {
+      store: createStateStore(env),
+      runHistory,
+    });
+    const approval = await parkForApproval(
+      { reporter, labels: labelWriter },
+      {
+        runId,
+        repo: targetRepo,
+        issue: issueNum,
+        questionLabel: TRIGGER_LABELS.question,
+        occurredAt: new Date().toISOString(),
+      },
+    );
+    if (!approval.ok) {
+      throw new Error(`the run could not be parked for approval: ${approval.error}`);
+    }
+    console.log(
+      `\n[GATE] Parked on #${issueNum} awaiting approval (${approval.mode}).` +
+        (approval.warning ? ` WARNING: ${approval.warning}` : "") +
+        (approval.commentUrl ? `\n       Question: ${approval.commentUrl}` : ""),
+    );
+    return;
+  }
 
   let loopResult: LoopResult;
   // #361 (R2): what the coding loop actually wrote, captured across the phase callback so BOTH commit
@@ -753,8 +836,8 @@ async function main(): Promise<void> {
       },
     );
     await issueWriter.postComment(
-      "ricardoblackskye",
-      "agent-eve",
+      repoOwner,
+      repoName,
       issueNum,
       `🤖 **Eve** (Dark Factory) — Story #${issueNum} Completed with Verified Traceability ✅\n\n` +
         `- **PR**: ${dodResult.pr.url}\n` +
