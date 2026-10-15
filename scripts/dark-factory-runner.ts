@@ -59,7 +59,10 @@ import {
 } from "../agent/lib/dark-factory/preservation-guard";
 import { renderPlanFile } from "../agent/lib/dark-factory/plan-file";
 import { postPlanComment } from "../agent/lib/dark-factory/plan-comment";
-import { parkForApproval } from "../agent/lib/dark-factory/plan-approval";
+import {
+  loadApprovedPlan,
+  parkForApproval,
+} from "../agent/lib/dark-factory/plan-approval";
 import { createWorkerReporter } from "../agent/lib/dark-factory/worker-reporter";
 import { createStateStore } from "../agent/lib/dark-factory/state-provider";
 import { TRIGGER_LABELS } from "../agent/lib/dark-factory/trigger";
@@ -285,8 +288,29 @@ async function main(): Promise<void> {
   );
 
   // STEP 3: Architect Agent Planning Phase
+  //
+  // #365 R4: on a RESUME the plan is NOT regenerated. A fresh plan is a different plan from the one a human
+  // approved, so the approved plan is read back off the ticket instead - and if it cannot be read, the run
+  // stops rather than guessing.
+  const isResume = process.argv.includes("--resume");
+  const approvedPlan = isResume
+    ? await loadApprovedPlan(
+        {
+          listComments: (owner, repo, issue) =>
+            issueWriter.listComments(owner, repo, issue),
+        },
+        {
+          owner: targetRepo.split("/")[0],
+          repo: targetRepo.split("/")[1],
+          issue: issueNum,
+        },
+      )
+    : undefined;
+
   console.log(
-    `\n[STEP 3] Architect Agent discovering repository structure and planning story...`,
+    isResume
+      ? `\n[STEP 3] Resuming: reading the approved plan back from the ticket...`
+      : `\n[STEP 3] Architect Agent discovering repository structure and planning story...`,
   );
   const architectAgent = new ArchitectAgent({
     listFiles: async () => scanWorkspaceFiles(process.cwd()),
@@ -316,11 +340,20 @@ async function main(): Promise<void> {
     maxPlanRetries: 2,
   });
 
-  const planResult = await architectAgent.planStory({
-    number: issueNum,
-    title: issueData.title,
-    body: issueData.body,
-  });
+  // A resume uses the approved plan; only a fresh run asks the architect. The architect is not merely
+  // ignored here - it is never called, which is the property the test pins.
+  const planResult = approvedPlan
+    ? approvedPlan.ok
+      ? { ok: true as const, plan: approvedPlan.plan as ExecutionPlan }
+      : {
+          ok: false as const,
+          error: `the approved plan could not be read: ${approvedPlan.error}`,
+        }
+    : await architectAgent.planStory({
+        number: issueNum,
+        title: issueData.title,
+        body: issueData.body,
+      });
   await checkpoint();
 
   if (!planResult.ok || !planResult.plan) {
@@ -471,7 +504,6 @@ async function main(): Promise<void> {
   // what marks this run "blocked", which is what the resume path looks for (entry.ts resumes only a blocked
   // run). A resume is explicit - `--resume` - exactly as entry.ts requires ("dispatch this run with an
   // explicit resume"), so a re-delivery can never be mistaken for approval.
-  const isResume = process.argv.includes("--resume");
   if (!isResume) {
     const reporter = createWorkerReporter(process.env, {
       store: createStateStore(env),

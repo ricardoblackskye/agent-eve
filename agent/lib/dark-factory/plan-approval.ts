@@ -142,10 +142,32 @@ export type ApprovedPlanResult =
   | { ok: true; plan: unknown }
   | { ok: false; error: string };
 
-/** Not implemented yet (RED stub for #365 R4 Task 3). */
+/**
+ * Read the plan a human approved back off the ticket.
+ *
+ * Fails closed at every step. Re-planning on a resume would be the worst outcome available: it would code
+ * against a plan no human ever read, while appearing to honour the approval that was given.
+ */
 export async function loadApprovedPlan(
-  _deps: ApprovedPlanDeps,
-  _options: { owner: string; repo: string; issue: number },
+  deps: ApprovedPlanDeps,
+  options: { owner: string; repo: string; issue: number },
 ): Promise<ApprovedPlanResult> {
-  throw new Error("loadApprovedPlan is not implemented");
+  const listed = await deps.listComments(options.owner, options.repo, options.issue);
+  if (!listed.ok) {
+    return {
+      ok: false,
+      error: `the approved plan could not be read from the ticket: ${listed.error ?? "unknown error"}`,
+    };
+  }
+
+  const comment = findPlanComment(listed.comments ?? []);
+  if (!comment || typeof comment.body !== "string" || comment.body === "") {
+    return { ok: false, error: "there is no approved plan on this ticket to resume from" };
+  }
+
+  const parsed = parsePlanFromComment(comment.body);
+  if (!parsed.ok) {
+    return { ok: false, error: `the approved plan could not be read: ${parsed.error}` };
+  }
+  return { ok: true, plan: parsed.plan };
 }
