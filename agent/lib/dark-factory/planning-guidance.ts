@@ -31,9 +31,33 @@ export const PLANNING_GUIDANCE_SOURCE = {
   license: "MIT",
 } as const;
 
+/**
+ * Where the vendored copy lives.
+ *
+ * Deliberately OUTSIDE `agent/lib`. Eve's build discovery requires every file under `lib/` to be a
+ * supported authored module, and a markdown file there fails the build outright:
+ *
+ *   Expected ".../agent/lib/dark-factory/planning-guidance/writing-plans.md" to be a supported authored
+ *   module within "lib/".
+ *
+ * Nothing local catches that - not the tests, not `tsc`, not cspell, not markdownlint, and not
+ * `npm run build`, which runs the Next build only and never Eve's discovery. This is data the agent
+ * READS rather than an agent module, so it belongs with the other Superpowers material. Do not move it
+ * back under `agent/lib`.
+ */
+const VENDORED_GUIDANCE = join(
+  HERE,
+  "..",
+  "..",
+  "..",
+  "docs",
+  "superpowers",
+  "writing-plans.md",
+);
+
 /** The vendored copy, verbatim, including its attribution header. */
 export const WRITING_PLANS_GUIDANCE: string = readFileSync(
-  join(HERE, "planning-guidance", "writing-plans.md"),
+  VENDORED_GUIDANCE,
   "utf8",
 );
 
