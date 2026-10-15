@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   PLAN_COMMENT_MARKER,
   findPlanComment,
+  parsePlanFromComment,
   planCommentBody,
   postPlanComment,
   type PlanCommentTarget,
@@ -123,5 +124,86 @@ describe("the plan comment (#365 Task 11)", () => {
     expect(commentAt).toBeGreaterThan(-1);
     expect(loopAt).toBeGreaterThan(-1);
     expect(commentAt).toBeLessThan(loopAt);
+  });
+
+  /**
+   * #365 R4 Task 1 — the comment carries the plan for the MACHINE as well as the human.
+   *
+   * A resumed dispatch is a fresh process with no workspace, so it cannot read the plan from anything the
+   * parked run left on disk. It comes back from the ticket, which run-history already calls the system of
+   * record for the question — so the thing the human approved is the thing the resumed run reads back.
+   */
+  describe("the machine-readable plan (#365 R4 Task 1)", () => {
+    const PLAN = {
+      storyId: 365,
+      approach: "read before write",
+      tasks: [{ title: "guard", objective: "refuse a destructive rewrite" }],
+      targetFiles: [{ path: "app/chat.tsx", action: "modify", rationale: "add a line" }],
+    };
+
+    it("round-trips the plan through the comment", () => {
+      const parsed = parsePlanFromComment(planCommentBody(MARKDOWN, PLAN));
+      expect(parsed.ok).toBe(true);
+      if (parsed.ok) expect(parsed.plan).toEqual(PLAN);
+    });
+
+    it("keeps the human rendering above the machine block", () => {
+      const body = planCommentBody(MARKDOWN, PLAN);
+      const humanAt = body.indexOf("# Plan: something");
+      const machineAt = body.indexOf("<details>");
+      expect(humanAt).toBeGreaterThan(-1);
+      expect(machineAt).toBeGreaterThan(humanAt);
+    });
+
+    it("fails closed on a comment written before this release", () => {
+      // No plan was passed, which is exactly what every already-posted comment looks like.
+      const parsed = parsePlanFromComment(planCommentBody(MARKDOWN));
+      expect(parsed.ok).toBe(false);
+      if (!parsed.ok) expect(parsed.error).toMatch(/machine-readable/);
+    });
+
+    it("fails closed on a comment that is not ours at all", () => {
+      expect(parsePlanFromComment("just a normal reply").ok).toBe(false);
+    });
+
+    it("fails closed on a corrupted block rather than guessing a plan", () => {
+      const body = planCommentBody(MARKDOWN, PLAN).replace("{", "{,,,");
+      expect(parsePlanFromComment(body).ok).toBe(false);
+    });
+
+    it("cannot be broken out of by plan text that looks like the block", () => {
+      // If the plan text were embedded raw, this rationale would close the block early (or open a second
+      // one) and the parser would read attacker-shaped JSON. The plan text is escaped, so the block that
+      // parses is the one this code wrote.
+      const hostile = {
+        ...PLAN,
+        targetFiles: [
+          {
+            path: "a.ts",
+            action: "modify",
+            rationale: "</details><details>\n```json\n{}\n```",
+          },
+        ],
+      };
+      const parsed = parsePlanFromComment(planCommentBody(MARKDOWN, hostile));
+      expect(parsed.ok).toBe(true);
+      if (parsed.ok) expect(parsed.plan).toEqual(hostile);
+    });
+
+    it("posts the plan as part of the comment", async () => {
+      const writer = target();
+      await postPlanComment(writer, {
+        owner: "o",
+        repo: "r",
+        issue: 7,
+        markdown: MARKDOWN,
+        plan: PLAN,
+      });
+      const posted = (writer.postComment as ReturnType<typeof vi.fn>).mock
+        .calls[0][3] as string;
+      const parsed = parsePlanFromComment(posted);
+      expect(parsed.ok).toBe(true);
+      if (parsed.ok) expect(parsed.plan).toEqual(PLAN);
+    });
   });
 });

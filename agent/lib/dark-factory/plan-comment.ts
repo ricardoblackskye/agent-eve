@@ -43,6 +43,14 @@ export interface PostPlanCommentOptions {
   repo: string;
   issue: number;
   markdown: string;
+  /**
+   * The plan itself, for the machine (#365 R4).
+   *
+   * A resumed dispatch is a fresh process with no workspace, so the plan it codes against has to survive
+   * the wait on the ticket. The comment carries the human rendering AND this, so the thing the human
+   * approved is the thing the resumed run reads back.
+   */
+  plan?: unknown;
 }
 
 export type PlanCommentResult =
@@ -55,8 +63,19 @@ export type PlanCommentResult =
  * The marker leads so a human opening the ticket sees the plan immediately; an HTML comment renders as
  * nothing, so putting it first costs no visual noise while making the comment findable by a retry.
  */
-export function planCommentBody(markdown: string): string {
+export function planCommentBody(markdown: string, _plan?: unknown): string {
+  // RED stub (#365 R4 Task 1): the plan is accepted and DISCARDED, so the comment carries no
+  // machine-readable plan and a resumed run has nothing to read back. GREEN appends it.
   return `${PLAN_COMMENT_MARKER}\n\n${markdown}`;
+}
+
+export type PlanParseResult =
+  | { ok: true; plan: unknown }
+  | { ok: false; error: string };
+
+/** Not implemented yet (RED stub for #365 R4 Task 1). */
+export function parsePlanFromComment(_commentBody: string): PlanParseResult {
+  throw new Error("parsePlanFromComment is not implemented");
 }
 
 /** This Factory's plan comment on a ticket, if it already has one. */
