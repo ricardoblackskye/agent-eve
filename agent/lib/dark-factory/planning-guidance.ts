@@ -7,7 +7,7 @@
  *
  * The guidance is VENDORED rather than fetched: the architect runs inside a sandbox with no outbound
  * access to GitHub, so the text has to travel with the code. `planning-guidance/writing-plans.md` holds
- * a verbatim copy with its source, commit, licence and sync instructions; this module loads it.
+ * a verbatim copy with its source, commit, license and sync instructions; this module loads it.
  */
 
 import { readFileSync } from "node:fs";
@@ -28,7 +28,7 @@ export const PLANNING_GUIDANCE_SOURCE = {
   url: "https://github.com/obra/superpowers/blob/bb92a77741419a4ab5f06e711a283343f1ada0c3/skills/writing-plans/SKILL.md",
   commit: "bb92a77741419a4ab5f06e711a283343f1ada0c3",
   release: "v7.0.0",
-  licence: "MIT",
+  license: "MIT",
 } as const;
 
 /** The vendored copy, verbatim, including its attribution header. */
