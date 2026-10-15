@@ -11,6 +11,19 @@
 /** The marker identifying this Factory's own plan comment, whatever the plan says. */
 export const PLAN_COMMENT_MARKER = "<!-- dark-factory:plan -->";
 
+/** A markdown code fence. A constant because the block writes one and the parser looks for it. */
+const FENCE = "```";
+
+/**
+ * The collapsed machine-readable block (#365 R4).
+ *
+ * It is appended LAST and closes the comment, which is what makes parsing unambiguous: `parsePlanFromComment`
+ * anchors on the end of the body and on the last opening tag, so plan text containing "<details>" cannot
+ * be mistaken for the block.
+ */
+const DETAILS_OPEN = "<details>";
+const DETAILS_CLOSE = "</details>";
+
 /** A comment as the ticket API returns it. */
 export interface PlanCommentRecord {
   id: number;
@@ -63,19 +76,79 @@ export type PlanCommentResult =
  * The marker leads so a human opening the ticket sees the plan immediately; an HTML comment renders as
  * nothing, so putting it first costs no visual noise while making the comment findable by a retry.
  */
-export function planCommentBody(markdown: string, _plan?: unknown): string {
-  // RED stub (#365 R4 Task 1): the plan is accepted and DISCARDED, so the comment carries no
-  // machine-readable plan and a resumed run has nothing to read back. GREEN appends it.
-  return `${PLAN_COMMENT_MARKER}\n\n${markdown}`;
+export function planCommentBody(markdown: string, plan?: unknown): string {
+  const human = `${PLAN_COMMENT_MARKER}\n\n${markdown}`;
+  if (plan === undefined) {
+    return human;
+  }
+
+  // Escaped so plan TEXT cannot become plan STRUCTURE. Both cases were caught by the tests here:
+  // a rationale containing "</details>" would close the block early, and one containing a fence would
+  // truncate the JSON payload at the first fence the parser found. These are valid JSON escapes that
+  // decode back, so the round-trip stays exact.
+  const json = JSON.stringify(plan)
+    .replace(/</g, "\\u003c")
+    .replace(/>/g, "\\u003e")
+    .replace(/`/g, "\\u0060");
+
+  return [
+    human,
+    "",
+    DETAILS_OPEN,
+    "<summary>Machine-readable plan (read back when this run resumes)</summary>",
+    "",
+    `${FENCE}json`,
+    json,
+    FENCE,
+    "",
+    DETAILS_CLOSE,
+  ].join("\n");
 }
 
 export type PlanParseResult =
   | { ok: true; plan: unknown }
   | { ok: false; error: string };
 
-/** Not implemented yet (RED stub for #365 R4 Task 1). */
-export function parsePlanFromComment(_commentBody: string): PlanParseResult {
-  throw new Error("parsePlanFromComment is not implemented");
+/**
+ * Read the plan back out of a plan comment (#365 R4).
+ *
+ * Fails CLOSED. A comment from before this release carries no block, and a resumed run must stop rather
+ * than code against a guessed plan — re-planning would be worse still, because the human approved the plan
+ * they read, not a fresh one.
+ */
+export function parsePlanFromComment(commentBody: string): PlanParseResult {
+  const body = (commentBody ?? "").replace(/\s+$/, "");
+  if (!body.includes(PLAN_COMMENT_MARKER)) {
+    return { ok: false, error: "this comment is not a Dark Factory plan comment" };
+  }
+  if (!body.endsWith(DETAILS_CLOSE)) {
+    return {
+      ok: false,
+      error:
+        "the plan comment carries no machine-readable plan (a comment posted before this release has none)",
+    };
+  }
+
+  const block = body.slice(body.lastIndexOf(DETAILS_OPEN));
+  const fence = `${FENCE}json`;
+  const fenceAt = block.indexOf(fence);
+  if (fenceAt === -1) {
+    return { ok: false, error: "the machine-readable plan block has no JSON fence" };
+  }
+  const afterFence = block.slice(fenceAt + fence.length);
+  const closeAt = afterFence.indexOf(FENCE);
+  if (closeAt === -1) {
+    return { ok: false, error: "the machine-readable plan block is not closed" };
+  }
+
+  try {
+    return { ok: true, plan: JSON.parse(afterFence.slice(0, closeAt).trim()) };
+  } catch (error) {
+    return {
+      ok: false,
+      error: `the machine-readable plan is not valid JSON: ${(error as Error).message}`,
+    };
+  }
 }
 
 /** This Factory's plan comment on a ticket, if it already has one. */
@@ -99,7 +172,7 @@ export async function postPlanComment(
   target: PlanCommentTarget,
   options: PostPlanCommentOptions,
 ): Promise<PlanCommentResult> {
-  const body = planCommentBody(options.markdown);
+  const body = planCommentBody(options.markdown, options.plan);
 
   const listed = await target.listComments(options.owner, options.repo, options.issue);
   if (!listed.ok) {
