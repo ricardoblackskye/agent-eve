@@ -156,6 +156,37 @@ A user must authenticate via Google OAuth before accessing the Eve Chat UI.
     expect(parsed.__proto__.polluted).toBeUndefined();
   });
 
+  it("approves a plan that declares a 'replace' action for a whole-file rewrite", () => {
+    // `replace` is the ONE sanctioned way to lose the old code, because it says in the plan itself
+    // that the file is being rewritten. See #361.
+    const plan: ExecutionPlan = {
+      ...basePlan,
+      targetFiles: [
+        {
+          path: "app/chat.tsx",
+          action: "replace",
+          rationale:
+            "Rewrite the component from scratch under a new design; the existing code is removed by intent.",
+        },
+      ],
+    };
+    const result = validateExecutionPlan(plan, sampleStoryText);
+    expect(result.valid).toBe(true);
+    expect(result.errors).toHaveLength(0);
+  });
+
+  it("still rejects an action it does not understand", () => {
+    const plan = {
+      ...basePlan,
+      targetFiles: [
+        { path: "app/chat.tsx", action: "delete", rationale: "not a real action" },
+      ],
+    } as unknown as ExecutionPlan;
+    const result = validateExecutionPlan(plan, sampleStoryText);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.includes("action must be"))).toBe(true);
+  });
+
   it("extracts and parses plan JSON with DefaultPlanParser", async () => {
     const { DefaultPlanParser } = await import("../../agent/lib/dark-factory/plan-validator");
     const parser = new DefaultPlanParser();
