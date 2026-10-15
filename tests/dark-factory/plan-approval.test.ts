@@ -202,6 +202,16 @@ describe("resuming against the approved plan (#365 R4 Task 3)", () => {
     if (!result.ok) expect(result.error).toMatch(/machine-readable/);
   });
 
+  it("labels and comments on the RUN's repo, not a hardcoded one (#348)", () => {
+    const runner = readFileSync("scripts/dark-factory-runner.ts", "utf8");
+    // Four call sites passed ("ricardoblackskye", "agent-eve") as literals, including the planning-failure
+    // path, so a run for any other repository would have labelled and commented on the WRONG one. The
+    // remaining repo literals are the default target and the allowed-repos default, which #348 replaces
+    // wholesale along with the single-repo assumption behind them.
+    expect(runner).not.toMatch(/"ricardoblackskye",\s*"agent-eve"/);
+    expect(runner).toContain("repoOwner, repoName");
+  });
+
   it("has the runner read the approved plan instead of re-planning on a resume", () => {
     const runner = readFileSync("scripts/dark-factory-runner.ts", "utf8");
     const resumeAt = runner.indexOf("loadApprovedPlan(");
