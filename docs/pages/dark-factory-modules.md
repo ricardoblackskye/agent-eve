@@ -10,7 +10,7 @@
 > is [Dark Factory (R1)](dark-factory.md) and the flow walkthroughs in the
 > [flow deep-dives](flow-run-lifecycle.md).
 
-_98 modules._
+_99 modules._
 
 ## agent-cli-author
 
@@ -456,6 +456,14 @@ Operator CLI for the self-improvement gate (#159). The gate in `self-improve.ts`
 **Source:** [`agent/lib/dark-factory/operator-cli.ts`](../../agent/lib/dark-factory/operator-cli.ts)
 
 **Exports:** `OPERATOR_CLI_USAGE`, `OperatorCliCommand`, `OperatorCliDeps`, `OperatorCliResult`, `OperatorCliUsageError`, `OperatorDecisionValue`, `ProposalKind`, `parseOperatorArgs`, `runOperatorCli`
+
+## plan-file
+
+Dark Factory — Plan File Renderer (#361). Renders an ExecutionPlan as reviewable markdown, so a run that fails before its commit still leaves its intent on the branch. The output is constrained by this repository's markdown linting (MegaLinter lints changed markdown in the pull request): every fenced block carries a language (MD040), task headings are numbered so they never repeat (MD024), heading text is stripped of trailing punctuation (MD026), and table cells have their pipes escaped. `approach` and `tasks` are optional, so a plan that does not carry them renders without those sections.
+
+**Source:** [`agent/lib/dark-factory/plan-file.ts`](../../agent/lib/dark-factory/plan-file.ts)
+
+**Exports:** `PlanFileInput`, `PlanTask`, `renderPlanFile`
 
 ## plan-validator
 
