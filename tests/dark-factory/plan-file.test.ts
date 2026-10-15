@@ -160,7 +160,7 @@ describe("renderPlanFile", () => {
       issueUrl: "https://github.com/ricardoblackskye/agent-eve/issues/361",
     });
     for (const line of md.split("\n")) {
-      // Remove markdown link targets and autolinks; no URL may remain bare in the prose.
+      // Remove markdown link targets and angle-bracket links; no URL may remain bare in the prose.
       const bare = line.replace(/\]\([^)]*\)/g, "").replace(/<[^>]*>/g, "");
       expect(bare).not.toMatch(/https?:\/\//);
     }
