@@ -182,7 +182,11 @@ async function main(): Promise<void> {
   const env = initEnv();
   const token = resolveIssueToken(env);
   const allowed = resolveWorkerAllowedRepos(env);
+  // #348: the Factory currently runs against ONE repository. Replacing this literal with the repository the
+  // dispatch actually targets is the point of that issue. Until then, every repo-wide reference in this run
+  // derives from here - which is why nothing below hardcodes an owner and a name again.
   const targetRepo = "ricardoblackskye/agent-eve";
+  const [repoOwner, repoName] = targetRepo.split("/");
 
   const issueArgIdx = process.argv.indexOf("--issue");
   const issueNum =
@@ -272,14 +276,14 @@ async function main(): Promise<void> {
     `\n[STEP 2] Updating ticket lifecycle label to 'df:running' and posting progress comment...`,
   );
   await issueWriter.addLabel(
-    "ricardoblackskye",
-    "agent-eve",
+    repoOwner,
+    repoName,
     issueNum,
     "df:running",
   );
   await issueWriter.postComment(
-    "ricardoblackskye",
-    "agent-eve",
+    repoOwner,
+    repoName,
     issueNum,
     `🤖 **Eve** (Dark Factory) — Dispatched Hardened Pipeline on #${issueNum}\n\n` +
       `- **Task Branch**: \`${branchName}\`\n` +
@@ -361,8 +365,8 @@ async function main(): Promise<void> {
       `[ERROR] Architect Agent planning failed: ${planResult.error}`,
     );
     await issueWriter.addLabel(
-      "ricardoblackskye",
-      "agent-eve",
+      repoOwner,
+      repoName,
       issueNum,
       "needs-answer",
     );
@@ -476,7 +480,6 @@ async function main(): Promise<void> {
   const sandboxWorkspace =
     (process.env.DF_SANDBOX_WORKSPACE ?? "").trim() ||
     DEFAULT_SANDBOX_WORKSPACE;
-  const [repoOwner, repoName] = targetRepo.split("/");
   const gitHost = (
     process.env.DF_SANDBOX_EGRESS_GIT_HOST ?? "github.com"
   ).trim();
@@ -821,8 +824,8 @@ async function main(): Promise<void> {
       },
     );
     await issueWriter.postComment(
-      "ricardoblackskye",
-      "agent-eve",
+      repoOwner,
+      repoName,
       issueNum,
       `🤖 **Eve** (Dark Factory) — Story #${issueNum} Completed with Verified Traceability ✅\n\n` +
         `- **PR**: ${dodResult.pr.url}\n` +
