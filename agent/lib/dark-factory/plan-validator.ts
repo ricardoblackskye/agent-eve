@@ -22,10 +22,33 @@ export interface AcceptanceCriteriaTestMapping {
   testCaseName: string;
 }
 
+/**
+ * A task within the plan's approach (#365 Task 8).
+ *
+ * The canonical definition lives here, with the rest of the plan schema; the plan-file renderer
+ * imports it rather than declaring its own, so the two cannot drift apart.
+ */
+export interface PlanTask {
+  title: string;
+  objective: string;
+  files?: string[];
+  steps?: string[];
+  verification?: string;
+}
+
 export interface ExecutionPlan {
   storyId: number;
   title: string;
   summary: string;
+  /**
+   * How the change will be made, in prose.
+   *
+   * Optional on purpose: plans in flight and existing fixtures predate it, and the architect prompt
+   * is what asks the model for it. The validator checks its shape when it is present.
+   */
+  approach?: string;
+  /** The work broken into reviewable tasks. Optional for the same reason as `approach`. */
+  tasks?: PlanTask[];
   targetFiles: PlanTargetFile[];
   acceptanceCriteriaMap: AcceptanceCriteriaTestMapping[];
   dependencies?: string[];

@@ -10,14 +10,11 @@
  * (MD026). Those are constraints on this renderer, not cosmetic details.
  */
 
-/** A task within the plan's approach. */
-export interface PlanTask {
-  title: string;
-  objective: string;
-  files?: string[];
-  steps?: string[];
-  verification?: string;
-}
+// Imported for local use AND re-exported: a bare `export type { X } from "..."` re-exports without
+// bringing the name into scope, which silently turned this module's task typing into `any`.
+import type { PlanTask } from "./plan-validator";
+
+export type { PlanTask };
 
 /**
  * The shape this renderer understands.

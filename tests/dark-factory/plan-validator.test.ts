@@ -187,6 +187,64 @@ A user must authenticate via Google OAuth before accessing the Eve Chat UI.
     expect(result.errors.some((e) => e.includes("action must be"))).toBe(true);
   });
 
+  // --- #365 Task 8: the plan can express an approach -------------------------
+
+  it("approves a plan that carries an approach and a task breakdown", () => {
+    const plan: ExecutionPlan = {
+      ...basePlan,
+      approach: "Read the file before writing it, then compare what is kept against what is removed.",
+      tasks: [
+        {
+          title: "Preservation guard",
+          objective: "Refuse a destructive rewrite of a modify target.",
+          files: ["agent/lib/dark-factory/preservation-guard.ts"],
+          steps: ["Measure the lines removed.", "Refuse past the threshold."],
+          verification: "tests/dark-factory/preservation-guard.test.ts",
+        },
+      ],
+    };
+    const result = validateExecutionPlan(plan, sampleStoryText);
+    expect(result.valid).toBe(true);
+    expect(result.errors).toHaveLength(0);
+  });
+
+  it("rejects a blank approach when the plan provides one", () => {
+    const plan: ExecutionPlan = { ...basePlan, approach: "   " };
+    const result = validateExecutionPlan(plan, sampleStoryText);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.includes("approach"))).toBe(true);
+  });
+
+  it("rejects an empty task list when the plan provides one", () => {
+    const plan: ExecutionPlan = { ...basePlan, tasks: [] };
+    const result = validateExecutionPlan(plan, sampleStoryText);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.includes("at least one task"))).toBe(true);
+  });
+
+  it("rejects a task with no title or no objective", () => {
+    const plan: ExecutionPlan = {
+      ...basePlan,
+      tasks: [
+        { title: "", objective: "Something." },
+        { title: "Named properly", objective: "  " },
+      ],
+    };
+    const result = validateExecutionPlan(plan, sampleStoryText);
+    expect(result.valid).toBe(false);
+    // The message names WHICH task: "task 1" and "task 2", not a bare count.
+    expect(result.errors.some((e) => e.includes("task 1") && e.includes("title"))).toBe(true);
+    expect(result.errors.some((e) => e.includes("task 2") && e.includes("objective"))).toBe(true);
+  });
+
+  it("still accepts a plan that omits both, so existing plans keep working", () => {
+    // Deliberate, and the reason there is no opt-out flag: the fields are OPTIONAL on the type, and the
+    // architect PROMPT is what asks the model for them. Making them required here would invalidate every
+    // plan already in flight and every existing fixture, for a guarantee the prompt already carries.
+    const result = validateExecutionPlan(basePlan, sampleStoryText);
+    expect(result.valid).toBe(true);
+  });
+
   it("extracts and parses plan JSON with DefaultPlanParser", async () => {
     const { DefaultPlanParser } = await import("../../agent/lib/dark-factory/plan-validator");
     const parser = new DefaultPlanParser();
