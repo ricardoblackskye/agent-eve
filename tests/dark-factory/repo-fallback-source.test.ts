@@ -50,3 +50,19 @@ describe("the backlog provider's default is config-sourced, not a literal", () =
     expect(repo).toBe("agent-eve");
   });
 });
+
+describe("the webhook prompt does not name a board (#348 R2 Task 6)", () => {
+  const source = readFileSync("app/api/github/webhook/route.ts", "utf8");
+
+  it("stops instructing the agent to use a specific login and project number", () => {
+    // This is the worst place for a hardcode to live: prose that TELLS an agent what to do. A fallback
+    // can only be wrong when it is used; an instruction is followed.
+    expect(source).not.toContain('login "ricardoblackskye"');
+    expect(source).not.toMatch(/projectNumber 3/);
+  });
+
+  it("tells the agent the tool resolves the board instead", () => {
+    expect(source).toContain("dark-factory.config.json");
+    expect(source).toMatch(/Do NOT supply projectOwner/);
+  });
+});
