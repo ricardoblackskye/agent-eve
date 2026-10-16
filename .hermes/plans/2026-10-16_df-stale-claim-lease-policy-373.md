@@ -1,8 +1,12 @@
-# 0039 — An active-run claim is a LEASE, and only a stale one may be retired
+# Policy proposal — an active-run claim is a LEASE, and only a stale one may be retired
 
 - **Date:** 2026-10-16
-- **Status:** Proposed
+- **Status:** PROPOSAL — awaiting your decision, not yet a decision.
 - **Related:** 0026 (one active run per repo+issue), 0037 (the target repository is resolved), #373.
+
+> This is a proposal rather than an ADR because the repo's ADR integrity gate accepts only `Accepted` or
+> `Superseded by NNNN` — correctly, since an ADR records a decision already taken. On your approval this
+> becomes ADR 0039 with status `Accepted` and its index row.
 
 ## Context
 
