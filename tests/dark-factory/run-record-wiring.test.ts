@@ -17,8 +17,12 @@ describe("runner records its run (#316)", () => {
     expect(source).toContain("beginRunRecord(");
   });
 
-  it("adopts the ledger's run id for everything downstream", () => {
-    expect(source).toContain("const runId = begun.runId;");
+  it("adopts the run id the start DECISION chose, for everything downstream", () => {
+    // #373: the decision is what separates starting from continuing. On a fresh run that is the id the ledger
+    // minted; on a resume against a parked (blocked) holder it is THAT run's id - which is what makes the
+    // resumed run's lifecycle writes land on the real run instead of a phantom run id.
+    expect(source).toContain("const startDecision = decideRunStart(begun");
+    expect(source).toContain("const runId = startDecision.runId;");
   });
 
   it("resolves the runner's own id as the ATTEMPT identity, not the run id", () => {

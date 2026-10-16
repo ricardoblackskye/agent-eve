@@ -25,7 +25,10 @@ import {
   type DefinitionOfDoneTask,
   type ReviewFinding,
 } from "../agent/lib/dark-factory/definition-of-done";
-import { applyTerminalLifecycle } from "../agent/lib/dark-factory/run-finalizer";
+import {
+  applyStartLifecycle,
+  applyTerminalLifecycle,
+} from "../agent/lib/dark-factory/run-finalizer";
 import { GitHubPrWriter } from "../agent/lib/dark-factory/pr-writer";
 import {
   GitHubIssueWriter,
@@ -92,7 +95,10 @@ import {
 } from "../agent/lib/dark-factory/cost-budget-store";
 import { createCostGovernor } from "../agent/lib/dark-factory/cost-governor";
 import { createRunHistoryStore } from "../agent/lib/dark-factory/run-history-provider";
-import { beginRunRecord } from "../agent/lib/dark-factory/run-record";
+import {
+  beginRunRecord,
+  decideRunStart,
+} from "../agent/lib/dark-factory/run-record";
 import { withNotifications } from "../agent/lib/dark-factory/notifying-run-history";
 import { runGovernedAgentCall } from "../agent/lib/dark-factory/governed-agent-call";
 
@@ -240,13 +246,32 @@ async function main(): Promise<void> {
   // addressable by its control actions. An unconfigured ledger is reported loudly and the attempt
   // id is used as a fallback, so a local run still works.
   const runHistory = withNotifications(createRunHistoryStore(env), env);
+  const isResume = process.argv.includes("--resume");
+
   const begun = await beginRunRecord({
     history: runHistory,
     attemptId,
     repo: targetRepo,
     issue: issueNum,
   });
-  const runId = begun.runId;
+  // #373: a run the ledger refused because ANOTHER run holds this issue must not start. The previous
+  // behaviour carried on with the attempt id as a synthetic run id, so its lifecycle writes targeted a run
+  // the ledger had never minted - the stale claim kept the issue and nothing could release it.
+  // #373: a FRESH run refused because another run holds this issue must not start. The old behaviour
+  // carried on with the attempt id as a synthetic run id, so its writes targeted a run the ledger had
+  // never minted and the claim could never be released. A RESUME is different: the blocked holder IS the
+  // run being approved, so it is adopted and the writes land on the real run.
+  const startDecision = decideRunStart(begun, { resuming: isResume });
+  if (startDecision.kind === "refuse") {
+    throw new Error(startDecision.reason);
+  }
+  if (startDecision.kind === "adopt") {
+    console.log(
+      `\n[RESUME] Continuing the parked run ${startDecision.runId}.`,
+    );
+  }
+
+  const runId = startDecision.runId;
 
   const { store: runControlStore, checkpoint } = buildRunControl(env, runId);
   activeControlStore = runControlStore;
@@ -307,12 +332,18 @@ async function main(): Promise<void> {
   console.log(
     `\n[STEP 2] Updating ticket lifecycle label to 'df:running' and posting progress comment...`,
   );
-  await issueWriter.addLabel(
-    repoOwner,
-    repoName,
-    issueNum,
-    "df:running",
+  // #373: clear the previous attempt's terminal label first. A run that died left `df:failed` behind, and
+  // adding `df:running` beside it made the ticket advertise two contradictory outcomes at once.
+  const startLifecycle = await applyStartLifecycle(
+    { labelWriter },
+    { repo: targetRepo, issue: issueNum },
   );
+  if (!startLifecycle.applied) {
+    console.warn(
+      `[WARN] The ticket lifecycle could not be set up cleanly: ${startLifecycle.error ?? "unknown error"}`,
+    );
+  }
+  console.log(`  -> Cleared: ${startLifecycle.cleared.join(", ") || "nothing to clear"}`);
   await issueWriter.postComment(
     repoOwner,
     repoName,
@@ -328,7 +359,7 @@ async function main(): Promise<void> {
   // #365 R4: on a RESUME the plan is NOT regenerated. A fresh plan is a different plan from the one a human
   // approved, so the approved plan is read back off the ticket instead - and if it cannot be read, the run
   // stops rather than guessing.
-  const isResume = process.argv.includes("--resume");
+  // Hoisted above the run record: a resume changes how a held claim is treated (#373).
   const approvedPlan = isResume
     ? await loadApprovedPlan(
         {
@@ -539,6 +570,9 @@ async function main(): Promise<void> {
     markdown: renderPlanFile(executionPlan, {
       issueUrl: `https://github.com/${targetRepo}/issues/${issueNum}`,
     }),
+    // #373: the plan ITSELF, not only its rendering. Without it the comment carries no machine-readable
+    // block, so the run that resumes against this comment cannot read the plan back and stops.
+    plan: executionPlan,
   });
   if (!planComment.ok) {
     throw new Error(`the plan comment could not be posted: ${planComment.error}`);
@@ -631,7 +665,13 @@ async function main(): Promise<void> {
             // same governed path as before; a failed author propagates as a failed iteration.
             let authored: AuthorFilesResult;
             try {
-              authored = await authorFiles(codeAuthor, ctx.plan, ctx.tools);
+              authored = await authorFiles(
+                codeAuthor,
+                ctx.plan,
+                ctx.tools,
+                // #373: the last iteration's failure, so the loop can actually self-correct.
+                ctx.previousFailure?.output,
+              );
             // #361 (R2): the commit after the loop stages `lastAuthored`, not just the plan's targets.
             lastAuthored = authored;
             } catch (err: any) {
@@ -770,6 +810,19 @@ async function main(): Promise<void> {
       planArtifactPath ? [planArtifactPath] : [],
     ).join(" ");
     await checkpoint();
+    // #373: the task branch must EXIST before anything is committed to it. Without this the commit landed
+    // on whatever was checked out - `main`, in a local run - so no ref was created and the push died with
+    // git reporting that the ref it was handed does not exist. That is what stopped a local run reaching a PR. The sandbox path
+    // is unaffected: it commits inside the sandbox.
+    try {
+      execSync(`git checkout -b ${branchName}`, { stdio: "inherit" });
+    } catch {
+      // The branch already exists (a retry, or an earlier attempt). Use it rather than resetting it: a
+      // reset here would discard work that may already be under review.
+      execSync(`git checkout ${branchName}`, { stdio: "inherit" });
+    }
+    await checkpoint();
+
     execSync(`git add ${filesToCommit}`, { stdio: "inherit" });
     await checkpoint();
     execSync(`git commit -m "feat: #${issueNum} ${executionPlan.title}"`, {
@@ -784,6 +837,17 @@ async function main(): Promise<void> {
     });
     await pushVault.put("git-push-token", token);
     try {
+      // #373: name the real reason rather than leaking git's own ref error, which describes the symptom
+      // (a missing ref) and not the cause (nothing created the branch).
+      const headBranch = execSync("git rev-parse --abbrev-ref HEAD")
+        .toString()
+        .trim();
+      if (headBranch !== branchName) {
+        throw new Error(
+          `refusing to push: HEAD is '${headBranch}' rather than the task branch '${branchName}'`,
+        );
+      }
+
       await gitPushWithVault({
         owner: ownerRepo[0],
         repo: ownerRepo[1],
@@ -956,7 +1020,7 @@ async function readExistingFile(
  * #361 — the author is shown the current content of the files it is modifying, and every write is
  * checked against what is already there before a single byte lands. A refused write throws
  * `PreservationRefusedError`, which the caller's worker turns into a failed iteration whose message
- * becomes the next iteration's context.
+ * IS handed to the next iteration as `feedback` (#373 - that sentence described intent, not behaviour, until the loop's context carried it).
  */
 export async function authorFiles(
   author: CodeAuthorProvider,
@@ -965,6 +1029,8 @@ export async function authorFiles(
     readFile(relPath: string): Promise<string>;
     writeFile(relPath: string, content: string): Promise<void>;
   },
+  /** The previous iteration's failure, if any (#373). */
+  feedback?: string,
 ): Promise<AuthorFilesResult> {
   const actions = readPlanTargetActions(plan);
 
@@ -981,6 +1047,7 @@ export async function authorFiles(
   const result = await author.write({
     plan,
     ...(Object.keys(existing).length > 0 ? { existing } : {}),
+    ...(feedback && feedback.trim() !== "" ? { feedback } : {}),
   });
 
   // Read the pre-write content of EVERY authored path before writing any of them: the guard needs

@@ -68,7 +68,7 @@ export function createAgentCliCodeAuthor(cli: AgentCliName, deps: AgentCliDeps):
         );
       }
       // The SAME prompt the in-process author uses, so the two backends ask the same question.
-      const command = buildAgentCliCommand(deps.commandTemplate, buildCodeAuthorPrompt(task.plan));
+      const command = buildAgentCliCommand(deps.commandTemplate, buildCodeAuthorPrompt(task.plan, task.existing, task.feedback));
       // The CLI is pointed at OUR gateway and carries a lease. No provider key is available here to
       // leak, and the call is governed at the gateway regardless of what the CLI believes.
       const env = {

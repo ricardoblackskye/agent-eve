@@ -39,16 +39,77 @@ export interface BeginRunRecordResult {
   /** True when the ledger could not record it, so `runId` is the fallback attempt id. */
   fellBack: boolean;
   error?: string;
+  /**
+   * Set when the ledger refused because another run holds this (repo, issue). Carried STRUCTURALLY so the
+   * start guard decides on a field rather than on the wording of a message (#373).
+   */
+  activeConflict?: { runId: string; status: string };
 }
 
 /**
  * The delivery identity for an attempt. Namespaced with `runner:` so it can never collide with a
  * webhook delivery id (`comment:<id>`, `operator-<action>:<runId>`, …).
  */
+/**
+ * Whether a run-history driver is configured at all. The advice "set DF_RUN_HISTORY_DRIVER" is only
+ * true when this is false (#373); otherwise it sends an operator to check the one thing already correct.
+ */
+function driverConfigured(): boolean {
+  return (process.env.DF_RUN_HISTORY_DRIVER ?? "").trim() !== "";
+}
+
 export function runnerDeliveryId(attemptId: string): string {
   return `runner:${attemptId.trim()}`;
 }
 
+export type RunStartDecision =
+  | { kind: "start"; runId: string }
+  | { kind: "adopt"; runId: string }
+  | { kind: "refuse"; reason: string };
+
+/**
+ * Whether this run may start, may adopt the run it is approving, or must refuse.
+ *
+ * Three outcomes, not two, and the third is what makes the approval gate work. Parking marks a run
+ * `blocked`, which HOLDS the claim, so the run awaiting approval is also the run blocking a fresh
+ * dispatch. Since a resume arrives as an ordinary dispatch with a newly minted attempt id, refuse-only
+ * guarding would mean approving a plan could never let that run continue.
+ *
+ * ADOPT is therefore limited to a RESUME against a BLOCKED holder - the run parked awaiting a human. A
+ * `queued` or `running` holder is genuinely in flight and is never adopted. The adopted id is the
+ * substance: it is what makes the resumed run's writes land on the real run rather than a phantom (#373).
+ */
+export function decideRunStart(
+  result: BeginRunRecordResult,
+  options: { resuming?: boolean } = {},
+): RunStartDecision {
+  if (!result.activeConflict) return { kind: "start", runId: result.runId };
+
+  const { runId: holder, status } = result.activeConflict;
+  if (options.resuming && status === "blocked") {
+    return { kind: "adopt", runId: holder };
+  }
+
+  // The explanation is reused rather than rebuilt: it already names the holder, its status and the issue.
+  // Only the consequence is added, as its own sentence.
+  const consequence =
+    options.resuming && status !== "blocked"
+      ? `This run will not start: a resume continues a run parked awaiting approval, and that one is '${status}'.`
+      : "This run will not start: wait for that run to finish, or retire its claim if the process is gone.";
+  return {
+    kind: "refuse",
+    reason: `${result.error ?? "Another run already holds this issue"}. ${consequence}`,
+  };
+}
+
+/** Refusal-only view of {@link decideRunStart}, for callers that have nothing to adopt. */
+export function refuseToStartReason(
+  result: BeginRunRecordResult,
+  options: { resuming?: boolean } = {},
+): string | null {
+  const decision = decideRunStart(result, options);
+  return decision.kind === "refuse" ? decision.reason : null;
+}
 export async function beginRunRecord(
   input: BeginRunRecordInput,
 ): Promise<BeginRunRecordResult> {
@@ -77,11 +138,33 @@ export async function beginRunRecord(
     };
   }
 
+  // #373 - the ADR 0026 atomic active-run claim arrives as `ok: true` with an `activeConflict` and NO
+  // value, so the check below would call it a refusal and report no reason. Name the holder instead: it
+  // is the one fact an operator needs, and without it a stale claim is invisible and unexplained.
+  if (accepted.activeConflict) {
+    const { runId: holderRunId, status: holderStatus } = accepted.activeConflict;
+    const conflict =
+      `the ledger already holds an active run (${holderRunId}, status '${holderStatus}') for ` +
+      `${input.repo}#${input.issue}, so this attempt was not recorded`;
+    log(`[WARN] The run record could not be opened: ${conflict}.`);
+    return {
+      runId: attemptId,
+      recorded: false,
+      fellBack: true,
+      error: conflict,
+      activeConflict: { runId: holderRunId, status: holderStatus },
+    };
+  }
+
   if (!accepted.ok || !accepted.value) {
     const error = accepted.error ?? "the ledger refused the delivery";
+    // #373 - the old advice said "set DF_RUN_HISTORY_DRIVER" unconditionally, which is false when the
+    // driver is set and the store simply refused. Point at the store that actually answered instead.
+    const advice = driverConfigured()
+      ? `The store in use is '${accepted.providerId}'.`
+      : `Set DF_RUN_HISTORY_DRIVER to record runs.`;
     log(
-      `[WARN] The run record could not be opened (${error}); this run will not be recorded. ` +
-        `Set DF_RUN_HISTORY_DRIVER to record runs.`,
+      `[WARN] The run record could not be opened (${error}); this run will not be recorded. ${advice}`,
     );
     return { runId: attemptId, recorded: false, fellBack: true, error };
   }
