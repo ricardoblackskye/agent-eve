@@ -6,11 +6,22 @@ import {
   resolveModelId,
 } from "./model-config";
 
-const openrouter = createOpenAI({
+/**
+ * Built on FIRST USE, not at import (#373). The OpenRouter key comes from `.env`, which the runner
+ * loads in `initEnv()` - at module scope, but after its own imports have been evaluated, because ESM
+ * hoists them. Building this at module scope captured an EMPTY key, so every request went out
+ * unauthenticated while the runner's log truthfully reported the key as present.
+ */
+let openrouterClient: ReturnType<typeof createOpenAI> | undefined;
+
+function openrouter(): ReturnType<typeof createOpenAI> {
+  openrouterClient ??= createOpenAI({
   baseURL: "https://openrouter.ai/api/v1",
-  apiKey: process.env.OPENROUTER_API_KEY ?? "",
-  name: "openrouter",
-});
+    apiKey: process.env.OPENROUTER_API_KEY ?? "",
+    name: "openrouter",
+  });
+  return openrouterClient;
+}
 
 /**
  * Production chat uses the real OpenRouter model. The model id is configurable
@@ -29,7 +40,7 @@ export function resolveChatModel(opts?: {
   fallback?: string;
   /** Explicit model id; beats EVE_CHAT_MODEL. Used by the LLM policy (#208). */
   modelId?: string;
-}): ReturnType<typeof openrouter.chat> | ReturnType<typeof mockModel> {
+}): ReturnType<ReturnType<typeof openrouter>["chat"]> | ReturnType<typeof mockModel> {
   const modelId = resolveModelId({
     primary: DEFAULT_MODEL_ID,
     fallback: opts?.fallback ?? FALLBACK_MODEL_ID,
@@ -48,5 +59,5 @@ export function resolveChatModel(opts?: {
     });
   }
 
-  return openrouter.chat(modelId);
+  return openrouter().chat(modelId);
 }
