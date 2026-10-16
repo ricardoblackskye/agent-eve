@@ -1208,11 +1208,15 @@ export async function finalizeCodingPhaseFailure(
         );
       }
     }
-    await applyTerminalLifecycle(
-      { labelWriter: deps.labelWriter, runHistory: deps.runHistory },
-      { repo: target.repo, issue: target.issue, runId: target.runId, terminalStatus: "failed" },
-    );
   }
+  // #376: the terminal lifecycle is NOT conditional on a trip. ANY failure after the run was
+  // accepted must end it: otherwise the ticket stays on `df:running` and the ledger keeps a
+  // claim no later attempt may adopt — which is what a TLS push failure did, because
+  // `main`'s catch only logs and sets an exit code.
+  await applyTerminalLifecycle(
+    { labelWriter: deps.labelWriter, runHistory: deps.runHistory },
+    { repo: target.repo, issue: target.issue, runId: target.runId, terminalStatus: "failed" },
+  );
 }
 
 const isDirectRun =
