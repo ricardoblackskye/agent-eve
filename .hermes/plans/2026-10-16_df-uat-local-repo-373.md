@@ -198,3 +198,54 @@ different id — leaving the old row holding the claim permanently, and every su
 Bug 2's fix now NAMES that holder instead of blaming the driver; what is still missing is a policy for
 retiring a claim whose process is long gone (`repairActiveRunDuplicates` exists but is not reachable at
 runtime). Terminating another run's claim on assumption is not a call to make unilaterally.
+
+---
+
+## Bug 3 — the plan cannot be read back, so the approval gate cannot be passed
+
+Found by resuming the UAT on WebFeedPOC#162, after Bug 1 was fixed and the run had planned successfully,
+posted its plan, and parked awaiting approval:
+
+```text
+[STEP 3] Resuming: reading the approved plan back from the ticket...
+[ERROR] This resumed run could not read back the plan it was approved against, so it stopped rather than
+plan again: a fresh plan would not be the one that was approved.
+the approved plan could not be read: the plan comment carries no machine-readable plan
+(a comment posted before this release has none)
+```
+
+**The comment was written by this release.** Verified against the ticket: the plan comment starts with
+`<!-- dark-factory:plan -->`, is 8180 characters, and contains **no `</details>` at all** — the
+machine-readable block was never written into it.
+
+### Cause: the tested builder is not the wired one
+
+- `planCommentBody(markdown, plan?)` returns human markdown alone when `plan` is undefined.
+- `postPlanComment` passes `options.plan` straight through, and `plan` is **optional**.
+- The runner's call site passes `markdown: renderPlanFile(executionPlan, …)` and no `plan`.
+
+So the builder that owns the block, and that has its own passing round-trip test, was never the builder the
+runner used. The omission compiled, ran, and posted a plan that no resume could ever read. The reader
+anchors on the body ENDING with `</details>`, so it failed closed — correctly, on our own comment.
+
+### Approach
+
+1. **Make `plan` REQUIRED on `PostPlanCommentOptions`.** This is the actual fix, and it is a type rather
+   than a test: an omitted plan becomes a compile error, so no future call site can reintroduce this in
+   silence. The four existing `postPlanComment` cases that omit it gain a plan; the two that already pass
+   one are unchanged.
+2. **Pass `plan: executionPlan` at the runner's call site**, so the comment carries what the human reads and
+   what the machine reads back.
+3. **Correct the message.** It said "a comment posted before this release has none" when the marker proves
+   the comment is ours. It now says the marker is there and the block is missing. The phrase
+   "machine-readable" stays, so the existing assertion on it still means something.
+4. **Regression guards:** the runner's call site must pass `plan:` (source guard — it is an out-of-band
+   script, the same style as `run-record-wiring.test.ts`), and the reader must not blame a prior release
+   when the marker is present.
+
+### Why not the alternatives
+
+- Making the reader tolerant of a missing block (guessing, or re-planning on a resume) → codes against a
+  plan nobody approved. The human approved what they read; a fresh plan is a different plan.
+- Leaving `plan` optional and only fixing the runner → exactly the bug: the next call site omits it and
+  nothing says so until a resume fails, hours later, on a ticket.
