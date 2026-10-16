@@ -249,3 +249,55 @@ anchors on the body ENDING with `</details>`, so it failed closed — correctly,
   plan nobody approved. The human approved what they read; a fresh plan is a different plan.
 - Leaving `plan` optional and only fixing the runner → exactly the bug: the next call site omits it and
   nothing says so until a resume fails, hours later, on a ticket.
+
+---
+
+## Bug 4 — the coding loop cannot self-correct, so every coding run trips the breaker
+
+Found by the resume on #162, which got through adoption, the plan read-back and domain validation, then:
+
+```text
+  -> Coding Iteration 1/10... Wrote ... ProductPage.jsx (9691) ... .css (7513) ... .test.jsx (3501) Test result: FAIL
+  -> Coding Iteration 2/10... Wrote ... ProductPage.jsx (9691) ... .css (7513) ... .test.jsx (3501) Test result: FAIL
+  -> Coding Iteration 3/10... Wrote ... ProductPage.jsx (9691) ... .css (7513) ... .test.jsx (3501) Test result: FAIL
+[ERROR] Circuit breaker tripped — halting fail-closed: failed-selfcorrect-exceeded (limit 3)
+```
+
+Byte-identical output three times. That is not a model problem, and the three code facts say why:
+
+1. `runMultiFileCodingLoop` calls the worker as `{ iteration, plan, tools }` — no failure output.
+2. The worker RETURNS `{ passed: false, output: "Tests failed: …" }`, and the loop reads `res.passed`
+   only, so the output is discarded on the floor.
+3. `CodeAuthorTask` is `{ plan, existing? }` — there is no field through which an author could be told
+   what went wrong.
+
+So the loop re-authors from identical inputs, gets identical output, and the breaker trips by
+construction. The intent was always there: the docstring on `authorFiles` states that a failed iteration's
+message **"becomes the next iteration's context"**. It was never wired. Same class as Bug 3 — a documented
+mechanism that no code path implements.
+
+This one is Factory-wide: it affects every repository, not only a non-default one. Folded into #373 because
+it is what this round of UAT found and it blocks the end-to-end proof, but it is the strongest argument yet
+that the loop's contract deserves its own record.
+
+### Bug 4 approach
+
+1. **`LoopContext` gains `previousFailure?: { iteration, output }`.** The loop records the last failed
+   iteration's output and offers it to the next one. Absent on the first attempt, and absent when the
+   previous iteration produced no output, so nothing is invented.
+2. **`CodeAuthorTask` gains `feedback?: string`**, and `buildCodeAuthorPrompt` appends it when present.
+   Both authors send it.
+3. **The runner forwards it**: `authorFiles(..., feedback?)` → `author.write({ plan, existing, feedback })`,
+   fed from `ctx.previousFailure`.
+4. **Fix the agent-cli author's dropped `existing`** while in there. It calls
+   `buildCodeAuthorPrompt(task.plan)` and its comment claims it uses "the SAME prompt the in-process author
+   uses" — it does not, and #361's preservation context never reaches that backend.
+
+### Why not the alternatives for self-correction
+
+- Raise `maxIterations` → three identical attempts become ten identical attempts, and the breaker still
+  trips. The cost grows; nothing else changes.
+- Send the failure only to the in-process author → the seam's whole point is that the backends are
+  interchangeable, and the agent-cli author would silently stay blind.
+- Assert the behaviour only through the runner → the loop is a library unit with its own tests, and the
+  defect is in the loop's contract, not in one caller.
