@@ -39,6 +39,11 @@ export interface BeginRunRecordResult {
   /** True when the ledger could not record it, so `runId` is the fallback attempt id. */
   fellBack: boolean;
   error?: string;
+  /**
+   * Set when the ledger refused because another run holds this (repo, issue). Carried STRUCTURALLY so the
+   * start guard decides on a field rather than on the wording of a message (#373).
+   */
+  activeConflict?: { runId: string; status: string };
 }
 
 /**
@@ -55,6 +60,28 @@ function driverConfigured(): boolean {
 
 export function runnerDeliveryId(attemptId: string): string {
   return `runner:${attemptId.trim()}`;
+}
+
+/**
+ * Whether this run may start, and if not, why. `null` means start.
+ *
+ * The distinction this draws is the fix for #373's orphan. An UNCONFIGURED ledger is a local convenience:
+ * the runner falls back to the attempt id, loudly, so a developer needs no database. An ACTIVE CONFLICT is
+ * the ledger saying another run owns this issue, and carrying on there is not a degraded mode — it is a
+ * second run on one issue, writing its lifecycle to a run the ledger never minted. That is how a stale
+ * claim became permanent: the writes went somewhere the ledger could not see, so nothing released it.
+ *
+ * The decision reads `activeConflict`, never the message text; the message is reused only because it already
+ * names the holder and its status.
+ */
+export function refuseToStartReason(
+  result: BeginRunRecordResult,
+): string | null {
+  if (!result.activeConflict) return null;
+  return (
+    `${result.error ?? "Another run already holds this issue"}, so this run will not start. ` +
+    `Wait for it to finish, or retire the claim if its process is gone.`
+  );
 }
 
 export async function beginRunRecord(
@@ -94,7 +121,13 @@ export async function beginRunRecord(
       `the ledger already holds an active run (${holderRunId}, status '${holderStatus}') for ` +
       `${input.repo}#${input.issue}, so this attempt was not recorded`;
     log(`[WARN] The run record could not be opened: ${conflict}.`);
-    return { runId: attemptId, recorded: false, fellBack: true, error: conflict };
+    return {
+      runId: attemptId,
+      recorded: false,
+      fellBack: true,
+      error: conflict,
+      activeConflict: { runId: holderRunId, status: holderStatus },
+    };
   }
 
   if (!accepted.ok || !accepted.value) {
