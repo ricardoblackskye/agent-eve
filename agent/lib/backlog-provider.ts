@@ -1,5 +1,6 @@
 import type { UserStory } from "./story-schema";
 import { finalizeLabels } from "./story-labels";
+import { loadRunnerConfig } from "./dark-factory/runner-config";
 
 /**
  * Platform-agnostic backlog provider seam.
@@ -25,8 +26,9 @@ export interface CanonicalPayload {
    * Source repo the trigger issue lives in. When set, the GitHub provider
    * creates the child story in THIS repo (and finalizes/linking there) instead
    * of the hardcoded `agent-eve` default. Falls back to the
-   * GITHUB_REPO_OWNER/GITHUB_REPO_NAME env vars, then to `ricardoblackskye`/
-   * `agent-eve`. Fixes issue #119 (stories were always written to agent-eve).
+   * GITHUB_REPO_OWNER/GITHUB_REPO_NAME env vars, then to `default_repo` in
+   * dark-factory.config.json. Fixes issue #119 (stories were always written to
+   * agent-eve); #348 moved the last literal out of this module.
    */
   owner?: string;
   /** See `owner`. The repo (within `owner`) to target. */
@@ -45,7 +47,7 @@ export function toCanonicalPayload(story: UserStory): CanonicalPayload {
 }
 
 /**
- * Identifier sanitisers for GitHub owner/repo fragments. They strip everything
+ * Identifier sanitizers for GitHub owner/repo fragments. They strip everything
  * outside the allowed character class so the values are safe to embed in API URLs
  * and LLM prompts (defense against control-char / markdown injection). Shared so
  * every provider — including the console/dry-run provider that may echo the
@@ -58,7 +60,7 @@ export function toCanonicalPayload(story: UserStory): CanonicalPayload {
  *   - repo: repository names additionally allow dots and underscores — `[A-Za-z0-9_.-]+`.
  *
  * GitHub also caps lengths: owner ≤ 39 chars, repo ≤ 100 chars. We truncate
- * (not reject) after sanitising so a misconfigured allow-list or oversized LLM
+ * (not reject) after sanitizing so a misconfigured allow-list or oversized LLM
  * value can never push an absurdly long string to the API.
  *
  * Used both in `publish_story` (pre-provider) and `GitHubProvider.publish`
@@ -98,20 +100,40 @@ function mergeWarnings(...lists: string[][]): string[] | undefined {
  * but strips to empty (e.g. whitespace-only misconfiguration), a warning is
  * emitted so the operator is not silently redirected to the default repo.
  */
+/**
+ * The built-in default, read from the config file's `default_repo` (#348 R2).
+ *
+ * The BEHAVIOUR is unchanged - a default still applies, and a test asserts it - but the value is no
+ * longer a literal in this module. Read once, because this runs per story and the file does not change
+ * under a running process. An unreadable config yields empty strings, which `STORY_ALLOWED_REPOS` then
+ * refuses: fail-closed, rather than filing a story in a repository nobody named.
+ */
+let configuredPair: { owner: string; repo: string } | undefined;
+function configuredDefault(): { owner: string; repo: string } {
+  if (configuredPair === undefined) {
+    const loaded = loadRunnerConfig();
+    const [owner = "", repo = ""] = loaded.ok
+      ? (loaded.config.defaultRepo ?? "").split("/")
+      : [];
+    configuredPair = { owner, repo };
+  }
+  return configuredPair;
+}
+
 export function sanitizeOwnerRepo(
   payloadOwner: string | undefined,
   payloadRepo: string | undefined,
   env: NodeJS.ProcessEnv = process.env,
 ): { owner: string; repo: string; warnings: string[] } {
   const warnings: string[] = [];
-  const fallbackOwner = "ricardoblackskye";
-  const fallbackRepo = "agent-eve";
+  const fallbackOwner = configuredDefault().owner;
+  const fallbackRepo = configuredDefault().repo;
 
   const rawOwnerEnv = env.GITHUB_REPO_OWNER;
   const rawRepoEnv = env.GITHUB_REPO_NAME;
   // Use the correct per-field character classes for the empty-strip check so the
   // warning reflects what resolution will actually do (an owner like "my_org"
-  // would strip to "myorg" under sanitizeOwnerId, not stay "my_org").
+  // would strip to a name with no underscore under sanitizeOwnerId, not stay "my_org").
   if (rawOwnerEnv && sanitizeOwnerId(rawOwnerEnv) === "") {
     warnings.push(
       `GITHUB_REPO_OWNER is set but contains no valid identifier characters; ` +
@@ -137,7 +159,7 @@ export function sanitizeOwnerRepo(
 export interface PublishResult {
   delivered: boolean;
   /** "live" = created; "dry-run" = simulated/no-op by design (e.g. console provider);
-   *  "blocked" = an active refusal (allow-list gate / misconfig) — distinct from a
+   *  "blocked" = an active refusal (allow-list gate / misconfiguration) — distinct from a
    *  successful dry-run so callers don't mistake a denial for a simulation. */
   mode: "dry-run" | "live" | "blocked";
   providerId: string;
@@ -207,7 +229,7 @@ class GitHubProvider implements BacklogProvider {
     }
 
     // Resolve owner/repo through the shared helper (boundary sanitization +
-    // env-misconfig warnings). `publish_story` already sanitizes upstream, so this
+    // env-misconfiguration warnings). `publish_story` already sanitizes upstream, so this
     // is defense-in-depth and also surfaces operator mistakes (e.g. a whitespace-
     // only GITHUB_REPO_OWNER) instead of silently falling back to defaults.
     const { owner, repo, warnings: ownerWarnings } = sanitizeOwnerRepo(

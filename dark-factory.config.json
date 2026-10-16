@@ -1,3 +1,8 @@
 {
-  "default_repo": "ricardoblackskye/agent-eve"
+  "default_repo": "ricardoblackskye/agent-eve",
+  "repos": {
+    "ricardoblackskye/agent-eve": {
+      "board": { "login": "ricardoblackskye", "number": 3 }
+    }
+  }
 }
