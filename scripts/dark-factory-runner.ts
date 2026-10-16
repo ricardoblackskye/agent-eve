@@ -810,6 +810,19 @@ async function main(): Promise<void> {
       planArtifactPath ? [planArtifactPath] : [],
     ).join(" ");
     await checkpoint();
+    // #373: the task branch must EXIST before anything is committed to it. Without this the commit landed
+    // on whatever was checked out - `main`, in a local run - so no ref was created and the push died with
+    // git reporting that the ref it was handed does not exist. That is what stopped a local run reaching a PR. The sandbox path
+    // is unaffected: it commits inside the sandbox.
+    try {
+      execSync(`git checkout -b ${branchName}`, { stdio: "inherit" });
+    } catch {
+      // The branch already exists (a retry, or an earlier attempt). Use it rather than resetting it: a
+      // reset here would discard work that may already be under review.
+      execSync(`git checkout ${branchName}`, { stdio: "inherit" });
+    }
+    await checkpoint();
+
     execSync(`git add ${filesToCommit}`, { stdio: "inherit" });
     await checkpoint();
     execSync(`git commit -m "feat: #${issueNum} ${executionPlan.title}"`, {
@@ -824,6 +837,17 @@ async function main(): Promise<void> {
     });
     await pushVault.put("git-push-token", token);
     try {
+      // #373: name the real reason rather than leaking git's own ref error, which describes the symptom
+      // (a missing ref) and not the cause (nothing created the branch).
+      const headBranch = execSync("git rev-parse --abbrev-ref HEAD")
+        .toString()
+        .trim();
+      if (headBranch !== branchName) {
+        throw new Error(
+          `refusing to push: HEAD is '${headBranch}' rather than the task branch '${branchName}'`,
+        );
+      }
+
       await gitPushWithVault({
         owner: ownerRepo[0],
         repo: ownerRepo[1],

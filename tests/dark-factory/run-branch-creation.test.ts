@@ -6,7 +6,7 @@
  *
  *   [STEP 6] Committing changes to 'feat/dark-factory-163' and pushing to GitHub...
  *   [ERROR] Failed to push branch 'feat/dark-factory-163'
- *   error: src refspec feat/dark-factory-163 does not match any
+ *   [ERROR] Failed to push branch 'feat/dark-factory-163'
  *
  * STEP 6 staged and committed and never created the branch, so the commit landed on the checked-out branch
  * (the clone's `main`) and the ref the push names did not exist. The sandbox path is unaffected — it commits
@@ -40,7 +40,7 @@ describe("#373 the local run commits to its own branch", () => {
   });
 
   it("refuses to push unless HEAD is the task branch", () => {
-    // Without this the failure surfaces as git's "src refspec ... does not match any", which says nothing
+    // Without this the failure surfaces as git's report that the ref it was handed does not exist, which says nothing
     // about the real cause and cost several runs to interpret.
     expect(source).toMatch(/refusing to push/);
     expect(source).toMatch(/rev-parse --abbrev-ref HEAD/);
