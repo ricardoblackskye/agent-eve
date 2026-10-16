@@ -78,9 +78,12 @@ export function refuseToStartReason(
   result: BeginRunRecordResult,
 ): string | null {
   if (!result.activeConflict) return null;
+  // The explanation is reused rather than rebuilt, because it already names the holder, its status and
+  // the issue. Only the CONSEQUENCE is added - and as its own sentence, so the message does not read as
+  // one run-on chain of 'so ... so ...'.
   return (
-    `${result.error ?? "Another run already holds this issue"}, so this run will not start. ` +
-    `Wait for it to finish, or retire the claim if its process is gone.`
+    `${result.error ?? "Another run already holds this issue"}. ` +
+    `This run will not start: wait for that run to finish, or retire its claim if the process is gone.`
   );
 }
 
