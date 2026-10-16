@@ -59,6 +59,19 @@ export class LabelWriteError extends Error {
   }
 }
 
+/**
+ * The terminal event is what RELEASES the run's active claim: `appendEvent` derives the updated summary
+ * and persists it, moving the row's status to the terminal value. A refused write therefore leaves the
+ * ledger believing the run is still in flight, and it must not pass unnoticed (#373).
+ */
+export class TerminalEventWriteError extends Error {
+  readonly code = "ERR_TERMINAL_EVENT_WRITE";
+  constructor(message: string) {
+    super(message);
+    this.name = "TerminalEventWriteError";
+  }
+}
+
 /** In-flight labels cleared on every terminal transition. */
 const CLEARED_LABELS: readonly string[] = [
   TRIGGER_LABELS.running,
@@ -167,9 +180,19 @@ export async function applyTerminalLifecycle(
   }
 
   // 5. Record the finalised state so the idempotency check (1) holds on a re-delivery.
-  await runHistory.appendEvent(
+  //
+  // #373 - this write is ALSO what releases the active-run claim, so its result is checked for the same
+  // reason step 3 checks every label write. A refusal here is not cosmetic: the ledger keeps believing
+  // the run is in flight, and a later run for the same repo+issue is refused as a duplicate delivery.
+  const marker = await runHistory.appendEvent(
     terminalEvent(runId, terminalStatus, markerEventId(runId), occurredAt),
   );
+  if (!marker.ok) {
+    throw new TerminalEventWriteError(
+      "Terminal lifecycle event write failed, so this run's claim was not released: " +
+        `${marker.error ?? "the ledger refused the write"}`,
+    );
+  }
 
   return { applied: true };
 }

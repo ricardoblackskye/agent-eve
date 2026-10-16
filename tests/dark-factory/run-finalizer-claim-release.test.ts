@@ -1,23 +1,26 @@
 /**
- * #373 — the terminal write must release the active-run claim.
+ * #373 — the terminal EVENT is what releases the active-run claim, and refusing to write it must not be
+ * swallowed.
  *
- * The first real UAT run against another repo stopped during planning. It labelled the ticket `df:failed`,
- * posted why, and wrote a `run.terminal` EVENT — and its ledger row still read `queued` hours later:
+ * CORRECTION of an earlier misdiagnosis, recorded here so it is not retried. I first concluded that
+ * `applyTerminalLifecycle` never released the claim because it appends an event and never writes the summary
+ * row. That is wrong: `appendEvent` -> `applyRunEvent` derives the updated summary and persists it, so the
+ * row's `status` does move to the terminal value and the claim IS released. Verified by reading a real
+ * SqliteRunHistoryStore before and after the call.
  *
- *   run_id: 0381b5d8-...  repo: ricardoblackskye/webfeedpoc  issue: 161  status: queued  stage: trigger
+ * An extra summary write on top of that is not merely redundant, it is HARMFUL: the caller's `occurredAt` is
+ * injectable (tests pass a fixed date), so rewriting `updatedAt` from it can move the timestamp BEFORE
+ * `createdAt`. The record layer then rejects the row — "Run record requires updatedAt to be at or after
+ * createdAt" — and every read of that store fails, not just this row.
  *
- * The claim that refuses a duplicate delivery is held by `status IN ('queued','running','blocked')`, and
- * `applyTerminalLifecycle` only appended an event — it never wrote the summary row that holds that status.
- * So the claim leaked: every later run for the same repo+issue was refused as a duplicate, reporting
- * "the ledger refused the delivery".
- *
- * These cases pin the release, the identity it preserves, and the two things that must NOT change:
- * idempotency, and the tolerance for the partial store doubles other suites drive this with.
+ * What the finalizer DOES get wrong is that it ignores the result of that write. Step 3 of the same function
+ * collects EVERY result so nothing is swallowed and fails closed on label writes; step 5 checks nothing. A
+ * refused terminal event therefore leaves the claim held, silently, and the run looks finished while the
+ * ledger still believes it is in flight — the state the real UAT run was left in.
  */
 import { describe, it, expect } from "vitest";
 import {
   applyTerminalLifecycle,
-  type TerminalFinalizerDeps,
   type TerminalFinalizeArgs,
 } from "../../agent/lib/dark-factory/run-finalizer";
 import type { LabelWriter } from "../../agent/lib/dark-factory/definition-of-done";
@@ -28,9 +31,6 @@ const AT = "2026-10-16T11:56:01.969Z";
 const REPO = "ricardoblackskye/webfeedpoc";
 const RUN_ID = "0381b5d8-629b-45b2-970b-362b67a126c9";
 
-/** The claim-holding statuses, named here so the assertion is explicit rather than implied. */
-const CLAIM_HOLDING = ["queued", "running", "blocked"];
-
 function okWriter(): LabelWriter {
   return {
     async add() {
@@ -39,59 +39,6 @@ function okWriter(): LabelWriter {
     async remove() {
       return { ok: true };
     },
-  };
-}
-
-/** The row as the UAT run left it: opened at trigger, never moved. */
-function leakedRun(): RunSummary {
-  return {
-    runId: RUN_ID,
-    repo: REPO,
-    issue: 161,
-    status: "queued",
-    stage: "trigger",
-    createdAt: AT,
-    updatedAt: AT,
-    attemptCount: 0,
-    reviewCount: 0,
-    iterationCount: 0,
-    fixCycleCount: 0,
-  } as unknown as RunSummary;
-}
-
-function historyWithSummary(current: RunSummary | undefined) {
-  const written: RunSummary[] = [];
-  const events: RunEvent[] = [];
-  const api = {
-    id: "fake",
-    async listRunEvents() {
-      return {
-        ok: true,
-        mode: "live",
-        providerId: "fake",
-        value: {
-          items: events.map((event, index) => ({ sequence: index + 1, event })),
-        },
-      };
-    },
-    async appendEvent(event: RunEvent) {
-      events.push(event);
-      return { ok: true, mode: "live", providerId: "fake" };
-    },
-    async getRun() {
-      return current
-        ? { ok: true, mode: "live", providerId: "fake", value: current }
-        : { ok: false, mode: "blocked", providerId: "fake", error: "no such run" };
-    },
-    async recordRunSummary(summary: RunSummary) {
-      written.push(summary);
-      return { ok: true, mode: "live", providerId: "fake", value: summary };
-    },
-  };
-  return {
-    deps: { labelWriter: okWriter(), runHistory: api as unknown as RunHistoryStore },
-    written,
-    events,
   };
 }
 
@@ -105,73 +52,74 @@ function args(terminalStatus: "succeeded" | "failed"): TerminalFinalizeArgs {
   };
 }
 
+function store(options: { eventOk: boolean }) {
+  const events: RunEvent[] = [];
+  const summaries: RunSummary[] = [];
+  const api = {
+    id: "fake",
+    async listRunEvents() {
+      return {
+        ok: true,
+        mode: "live",
+        providerId: "fake",
+        value: { items: events.map((event, i) => ({ sequence: i + 1, event })) },
+      };
+    },
+    async appendEvent(event: RunEvent) {
+      if (!options.eventOk) {
+        return {
+          ok: false,
+          mode: "blocked",
+          providerId: "fake",
+          error: "the ledger refused the terminal event write",
+        };
+      }
+      events.push(event);
+      return { ok: true, mode: "live", providerId: "fake" };
+    },
+    async getRun() {
+      return {
+        ok: true,
+        mode: "live",
+        providerId: "fake",
+        value: { runId: RUN_ID, repo: REPO, issue: 161, status: "queued" },
+      };
+    },
+    async recordRunSummary(summary: RunSummary) {
+      summaries.push(summary);
+      return { ok: true, mode: "live", providerId: "fake", value: summary };
+    },
+  };
+  return {
+    deps: { labelWriter: okWriter(), runHistory: api as unknown as RunHistoryStore },
+    events,
+    summaries,
+  };
+}
+
 describe("#373 the terminal write releases the active-run claim", () => {
-  it("moves a failed run's summary off the claim-holding status", async () => {
-    const { deps, written } = historyWithSummary(leakedRun());
+  it("surfaces a refused terminal-event write — that write is what releases the claim", async () => {
+    const { deps } = store({ eventOk: false });
+
+    await expect(applyTerminalLifecycle(deps, args("failed"))).rejects.toThrow(
+      /terminal event/i,
+    );
+  });
+
+  it("still finalises normally when the terminal event IS written", async () => {
+    const { deps, events } = store({ eventOk: true });
 
     const outcome = await applyTerminalLifecycle(deps, args("failed"));
 
     expect(outcome.applied).toBe(true);
-    expect(written).toHaveLength(1);
-    expect(written[0].status).toBe("failed");
-    expect(CLAIM_HOLDING).not.toContain(written[0].status);
+    expect(events.some((event) => event.type === "run.terminal")).toBe(true);
   });
 
-  it("marks a successful run 'succeeded', so its claim is released too", async () => {
-    const { deps, written } = historyWithSummary(leakedRun());
-
-    await applyTerminalLifecycle(deps, {
-      ...args("succeeded"),
-      // Required for `succeeded`: `df:done` is applied ONLY when the gate passed (#271).
-      dodResult: { status: "done" } as unknown as TerminalFinalizeArgs["dodResult"],
-    });
-
-    expect(written).toHaveLength(1);
-    expect(written[0].status).toBe("succeeded");
-    expect(CLAIM_HOLDING).not.toContain(written[0].status);
-  });
-
-  it("rewrites the run's OWN row, keeping its identity", async () => {
-    const { deps, written } = historyWithSummary(leakedRun());
+  it("does NOT rewrite the summary itself — that clobbers updatedAt and can make the row unreadable", async () => {
+    const { deps, summaries } = store({ eventOk: true });
 
     await applyTerminalLifecycle(deps, args("failed"));
 
-    expect(written[0]).toMatchObject({ runId: RUN_ID, repo: REPO, issue: 161 });
-  });
-
-  it("does not rewrite the summary a second time — finalising is still at most once", async () => {
-    const { deps, written } = historyWithSummary(leakedRun());
-
-    await applyTerminalLifecycle(deps, args("failed"));
-    const second = await applyTerminalLifecycle(deps, args("failed"));
-
-    expect(second.skipped).toBe(true);
-    expect(written).toHaveLength(1);
-  });
-
-  it("does not throw when the store double cannot rewrite a summary", async () => {
-    // Other suites drive this with partial doubles that only implement listRunEvents + appendEvent. A run
-    // that finished must not be turned into a thrown error by the claim release.
-    const partial = {
-      id: "partial",
-      async listRunEvents() {
-        return {
-          ok: true,
-          mode: "live",
-          providerId: "partial",
-          value: { items: [] },
-        };
-      },
-      async appendEvent() {
-        return { ok: true, mode: "live", providerId: "partial" };
-      },
-    } as unknown as RunHistoryStore;
-
-    const outcome = await applyTerminalLifecycle(
-      { labelWriter: okWriter(), runHistory: partial } as TerminalFinalizerDeps,
-      args("failed"),
-    );
-
-    expect(outcome.applied).toBe(true);
+    expect(summaries).toHaveLength(0);
   });
 });
