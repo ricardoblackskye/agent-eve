@@ -5,6 +5,8 @@ import {
   authorizeTargetRepo,
   loadRunnerConfig,
   parseRunnerConfig,
+  resolveBranchName,
+  resolveIssueNumber,
   resolveTargetRepo,
   type RunnerConfig,
 } from "../../agent/lib/dark-factory/runner-config";
@@ -221,5 +223,86 @@ describe("the runner's wiring (#348)", () => {
   it("resolves and authorizes the repository through the module", () => {
     expect(runner).toContain("resolveTargetRepo(");
     expect(runner).toContain("authorizeTargetRepo(");
+  });
+});
+
+describe("resolveIssueNumber", () => {
+  it("reads the issue from --issue", () => {
+    const result = resolveIssueNumber(argv("--issue", "348"));
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.issue).toBe(348);
+  });
+
+  it("refuses an absent --issue instead of running a default issue nobody asked for", () => {
+    // The runner used to default to 179, silently.
+    const result = resolveIssueNumber(argv("--repo", "owner/name"));
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain("--issue");
+  });
+
+  it("refuses a non-numeric, fractional, empty or valueless --issue rather than coercing it", () => {
+    // `parseInt("34.8")` is 34 and `parseInt("12abc")` is 12: parseInt coerces rather than validates, so
+    // the digits check is the control, not a nicety.
+    for (const args of [
+      ["--issue", "abc"],
+      ["--issue", "34.8"],
+      ["--issue", "12abc"],
+      ["--issue", "-5"],
+      ["--issue", ""],
+      ["--issue"],
+    ]) {
+      const result = resolveIssueNumber(argv(...args));
+      expect(result.ok, `expected ${JSON.stringify(args)} to be refused`).toBe(false);
+    }
+  });
+});
+
+describe("resolveBranchName", () => {
+  it("uses an explicit --branch", () => {
+    const result = resolveBranchName({
+      argv: argv("--branch", "feat/thing-348"),
+      issue: 348,
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.branch).toBe("feat/thing-348");
+  });
+
+  it("derives a default branch name containing no '#'", () => {
+    // The old default was `feat/dark-factory-#${issue}` — a `#` in a branch name breaks the GitHub UI and
+    // URLs, and this repo's own convention forbids it.
+    const result = resolveBranchName({ argv: argv("--issue", "348"), issue: 348 });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.branch).toContain("348");
+      expect(result.branch).not.toContain("#");
+    }
+  });
+
+  it("refuses a bare --branch rather than silently defaulting", () => {
+    const result = resolveBranchName({ argv: argv("--branch"), issue: 348 });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain("--branch");
+  });
+});
+
+describe("the runner's other invented inputs (#348)", () => {
+  const runner = readFileSync("scripts/dark-factory-runner.ts", "utf8");
+
+  it("no longer defaults the issue number", () => {
+    expect(runner).not.toContain(": 179;");
+  });
+
+  it("no longer builds a branch name containing '#'", () => {
+    expect(runner).not.toContain("feat/dark-factory-#");
+  });
+
+  it("takes both from the module", () => {
+    expect(runner).toContain("resolveIssueNumber(");
+    expect(runner).toContain("resolveBranchName(");
   });
 });

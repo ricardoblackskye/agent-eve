@@ -103,6 +103,27 @@ export function authorizeTargetRepo(input: {
   return { ok: true };
 }
 
+export type IssueNumberResult =
+  | { ok: true; issue: number }
+  | { ok: false; error: string };
+
+export type BranchNameResult =
+  | { ok: true; branch: string }
+  | { ok: false; error: string };
+
+/** Not implemented yet (RED stub for #348 Task 4). */
+export function resolveIssueNumber(_argv: readonly string[]): IssueNumberResult {
+  throw new Error("resolveIssueNumber is not implemented");
+}
+
+/** Not implemented yet (RED stub for #348 Task 4). */
+export function resolveBranchName(_input: {
+  argv: readonly string[];
+  issue: number;
+}): BranchNameResult {
+  throw new Error("resolveBranchName is not implemented");
+}
+
 /**
  * Parse the config text.
  *
