@@ -171,6 +171,28 @@ export function resolveBoard(input: {
   return { ok: true, board: settings.settings.board };
 }
 
+/** Which of the three sources a resolved value came from. */
+export type SettingSource = "argument" | "env" | "config";
+
+export type BoardSettingResult =
+  | {
+      ok: true;
+      login: string;
+      number: number;
+      sources: { login: SettingSource; number: SettingSource };
+    }
+  | { ok: false; error: string };
+
+/** Not implemented yet (RED stub for #348 R2 Task 2). */
+export function resolveBoardSetting(_input: {
+  repo: string;
+  config: RunnerConfig;
+  explicit?: { login?: string; number?: number };
+  env?: Record<string, string | undefined>;
+}): BoardSettingResult {
+  throw new Error("resolveBoardSetting is not implemented");
+}
+
 /** Where the resolved repository came from, for the run's opening log. */
 export type TargetRepoSource = "argument" | "config";
 

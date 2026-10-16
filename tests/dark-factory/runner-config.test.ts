@@ -7,6 +7,7 @@ import {
   loadRunnerConfig,
   parseRunnerConfig,
   resolveBoard,
+  resolveBoardSetting,
   resolveBranchName,
   resolveIssueNumber,
   resolveRepoSettings,
@@ -439,6 +440,118 @@ describe("per-repo settings (#348 R2)", () => {
     expect(board.ok).toBe(true);
     if (board.ok) {
       expect(board.board).toEqual({ login: "ricardoblackskye", number: 3 });
+    }
+  });
+});
+
+describe("resolveBoardSetting (#348 R2 Task 2)", () => {
+  const CONFIG: RunnerConfig = {
+    repos: { "owner/name": { board: { login: "config-login", number: 5 } } },
+  };
+
+  it("takes both halves from an explicit argument", () => {
+    const result = resolveBoardSetting({
+      repo: "owner/name",
+      config: CONFIG,
+      explicit: { login: "arg-login", number: 9 },
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.login).toBe("arg-login");
+      expect(result.number).toBe(9);
+      expect(result.sources).toEqual({ login: "argument", number: "argument" });
+    }
+  });
+
+  it("resolves each half independently: environment first, then config", () => {
+    const both = resolveBoardSetting({
+      repo: "owner/name",
+      config: CONFIG,
+      env: { SPRINT_PROJECT_OWNER: "env-login", SPRINT_PROJECT_NUMBER: "7" },
+    });
+
+    expect(both.ok).toBe(true);
+    if (both.ok) {
+      expect(both.login).toBe("env-login");
+      expect(both.number).toBe(7);
+      expect(both.sources).toEqual({ login: "env", number: "env" });
+    }
+
+    const mixed = resolveBoardSetting({
+      repo: "owner/name",
+      config: CONFIG,
+      env: { SPRINT_PROJECT_OWNER: "env-login" },
+    });
+
+    expect(mixed.ok).toBe(true);
+    if (mixed.ok) {
+      expect(mixed.login).toBe("env-login");
+      expect(mixed.number).toBe(5);
+      expect(mixed.sources).toEqual({ login: "env", number: "config" });
+    }
+  });
+
+  it("takes both halves from config when nothing overrides them", () => {
+    const result = resolveBoardSetting({ repo: "owner/name", config: CONFIG });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.login).toBe("config-login");
+      expect(result.number).toBe(5);
+      expect(result.sources).toEqual({ login: "config", number: "config" });
+    }
+  });
+
+  it("refuses when nothing supplies a value, naming the repo and every way to set one", () => {
+    const result = resolveBoardSetting({ repo: "someone/other", config: CONFIG });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain("someone/other");
+      expect(result.error).toContain("SPRINT_PROJECT_OWNER");
+      expect(result.error).toContain("SPRINT_PROJECT_NUMBER");
+      expect(result.error).toContain(RUNNER_CONFIG_PATH);
+    }
+  });
+
+  it("refuses a malformed environment override instead of coercing it", () => {
+    // The replaced expression was `Number(process.env.SPRINT_PROJECT_NUMBER || 3)`: Number("abc") is NaN
+    // and Number("3.7") is 3.7, so a typo became a board number nobody chose.
+    for (const bad of ["abc", "3.7", "-1", "0"]) {
+      const result = resolveBoardSetting({
+        repo: "owner/name",
+        config: CONFIG,
+        env: { SPRINT_PROJECT_NUMBER: bad },
+      });
+
+      expect(result.ok, `expected ${JSON.stringify(bad)} to be refused`).toBe(false);
+    }
+  });
+
+  it("treats a BLANK explicit value as unset, and falls through rather than failing", () => {
+    const result = resolveBoardSetting({
+      repo: "owner/name",
+      config: CONFIG,
+      explicit: { login: "   " },
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.login).toBe("config-login");
+      expect(result.sources.login).toBe("config");
+    }
+  });
+
+  it("refuses an explicit project number that is not a positive integer", () => {
+    for (const bad of [0, -1, 2.5]) {
+      const result = resolveBoardSetting({
+        repo: "owner/name",
+        config: CONFIG,
+        explicit: { number: bad },
+      });
+
+      expect(result.ok, `expected ${bad} to be refused`).toBe(false);
     }
   });
 });
