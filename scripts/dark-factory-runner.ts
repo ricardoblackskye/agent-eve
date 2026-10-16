@@ -25,7 +25,10 @@ import {
   type DefinitionOfDoneTask,
   type ReviewFinding,
 } from "../agent/lib/dark-factory/definition-of-done";
-import { applyTerminalLifecycle } from "../agent/lib/dark-factory/run-finalizer";
+import {
+  applyStartLifecycle,
+  applyTerminalLifecycle,
+} from "../agent/lib/dark-factory/run-finalizer";
 import { GitHubPrWriter } from "../agent/lib/dark-factory/pr-writer";
 import {
   GitHubIssueWriter,
@@ -307,12 +310,18 @@ async function main(): Promise<void> {
   console.log(
     `\n[STEP 2] Updating ticket lifecycle label to 'df:running' and posting progress comment...`,
   );
-  await issueWriter.addLabel(
-    repoOwner,
-    repoName,
-    issueNum,
-    "df:running",
+  // #373: clear the previous attempt's terminal label first. A run that died left `df:failed` behind, and
+  // adding `df:running` beside it made the ticket advertise two contradictory outcomes at once.
+  const startLifecycle = await applyStartLifecycle(
+    { labelWriter },
+    { repo: targetRepo, issue: issueNum },
   );
+  if (!startLifecycle.applied) {
+    console.warn(
+      `[WARN] The ticket lifecycle could not be set up cleanly: ${startLifecycle.error ?? "unknown error"}`,
+    );
+  }
+  console.log(`  -> Cleared: ${startLifecycle.cleared.join(", ") || "nothing to clear"}`);
   await issueWriter.postComment(
     repoOwner,
     repoName,

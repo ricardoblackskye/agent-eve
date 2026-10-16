@@ -79,6 +79,16 @@ const CLEARED_LABELS: readonly string[] = [
 ];
 
 /**
+ * Labels that describe a FINISHED attempt. A new attempt must not leave one behind: #373's re-run left
+ * WebFeedPOC#161 carrying df:running AND a stale df:failed from the previous attempt, so the ticket
+ * advertised two contradictory outcomes at once.
+ */
+export const TERMINAL_LABELS: readonly string[] = [
+  TRIGGER_LABELS.done,
+  TRIGGER_LABELS.failed,
+];
+
+/**
  * Marker eventId for a run that HAS been finalised.
  *
  * Idempotency keys on this marker rather than on "a `run.terminal` event with this
@@ -114,6 +124,58 @@ function terminalEvent(
     status,
     occurredAt,
   };
+}
+
+export interface StartLifecycleArgs {
+  repo: string;
+  issue: number;
+}
+
+export interface StartLifecycleOutcome {
+  /** False when any of the writes failed; the failures are in `error`. */
+  applied: boolean;
+  /** The terminal labels actually removed. */
+  cleared: string[];
+  error?: string;
+}
+
+/**
+ * The START half of the ticket lifecycle (#373): clear what a finished attempt left behind, then mark this
+ * attempt in flight. The terminal transition already clears the in-flight labels; until this existed
+ * nothing mirrored it at the start.
+ *
+ * Deliberately NOT fail-closed, unlike {@link applyTerminalLifecycle}. These labels are informational: the
+ * terminal transition must fail closed because it states the outcome AND releases the run's claim, whereas a
+ * transient GitHub error here must not stop a run that is otherwise fine. Failures are collected and
+ * reported, and one failure never cancels the remaining writes.
+ */
+export async function applyStartLifecycle(
+  deps: { labelWriter: LabelWriter },
+  args: StartLifecycleArgs,
+): Promise<StartLifecycleOutcome> {
+  const cleared: string[] = [];
+  const failures: string[] = [];
+
+  for (const label of TERMINAL_LABELS) {
+    const removed = await deps.labelWriter.remove(args.repo, args.issue, label);
+    if (removed.ok) cleared.push(label);
+    else failures.push(`remove ${label}: ${removed.error ?? "unknown error"}`);
+  }
+
+  const started = await deps.labelWriter.add(
+    args.repo,
+    args.issue,
+    TRIGGER_LABELS.running,
+  );
+  if (!started.ok) {
+    failures.push(
+      `add ${TRIGGER_LABELS.running}: ${started.error ?? "unknown error"}`,
+    );
+  }
+
+  return failures.length > 0
+    ? { applied: false, cleared, error: failures.join("; ") }
+    : { applied: true, cleared };
 }
 
 export async function applyTerminalLifecycle(
