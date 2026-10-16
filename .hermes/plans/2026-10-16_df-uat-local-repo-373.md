@@ -67,15 +67,35 @@ the cause is a legitimate refusal, the fix is the message, not the gate.
 
 ## Tasks (TDD, in order)
 
-### Task 1 — the model client reads its key at call time
+### Task 1 — the model client is built at call time, not at module scope
 
-**Files:** `agent/chat-model.ts`; tests for the call sites.
+**Files:** `agent/chat-model.ts`, `agent/subagents/{product-owner,release-manager,sprint-reporter}/agent.ts`;
+`tests/dark-factory/model-key-lazy.test.ts`.
 
-RED: a test that sets `OPENROUTER_API_KEY` **after** the module is imported and asserts the client then sends
-it. That is the exact failure — a construction-time read cannot pass it, and a lazy read cannot fail it.
-GREEN: the lazy apiKey; then the same change at every other `createOpenAI` call site, with a source guard
-asserting no call site passes `process.env.OPENROUTER_API_KEY` directly as a string.
+**The approach this plan first gave was WRONG, and is corrected here.** It said to pass the key as a
+resolver — `apiKey: *** => process.env.OPENROUTER_API_KEY`. tsc rejects that outright:
 
+```text
+error TS2322: Type '() => string | undefined' is not assignable to type 'string'.
+```
+
+This `@ai-sdk/openai` version types `apiKey` as a **string**, so the deferral has to be the PROVIDER
+construction, not the key. The attempt was reverted rather than forced through with a cast, and the dead
+end is recorded in the test so it is not retried.
+
+**Also rejected on purpose: loading `.env` at module scope in the runner.** `scripts/load-env.ts` already
+exists and would fix every module-scope read at once, but the runner is IMPORTED by its own tests
+(`PreservationRefusedError`, `authorFiles`), so a module-level load would inject the developer's real
+environment into the suite — a trap this repo has been bitten by, and the reason the existing callers load
+inside their entry point.
+
+RED: a guard that discovers every `createOpenAI(` call site and asserts none CONSTRUCTS the client at
+module scope. It fails today because all four do. The discovery case is asserted separately, so the guard
+cannot pass by matching nothing.
+
+GREEN: replace each module-scope client with a memoised builder invoked at the call site. One wrinkle to
+expect: `chat-model.ts:32` names `ReturnType<typeof openrouter.chat>` as a TYPE, which needs rewording
+alongside the change.
 ### Task 2 — the ledger refusal says why
 
 **Files:** `agent/lib/dark-factory/run-record.ts`, `agent/lib/dark-factory/run-history-provider.ts`; tests.
@@ -110,7 +130,7 @@ workaround.
 ## Risks and open questions
 
 1. **CI cannot reproduce bug 1.** The suite mocks the model, so the regression guard has to assert the *shape*
-   (a lazy read) rather than the 401. A source guard plus a late-set-env test is the strongest available
+   (no module-scope construction) rather than the 401. A source guard plus a late-set-env test is the strongest available
    without mocking an ordering that only occurs in a real process.
 2. **The ledger refusal may be correct behaviour.** If it is the active-run claim, the run genuinely should not
    be recorded twice, and only the message changes. I will say which, with the probe's output, rather than
