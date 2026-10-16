@@ -301,3 +301,64 @@ that the loop's contract deserves its own record.
   interchangeable, and the agent-cli author would silently stay blind.
 - Assert the behaviour only through the runner → the loop is a library unit with its own tests, and the
   defect is in the loop's contract, not in one caller.
+
+---
+
+## Outcome — the end-to-end run succeeded (first real one for this Factory)
+
+Against **WebFeedPOC#163**, on a clean clone:
+
+```text
+[RESUME] Continuing the parked run 0b7a2428-…            ← adoption
+[STEP 3] reading the approved plan back from the ticket   ← Bug 3 fixed
+[STEP 5] Coding Iteration 1/10 … Test result: PASS        ← 4 files authored, suite green first try
+[STEP 6] -> Pushed 'feat/dark-factory-163' successfully!  ← Bug 5 fixed
+[STEP 7] Is DONE (ok) true
+DARK FACTORY RUNNER: EXECUTION COMPLETED SUCCESSFULLY
+```
+
+Verified from the API, not from the runner's own output:
+
+| Check | Result |
+| --- | --- |
+| Branch on the remote | `refs/heads/feat/dark-factory-163` |
+| Pull request | WebFeedPOC **#164**, open, `mergeable: true`, `feat/dark-factory-163` -> `main` |
+| Body | carries `Closes #163` and links the plan artifact |
+| Diff | 5 files, **+104/-1**: `WelcomeHeading.jsx` +5, `WelcomeHeading.test.jsx` +15, `ProductPage.jsx` +2, `ProductPage.test.jsx` +6/-1, plan +76 |
+| Issue #163 | labels `['df:done']`, `df:running` cleared |
+
+The answered question was the one this whole arc existed for: an issue on a repository other than
+agent-eve, picked up, planned, approved, coded, tested, committed to its own branch, pushed, and PR'd.
+
+## The defects, and what they had in common
+
+Five defects, four of them the same shape — a mechanism written down somewhere but never wired:
+
+1. the model key read at module scope, before `.env` loaded (the 401);
+2. a claim refusal that named no reason and blamed a correctly-set driver;
+3. the plan comment written without the block its own reader requires;
+4. the coding loop discarding the failure it was supposed to feed back;
+5. a local run never creating its task branch, so the commit landed on `main`;
+
+plus one of my own: a guard I added in this round that reported a released claim as unreleased.
+
+## Harness lessons of my own (not Factory defects)
+
+- **The UAT clone must be reset before each run.** Reusing one clone kept the previous run's
+  uncommitted edits, so the whole-repo success gate included another run's broken files and the run
+  could never pass. Reset with `git reset --hard <base>` plus removal of only the RUN's untracked
+  output — an over-broad `rm -rf` deleted the repo's own tracked plan files.
+- **Write the commit-message file BEFORE any command that can `exit 1`.** Twice a gate refused after the
+  `cat >` was skipped, so `git commit --file=…` silently failed and the previous commit stayed HEAD.
+- A run leaves the clone dirty and its ledger rows behind. That is expected, not damage: the rows are
+  the claim store, and the working tree is disposable by design.
+
+## Still open
+
+- **ADR 0039 is a PROPOSAL, awaiting your decision.** The repo's ADR integrity gate accepts only
+  `Accepted`/`Superseded`, so it lives in the plans directory as a proposal; on approval it becomes
+  ADR 0039 with its index row.
+- **A stale claim still holds WebFeedPOC#161** (`blocked` since the first UAT attempt). The policy above
+  is what would retire it; no reaper is implemented.
+- Two registries describe repositories (`release-manager.config.json`, `dark-factory.config.json`) and
+  per-repo settings are deliberately partial (only `board`).
