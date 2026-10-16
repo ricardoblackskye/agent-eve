@@ -65,12 +65,42 @@ export type RunnerConfigResult =
 
 export type TargetRepoAuthorization = { ok: true } | { ok: false; error: string };
 
-/** Not implemented yet (RED stub for #348 Task 3). */
-export function authorizeTargetRepo(_input: {
+/**
+ * Decide whether a repository may be touched at all.
+ *
+ * Fail-closed in the same way as the rest of the Factory: an unset allow-list authorizes NOTHING, and the
+ * message names the variable rather than reporting a generic refusal. The runner used to make this path
+ * unreachable by setting the variable when it was unset, which turned "not configured" into "authorized".
+ *
+ * Comparison ignores case because `resolveWorkerAllowedRepos` lower-cases its entries: a caller that
+ * supplies the configured casing must not be refused on spelling.
+ */
+export function authorizeTargetRepo(input: {
   repo: string;
   allowed: readonly string[];
 }): TargetRepoAuthorization {
-  throw new Error("authorizeTargetRepo is not implemented");
+  if (input.allowed.length === 0) {
+    return {
+      ok: false,
+      error:
+        "DF_WORKER_ALLOWED_REPOS is not configured, so no repository is authorized " +
+        "(fail-closed). Set it to a comma-separated list of owner/repo entries.",
+    };
+  }
+
+  const repo = input.repo.trim().toLowerCase();
+  const allowed = input.allowed.map((entry) => entry.trim().toLowerCase());
+
+  if (!allowed.includes(repo)) {
+    return {
+      ok: false,
+      error:
+        `repository ${input.repo} is not in DF_WORKER_ALLOWED_REPOS ` +
+        `(${input.allowed.join(", ")}).`,
+    };
+  }
+
+  return { ok: true };
 }
 
 /**

@@ -33,6 +33,11 @@ import {
   resolveIssueToken,
 } from "../agent/lib/dark-factory/issue-writer";
 import { resolveWorkerAllowedRepos } from "../agent/lib/dark-factory/credentials";
+import {
+  authorizeTargetRepo,
+  loadRunnerConfig,
+  resolveTargetRepo,
+} from "../agent/lib/dark-factory/runner-config";
 import { createInMemoryCredentialVault } from "../agent/lib/dark-factory/credential-vault";
 import {
   commitAndPushFromSandbox,
@@ -105,9 +110,9 @@ function initEnv(): Record<string, string | undefined> {
       }
     }
   }
-  if (!process.env.DF_WORKER_ALLOWED_REPOS) {
-    process.env.DF_WORKER_ALLOWED_REPOS = "ricardoblackskye/agent-eve";
-  }
+  // #348: DF_WORKER_ALLOWED_REPOS is deliberately NOT defaulted here. Setting it when unset made an
+  // unconfigured deployment look authorized instead of refusing, so the fail-closed gate in credentials.ts
+  // existed on paper and was defeated at this call site.
   if (!process.env.EVE_CHAT_MODEL) {
     process.env.EVE_CHAT_MODEL = "deepseek/deepseek-chat";
   }
@@ -183,10 +188,31 @@ async function main(): Promise<void> {
   const env = initEnv();
   const token = resolveIssueToken(env);
   const allowed = resolveWorkerAllowedRepos(env);
-  // #348: the Factory currently runs against ONE repository. Replacing this literal with the repository the
-  // dispatch actually targets is the point of that issue. Until then, every repo-wide reference in this run
-  // derives from here - which is why nothing below hardcodes an owner and a name again.
-  const targetRepo = "ricardoblackskye/agent-eve";
+  // #348: RESOLUTION and AUTHORIZATION are separate questions, answered in runner-config.ts.
+  //
+  // Resolution: which repository this run is for - the dispatch's `--repo`, else `default_repo` from
+  // dark-factory.config.json, else a refusal. Never a literal here: a default in code is indistinguishable
+  // from a hardcode, which is precisely what this issue exists to remove.
+  const configResult = loadRunnerConfig();
+  if (!configResult.ok) {
+    throw new Error(`Dark Factory Runner cannot start: ${configResult.error}`);
+  }
+  const repoResult = resolveTargetRepo({
+    argv: process.argv,
+    config: configResult.config,
+  });
+  if (!repoResult.ok) {
+    throw new Error(`Dark Factory Runner cannot start: ${repoResult.error}`);
+  }
+  const targetRepo = repoResult.repo;
+
+  // Authorization: may we touch it? Fail-closed and BEFORE anything is cloned or written, so an
+  // unconfigured or unlisted repository produces an explanation rather than a half-finished run.
+  const authorization = authorizeTargetRepo({ repo: targetRepo, allowed });
+  if (!authorization.ok) {
+    throw new Error(`Dark Factory Runner cannot start: ${authorization.error}`);
+  }
+
   const [repoOwner, repoName] = targetRepo.split("/");
 
   const issueArgIdx = process.argv.indexOf("--issue");
@@ -221,7 +247,7 @@ async function main(): Promise<void> {
       ? process.argv[branchArgIdx + 1]
       : `feat/dark-factory-#${issueNum}`;
 
-  line("Target Repository", targetRepo);
+  line("Target Repository", `${targetRepo} (from ${repoResult.source})`);
   line("Allowed Repositories", allowed);
   line("Target Issue", `#${issueNum}`);
   line("Configured Chat Model", env.EVE_CHAT_MODEL);
