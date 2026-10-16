@@ -62,31 +62,54 @@ export function runnerDeliveryId(attemptId: string): string {
   return `runner:${attemptId.trim()}`;
 }
 
+export type RunStartDecision =
+  | { kind: "start"; runId: string }
+  | { kind: "adopt"; runId: string }
+  | { kind: "refuse"; reason: string };
+
 /**
- * Whether this run may start, and if not, why. `null` means start.
+ * Whether this run may start, may adopt the run it is approving, or must refuse.
  *
- * The distinction this draws is the fix for #373's orphan. An UNCONFIGURED ledger is a local convenience:
- * the runner falls back to the attempt id, loudly, so a developer needs no database. An ACTIVE CONFLICT is
- * the ledger saying another run owns this issue, and carrying on there is not a degraded mode — it is a
- * second run on one issue, writing its lifecycle to a run the ledger never minted. That is how a stale
- * claim became permanent: the writes went somewhere the ledger could not see, so nothing released it.
+ * Three outcomes, not two, and the third is what makes the approval gate work. Parking marks a run
+ * `blocked`, which HOLDS the claim, so the run awaiting approval is also the run blocking a fresh
+ * dispatch. Since a resume arrives as an ordinary dispatch with a newly minted attempt id, refuse-only
+ * guarding would mean approving a plan could never let that run continue.
  *
- * The decision reads `activeConflict`, never the message text; the message is reused only because it already
- * names the holder and its status.
+ * ADOPT is therefore limited to a RESUME against a BLOCKED holder - the run parked awaiting a human. A
+ * `queued` or `running` holder is genuinely in flight and is never adopted. The adopted id is the
+ * substance: it is what makes the resumed run's writes land on the real run rather than a phantom (#373).
  */
-export function refuseToStartReason(
+export function decideRunStart(
   result: BeginRunRecordResult,
-): string | null {
-  if (!result.activeConflict) return null;
-  // The explanation is reused rather than rebuilt, because it already names the holder, its status and
-  // the issue. Only the CONSEQUENCE is added - and as its own sentence, so the message does not read as
-  // one run-on chain of 'so ... so ...'.
-  return (
-    `${result.error ?? "Another run already holds this issue"}. ` +
-    `This run will not start: wait for that run to finish, or retire its claim if the process is gone.`
-  );
+  options: { resuming?: boolean } = {},
+): RunStartDecision {
+  if (!result.activeConflict) return { kind: "start", runId: result.runId };
+
+  const { runId: holder, status } = result.activeConflict;
+  if (options.resuming && status === "blocked") {
+    return { kind: "adopt", runId: holder };
+  }
+
+  // The explanation is reused rather than rebuilt: it already names the holder, its status and the issue.
+  // Only the consequence is added, as its own sentence.
+  const consequence =
+    options.resuming && status !== "blocked"
+      ? `This run will not start: a resume continues a run parked awaiting approval, and that one is '${status}'.`
+      : "This run will not start: wait for that run to finish, or retire its claim if the process is gone.";
+  return {
+    kind: "refuse",
+    reason: `${result.error ?? "Another run already holds this issue"}. ${consequence}`,
+  };
 }
 
+/** Refusal-only view of {@link decideRunStart}, for callers that have nothing to adopt. */
+export function refuseToStartReason(
+  result: BeginRunRecordResult,
+  options: { resuming?: boolean } = {},
+): string | null {
+  const decision = decideRunStart(result, options);
+  return decision.kind === "refuse" ? decision.reason : null;
+}
 export async function beginRunRecord(
   input: BeginRunRecordInput,
 ): Promise<BeginRunRecordResult> {

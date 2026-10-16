@@ -97,7 +97,7 @@ import { createCostGovernor } from "../agent/lib/dark-factory/cost-governor";
 import { createRunHistoryStore } from "../agent/lib/dark-factory/run-history-provider";
 import {
   beginRunRecord,
-  refuseToStartReason,
+  decideRunStart,
 } from "../agent/lib/dark-factory/run-record";
 import { withNotifications } from "../agent/lib/dark-factory/notifying-run-history";
 import { runGovernedAgentCall } from "../agent/lib/dark-factory/governed-agent-call";
@@ -246,6 +246,8 @@ async function main(): Promise<void> {
   // addressable by its control actions. An unconfigured ledger is reported loudly and the attempt
   // id is used as a fallback, so a local run still works.
   const runHistory = withNotifications(createRunHistoryStore(env), env);
+  const isResume = process.argv.includes("--resume");
+
   const begun = await beginRunRecord({
     history: runHistory,
     attemptId,
@@ -255,12 +257,21 @@ async function main(): Promise<void> {
   // #373: a run the ledger refused because ANOTHER run holds this issue must not start. The previous
   // behaviour carried on with the attempt id as a synthetic run id, so its lifecycle writes targeted a run
   // the ledger had never minted - the stale claim kept the issue and nothing could release it.
-  const startRefusal = refuseToStartReason(begun);
-  if (startRefusal) {
-    throw new Error(startRefusal);
+  // #373: a FRESH run refused because another run holds this issue must not start. The old behaviour
+  // carried on with the attempt id as a synthetic run id, so its writes targeted a run the ledger had
+  // never minted and the claim could never be released. A RESUME is different: the blocked holder IS the
+  // run being approved, so it is adopted and the writes land on the real run.
+  const startDecision = decideRunStart(begun, { resuming: isResume });
+  if (startDecision.kind === "refuse") {
+    throw new Error(startDecision.reason);
+  }
+  if (startDecision.kind === "adopt") {
+    console.log(
+      `\n[RESUME] Continuing the parked run ${startDecision.runId}.`,
+    );
   }
 
-  const runId = begun.runId;
+  const runId = startDecision.runId;
 
   const { store: runControlStore, checkpoint } = buildRunControl(env, runId);
   activeControlStore = runControlStore;
@@ -348,7 +359,7 @@ async function main(): Promise<void> {
   // #365 R4: on a RESUME the plan is NOT regenerated. A fresh plan is a different plan from the one a human
   // approved, so the approved plan is read back off the ticket instead - and if it cannot be read, the run
   // stops rather than guessing.
-  const isResume = process.argv.includes("--resume");
+  // Hoisted above the run record: a resume changes how a held claim is treated (#373).
   const approvedPlan = isResume
     ? await loadApprovedPlan(
         {
