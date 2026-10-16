@@ -572,3 +572,23 @@ describe("the runner's other invented inputs (#348)", () => {
     expect(runner).toContain("resolveBranchName(");
   });
 });
+
+describe("the sprint reporter's board wiring (#348 R2 Task 2)", () => {
+  const source = readFileSync(
+    "agent/subagents/sprint-reporter/tools/generate_sprint_report.ts",
+    "utf8",
+  );
+
+  it("no longer defaults to a hardcoded owner and project number", () => {
+    // The tool's execute() makes network calls, so the wiring is pinned at the source: a guard that reads
+    // the call site is what stops the literal coming back, and the resolver's own precedence is covered
+    // by the tests above.
+    expect(source).not.toContain('"ricardoblackskye"');
+    expect(source).not.toMatch(/SPRINT_PROJECT_NUMBER\s*\|\|\s*3/);
+  });
+
+  it("resolves the board through the shared module instead of composing it inline", () => {
+    expect(source).toContain("resolveBoardSetting(");
+    expect(source).toContain("loadRunnerConfig(");
+  });
+});
