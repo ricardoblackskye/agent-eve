@@ -36,6 +36,8 @@ import { resolveWorkerAllowedRepos } from "../agent/lib/dark-factory/credentials
 import {
   authorizeTargetRepo,
   loadRunnerConfig,
+  resolveBranchName,
+  resolveIssueNumber,
   resolveTargetRepo,
 } from "../agent/lib/dark-factory/runner-config";
 import { createInMemoryCredentialVault } from "../agent/lib/dark-factory/credential-vault";
@@ -215,11 +217,20 @@ async function main(): Promise<void> {
 
   const [repoOwner, repoName] = targetRepo.split("/");
 
-  const issueArgIdx = process.argv.indexOf("--issue");
-  const issueNum =
-    issueArgIdx !== -1 && process.argv[issueArgIdx + 1]
-      ? parseInt(process.argv[issueArgIdx + 1], 10)
-      : 179;
+  // #348: the issue and the branch are supplied, not invented. `--issue` used to default to 179 (a run
+  // against an issue nobody asked for) and the branch to a name containing a '#', which breaks GitHub
+  // URLs. Both resolve BEFORE the run record is opened, so a bad argument fails with no side effects.
+  const issueResult = resolveIssueNumber(process.argv);
+  if (!issueResult.ok) {
+    throw new Error(`Dark Factory Runner cannot start: ${issueResult.error}`);
+  }
+  const issueNum = issueResult.issue;
+
+  const branchResult = resolveBranchName({ argv: process.argv, issue: issueNum });
+  if (!branchResult.ok) {
+    throw new Error(`Dark Factory Runner cannot start: ${branchResult.error}`);
+  }
+  const branchName = branchResult.branch;
 
   const attemptId = resolveRunnerRunId(process.argv, issueNum);
 
@@ -240,12 +251,6 @@ async function main(): Promise<void> {
   const { store: runControlStore, checkpoint } = buildRunControl(env, runId);
   activeControlStore = runControlStore;
   await checkpoint();
-
-  const branchArgIdx = process.argv.indexOf("--branch");
-  const branchName =
-    branchArgIdx !== -1 && process.argv[branchArgIdx + 1]
-      ? process.argv[branchArgIdx + 1]
-      : `feat/dark-factory-#${issueNum}`;
 
   line("Target Repository", `${targetRepo} (from ${repoResult.source})`);
   line("Allowed Repositories", allowed);

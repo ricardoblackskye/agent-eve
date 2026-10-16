@@ -111,17 +111,59 @@ export type BranchNameResult =
   | { ok: true; branch: string }
   | { ok: false; error: string };
 
-/** Not implemented yet (RED stub for #348 Task 4). */
-export function resolveIssueNumber(_argv: readonly string[]): IssueNumberResult {
-  throw new Error("resolveIssueNumber is not implemented");
+/**
+ * The issue number, which must be supplied explicitly.
+ *
+ * The runner used to default this to 179: a run against an issue nobody asked for, with nothing in the
+ * output saying so. Digits are matched rather than passed to `parseInt`, which COERCES instead of
+ * validating — `parseInt("34.8")` is 34 and `parseInt("12abc")` is 12 — so a typo would silently become a
+ * real issue number and the run would look intentional.
+ */
+export function resolveIssueNumber(argv: readonly string[]): IssueNumberResult {
+  const argument = flagValue(argv, "--issue");
+  const raw = (argument.value ?? "").trim();
+
+  if (!argument.present || raw === "") {
+    return { ok: false, error: "No issue number: pass --issue <number>." };
+  }
+
+  if (!/^\d+$/.test(raw)) {
+    return {
+      ok: false,
+      error: `--issue ${JSON.stringify(argument.value)} is not a positive integer.`,
+    };
+  }
+
+  return { ok: true, issue: Number(raw) };
 }
 
-/** Not implemented yet (RED stub for #348 Task 4). */
-export function resolveBranchName(_input: {
+/**
+ * The branch to work on: an explicit `--branch`, else one derived from the issue.
+ *
+ * Branch names must not contain `#` — it breaks the GitHub UI and URLs, and this repo's own convention
+ * forbids it. The previous default (`feat/dark-factory-#${issue}`) did exactly that.
+ */
+export function resolveBranchName(input: {
   argv: readonly string[];
   issue: number;
 }): BranchNameResult {
-  throw new Error("resolveBranchName is not implemented");
+  const argument = flagValue(input.argv, "--branch");
+  const raw = (argument.value ?? "").trim();
+
+  if (argument.present) {
+    if (raw === "") {
+      return { ok: false, error: "No branch name: pass --branch <name>." };
+    }
+    if (raw.includes("#")) {
+      return {
+        ok: false,
+        error: `--branch ${JSON.stringify(raw)} contains '#', which breaks GitHub URLs and this repo's naming convention.`,
+      };
+    }
+    return { ok: true, branch: raw };
+  }
+
+  return { ok: true, branch: `feat/dark-factory-${input.issue}` };
 }
 
 /**
