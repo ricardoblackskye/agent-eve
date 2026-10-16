@@ -57,7 +57,10 @@ import {
   toTaskAssignment,
   type LoopResult,
 } from "../agent/lib/dark-factory/developer-agent";
-import { createCircuitBreaker } from "../agent/lib/dark-factory/circuit-breaker";
+import {
+  createCircuitBreaker,
+  type TripEvent,
+} from "../agent/lib/dark-factory/circuit-breaker";
 import { createSandboxProvider } from "../agent/lib/dark-factory/sandbox-provider";
 import { reapSandboxesByRun } from "../agent/lib/dark-factory/sandbox-reaper";
 import type { SandboxProvider } from "../agent/lib/dark-factory/sandbox";
@@ -743,43 +746,13 @@ async function main(): Promise<void> {
       },
     );
   } catch (error) {
-    // #312: a trip halts fail-closed through the SAME terminal path as the runner's other
-    // steps, so a tripped run is never silently left running.
-    if (error instanceof CircuitTrippedError) {
-      const trips = breaker.getTripEvents();
-      console.error(
-        `[ERROR] Circuit breaker tripped — halting fail-closed: ${JSON.stringify(trips)}`,
-      );
-      // #313: persist the trip ON THE RUN so it is explainable on the ticket, not only in a
-      // log. Honest fail-closed: a ledger outage must never turn a recorded trip into a
-      // silent one, so the failure is reported loudly and the run still fails.
-      for (const trip of trips) {
-        if (trip.limit === undefined) {
-          console.error(
-            `[WARN] Circuit-breaker trip (${trip.reason}) carried no limit and cannot be ` +
-              `recorded machine-readably; refusing to invent one.`,
-          );
-          continue;
-        }
-        const recorded = await recordBreakerTrip(runHistory, {
-          runId,
-          trip: {
-            reason: trip.reason,
-            limit: trip.limit,
-            workerMinutes: trip.workerMinutes,
-          },
-        });
-        if (!recorded.ok) {
-          console.error(
-            `[ERROR] Circuit-breaker trip could not be persisted for ${runId}: ${recorded.error}`,
-          );
-        }
-      }
-      await applyTerminalLifecycle(
-        { labelWriter, runHistory },
-        { repo: targetRepo, issue: issueNum, runId, terminalStatus: "failed" },
-      );
-    }
+    // #376: the failure path is extracted so it is testable, and it ends the run for ANY
+    // failure after acceptance — not only a circuit trip.
+    await finalizeCodingPhaseFailure(
+      { labelWriter, runHistory, breaker },
+      { repo: targetRepo, issue: issueNum, runId },
+      error,
+    );
     throw error;
   }
 
@@ -1185,6 +1158,67 @@ export async function runCodingPhase<T>(
  * Comparing the module URL with the entry URL behaves identically under tsx, plain node and vitest,
  * so importing this module from a test still does not run `main`.
  */
+/**
+ * #376 — end a run that failed AFTER it was accepted.
+ *
+ * Extracted from `main`'s coding-phase catch so it is reachable from a test: `main` cannot be
+ * called, and the defect this fixes (a failure that skips the terminal lifecycle) lives in that
+ * catch rather than in the phase itself. The terminal lifecycle is what releases the run's claim,
+ * so skipping it leaves the ticket on `df:running` and the ledger holding a claim no later attempt
+ * may adopt.
+ */
+export async function finalizeCodingPhaseFailure(
+  deps: {
+    labelWriter: Parameters<typeof applyTerminalLifecycle>[0]["labelWriter"];
+    runHistory: Parameters<typeof applyTerminalLifecycle>[0]["runHistory"];
+    breaker: { getTripEvents(): readonly TripEvent[] };
+  },
+  target: { repo: string; issue: number; runId: string },
+  error: unknown,
+): Promise<void> {
+  // #312: a trip halts fail-closed through the SAME terminal path as the runner's other
+  // steps, so a tripped run is never silently left running.
+  if (error instanceof CircuitTrippedError) {
+    const trips = deps.breaker.getTripEvents();
+    console.error(
+      `[ERROR] Circuit breaker tripped — halting fail-closed: ${JSON.stringify(trips)}`,
+    );
+    // #313: persist the trip ON THE RUN so it is explainable on the ticket, not only in a
+    // log. Honest fail-closed: a ledger outage must never turn a recorded trip into a
+    // silent one, so the failure is reported loudly and the run still fails.
+    for (const trip of trips) {
+      if (trip.limit === undefined) {
+        console.error(
+          `[WARN] Circuit-breaker trip (${trip.reason}) carried no limit and cannot be ` +
+            `recorded machine-readably; refusing to invent one.`,
+        );
+        continue;
+      }
+      const recorded = await recordBreakerTrip(deps.runHistory, {
+        runId: target.runId,
+        trip: {
+          reason: trip.reason,
+          limit: trip.limit,
+          workerMinutes: trip.workerMinutes,
+        },
+      });
+      if (!recorded.ok) {
+        console.error(
+          `[ERROR] Circuit-breaker trip could not be persisted for ${target.runId}: ${recorded.error}`,
+        );
+      }
+    }
+  }
+  // #376: the terminal lifecycle is NOT conditional on a trip. ANY failure after the run was
+  // accepted must end it: otherwise the ticket stays on `df:running` and the ledger keeps a
+  // claim no later attempt may adopt — which is what a TLS push failure did, because
+  // `main`'s catch only logs and sets an exit code.
+  await applyTerminalLifecycle(
+    { labelWriter: deps.labelWriter, runHistory: deps.runHistory },
+    { repo: target.repo, issue: target.issue, runId: target.runId, terminalStatus: "failed" },
+  );
+}
+
 const isDirectRun =
   process.argv[1] !== undefined &&
   import.meta.url === pathToFileURL(process.argv[1]).href;

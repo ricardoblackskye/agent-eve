@@ -51,6 +51,19 @@ function fakeHandle(over: Partial<{ exitCode: number | undefined }> = {}) {
 
 const env = { DF_SANDBOX_IMAGE: "python:3.12", DF_SANDBOX_TIMEOUT_SECONDS: "600" };
 
+/**
+ * #376 — the sidecar terminates TLS with a root it mints, so the in-sandbox git cannot verify
+ * GitHub unaided. The driver offers that CA as a per-invocation `-c` override, guarded because
+ * the MITM is what creates the bundle. Written out HERE, not imported, so the assertion pins the
+ * literal shape and cannot drift with the implementation.
+ */
+const CA_OVERRIDE =
+  'GIT_CA=""; ' +
+  "if [ -f /opt/opensandbox/merged-ca-certificates.pem ]; then " +
+  'GIT_CA="-c http.sslCAInfo=/opt/opensandbox/merged-ca-certificates.pem"; fi; ';
+const gitCmd = (args: string) =>
+  `${CA_OVERRIDE}GIT_TERMINAL_PROMPT=0 git $GIT_CA ${args}`;
+
 describe("#281 opensandbox driver", () => {
   it("identifies as opensandbox and IS isolated", () => {
     const provider = createOpenSandboxProvider(env, { createSandbox: vi.fn() });
@@ -209,7 +222,7 @@ describe("#282 R3 in-sandbox git (vault path)", () => {
     expect(res.exitCode).toBe(0);
     // A bare URL with no userinfo, and a non-interactive git: nothing to leak, nothing to prompt for.
     expect(calls.run).toEqual([
-      `GIT_TERMINAL_PROMPT=0 git push ${repoUrl} feat/df-sandbox-vault-push-354`,
+      gitCmd(`push ${repoUrl} feat/df-sandbox-vault-push-354`),
     ]);
     expect(calls.run[0]).not.toContain("@");
   });
@@ -230,7 +243,7 @@ describe("#282 R3 in-sandbox git (vault path)", () => {
     expect(res.exitCode).toBe(0);
     // ONE single-quoted shell word: the sidecar shell cannot execute the `;` or the `$`.
     expect(calls.run).toEqual([
-      `GIT_TERMINAL_PROMPT=0 git commit -m 'feat: #354 vault push; rm -rf ${repoUrl}'`,
+      gitCmd(`commit -m 'feat: #354 vault push; rm -rf ${repoUrl}'`),
     ]);
   });
 
@@ -239,7 +252,7 @@ describe("#282 R3 in-sandbox git (vault path)", () => {
     const provider = vaultProvider(handle);
     await provider.runGit!(["commit", "-m", "it's safe"]);
     expect(calls.run).toEqual([
-      "GIT_TERMINAL_PROMPT=0 git commit -m 'it'\\''s safe'",
+      gitCmd("commit -m 'it'\\''s safe'"),
     ]);
   });
 
@@ -248,6 +261,25 @@ describe("#282 R3 in-sandbox git (vault path)", () => {
     const provider = vaultProvider(handle);
     await expect(provider.runGit!([])).rejects.toThrow();
     expect(calls.run).toEqual([]);
+  });
+
+  it("hands git the egress sidecar CA, per-invocation and only where it exists", async () => {
+    const { handle, calls } = fakeHandle();
+    const provider = vaultProvider(handle);
+    await provider.runGit!(["push", repoUrl, "feat/df-sandbox-push-tls-376"]);
+    const command = calls.run[0]!;
+    // The CA reaches git as a per-invocation override, not an exported variable: nothing else
+    // in the sandbox may inherit a trust override.
+    expect(command).toContain(
+      "if [ -f /opt/opensandbox/merged-ca-certificates.pem ]; then " +
+        'GIT_CA="-c http.sslCAInfo=/opt/opensandbox/merged-ca-certificates.pem"; fi; ',
+    );
+    expect(command).not.toMatch(/\bexport\b/);
+    // The git invocation keeps its existing shape, so the credential still arrives as a header
+    // the egress sidecar injects.
+    expect(command).toContain(
+      `GIT_TERMINAL_PROMPT=0 git $GIT_CA push ${repoUrl} feat/df-sandbox-push-tls-376`,
+    );
   });
 });
 

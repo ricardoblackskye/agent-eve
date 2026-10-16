@@ -390,6 +390,25 @@ export function createOpenSandboxProvider(
     return pending;
   };
 
+  /**
+   * #376 — the CA `execd` merges at sandbox start: the full root set PLUS the egress
+   * sidecar's mitm root. The sidecar terminates outbound TLS with that root (that is how it
+   * injects the vaulted Authorization header), so git cannot verify GitHub unaided and the
+   * push dies with "server certificate verification failed".
+   */
+  const mergedCaBundle = "/opt/opensandbox/merged-ca-certificates.pem";
+  /**
+   * #376 — offer git that CA as a PER-INVOCATION override, and only where the file exists.
+   *
+   * Not an exported variable: nothing else in the sandbox should inherit a trust override.
+   * The existence guard is load-bearing — the MITM is what creates the bundle, so where it is
+   * absent an unconditional CA path makes git fail with "Problem with the SSL CA cert
+   * (path? access rights?)".
+   */
+  const gitCaOverride =
+    'GIT_CA=""; ' +
+    `if [ -f ${mergedCaBundle} ]; then ` +
+    `GIT_CA="-c http.sslCAInfo=${mergedCaBundle}"; fi; `;
   // #354 — in-sandbox git exists ONLY on the vault path: the egress sidecar supplies the credential,
   // so the sandbox runs a bare command. Every other driver keeps the host-side push unchanged.
   const gitCapability: Pick<SandboxProvider, "runGit"> = vaultEnabled(env)
@@ -405,7 +424,7 @@ export function createOpenSandboxProvider(
           // GIT_TERMINAL_PROMPT=0: git must never block on a credential prompt it cannot answer — the
           // credential arrives as a header the egress sidecar injects.
           const execution = await handle.commands.run(
-            `GIT_TERMINAL_PROMPT=0 git ${command}`,
+            `${gitCaOverride}GIT_TERMINAL_PROMPT=0 git $GIT_CA ${command}`,
           );
           const stdout = execution.logs.stdout
             .map((line) => line.text)
