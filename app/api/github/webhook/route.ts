@@ -517,7 +517,7 @@ async function handler(request: NextRequest) {
         `Repository (verified identifier): ${sprintOwner}/${sprintRepo}`,
         `Issue number (verified identifier): ${sprintIssueNumber}`,
         ``,
-        `The Sprint Metrics Analyst subagent must call generate_sprint_report with owner "${sprintOwner}", repo "${sprintRepo}", issueNumber ${sprintIssueNumber}, and the default board (login "ricardoblackskye", projectNumber 3).`,
+        `The Sprint Metrics Analyst subagent must call generate_sprint_report with owner "${sprintOwner}", repo "${sprintRepo}", and issueNumber ${sprintIssueNumber}. Do NOT supply projectOwner or projectNumber: the tool resolves the board from dark-factory.config.json for ${sprintOwner}/${sprintRepo}, and refuses if none is configured.`,
       ].join("\n");
 
       const apiKey = process.env.EVE_API_KEY;
