@@ -3,14 +3,21 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 /**
- * The OpenRouter key is read at CALL time, not at import time (#373).
+ * The model client must not be BUILT at module scope (#373).
  *
- * A real local run exposed this: `createOpenAI` is called at module scope, so it captured an empty key while
- * the runner's `initEnv()` - which loads `.env` - ran after the imports had already been evaluated. Every
- * request went out unauthenticated, and the runner's own log truthfully said the key was present.
+ * A real local run exposed this: `createOpenAI({ apiKey: process.env.OPENROUTER_API_KEY })` runs while the
+ * module is evaluated, and the runner loads `.env` in `initEnv()` - also at module scope, but after its own
+ * imports, because ESM hoists them. So the client captured an empty key (every request went out
+ * unauthenticated, and OpenRouter answered "Missing Authentication header") while the runner's own log
+ * truthfully reported the key as present.
  *
- * The ordering is not reproducible in-process without stubbing the SDK's transport, so this asserts the
- * SHAPE that makes the ordering irrelevant: a function, resolved when the provider is used.
+ * The ordering cannot be fixed by loading earlier: a module cannot run code before its own imports, and
+ * loading `.env` at module scope here would inject the developer's real environment into every test that
+ * imports the runner. So the fix is to DEFER the construction to call time - and this asserts that no call
+ * site constructs the client eagerly.
+ *
+ * NOTE: passing a resolver as `apiKey` was tried and REJECTED by tsc - this @ai-sdk/openai version types
+ * `apiKey` as a string. The deferral has to be the provider construction, not the key.
  */
 function walk(dir: string): string[] {
   const out: string[] = [];
@@ -26,18 +33,16 @@ const callSites = walk("agent")
   .filter((file) => readFileSync(file, "utf8").includes("createOpenAI("))
   .map((file) => ({ file, source: readFileSync(file, "utf8") }));
 
-describe("the model key is read at call time (#373)", () => {
+describe("the model client is built at call time (#373)", () => {
   it("finds the call sites at all — a guard that matches nothing proves nothing", () => {
     expect(callSites.length).toBeGreaterThan(0);
   });
 
-  it("hands the client a RESOLVER rather than a key captured at module scope", () => {
+  it("builds no provider at module scope", () => {
     for (const { file, source } of callSites) {
-      expect(source, `${file}: apiKey captured at construction time`).not.toMatch(
-        /apiKey:\s*process\.env\./,
-      );
-      expect(source, `${file}: apiKey is not a lazy resolver`).toMatch(
-        /apiKey:\s*\(\s*\)\s*=>\s*process\.env\./,
+      // A module-scope construction looks like `const x = createOpenAI({` at the start of a line.
+      expect(source, `${file}: provider built at module scope`).not.toMatch(
+        /^(?:export\s+)?const\s+\w+\s*=\s*createOpenAI\(/m,
       );
     }
   });
