@@ -1,5 +1,8 @@
+import { readFileSync } from "node:fs";
+
 import { describe, expect, it } from "vitest";
 import {
+  authorizeTargetRepo,
   loadRunnerConfig,
   parseRunnerConfig,
   resolveTargetRepo,
@@ -157,5 +160,66 @@ describe("runner config loading", () => {
       expect(result.ok, `expected ${bad} to be refused`).toBe(false);
       if (!result.ok) expect(result.error).toContain("default_repo");
     }
+  });
+});
+
+describe("authorizeTargetRepo", () => {
+  it("refuses every repository when the allow-list is unset, naming the variable", () => {
+    // This is the path the runner used to make unreachable by SETTING the variable when it was unset, so
+    // an unconfigured deployment looked authorized instead of refusing.
+    const result = authorizeTargetRepo({ repo: "ricardoblackskye/agent-eve", allowed: [] });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain("DF_WORKER_ALLOWED_REPOS");
+  });
+
+  it("refuses a repository outside the list, naming the repo and the list", () => {
+    const result = authorizeTargetRepo({
+      repo: "ricardoblackskye/WebFeedPOC",
+      allowed: ["ricardoblackskye/agent-eve"],
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain("ricardoblackskye/WebFeedPOC");
+      expect(result.error).toContain("ricardoblackskye/agent-eve");
+    }
+  });
+
+  it("allows a listed repository", () => {
+    expect(
+      authorizeTargetRepo({
+        repo: "ricardoblackskye/agent-eve",
+        allowed: ["ricardoblackskye/agent-eve", "ricardoblackskye/WebFeedPOC"],
+      }).ok,
+    ).toBe(true);
+  });
+
+  it("compares without regard to case, matching how the allow-list is parsed", () => {
+    // resolveWorkerAllowedRepos lower-cases its entries, so a caller that hands over the configured
+    // casing must not be refused on spelling.
+    expect(
+      authorizeTargetRepo({
+        repo: "RicardoBlackSkye/Agent-Eve",
+        allowed: ["ricardoblackskye/agent-eve"],
+      }).ok,
+    ).toBe(true);
+  });
+});
+
+describe("the runner's wiring (#348)", () => {
+  const runner = readFileSync("scripts/dark-factory-runner.ts", "utf8");
+
+  it("no longer invents an allow-list when none is configured", () => {
+    expect(runner).not.toMatch(/process\.env\.DF_WORKER_ALLOWED_REPOS\s*=/);
+  });
+
+  it("no longer hardcodes the target repository", () => {
+    expect(runner).not.toContain('"ricardoblackskye/agent-eve"');
+  });
+
+  it("resolves and authorizes the repository through the module", () => {
+    expect(runner).toContain("resolveTargetRepo(");
+    expect(runner).toContain("authorizeTargetRepo(");
   });
 });

@@ -63,6 +63,16 @@ export type RunnerConfigResult =
   | { ok: true; config: RunnerConfig }
   | { ok: false; error: string };
 
+export type TargetRepoAuthorization = { ok: true } | { ok: false; error: string };
+
+/** Not implemented yet (RED stub for #348 Task 3). */
+export function authorizeTargetRepo(_input: {
+  repo: string;
+  allowed: readonly string[];
+}): TargetRepoAuthorization {
+  throw new Error("authorizeTargetRepo is not implemented");
+}
+
 /**
  * Parse the config text.
  *
