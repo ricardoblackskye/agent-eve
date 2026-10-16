@@ -10,7 +10,7 @@
 > is [Dark Factory (R1)](dark-factory.md) and the flow walkthroughs in the
 > [flow deep-dives](flow-run-lifecycle.md).
 
-_102 modules._
+_103 modules._
 
 ## agent-cli-author
 
@@ -618,6 +618,14 @@ Dark Factory — open a run's record at the start of a run (#316). A run driven 
 **Source:** [`agent/lib/dark-factory/run-record.ts`](../../agent/lib/dark-factory/run-record.ts)
 
 **Exports:** `BeginRunRecordInput`, `BeginRunRecordResult`, `beginRunRecord`, `runnerDeliveryId`
+
+## runner-config
+
+Dark Factory — resolve a run's target repository instead of hardcoding one (#348). Two concerns, kept apart: RESOLUTION decides which repository a run works on (`--repo`, else the `default_repo` in `dark-factory.config.json`, else refuse) and AUTHORIZATION decides whether it may be touched (the fail-closed `DF_WORKER_ALLOWED_REPOS` list in `credentials.ts`). The runner previously answered the first with a literal and faked the second by setting the allow-list when it was unset, so an unconfigured deployment looked authorized while every run targeted one repository. The default is an operating choice and lives in config, never in code: a default in code is indistinguishable from a hardcode.
+
+**Source:** [`agent/lib/dark-factory/runner-config.ts`](../../agent/lib/dark-factory/runner-config.ts)
+
+**Exports:** `RUNNER_CONFIG_PATH`, `RunnerConfig`, `TargetRepoResult`, `TargetRepoSource`, `resolveTargetRepo`
 
 ## sandbox-reaper
 
