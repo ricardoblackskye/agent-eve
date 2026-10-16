@@ -26,8 +26,9 @@ export interface CanonicalPayload {
    * Source repo the trigger issue lives in. When set, the GitHub provider
    * creates the child story in THIS repo (and finalizes/linking there) instead
    * of the hardcoded `agent-eve` default. Falls back to the
-   * GITHUB_REPO_OWNER/GITHUB_REPO_NAME env vars, then to `ricardoblackskye`/
-   * `agent-eve`. Fixes issue #119 (stories were always written to agent-eve).
+   * GITHUB_REPO_OWNER/GITHUB_REPO_NAME env vars, then to `default_repo` in
+   * dark-factory.config.json. Fixes issue #119 (stories were always written to
+   * agent-eve); #348 moved the last literal out of this module.
    */
   owner?: string;
   /** See `owner`. The repo (within `owner`) to target. */

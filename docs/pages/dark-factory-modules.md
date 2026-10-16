@@ -621,11 +621,11 @@ Dark Factory — open a run's record at the start of a run (#316). A run driven 
 
 ## runner-config
 
-Dark Factory — resolve a run's target repository instead of hardcoding one (#348). Two concerns, kept apart: RESOLUTION decides which repository a run works on (`--repo`, else the `default_repo` in `dark-factory.config.json`, else refuse) and AUTHORIZATION decides whether it may be touched (the fail-closed `DF_WORKER_ALLOWED_REPOS` list in `credentials.ts`). The runner previously answered the first with a literal and faked the second by setting the allow-list when it was unset, so an unconfigured deployment looked authorized while every run targeted one repository. The default is an operating choice and lives in config, never in code: a default in code is indistinguishable from a hardcode.
+Dark Factory — resolve a run's target repository instead of hardcoding one (#348), and the per-repo settings that depend on it (#348 R2). Two concerns, kept apart: RESOLUTION decides which repository a run works on (`--repo`, else the `default_repo` in `dark-factory.config.json`, else refuse) and AUTHORIZATION decides whether it may be touched (the fail-closed `DF_WORKER_ALLOWED_REPOS` list in `credentials.ts`). The same file carries a `repos` map — the board a repository reports to, and the owner/repo a story is filed against — resolved by the same order (argument, then environment, then config) and REFUSED when nothing supplies a value, because a board defaulted to a number nobody chose is how work gets reported to the wrong Project. See ADRs 0037 and 0038. The runner previously answered the first with a literal and faked the second by setting the allow-list when it was unset, so an unconfigured deployment looked authorized while every run targeted one repository. The default is an operating choice and lives in config, never in code: a default in code is indistinguishable from a hardcode.
 
 **Source:** [`agent/lib/dark-factory/runner-config.ts`](../../agent/lib/dark-factory/runner-config.ts)
 
-**Exports:** `RUNNER_CONFIG_PATH`, `RunnerConfig`, `TargetRepoResult`, `TargetRepoSource`, `resolveTargetRepo`
+**Exports:** `RUNNER_CONFIG_PATH`, `RunnerConfig`, `RunnerConfigResult`, `parseRunnerConfig`, `loadRunnerConfig`, `TargetRepoResult`, `TargetRepoSource`, `resolveTargetRepo`, `TargetRepoAuthorization`, `authorizeTargetRepo`, `IssueNumberResult`, `resolveIssueNumber`, `BranchNameResult`, `resolveBranchName`, `RepoSettings`, `RepoBoardSettings`, `RepoSettingsResult`, `resolveRepoSettings`, `resolveBoard`, `SettingSource`, `BoardSettingResult`, `resolveBoardSetting`, `OwnerRepoResult`, `resolveOwnerRepo`
 
 ## sandbox-reaper
 
