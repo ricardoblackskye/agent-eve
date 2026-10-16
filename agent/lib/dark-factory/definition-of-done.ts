@@ -269,7 +269,7 @@ async function applyAcceptedDispositions(
       const explanation = (disposition.explanation ?? "").trim();
       if (!explanation) {
         if (deps.labelWriter) {
-          await deps.labelWriter.add(task.repo, task.issue, "needs-answer");
+          await deps.labelWriter.add(task.repo, task.issue, TRIGGER_LABELS.question);
         }
         return {
           blockedResult: {
@@ -336,7 +336,7 @@ async function applyAcceptedDispositions(
     }
     if (!posted.ok) {
       if (deps.labelWriter) {
-        await deps.labelWriter.add(task.repo, task.issue, "needs-answer");
+        await deps.labelWriter.add(task.repo, task.issue, TRIGGER_LABELS.question);
       }
       return {
         blockedResult: {
@@ -766,7 +766,7 @@ export async function runDefinitionOfDone(
         (f) => !acceptedIds.has(f.id),
       );
       if (deps.labelWriter) {
-        await deps.labelWriter.add(task.repo, task.issue, "needs-answer");
+        await deps.labelWriter.add(task.repo, task.issue, TRIGGER_LABELS.question);
       }
       const blocked: DefinitionOfDoneResult = buildBudgetExhaustedResult(
         pr,
