@@ -48,20 +48,127 @@ export type BoardResult =
   | { ok: true; board: RepoBoardSettings }
   | { ok: false; error: string };
 
-/** Not implemented yet (RED stub for #348 R2 Task 1). */
-export function resolveRepoSettings(_input: {
+/** `array` rather than `object` for an array, so a type error names what the operator actually wrote. */
+function describeValue(value: unknown): string {
+  return Array.isArray(value) ? "array" : typeof value;
+}
+
+/**
+ * Validate one repo's entry by SHAPE.
+ *
+ * Used at load time AND at use, because the loader is not the only door into `RunnerConfig`: a config
+ * assembled in code never passes through it. A truthiness check here would accept `"3"`, a blank login, a
+ * fractional number and a negative one, and every one of those then reaches a GitHub call.
+ */
+function validateEntry(
+  value: unknown,
+  path: string,
+  repo: string,
+): RepoSettingsResult {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return {
+      ok: false,
+      error: `${path}: the entry for ${repo} must be an object (received ${describeValue(value)}).`,
+    };
+  }
+
+  const record = value as Record<string, unknown>;
+  const settings: RepoSettings = {};
+
+  const board = record.board;
+  if (board !== undefined) {
+    if (board === null || typeof board !== "object" || Array.isArray(board)) {
+      return {
+        ok: false,
+        error: `${path}: "board" for ${repo} must be an object with "login" and "number".`,
+      };
+    }
+
+    const candidate = board as Record<string, unknown>;
+    const login = candidate.login;
+    const number = candidate.number;
+
+    if (typeof login !== "string" || login.trim() === "") {
+      return {
+        ok: false,
+        error: `${path}: "board.login" for ${repo} must be a non-empty string.`,
+      };
+    }
+    if (typeof number !== "number" || !Number.isInteger(number) || number <= 0) {
+      return {
+        ok: false,
+        error: `${path}: "board.number" for ${repo} must be a positive integer (received ${JSON.stringify(number)}).`,
+      };
+    }
+
+    settings.board = { login: login.trim(), number };
+  }
+
+  return { ok: true, settings };
+}
+
+/** The raw entry for a repo, matched without regard to case. Raw, so the caller re-validates it. */
+function findRepoEntry(
+  repos: Record<string, RepoSettings> | undefined,
+  wanted: string,
+): unknown {
+  if (repos === undefined) return undefined;
+  for (const [key, value] of Object.entries(repos)) {
+    if (normalise(key) === wanted) return value;
+  }
+  return undefined;
+}
+
+/**
+ * The settings for a repository, or a refusal.
+ *
+ * The refusal is the feature. Reporting to a board nobody configured is worse than not reporting: the
+ * failure is silent, it lands on someone else's Project, and it looks intentional. So a repo with no entry
+ * is refused with the repository AND the file to edit named in the message.
+ */
+export function resolveRepoSettings(input: {
   repo: string;
   config: RunnerConfig;
 }): RepoSettingsResult {
-  throw new Error("resolveRepoSettings is not implemented");
+  const wanted = normalise(input.repo);
+  const entry = findRepoEntry(input.config.repos, wanted);
+
+  if (entry === undefined) {
+    return {
+      ok: false,
+      error:
+        `No settings for repository ${input.repo} in ${RUNNER_CONFIG_PATH}. Add a ` +
+        `"${wanted}" entry to that file - the Factory will not assume another repository's settings.`,
+    };
+  }
+
+  return validateEntry(entry, RUNNER_CONFIG_PATH, wanted);
 }
 
-/** Not implemented yet (RED stub for #348 R2 Task 1). */
-export function resolveBoard(_input: {
+/**
+ * The board a repository's work is reported to, or a refusal naming the repo and the file.
+ *
+ * Separate from `resolveRepoSettings` so the message can say what is missing: a repo may legitimately have
+ * an entry without a board, and "no settings" would then be misleading.
+ */
+export function resolveBoard(input: {
   repo: string;
   config: RunnerConfig;
 }): BoardResult {
-  throw new Error("resolveBoard is not implemented");
+  const settings = resolveRepoSettings(input);
+  if (!settings.ok) return { ok: false, error: settings.error };
+
+  if (settings.settings.board === undefined) {
+    return {
+      ok: false,
+      error:
+        `No board configured for ${input.repo} in ${RUNNER_CONFIG_PATH}. Add ` +
+        '"board": { "login": "<owner>", "number": <n> } for it - refusing to report to a board ' +
+        "nobody configured.",
+    };
+  }
+
+  return { ok: true, board: settings.settings.board };
 }
 
 /** Where the resolved repository came from, for the run's opening log. */
@@ -226,29 +333,64 @@ export function parseRunnerConfig(
     return { ok: false, error: `${path} must contain a JSON object.` };
   }
 
-  const value = (parsed as Record<string, unknown>).default_repo;
-  if (value === undefined) return { ok: true, config: {} };
+  const record = parsed as Record<string, unknown>;
+  const config: RunnerConfig = {};
 
-  if (typeof value !== "string") {
-    return {
-      ok: false,
-      error:
-        `${path}: "default_repo" must be a string (received ` +
-        `${Array.isArray(value) ? "array" : typeof value}).`,
-    };
+  const defaultRepo = record.default_repo;
+  if (defaultRepo !== undefined) {
+    if (typeof defaultRepo !== "string") {
+      return {
+        ok: false,
+        error: `${path}: "default_repo" must be a string (received ${describeValue(defaultRepo)}).`,
+      };
+    }
+
+    const trimmed = defaultRepo.trim();
+    if (!REPO_PAIR_PATTERN.test(trimmed)) {
+      return {
+        ok: false,
+        error:
+          `${path}: "default_repo" ${JSON.stringify(defaultRepo)} is not an owner/repo pair ` +
+          "(expected e.g. owner/name).",
+      };
+    }
+
+    config.defaultRepo = trimmed;
   }
 
-  const trimmed = value.trim();
-  if (!REPO_PAIR_PATTERN.test(trimmed)) {
-    return {
-      ok: false,
-      error:
-        `${path}: "default_repo" ${JSON.stringify(value)} is not an owner/repo pair ` +
-        "(expected e.g. owner/name).",
-    };
+  const repos = record.repos;
+  if (repos !== undefined) {
+    if (repos === null || typeof repos !== "object" || Array.isArray(repos)) {
+      return {
+        ok: false,
+        error:
+          `${path}: "repos" must be an object keyed by owner/repo ` +
+          `(received ${describeValue(repos)}).`,
+      };
+    }
+
+    const entries: Record<string, RepoSettings> = {};
+    for (const [key, entry] of Object.entries(repos as Record<string, unknown>)) {
+      const repo = key.trim();
+      if (!REPO_PAIR_PATTERN.test(repo)) {
+        return {
+          ok: false,
+          error:
+            `${path}: repos key ${JSON.stringify(key)} is not an owner/repo pair ` +
+            "(expected e.g. owner/name).",
+        };
+      }
+
+      const validated = validateEntry(entry, path, repo);
+      if (!validated.ok) return validated;
+
+      entries[key] = validated.settings;
+    }
+
+    config.repos = entries;
   }
 
-  return { ok: true, config: { defaultRepo: trimmed } };
+  return { ok: true, config };
 }
 
 /**

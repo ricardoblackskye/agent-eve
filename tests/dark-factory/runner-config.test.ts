@@ -420,6 +420,27 @@ describe("per-repo settings (#348 R2)", () => {
     expect(parsed.ok).toBe(false);
     if (!parsed.ok) expect(parsed.error).toContain("board");
   });
+
+  it("the SHIPPED config file parses and still gives agent-eve its board", () => {
+    // A characterization guard, not a RED - the file already parses, so this passes on first run. It exists
+    // because the board used to be hardcoded in the sprint reporter, which makes this file the only place
+    // that value now lives: an edit to it should have to break a test rather than silently move a
+    // repository's reporting to a different Project.
+    const loaded = loadRunnerConfig();
+
+    expect(loaded.ok).toBe(true);
+    if (!loaded.ok) return;
+
+    const board = resolveBoard({
+      repo: "ricardoblackskye/agent-eve",
+      config: loaded.config,
+    });
+
+    expect(board.ok).toBe(true);
+    if (board.ok) {
+      expect(board.board).toEqual({ login: "ricardoblackskye", number: 3 });
+    }
+  });
 });
 
 describe("the runner's other invented inputs (#348)", () => {
