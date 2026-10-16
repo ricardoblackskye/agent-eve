@@ -89,6 +89,30 @@ export const TERMINAL_LABELS: readonly string[] = [
 ];
 
 /**
+ * The statuses that mean a run is FINISHED. Mirrors `RunStatus`'s terminal half, kept as a set so
+ * `isRunTerminal` reads as a question rather than as string matching at the call site.
+ */
+const TERMINAL_STATUSES: readonly string[] = ["succeeded", "failed", "aborted"];
+
+/**
+ * Whether this run is already terminal (#373).
+ *
+ * A run can reach a terminal status WITHOUT this function finalising it: the circuit breaker writes its own
+ * `run.terminal` event, which is enough to release the claim. Capability-guarded, because partial store
+ * doubles drive this in tests and an absent reader means 'cannot tell', which stays on the loud path.
+ */
+async function isRunTerminal(
+  runHistory: RunHistoryStore,
+  runId: string,
+): Promise<boolean> {
+  if (typeof runHistory.getRun !== "function") return false;
+  const current = await runHistory.getRun(runId);
+  return Boolean(
+    current.ok && current.value && TERMINAL_STATUSES.includes(current.value.status),
+  );
+}
+
+/**
  * Marker eventId for a run that HAS been finalised.
  *
  * Idempotency keys on this marker rather than on "a `run.terminal` event with this
@@ -250,6 +274,13 @@ export async function applyTerminalLifecycle(
     terminalEvent(runId, terminalStatus, markerEventId(runId), occurredAt),
   );
   if (!marker.ok) {
+    // #373: the store refuses a second terminal event for a run that is already terminal, and that refusal
+    // means the claim is ALREADY released - the circuit breaker reaches a terminal status with its own
+    // `run.terminal` event. Reporting it as a failure to release was the opposite of the truth. The label
+    // work above still ran, so a run terminated elsewhere is still labelled correctly.
+    if (await isRunTerminal(runHistory, runId)) {
+      return { applied: true };
+    }
     throw new TerminalEventWriteError(
       "Terminal lifecycle event write failed, so this run's claim was not released: " +
         `${marker.error ?? "the ledger refused the write"}`,
