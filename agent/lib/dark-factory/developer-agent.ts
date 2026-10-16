@@ -125,6 +125,17 @@ export function toTaskAssignment(input: TaskAssignmentInput): TaskAssignment {
 export interface LoopContext {
   /** 1-based iteration index (1 = first attempt). */
   iteration: number;
+  /**
+   * The PREVIOUS iteration's failure, when there was one (#373).
+   *
+   * Without it the loop re-invokes the worker with identical inputs and gets identical output, so a loop
+   * called self-correcting can never correct: a real run wrote byte-identical files on three consecutive
+   * iterations and tripped the breaker with `failed-selfcorrect-exceeded`.
+   *
+   * Absent on the first attempt, and absent when the previous iteration failed without producing output,
+   * so nothing is invented for a worker that reports only a verdict.
+   */
+  previousFailure?: { iteration: number; output: string };
 }
 
 /** Result returned by the worker for one iteration. */
@@ -786,6 +797,9 @@ export async function runMultiFileCodingLoop(
 ): Promise<LoopResult> {
   let iterations = 0;
   let passed = false;
+  // #373: what the last failed iteration said, offered to the next one. Discarding this is what made the
+  // loop's self-correction impossible.
+  let previousFailure: LoopContext["previousFailure"];
 
   for (let i = 0; i < opts.maxIterations; i++) {
     const iteration = i + 1;
@@ -797,7 +811,11 @@ export async function runMultiFileCodingLoop(
       iteration,
       plan: opts.plan,
       tools: opts.tools,
+      ...(previousFailure ? { previousFailure } : {}),
     });
+    if (!res.passed && res.output) {
+      previousFailure = { iteration, output: res.output };
+    }
     // Record exactly one unit of activity per completed iteration. The breaker rounds
     // sub-minute work UP to a full minute, so an iteration cannot escape the budget.
     const breaker = opts.breaker;

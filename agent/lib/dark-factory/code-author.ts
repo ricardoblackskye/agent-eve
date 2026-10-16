@@ -21,6 +21,14 @@ export interface CodeAuthorTask {
    * stays byte-for-byte what #281 pinned.
    */
   existing?: Record<string, string>;
+  /**
+   * The previous iteration's failure, verbatim (#373).
+   *
+   * A loop that re-authors from identical inputs produces identical output, so an author that is not told
+   * what failed cannot fix it. This is the test runner's own report, passed through rather than summarized:
+   * a paraphrase drops the assertion names the author needs.
+   */
+  feedback?: string;
 }
 
 export interface CodeAuthorResult {
@@ -60,6 +68,7 @@ export const PRESERVATION_CONTRACT = [
 export function buildCodeAuthorPrompt(
   plan: unknown,
   existing?: Record<string, string>,
+  feedback?: string,
 ): string {
   // Byte-for-byte the text the runner sent inline before this seam existed.
   const lines = [
@@ -80,6 +89,18 @@ export function buildCodeAuthorPrompt(
       JSON.stringify(existing, null, 2),
       ``,
       PRESERVATION_CONTRACT,
+    );
+  }
+
+  if (feedback && feedback.trim() !== "") {
+    lines.push(
+      ``,
+      `### YOUR PREVIOUS ATTEMPT FAILED - FIX THAT, DO NOT REPEAT IT`,
+      // Verbatim, not summarized: this is the test runner's own report, and a paraphrase would drop the
+      // assertion names that tell an author what to change.
+      feedback,
+      ``,
+      `Return the full corrected contents of every target file, as the JSON object described above.`,
     );
   }
 
@@ -108,7 +129,7 @@ export function createInProcessCodeAuthor(
     author: "in-process",
     write: async (task) => {
       const raw = await generate(
-        buildCodeAuthorPrompt(task.plan, task.existing),
+        buildCodeAuthorPrompt(task.plan, task.existing, task.feedback),
       );
       return { files: parseCodeAuthorOutput(raw), raw };
     },

@@ -665,7 +665,13 @@ async function main(): Promise<void> {
             // same governed path as before; a failed author propagates as a failed iteration.
             let authored: AuthorFilesResult;
             try {
-              authored = await authorFiles(codeAuthor, ctx.plan, ctx.tools);
+              authored = await authorFiles(
+                codeAuthor,
+                ctx.plan,
+                ctx.tools,
+                // #373: the last iteration's failure, so the loop can actually self-correct.
+                ctx.previousFailure?.output,
+              );
             // #361 (R2): the commit after the loop stages `lastAuthored`, not just the plan's targets.
             lastAuthored = authored;
             } catch (err: any) {
@@ -990,7 +996,7 @@ async function readExistingFile(
  * #361 — the author is shown the current content of the files it is modifying, and every write is
  * checked against what is already there before a single byte lands. A refused write throws
  * `PreservationRefusedError`, which the caller's worker turns into a failed iteration whose message
- * becomes the next iteration's context.
+ * IS handed to the next iteration as `feedback` (#373 - that sentence described intent, not behaviour, until the loop's context carried it).
  */
 export async function authorFiles(
   author: CodeAuthorProvider,
@@ -999,6 +1005,8 @@ export async function authorFiles(
     readFile(relPath: string): Promise<string>;
     writeFile(relPath: string, content: string): Promise<void>;
   },
+  /** The previous iteration's failure, if any (#373). */
+  feedback?: string,
 ): Promise<AuthorFilesResult> {
   const actions = readPlanTargetActions(plan);
 
@@ -1015,6 +1023,7 @@ export async function authorFiles(
   const result = await author.write({
     plan,
     ...(Object.keys(existing).length > 0 ? { existing } : {}),
+    ...(feedback && feedback.trim() !== "" ? { feedback } : {}),
   });
 
   // Read the pre-write content of EVERY authored path before writing any of them: the guard needs
