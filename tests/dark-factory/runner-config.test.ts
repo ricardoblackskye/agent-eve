@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  loadRunnerConfig,
+  parseRunnerConfig,
   resolveTargetRepo,
   type RunnerConfig,
 } from "../../agent/lib/dark-factory/runner-config";
@@ -87,5 +89,73 @@ describe("resolveTargetRepo", () => {
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toContain("default_repo");
+  });
+});
+
+describe("runner config loading", () => {
+  const PATH = "dark-factory.config.json";
+
+  const enoent = (): never => {
+    const error = new Error("ENOENT") as NodeJS.ErrnoException;
+    error.code = "ENOENT";
+    throw error;
+  };
+
+  it("reads default_repo from a well-formed config", () => {
+    const result = parseRunnerConfig('{"default_repo": "ricardoblackskye/WebFeedPOC"}');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.config.defaultRepo).toBe("ricardoblackskye/WebFeedPOC");
+    }
+  });
+
+  it("loads through the injected reader, so no test touches the real filesystem", () => {
+    const result = loadRunnerConfig({
+      readFile: () => '{"default_repo": "ricardoblackskye/agent-eve"}',
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.config.defaultRepo).toBe("ricardoblackskye/agent-eve");
+  });
+
+  it("treats a missing config as no default, not as an error", () => {
+    // The config supplies a DEFAULT, and --repo alone is legitimate. With neither, the run refuses in
+    // resolveTargetRepo - so an absent file is not itself a failure.
+    const result = loadRunnerConfig({ readFile: enoent });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.config.defaultRepo).toBeUndefined();
+  });
+
+  it("refuses malformed JSON, naming the file", () => {
+    const result = parseRunnerConfig("{ not json", PATH);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain(PATH);
+  });
+
+  it("refuses a config that is not an object at all", () => {
+    const result = parseRunnerConfig('["not", "an", "object"]', PATH);
+
+    expect(result.ok).toBe(false);
+  });
+
+  it("refuses a default_repo that is not an owner/repo pair", () => {
+    const result = parseRunnerConfig('{"default_repo": "agent-eve"}', PATH);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain("default_repo");
+  });
+
+  it("refuses a default_repo of the wrong SHAPE instead of reading it as text", () => {
+    // A truthiness check accepts every one of these, and the value then reaches a repo-pair test that
+    // coerces it. Validate the type, not the presence.
+    for (const bad of ["42", "null", "true", '["a/b"]', '{"owner":"a"}']) {
+      const result = parseRunnerConfig(`{"default_repo": ${bad}}`, PATH);
+
+      expect(result.ok, `expected ${bad} to be refused`).toBe(false);
+      if (!result.ok) expect(result.error).toContain("default_repo");
+    }
   });
 });

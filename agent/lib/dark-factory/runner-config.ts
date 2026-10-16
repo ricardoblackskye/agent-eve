@@ -57,6 +57,23 @@ function normalise(value: string): string {
   return value.trim().toLowerCase();
 }
 
+export type RunnerConfigResult =
+  | { ok: true; config: RunnerConfig }
+  | { ok: false; error: string };
+
+/** Not implemented yet (RED stub for #348 Task 2). */
+export function parseRunnerConfig(_raw: string, _path?: string): RunnerConfigResult {
+  throw new Error("parseRunnerConfig is not implemented");
+}
+
+/** Not implemented yet (RED stub for #348 Task 2). */
+export function loadRunnerConfig(_deps?: {
+  readFile?: (path: string) => string;
+  path?: string;
+}): RunnerConfigResult {
+  throw new Error("loadRunnerConfig is not implemented");
+}
+
 /**
  * Decide the target repository: an explicit `--repo` wins, else the configured default, else refuse.
  *
