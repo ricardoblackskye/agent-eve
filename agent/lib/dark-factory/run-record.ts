@@ -45,6 +45,14 @@ export interface BeginRunRecordResult {
  * The delivery identity for an attempt. Namespaced with `runner:` so it can never collide with a
  * webhook delivery id (`comment:<id>`, `operator-<action>:<runId>`, …).
  */
+/**
+ * Whether a run-history driver is configured at all. The advice "set DF_RUN_HISTORY_DRIVER" is only
+ * true when this is false (#373); otherwise it sends an operator to check the one thing already correct.
+ */
+function driverConfigured(): boolean {
+  return (process.env.DF_RUN_HISTORY_DRIVER ?? "").trim() !== "";
+}
+
 export function runnerDeliveryId(attemptId: string): string {
   return `runner:${attemptId.trim()}`;
 }
@@ -77,11 +85,27 @@ export async function beginRunRecord(
     };
   }
 
+  // #373 - the ADR 0026 atomic active-run claim arrives as `ok: true` with an `activeConflict` and NO
+  // value, so the check below would call it a refusal and report no reason. Name the holder instead: it
+  // is the one fact an operator needs, and without it a stale claim is invisible and unexplained.
+  if (accepted.activeConflict) {
+    const { runId: holderRunId, status: holderStatus } = accepted.activeConflict;
+    const conflict =
+      `the ledger already holds an active run (${holderRunId}, status '${holderStatus}') for ` +
+      `${input.repo}#${input.issue}, so this attempt was not recorded`;
+    log(`[WARN] The run record could not be opened: ${conflict}.`);
+    return { runId: attemptId, recorded: false, fellBack: true, error: conflict };
+  }
+
   if (!accepted.ok || !accepted.value) {
     const error = accepted.error ?? "the ledger refused the delivery";
+    // #373 - the old advice said "set DF_RUN_HISTORY_DRIVER" unconditionally, which is false when the
+    // driver is set and the store simply refused. Point at the store that actually answered instead.
+    const advice = driverConfigured()
+      ? `The store in use is '${accepted.providerId}'.`
+      : `Set DF_RUN_HISTORY_DRIVER to record runs.`;
     log(
-      `[WARN] The run record could not be opened (${error}); this run will not be recorded. ` +
-        `Set DF_RUN_HISTORY_DRIVER to record runs.`,
+      `[WARN] The run record could not be opened (${error}); this run will not be recorded. ${advice}`,
     );
     return { runId: attemptId, recorded: false, fellBack: true, error };
   }
