@@ -92,3 +92,4 @@ changes, write a new one that supersedes it.
 | [0036](0036-df-sandbox-vault-push-wiring.md)                      | Vault push is fail-closed and runs inside the sandbox whose image carries the project | Accepted |
 | [0037](0037-df-target-repo-resolution.md)                         | A run's target repository is resolved from config and authorized by an allow-list     | Accepted |
 | [0038](0038-per-repo-factory-settings-in-config.md)               | Per-repo Factory settings live in config, not the database                            | Accepted |
+| [0039](0039-df-stale-claim-lease.md)                              | An active-run claim is a lease; only a stale one may be retired                       | Proposed |
