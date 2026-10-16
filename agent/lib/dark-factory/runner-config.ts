@@ -19,10 +19,49 @@ import { REPO_PAIR_PATTERN } from "./credentials";
 /** Where the config file is expected, relative to the working directory. */
 export const RUNNER_CONFIG_PATH = "dark-factory.config.json";
 
+/** Where a repository's work is reported, when the Project has a board. */
+export interface RepoBoardSettings {
+  /** The Project's owner login. */
+  login: string;
+  /** The Project's number. */
+  number: number;
+}
+
+/** The per-repo settings the Factory reads. Only fields something consumes. */
+export interface RepoSettings {
+  board?: RepoBoardSettings;
+}
+
 /** The parts of `dark-factory.config.json` the runner needs. */
 export interface RunnerConfig {
   /** `owner/name` from the config's `default_repo`, or absent when it sets none. */
   defaultRepo?: string;
+  /** Per-repo settings, keyed `owner/name` as written in the file. */
+  repos?: Record<string, RepoSettings>;
+}
+
+export type RepoSettingsResult =
+  | { ok: true; settings: RepoSettings }
+  | { ok: false; error: string };
+
+export type BoardResult =
+  | { ok: true; board: RepoBoardSettings }
+  | { ok: false; error: string };
+
+/** Not implemented yet (RED stub for #348 R2 Task 1). */
+export function resolveRepoSettings(_input: {
+  repo: string;
+  config: RunnerConfig;
+}): RepoSettingsResult {
+  throw new Error("resolveRepoSettings is not implemented");
+}
+
+/** Not implemented yet (RED stub for #348 R2 Task 1). */
+export function resolveBoard(_input: {
+  repo: string;
+  config: RunnerConfig;
+}): BoardResult {
+  throw new Error("resolveBoard is not implemented");
 }
 
 /** Where the resolved repository came from, for the run's opening log. */

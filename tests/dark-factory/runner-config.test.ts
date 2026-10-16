@@ -2,11 +2,14 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 import {
+  RUNNER_CONFIG_PATH,
   authorizeTargetRepo,
   loadRunnerConfig,
   parseRunnerConfig,
+  resolveBoard,
   resolveBranchName,
   resolveIssueNumber,
+  resolveRepoSettings,
   resolveTargetRepo,
   type RunnerConfig,
 } from "../../agent/lib/dark-factory/runner-config";
@@ -287,6 +290,135 @@ describe("resolveBranchName", () => {
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toContain("--branch");
+  });
+});
+
+describe("per-repo settings (#348 R2)", () => {
+  const CONFIG: RunnerConfig = {
+    defaultRepo: "ricardoblackskye/agent-eve",
+    repos: {
+      "ricardoblackskye/agent-eve": { board: { login: "ricardoblackskye", number: 3 } },
+      "ricardoblackskye/WebFeedPOC": { board: { login: "ricardoblackskye", number: 7 } },
+    },
+  };
+
+  it("reads the board for a listed repo", () => {
+    const result = resolveRepoSettings({ repo: "ricardoblackskye/agent-eve", config: CONFIG });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.settings.board).toEqual({ login: "ricardoblackskye", number: 3 });
+    }
+  });
+
+  it("does not leak another repository's board", () => {
+    const result = resolveRepoSettings({ repo: "ricardoblackskye/WebFeedPOC", config: CONFIG });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.settings.board?.number).toBe(7);
+  });
+
+  it("matches the repo key without regard to case", () => {
+    const result = resolveRepoSettings({ repo: "RicardoBlackSkye/Agent-Eve", config: CONFIG });
+
+    expect(result.ok).toBe(true);
+  });
+
+  it("refuses a repo with no entry, naming the repo AND the file", () => {
+    // The alternative is the behaviour being replaced: silently reporting to board 3.
+    const result = resolveRepoSettings({ repo: "someone/other", config: CONFIG });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain("someone/other");
+      expect(result.error).toContain(RUNNER_CONFIG_PATH);
+    }
+  });
+
+  it("refuses when the config has no repos map at all, naming the file", () => {
+    const result = resolveRepoSettings({
+      repo: "ricardoblackskye/agent-eve",
+      config: { defaultRepo: "ricardoblackskye/agent-eve" },
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain(RUNNER_CONFIG_PATH);
+  });
+
+  it("refuses a malformed board by SHAPE instead of reading it as text", () => {
+    // A truthiness check accepts every one of these and the value then reaches a GitHub call.
+    for (const bad of [
+      { login: "ricardoblackskye", number: "3" },
+      { login: "ricardoblackskye" },
+      { login: "", number: 3 },
+      { login: "   ", number: 3 },
+      { number: 3 },
+      { login: "ricardoblackskye", number: 3.5 },
+      { login: "ricardoblackskye", number: -1 },
+      "board",
+      ["board"],
+      null,
+    ]) {
+      const result = resolveRepoSettings({
+        repo: "a/b",
+        config: { repos: { "a/b": { board: bad as never } } },
+      });
+
+      expect(result.ok, `expected ${JSON.stringify(bad)} to be refused`).toBe(false);
+    }
+  });
+
+  it("resolveBoard returns the board, or refuses naming the repo and the file", () => {
+    const found = resolveBoard({ repo: "ricardoblackskye/agent-eve", config: CONFIG });
+
+    expect(found.ok).toBe(true);
+    if (found.ok) expect(found.board.number).toBe(3);
+
+    const missing = resolveBoard({ repo: "a/b", config: { repos: { "a/b": {} } } });
+
+    expect(missing.ok).toBe(false);
+    if (!missing.ok) {
+      expect(missing.error).toContain("a/b");
+      expect(missing.error).toContain(RUNNER_CONFIG_PATH);
+    }
+  });
+
+  it("parses a repos map out of the file", () => {
+    const parsed = parseRunnerConfig(
+      JSON.stringify({
+        default_repo: "ricardoblackskye/agent-eve",
+        repos: {
+          "ricardoblackskye/agent-eve": { board: { login: "ricardoblackskye", number: 3 } },
+        },
+      }),
+    );
+
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.config.repos?.["ricardoblackskye/agent-eve"]?.board?.number).toBe(3);
+    }
+  });
+
+  it("still accepts a config with no repos at all, so R1's file keeps working", () => {
+    const parsed = parseRunnerConfig('{"default_repo": "ricardoblackskye/agent-eve"}');
+
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.config.repos).toBeUndefined();
+  });
+
+  it("refuses a repos key that is not an owner/repo pair, naming the key", () => {
+    const parsed = parseRunnerConfig('{"repos": {"not-a-pair": {}}}');
+
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.error).toContain("not-a-pair");
+  });
+
+  it("refuses a malformed board at LOAD time as well as at use", () => {
+    // The loader is not the only door: a config built in code is validated in resolveRepoSettings too.
+    const parsed = parseRunnerConfig('{"repos": {"a/b": {"board": {"login": "x"}}}}');
+
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.error).toContain("board");
   });
 });
 
