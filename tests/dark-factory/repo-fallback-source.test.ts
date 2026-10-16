@@ -42,7 +42,7 @@ describe("the backlog provider's default is config-sourced, not a literal", () =
   });
 
   it("still applies a default, now read from the config file", () => {
-    // A CHARACTERISATION guard: this passes before AND after, because the behaviour is deliberately
+    // A characterization guard: this passes before AND after, because the behaviour is deliberately
     // preserved. It is what proves the default did not vanish while its source was being changed - which
     // is the risk in this kind of refactor, and the reason the existing assertion stays untouched.
     const { owner, repo } = sanitizeOwnerRepo(undefined, undefined);

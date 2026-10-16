@@ -317,6 +317,54 @@ export function resolveBoardSetting(input: {
   };
 }
 
+/** The first candidate that is present and not blank, trimmed. */
+function firstNonBlank(...candidates: (string | undefined)[]): string | undefined {
+  for (const candidate of candidates) {
+    if (candidate !== undefined && candidate.trim() !== "") return candidate.trim();
+  }
+  return undefined;
+}
+
+export type OwnerRepoResult =
+  | { ok: true; owner: string; repo: string }
+  | { ok: false; error: string };
+
+/**
+ * Resolve an `owner/repo` pair: explicit, then a platform env var, then the config's `default_repo`.
+ *
+ * `default_repo` is written as one `owner/name` (R1), so a single setting serves every consumer rather than
+ * each tool keeping its own idea of a default. Where each half comes from is reported by the caller's own
+ * logging rather than duplicated here.
+ *
+ * The refusal matters: a pair assembled from a literal is a repository nobody chose, and the whole class of
+ * bug this epic removes is a wrong value that reads as a considered one.
+ */
+export function resolveOwnerRepo(input: {
+  owner?: string;
+  repo?: string;
+  config: RunnerConfig;
+  envOwnerValue?: string;
+  envRepoValue?: string;
+  env?: Record<string, string | undefined>;
+}): OwnerRepoResult {
+  const env = input.env ?? {};
+  const [defaultOwner, defaultRepo] = (input.config.defaultRepo ?? "").split("/");
+
+  const owner = firstNonBlank(input.owner, input.envOwnerValue, defaultOwner);
+  const repo = firstNonBlank(input.repo, input.envRepoValue, defaultRepo);
+
+  if (owner === undefined || repo === undefined) {
+    return {
+      ok: false,
+      error:
+        "No repository: pass owner and repo explicitly, or set " +
+        `"default_repo" in ${RUNNER_CONFIG_PATH}.`,
+    };
+  }
+
+  return { ok: true, owner, repo };
+}
+
 /** Where the resolved repository came from, for the run's opening log. */
 export type TargetRepoSource = "argument" | "config";
 

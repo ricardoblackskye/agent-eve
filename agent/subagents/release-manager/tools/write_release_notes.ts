@@ -1,5 +1,6 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
+import { loadRunnerConfig, resolveOwnerRepo } from "../../../lib/dark-factory/runner-config";
 
 /**
  * Write release notes content to releasenotes.md in the GitHub repository.
@@ -39,9 +40,26 @@ export default defineTool({
       };
     }
 
-    const targetOwner =
-      owner || process.env.VERCEL_GIT_REPO_OWNER || "ricardoblackskye";
-    const targetRepo = repo || process.env.VERCEL_GIT_REPO_SLUG || "agent-eve";
+    // #348 R2: RESOLVED, not composed. A literal owner behind an `||` is a value nobody chose,
+    // and it reads as care exactly like the allow-list default that defeated its own gate.
+    const configResult = loadRunnerConfig();
+    if (!configResult.ok) {
+      return { success: false, error: configResult.error };
+    }
+
+    const target = resolveOwnerRepo({
+      owner,
+      repo,
+      config: configResult.config,
+      envOwnerValue: process.env.VERCEL_GIT_REPO_OWNER,
+      envRepoValue: process.env.VERCEL_GIT_REPO_SLUG,
+    });
+    if (!target.ok) {
+      return { success: false, error: target.error };
+    }
+
+    const targetOwner = target.owner;
+    const targetRepo = target.repo;
 
     // Build commit message
     const msg = prNumber ? `${commitMessage} (#${prNumber})` : commitMessage;
