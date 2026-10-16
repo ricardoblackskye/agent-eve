@@ -570,6 +570,9 @@ async function main(): Promise<void> {
     markdown: renderPlanFile(executionPlan, {
       issueUrl: `https://github.com/${targetRepo}/issues/${issueNum}`,
     }),
+    // #373: the plan ITSELF, not only its rendering. Without it the comment carries no machine-readable
+    // block, so the run that resumes against this comment cannot read the plan back and stops.
+    plan: executionPlan,
   });
   if (!planComment.ok) {
     throw new Error(`the plan comment could not be posted: ${planComment.error}`);

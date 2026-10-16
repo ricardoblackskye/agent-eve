@@ -56,6 +56,7 @@ describe("the plan comment (#365 Task 11)", () => {
       repo: "r",
       issue: 7,
       markdown: MARKDOWN,
+      plan: { storyId: 7 },
     });
     expect(result).toEqual({ ok: true, action: "created", id: 11 });
     expect(writer.postComment).toHaveBeenCalledTimes(1);
@@ -74,6 +75,7 @@ describe("the plan comment (#365 Task 11)", () => {
       repo: "r",
       issue: 7,
       markdown: MARKDOWN,
+      plan: { storyId: 7 },
     });
 
     expect(result).toEqual({ ok: true, action: "updated", id: 12 });
@@ -92,6 +94,7 @@ describe("the plan comment (#365 Task 11)", () => {
       repo: "r",
       issue: 7,
       markdown: MARKDOWN,
+      plan: { storyId: 7 },
     });
 
     expect(result.ok).toBe(false);
@@ -110,6 +113,7 @@ describe("the plan comment (#365 Task 11)", () => {
       repo: "r",
       issue: 7,
       markdown: MARKDOWN,
+      plan: { storyId: 7 },
     });
     expect(result.ok).toBe(false);
   });
@@ -156,7 +160,8 @@ describe("the plan comment (#365 Task 11)", () => {
     });
 
     it("fails closed on a comment written before this release", () => {
-      // No plan was passed, which is exactly what every already-posted comment looks like.
+      // A body with no block at all: what a comment from an earlier release looks like, and what a
+      // call site that forgets the plan used to produce before #373 made that impossible.
       const parsed = parsePlanFromComment(planCommentBody(MARKDOWN));
       expect(parsed.ok).toBe(false);
       if (!parsed.ok) expect(parsed.error).toMatch(/machine-readable/);

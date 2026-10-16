@@ -62,8 +62,12 @@ export interface PostPlanCommentOptions {
    * A resumed dispatch is a fresh process with no workspace, so the plan it codes against has to survive
    * the wait on the ticket. The comment carries the human rendering AND this, so the thing the human
    * approved is the thing the resumed run reads back.
+   *
+   * REQUIRED, not optional (#373). It was optional, the runner omitted it, and the omission compiled and ran:
+   * the comment then carried the human markdown with no machine-readable block, so the resumed run could not
+   * read back the plan it had posted and stopped. A promise to pass it is not a fix; a compile error is.
    */
-  plan?: unknown;
+  plan: unknown;
 }
 
 export type PlanCommentResult =
@@ -125,7 +129,7 @@ export function parsePlanFromComment(commentBody: string): PlanParseResult {
     return {
       ok: false,
       error:
-        "the plan comment carries no machine-readable plan (a comment posted before this release has none)",
+        "the plan comment carries no machine-readable plan (the marker is present, so the comment is ours; the block that carries the plan is missing)",
     };
   }
 
