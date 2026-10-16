@@ -183,14 +183,138 @@ export type BoardSettingResult =
     }
   | { ok: false; error: string };
 
-/** Not implemented yet (RED stub for #348 R2 Task 2). */
-export function resolveBoardSetting(_input: {
+/** One half of a resolution: a value with its source, genuinely absent, or present and wrong. */
+type Resolved<T> =
+  | { kind: "value"; value: T; source: SettingSource }
+  | { kind: "absent" }
+  | { kind: "invalid"; error: string };
+
+/**
+ * The login: explicit argument, then environment, then config.
+ *
+ * A BLANK value counts as unset and falls through, because an empty owner is not a choice anybody makes.
+ * That is the opposite of the rule for the number below, deliberately: see `resolveNumber`.
+ */
+function resolveLogin(input: {
+  explicit?: string;
+  env: Record<string, string | undefined>;
+  configured?: string;
+}): Resolved<string> {
+  if (input.explicit !== undefined && input.explicit.trim() !== "") {
+    return { kind: "value", value: input.explicit.trim(), source: "argument" };
+  }
+
+  const fromEnv = input.env.SPRINT_PROJECT_OWNER;
+  if (fromEnv !== undefined && fromEnv.trim() !== "") {
+    return { kind: "value", value: fromEnv.trim(), source: "env" };
+  }
+
+  if (input.configured !== undefined) {
+    return { kind: "value", value: input.configured, source: "config" };
+  }
+
+  return { kind: "absent" };
+}
+
+/**
+ * The project number: explicit argument, then environment, then config.
+ *
+ * A supplied-but-INVALID value is refused rather than treated as absent, because it is a choice someone
+ * made and got wrong — falling through would quietly use a different board than the one they asked for. The
+ * digits check is load-bearing: `Number()` accepts `"3.7"`, `"1e3"` and `" 3 "`, which is how a typo became
+ * a board number nobody chose.
+ */
+function resolveNumber(input: {
+  explicit?: number;
+  env: Record<string, string | undefined>;
+  configured?: number;
+}): Resolved<number> {
+  if (input.explicit !== undefined) {
+    return Number.isInteger(input.explicit) && input.explicit > 0
+      ? { kind: "value", value: input.explicit, source: "argument" }
+      : {
+          kind: "invalid",
+          error: `projectNumber ${JSON.stringify(input.explicit)} is not a positive integer.`,
+        };
+  }
+
+  const fromEnv = input.env.SPRINT_PROJECT_NUMBER;
+  if (fromEnv !== undefined && fromEnv.trim() !== "") {
+    const raw = fromEnv.trim();
+    if (!/^\d+$/.test(raw) || Number(raw) === 0) {
+      return {
+        kind: "invalid",
+        error: `SPRINT_PROJECT_NUMBER ${JSON.stringify(fromEnv)} is not a positive integer.`,
+      };
+    }
+    return { kind: "value", value: Number(raw), source: "env" };
+  }
+
+  if (input.configured !== undefined) {
+    return { kind: "value", value: input.configured, source: "config" };
+  }
+
+  return { kind: "absent" };
+}
+
+/** One message naming every way to supply a board, so the refusal is actionable. */
+function noBoardConfigured(repo: string, what: string): string {
+  return (
+    `No ${what} for repository ${repo}: pass it explicitly, set SPRINT_PROJECT_OWNER and ` +
+    `SPRINT_PROJECT_NUMBER, or add a "board" entry for ${repo} in ${RUNNER_CONFIG_PATH}.`
+  );
+}
+
+/**
+ * Resolve a board from argument → environment → config, refusing when nothing supplies it.
+ *
+ * Each half resolves INDEPENDENTLY, because the two are genuinely separate settings and a caller may know
+ * one without the other. A repo with no config entry is fine as long as the caller supplies both halves;
+ * what is not fine is reporting to a board nobody configured, which is what the code being replaced did by
+ * defaulting to number 3 for every repository.
+ */
+export function resolveBoardSetting(input: {
   repo: string;
   config: RunnerConfig;
   explicit?: { login?: string; number?: number };
   env?: Record<string, string | undefined>;
 }): BoardSettingResult {
-  throw new Error("resolveBoardSetting is not implemented");
+  const env = input.env ?? {};
+
+  let configured: RepoBoardSettings | undefined;
+  const entry = findRepoEntry(input.config.repos, normalise(input.repo));
+  if (entry !== undefined) {
+    const validated = validateEntry(entry, RUNNER_CONFIG_PATH, normalise(input.repo));
+    if (!validated.ok) return { ok: false, error: validated.error };
+    configured = validated.settings.board;
+  }
+
+  const login = resolveLogin({
+    explicit: input.explicit?.login,
+    env,
+    configured: configured?.login,
+  });
+  if (login.kind === "invalid") return { ok: false, error: login.error };
+  if (login.kind === "absent") {
+    return { ok: false, error: noBoardConfigured(input.repo, "board owner") };
+  }
+
+  const number = resolveNumber({
+    explicit: input.explicit?.number,
+    env,
+    configured: configured?.number,
+  });
+  if (number.kind === "invalid") return { ok: false, error: number.error };
+  if (number.kind === "absent") {
+    return { ok: false, error: noBoardConfigured(input.repo, "project number") };
+  }
+
+  return {
+    ok: true,
+    login: login.value,
+    number: number.value,
+    sources: { login: login.source, number: number.source },
+  };
 }
 
 /** Where the resolved repository came from, for the run's opening log. */
