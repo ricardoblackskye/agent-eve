@@ -96,6 +96,7 @@ cannot pass by matching nothing.
 GREEN: replace each module-scope client with a memoised builder invoked at the call site. One wrinkle to
 expect: `chat-model.ts:32` names `ReturnType<typeof openrouter.chat>` as a TYPE, which needs rewording
 alongside the change.
+
 ### Task 2 — the ledger refusal says why
 
 **Files:** `agent/lib/dark-factory/run-record.ts`, `agent/lib/dark-factory/run-history-provider.ts`; tests.
@@ -137,3 +138,63 @@ workaround.
    assume.
 3. **The `.env`-from-cwd pattern stays.** It is what makes an isolated clone work; the bug was the ordering, not
    the location. Moving it would be a redesign this issue does not need.
+
+---
+
+## Correction — my third finding was MISDIAGNOSED
+
+I claimed the active-run claim was never released because `applyTerminalLifecycle` appends a
+`run.terminal` event and never writes the summary row. **That is wrong.** Verified by reading a real
+`SqliteRunHistoryStore` before and after the call: `appendEvent` -> `applyRunEvent` derives the updated
+summary AND persists it, so the row's `status` does move to the terminal value and the claim IS released.
+
+The fix I first wrote for it was worse than redundant. The caller's `occurredAt` is injectable — tests pass
+a fixed date — so rewriting `updatedAt` from it moved the timestamp BEFORE `createdAt`. The record layer
+rejects such a row ("Run record requires updatedAt to be at or after createdAt") and then EVERY read of that
+store fails, not just the row. The e2e pipeline test caught it. It is reverted, and a test now guards the
+approach so it is not retried.
+
+The defect that IS real, once that was out of the way: step 5 ignored the result of the very write that
+releases the claim. Step 3 of the same function collects EVERY result so nothing is swallowed and fails
+closed on label writes; step 5 checked nothing. A refused terminal event left the ledger believing the run
+was still in flight. It now throws `TerminalEventWriteError` instead, with the store's own reason.
+
+## The UAT re-run — the acceptance test, and it passed its first milestone
+
+Same one-command invocation from inside the clone, with **no key exported** (so it proves the fix, not a
+workaround). Exit code 0, and it got past the 401 exactly as the fix intends:
+
+```text
+[STEP 3] Architect Agent discovering repository structure and planning story...
+  -> Architect Planning Succeeded!
+  Target Files  src/components/WelcomeHeading.jsx, src/components/WelcomeHeading.test.jsx,
+                src/components/ProductPage.jsx, src/components/ProductPage.test.jsx
+[STEP 4] Validating ExecutionPlan against domain constraints... -> Domain Validation Passed!
+[STEP 5] Dispatched Multi-File Developer Agent with Workspace Tools...
+[PLAN] Posted the plan on #161 (created).
+[GATE] Parked on #161 awaiting approval (dry-run).
+```
+
+The architect produced a real three-task ExecutionPlan with an explicit `approach`, a task per change, and
+an acceptance-criteria map — i.e. authenticated model calls against the target repo's actual structure.
+Verified on the issue itself: the plan comment carries the `<!-- dark-factory:plan -->` marker, and no
+branch or PR was created (the run parks before coding by design).
+
+### Two things the re-run exposed
+
+1. **A stale terminal label survives into the next run.** #161 now carries `feature`, `df:running`,
+   `needs-answer` and a leftover `df:failed` from the earlier failed attempt. A run that starts should clear
+   the previous attempt's terminal label, or the ticket advertises two contradictory outcomes at once.
+2. **`dry-run` is the ACTION reporter's mode, not fake coding.** The log shows `[df-reporter:console]`, so
+   the plan really posted but the resume channel is a local console reporter. Replying on the issue will NOT
+   resume this run — resuming needs the live (webhook) path or an explicit `--resume`.
+
+## Still open, and needing a product decision
+
+**Reaping a stale claim.** The row that blocked the UAT (created 11:56, still `queued` hours later) predates
+the attempt that posted comments at 12:07. So: an earlier attempt left a row that was never finished, the later run was
+REFUSED the delivery, fell back to a synthetic run id, and its terminal lifecycle therefore targeted a
+different id — leaving the old row holding the claim permanently, and every subsequent run refused.
+Bug 2's fix now NAMES that holder instead of blaming the driver; what is still missing is a policy for
+retiring a claim whose process is long gone (`repairActiveRunDuplicates` exists but is not reachable at
+runtime). Terminating another run's claim on assumption is not a call to make unilaterally.
