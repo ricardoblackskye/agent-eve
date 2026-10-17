@@ -7,14 +7,14 @@ import {
 } from "../scripts/coverage-ratchet";
 
 /** A coverage summary shaped like the one `json-summary` writes. */
-function summary(pcts: Partial<Record<string, number>>, total = 1000) {
+function summary(overrides: Partial<Record<string, number>>, total = 1000) {
   const make = (pct: number) => ({ total, covered: Math.round((total * pct) / 100), skipped: 0, pct });
   return {
     total: {
-      lines: make(pcts.lines ?? 78.34),
-      statements: make(pcts.statements ?? 77.85),
-      functions: make(pcts.functions ?? 80.22),
-      branches: make(pcts.branches ?? 72.3),
+      lines: make(overrides.lines ?? 78.34),
+      statements: make(overrides.statements ?? 77.85),
+      functions: make(overrides.functions ?? 80.22),
+      branches: make(overrides.branches ?? 72.3),
     },
   };
 }
