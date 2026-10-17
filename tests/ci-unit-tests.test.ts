@@ -26,8 +26,9 @@ describe("CI unit test pipeline (#103)", () => {
   it("runs the unit tests with coverage in the CI job (#391)", () => {
     expect(ci).toMatch(/run: npm run test:coverage/);
     // Point the job at a script that actually runs the suite, so a rename cannot leave CI green while
-    // running nothing. The coverage flag is part of the assertion for the same reason.
-    expect(pkg.scripts["test:coverage"]).toBe("vitest run --coverage");
+    // running nothing, and that writes the report the gate reads - so the two cannot drift apart.
+    expect(pkg.scripts["test:coverage"]).toContain("vitest run --coverage");
+    expect(pkg.scripts["test:coverage"]).toContain("--outputFile.json=coverage/vitest-report.json");
   });
 
   it("gates the pull request on the coverage ratchet (#391)", () => {
