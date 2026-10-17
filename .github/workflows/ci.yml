@@ -73,7 +73,40 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
       - run: npm ci
-      - run: npm test
+      # #391: coverage is measured on the same pass, not a second one. The job is still named
+      # "Unit Tests" on purpose: the branch ruleset gates on that check name, and a new job would
+      # produce a check nothing requires, which is a silent gap rather than a gate.
+      - name: Run unit tests with coverage
+        run: npm run test:coverage
+      - name: Coverage gate, and publish the metrics
+        # The gate prints a metric-by-metric table; publishing THAT to the job summary means the
+        # numbers a reviewer reads are the same numbers the gate decided on, not a second rendering.
+        run: |
+          mkdir -p .eve
+          set +e
+          npm run coverage:ratchet > .eve/coverage-ratchet.txt 2>&1
+          status=$?
+          set -e
+          {
+            echo "### Unit test coverage"
+            echo ""
+            echo "| check | result |"
+            echo "| --- | --- |"
+            echo "| coverage ratchet | $([ "$status" -eq 0 ] && echo 'passed' || echo 'FAILED') |"
+            echo ""
+            echo "\`\`\`text"
+            cat .eve/coverage-ratchet.txt
+            echo "\`\`\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+      - name: Upload the coverage report
+        # always(): the HTML and lcov report is most useful precisely when something failed.
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: coverage-report
+          path: coverage/
+          if-no-files-found: warn
 
   build:
     name: Eve Build

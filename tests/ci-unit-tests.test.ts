@@ -23,8 +23,21 @@ describe("CI unit test pipeline (#103)", () => {
     expect(ci).toMatch(/^  test:/m);
   });
 
-  it("runs the unit tests with npm test in the CI job", () => {
-    expect(ci).toMatch(/run: npm test/);
+  it("runs the unit tests with coverage in the CI job (#391)", () => {
+    expect(ci).toMatch(/run: npm run test:coverage/);
+    // Point the job at a script that actually runs the suite, so a rename cannot leave CI green while
+    // running nothing, and that writes the report the gate reads - so the two cannot drift apart.
+    expect(pkg.scripts["test:coverage"]).toContain("vitest run --coverage");
+    expect(pkg.scripts["test:coverage"]).toContain("--outputFile.json=coverage/vitest-report.json");
+  });
+
+  it("gates the pull request on the coverage ratchet (#391)", () => {
+    // The gate runs inside a block scalar, so assert the command rather than a "run:" prefix.
+    expect(ci).toMatch(/npm run coverage:ratchet/);
+    expect(pkg.scripts["coverage:ratchet"]).toBe("tsx scripts/coverage-ratchet.ts");
+    // The gate must be able to fail the job: a ratchet step that swallows its exit code is decoration.
+    expect(ci).toMatch(/exit "\$status"/);
+    expect(ci).toMatch(/GITHUB_STEP_SUMMARY/);
   });
 
   it("selects the generic adapter for CI production builds", () => {
