@@ -71,6 +71,16 @@ export const COVERAGE_SUMMARY_PATH = "coverage/coverage-summary.json";
  */
 export const DEFAULT_TOLERANCE_PCT = 0.05;
 
+/**
+ * Percentage points above which a drop is more likely to be a MEASUREMENT difference than a regression.
+ *
+ * Measured on this repository, the same suite reports 83.89% of lines with the five Postgres test variables
+ * set and 78.34% without them, because the gated suites SKIP without a database - a gap of over 5pp, while
+ * an ordinary regression is under 2pp. The committed baseline is the CI figure, so a developer running the
+ * gate locally without a database would otherwise see a drop that is entirely an artefact of their setup.
+ */
+export const SKIPPED_SUITE_DROP_HINT_PCT = 2;
+
 /** Raised when an input is not a coverage summary at all, as opposed to reporting a drop. */
 export class CoverageSummaryError extends Error {
   constructor(message: string) {
@@ -262,6 +272,20 @@ export function runCoverageRatchet(
           ? `FAIL: ${violation.metric} could not be read from the baseline and the summary, so the gate cannot verify it.`
           : `FAIL: ${violation.metric} dropped ${violation.dropPct?.toFixed(2)}pp, from ${violation.baselinePct?.toFixed(2)}% to ${violation.currentPct?.toFixed(2)}%.`,
       );
+    }
+    const biggestDrop = Math.max(
+      0,
+      ...comparison.violations
+        .filter((violation) => violation.reason === "dropped")
+        .map((violation) => violation.dropPct ?? 0),
+    );
+    if (biggestDrop > SKIPPED_SUITE_DROP_HINT_PCT) {
+      // The hint is the difference between a gate someone fixes and a gate someone disables.
+      io.log(
+        "A drop this large is usually a MEASUREMENT difference, not a regression: the gated Postgres suites",
+      );
+      io.log("skip unless the five test variables are set, and every metric then reads points lower.");
+      io.log("See the Coverage section of AGENTS.md for the one-command setup.");
     }
     io.log("Coverage must not go backwards. Add tests for what this change touched.");
     return 1;
