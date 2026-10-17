@@ -1219,6 +1219,13 @@ export async function finalizeCodingPhaseFailure(
   );
 }
 
+export function parksForHumanApproval(_input: {
+  resuming: boolean;
+  revision: boolean;
+}): boolean {
+  throw new Error("not implemented");
+}
+
 const isDirectRun =
   process.argv[1] !== undefined &&
   import.meta.url === pathToFileURL(process.argv[1]).href;
