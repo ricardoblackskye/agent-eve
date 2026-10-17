@@ -98,3 +98,4 @@ changes, write a new one that supersedes it.
 | [0042](0042-df-plan-revision-needs-approval.md)                   | A plan revision re-parks, is capped, and the deployed path holds rather than coding                 | Accepted |
 | [0043](0043-coverage-is-gated-by-a-ratchet.md)                    | Unit test coverage is gated by a ratchet, and measures tests rather than types                      | Accepted |
 | [0044](0044-skeleton-path-shape-guards-precede-absoluteness.md)   | Skeleton path shape guards run before the absoluteness check, so the reason is platform-independent | Accepted |
+| [0045](0045-workspace-escape-routes-use-junctions.md)             | Workspace escape routes are exercised with directory junctions, and a failed setup skips visibly    | Accepted |

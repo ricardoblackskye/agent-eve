@@ -124,27 +124,81 @@ describe("Developer Agent Multi-File Workspace Tools", () => {
     );
   });
 
-  it("blocks reading or writing through symlinks resolving outside the workspace", async () => {
+  it("blocks reading or writing through symlinks resolving outside the workspace", async (ctx) => {
     const { symlink, writeFile } = await import("node:fs/promises");
     const tools = createWorkspaceTools(tempDir);
     const outsideFile = join(tmpdir(), `df-outside-${Date.now()}.txt`);
     await writeFile(outsideFile, "outside content", "utf8");
 
+    // Setup is deliberately OUTSIDE the assertions. This used to catch the setup error and carry on, so on
+    // a platform that cannot create a FILE symlink the test asserted nothing at all while still reporting
+    // PASS. A visible SKIP is honest about that; a swallowed error is not. The matchers stay loose here
+    // because the #396 cases below pin which symlink guard refuses.
     try {
       await symlink(outsideFile, join(tempDir, "symlink-escape.txt"));
+    } catch (err) {
+      await rm(outsideFile, { force: true });
+      if ((err as NodeJS.ErrnoException).code === "EPERM") return ctx.skip();
+      throw err;
+    }
+
+    try {
       await expect(tools.readFile("symlink-escape.txt")).rejects.toThrow(
         /symlink/i,
       );
       await expect(tools.writeFile("symlink-escape.txt", "overwrite")).rejects.toThrow(
         /symlink/i,
       );
-    } catch (err: any) {
-      // If OS environment does not permit non-admin symlink creation, verify graceful bypass
-      if (err.code !== "EPERM") {
-        throw err;
-      }
     } finally {
       await rm(outsideFile, { force: true });
+    }
+  });
+
+  // #396: the target-is-a-symlink guard above is only reachable when the TARGET path itself is a symlink,
+  // and it is built there with a FILE symlink - which cannot be created on Windows without a privilege.
+  // The catch above swallows that failure and the test still PASSES, so the guard has never run on
+  // Windows and the suite has been reporting otherwise. Note also that /symlink/i above is satisfied by
+  // EITHER symlink guard, so it never pinned which one refused. These two cases pin each reason, and the
+  // first builds the condition with a DIRECTORY JUNCTION instead - freed of that privilege, so the guard
+  // is exercised on both platforms.
+  it("refuses a write whose TARGET is an escaping link, naming the target guard (#396)", async () => {
+    const { symlink } = await import("node:fs/promises");
+    const { existsSync, mkdtempSync, rmSync } = await import("node:fs");
+    const outsideDir = mkdtempSync(join(tmpdir(), "df-396-out-"));
+    const tools = createWorkspaceTools(tempDir);
+    // A directory junction needs no privilege on Windows, unlike a file symlink, and `lstat` still reports
+    // it as a symlink - so this builds the SAME condition here as it does on the CI platform.
+    const linkType = process.platform === "win32" ? "junction" : "dir";
+
+    try {
+      // The link's NAME must carry an allowed extension: the extension allow-list is checked before the
+      // symlink guards, so a link named `escape` is refused for its name and never reaches them.
+      await symlink(outsideDir, join(tempDir, "escape.ts"), linkType);
+      // A fixture that silently did not get created is how this guard went untested here; assert it.
+      expect(existsSync(join(tempDir, "escape.ts"))).toBe(true);
+
+      await expect(tools.writeFile("escape.ts", "pwned")).rejects.toThrow(
+        /is a symlink resolving outside workspace/,
+      );
+    } finally {
+      rmSync(outsideDir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a write THROUGH an escaping link, naming the ancestor guard (#396)", async () => {
+    const { symlink } = await import("node:fs/promises");
+    const { mkdtempSync, rmSync } = await import("node:fs");
+    const outsideDir = mkdtempSync(join(tmpdir(), "df-396-out-"));
+    const tools = createWorkspaceTools(tempDir);
+    const linkType = process.platform === "win32" ? "junction" : "dir";
+
+    try {
+      await symlink(outsideDir, join(tempDir, "escape"), linkType);
+      await expect(tools.writeFile("escape/evil.ts", "pwned")).rejects.toThrow(
+        /escapes workspace via directory symlink/,
+      );
+    } finally {
+      rmSync(outsideDir, { recursive: true, force: true });
     }
   });
 
