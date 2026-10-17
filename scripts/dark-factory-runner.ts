@@ -77,6 +77,17 @@ import {
   loadApprovedPlan,
   parkForApproval,
 } from "../agent/lib/dark-factory/plan-approval";
+import {
+  MAX_PLAN_REVISIONS_ENV,
+  classifyPlanResponse,
+  resolveMaxPlanRevisions,
+} from "../agent/lib/dark-factory/plan-response";
+import {
+  isPlanRevisionCapReached,
+  readPlanRevisionCount,
+  recordPlanRevision,
+} from "../agent/lib/dark-factory/plan-revision-recorder";
+import { resolveRunnerAnswer } from "../agent/lib/dark-factory/runner-config";
 import { createWorkerReporter } from "../agent/lib/dark-factory/worker-reporter";
 import { createStateStore } from "../agent/lib/dark-factory/state-provider";
 import { TRIGGER_LABELS } from "../agent/lib/dark-factory/trigger";
@@ -251,6 +262,30 @@ async function main(): Promise<void> {
   const runHistory = withNotifications(createRunHistoryStore(env), env);
   const isResume = process.argv.includes("--resume");
 
+  // #378: on a resume the human's REPLY decides. The reply is read from a file rather than an argument
+  // value, and a named file that cannot be read REFUSES here - it must never be degraded to "no answer",
+  // which is how a cleared label is read, i.e. an approval.
+  const answerResult = resolveRunnerAnswer({
+    argv: process.argv,
+    readFile: (answerPath) => readFileSync(answerPath, "utf8"),
+  });
+  if (!answerResult.ok) {
+    console.error(`[ERROR] ${answerResult.error}`);
+    throw new Error("Dark Factory Runner stopped after the preceding error.");
+  }
+
+  // A resume with NO reply means the `needs-answer` label was cleared, which the parked question
+  // advertises as a way to begin - so it stays an approval. A resume WITH a reply is classified, and
+  // only explicit approval wording counts as one.
+  const planResponse =
+    isResume && answerResult.answer !== undefined
+      ? classifyPlanResponse(answerResult.answer)
+      : undefined;
+  const isRevision = planResponse?.kind === "revision";
+  if (planResponse) {
+    console.log(`\n[REPLY] ${planResponse.reason}`);
+  }
+
   const begun = await beginRunRecord({
     history: runHistory,
     attemptId,
@@ -412,7 +447,7 @@ async function main(): Promise<void> {
 
   // A resume uses the approved plan; only a fresh run asks the architect. The architect is not merely
   // ignored here - it is never called, which is the property the test pins.
-  const planResult = approvedPlan
+  let planResult = approvedPlan
     ? approvedPlan.ok
       ? { ok: true as const, plan: approvedPlan.plan as ExecutionPlan }
       : {
@@ -454,11 +489,121 @@ async function main(): Promise<void> {
     throw new Error("Dark Factory Runner stopped after the preceding error.");
   }
 
-  const executionPlan = planResult.plan;
+  let executionPlan = planResult.plan;
   console.log("\n  -> Architect Planning Succeeded!");
   line("Plan Summary", executionPlan.summary);
   line("Target Files", executionPlan.targetFiles.map((f) => f.path).join(", "));
   line("AC Mappings Count", executionPlan.acceptanceCriteriaMap.length);
+
+  // #378: a resume whose reply is NOT an explicit approval is plan FEEDBACK, not approval. Amend the plan
+  // from the frozen one plus the reply, so a reply such as "the target file is wrong, please update the
+  // plan" changes what gets built instead of being silently ignored by a run that codes anyway.
+  //
+  // This block sits BEFORE the plan comment and BEFORE the park, so the amended plan is what gets posted
+  // and what a human then approves. The coding phase is unreachable on a revision, because
+  // `parksForHumanApproval()` returns true for one and the park path ends the run.
+  if (isResume && isRevision) {
+    const maxRevisions = resolveMaxPlanRevisions(env);
+
+    const counted = await readPlanRevisionCount(runHistory, runId);
+    if (!counted.ok) {
+      // Fail closed on an unreadable ledger: assuming zero would let a revision through a cap the
+      // operator believes is enforced.
+      const explanation = explainPlanFailure(
+        `the plan revisions already applied could not be counted: ${counted.error ?? "unknown error"}`,
+        { resuming: true },
+      );
+      console.error(`[ERROR] ${explanation}`);
+      await issueWriter.postComment(
+        repoOwner,
+        repoName,
+        issueNum,
+        `🤖 **Eve** (Dark Factory) — ${explanation}`,
+      );
+      await applyTerminalLifecycle(
+        { labelWriter, runHistory },
+        { repo: targetRepo, issue: issueNum, runId, terminalStatus: "failed" },
+      );
+      throw new Error("Dark Factory Runner stopped after the preceding error.");
+    }
+
+    if (isPlanRevisionCapReached(counted.count, maxRevisions)) {
+      const explanation =
+        `This plan has already been revised ${counted.count} time(s), which has reached the cap of ` +
+        `${maxRevisions} (${MAX_PLAN_REVISIONS_ENV}). Raise that value and clear the ` +
+        `'${TRIGGER_LABELS.question}' label for another round, or approve the plan as it stands. ` +
+        `Nothing was coded.`;
+      console.error(`[ERROR] ${explanation}`);
+      await issueWriter.postComment(
+        repoOwner,
+        repoName,
+        issueNum,
+        `🤖 **Eve** (Dark Factory) — ${explanation}`,
+      );
+      await applyTerminalLifecycle(
+        { labelWriter, runHistory },
+        { repo: targetRepo, issue: issueNum, runId, terminalStatus: "failed" },
+      );
+      throw new Error("Dark Factory Runner stopped after the preceding error.");
+    }
+
+    console.log(
+      `\n[STEP 3b] Revising the plan from the feedback (round ${counted.count + 1}/${maxRevisions})...`,
+    );
+    const amended = await architectAgent.amendPlan({
+      story: { number: issueNum, title: issueData.title, body: issueData.body },
+      currentPlan: executionPlan,
+      feedback: answerResult.answer ?? "",
+    });
+    if (!amended.ok || !amended.plan) {
+      const explanation = explainPlanFailure(String(amended.error ?? "no reason given"), {
+        resuming: true,
+      });
+      console.error(`[ERROR] ${explanation}`);
+      await issueWriter.postComment(
+        repoOwner,
+        repoName,
+        issueNum,
+        `🤖 **Eve** (Dark Factory) — ${explanation}`,
+      );
+      await applyTerminalLifecycle(
+        { labelWriter, runHistory },
+        { repo: targetRepo, issue: issueNum, runId, terminalStatus: "failed" },
+      );
+      throw new Error("Dark Factory Runner stopped after the preceding error.");
+    }
+
+    const amendedValidation = validateExecutionPlan(amended.plan, issueData.body);
+    if (!amendedValidation.valid) {
+      console.error(
+        `[ERROR] The amended plan failed domain validation:`,
+        amendedValidation.errors,
+      );
+      await applyTerminalLifecycle(
+        { labelWriter, runHistory },
+        { repo: targetRepo, issue: issueNum, runId, terminalStatus: "failed" },
+      );
+      throw new Error("Dark Factory Runner stopped after the preceding error.");
+    }
+
+    executionPlan = amended.plan;
+    console.log(
+      `  -> Amended plan: ${executionPlan.targetFiles.map((f) => f.path).join(", ")}`,
+    );
+
+    // Record the round. A ledger outage is logged LOUDLY but does NOT stop the run: the run still parks,
+    // and coding stays unreachable without an explicit approval, so failing open here cannot produce
+    // unapproved code - it can only under-count the cap, which is the safe direction.
+    const recorded = await recordPlanRevision(runHistory, {
+      runId,
+      revisionId: `${counted.count + 1}:${answerResult.answer ?? ""}`,
+    });
+    if (!recorded.ok) {
+      console.warn(
+        `[WARN] The revision round could not be recorded: ${recorded.error ?? "unknown error"}`,
+      );
+    }
+  }
 
   // STEP 4: Pre-flight Domain Validation
   console.log(
@@ -587,7 +732,7 @@ async function main(): Promise<void> {
   // what marks this run "blocked", which is what the resume path looks for (entry.ts resumes only a blocked
   // run). A resume is explicit - `--resume` - exactly as entry.ts requires ("dispatch this run with an
   // explicit resume"), so a re-delivery can never be mistaken for approval.
-  if (!isResume) {
+  if (parksForHumanApproval({ resuming: isResume, revision: isRevision })) {
     const reporter = createWorkerReporter(process.env, {
       store: createStateStore(env),
       runHistory,
@@ -1219,11 +1364,20 @@ export async function finalizeCodingPhaseFailure(
   );
 }
 
-export function parksForHumanApproval(_input: {
+/**
+ * Does this dispatch stop and wait for a human? (#378)
+ *
+ * True for a fresh run, and TRUE FOR A REVISION: an amended plan is a plan nobody has approved yet, so
+ * the run must park again rather than code against it. Only an approval resume falls through to coding.
+ * Exported so the property "a revision never reaches the coding phase" is pinned by a test rather than
+ * by reading `if` statements.
+ */
+export function parksForHumanApproval(input: {
   resuming: boolean;
   revision: boolean;
 }): boolean {
-  throw new Error("not implemented");
+  if (input.revision) return true;
+  return !input.resuming;
 }
 
 const isDirectRun =
