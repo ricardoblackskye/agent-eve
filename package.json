@@ -13,6 +13,7 @@
     "test:e2e": "playwright test",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
+    "coverage:ratchet": "tsx scripts/coverage-ratchet.ts",
     "eve:build": "eve build",
     "typecheck": "tsc --noEmit",
     "operator": "tsx scripts/self-improve-operator.ts",
