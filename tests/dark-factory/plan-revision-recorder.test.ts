@@ -5,7 +5,10 @@ import {
   readPlanRevisionCount,
   recordPlanRevision,
 } from "../../agent/lib/dark-factory/plan-revision-recorder";
-import type { RunHistoryStore } from "../../agent/lib/dark-factory/run-history-store";
+import {
+  SqliteRunHistoryStore,
+  type RunHistoryStore,
+} from "../../agent/lib/dark-factory/run-history-store";
 
 /** A store stub that only implements the two methods this module uses. */
 function historyStub(overrides: Partial<Record<"appendEvent" | "listRunEvents", unknown>>) {
@@ -22,13 +25,15 @@ function historyStub(overrides: Partial<Record<"appendEvent" | "listRunEvents", 
 }
 
 describe("countPlanRevisions", () => {
-  it("counts only plan revision events", () => {
+  it("counts reply-resumes, because a round IS the human's reply", () => {
+    // A revision round is recorded as `run.resumed`: the ledger lets a BLOCKED run receive only
+    // `run.resumed` or `run.terminal`, and that rule is load-bearing rather than incidental.
     const events = [
       { type: "run.accepted" },
       { type: "worker.question" },
-      { type: "run.plan_revised" },
       { type: "run.resumed" },
-      { type: "run.plan_revised" },
+      { type: "worker.question" },
+      { type: "run.resumed" },
     ];
     expect(countPlanRevisions(events)).toBe(2);
   });
@@ -54,7 +59,7 @@ describe("isPlanRevisionCapReached", () => {
 });
 
 describe("recordPlanRevision", () => {
-  it("records a revision while the run is blocked", async () => {
+  it("records the round by RESUMING the parked run", async () => {
     const appendEvent = vi.fn().mockResolvedValue({ ok: true, mode: "live", providerId: "stub" });
     const history = historyStub({ appendEvent });
 
@@ -62,8 +67,8 @@ describe("recordPlanRevision", () => {
 
     expect(result.ok).toBe(true);
     const event = appendEvent.mock.calls[0][0];
-    expect(event.type).toBe("run.plan_revised");
-    expect(event.status).toBe("blocked");
+    expect(event.type).toBe("run.resumed");
+    expect(event.status).toBe("running");
     expect(event.runId).toBe("run-1");
   });
 
@@ -78,7 +83,7 @@ describe("recordPlanRevision", () => {
     expect(first).toBe(second);
   });
 
-  it("gives a DIFFERENT reply a different event id, so a real revision is a new round", async () => {
+  it("gives a DIFFERENT reply a different event id, so a real round is a new event", async () => {
     const appendEvent = vi.fn().mockResolvedValue({ ok: true, mode: "live", providerId: "stub" });
     const history = historyStub({ appendEvent });
 
@@ -104,7 +109,7 @@ describe("recordPlanRevision", () => {
 });
 
 describe("readPlanRevisionCount", () => {
-  it("counts revisions across every page", async () => {
+  it("counts rounds across every page", async () => {
     const listRunEvents = vi
       .fn()
       .mockResolvedValueOnce({
@@ -112,7 +117,7 @@ describe("readPlanRevisionCount", () => {
         mode: "live",
         providerId: "stub",
         value: {
-          items: [{ sequence: 1, event: { type: "run.plan_revised" } }],
+          items: [{ sequence: 1, event: { type: "run.resumed" } }],
           nextCursor: { sequence: 1 },
         },
       })
@@ -123,7 +128,7 @@ describe("readPlanRevisionCount", () => {
         value: {
           items: [
             { sequence: 2, event: { type: "run.accepted" } },
-            { sequence: 3, event: { type: "run.plan_revised" } },
+            { sequence: 3, event: { type: "run.resumed" } },
           ],
         },
       });
@@ -151,5 +156,55 @@ describe("readPlanRevisionCount", () => {
     const result = await readPlanRevisionCount(history, "run-1");
     expect(result.ok).toBe(false);
     expect(result.error).toMatch(/ledger unavailable/);
+  });
+
+  it("REPORTS failure when the store THROWS rather than returning a result", async () => {
+    // A store returning `{ ok: false }` is only one of the two error shapes. The real store REJECTS on a
+    // page limit outside [1, 100]; an unhandled rejection here escaped the whole revision branch and
+    // aborted the run. This case and the next are from a live end-to-end run, not from theory.
+    const history = historyStub({
+      listRunEvents: vi.fn().mockImplementation(() => {
+        throw new Error("Run history page limit must be an integer in [1, 100].");
+      }),
+    });
+
+    const result = await readPlanRevisionCount(history, "run-1");
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/page limit/);
+  });
+
+  it("works against the REAL sqlite store, whose page limit is capped at 100", async () => {
+    // The stub accepts ANY limit, so the recorded suite could not see the bug the live run hit: a 200-row
+    // page was rejected by the real store. Only the real store enforces the cap.
+    const history = new SqliteRunHistoryStore(":memory:", () => "run-378");
+    try {
+      const accepted = await history.acceptDelivery({
+        deliveryId: "revision-count",
+        repo: "ricardoblackskye/agent-eve",
+        issue: 378,
+        receivedAt: "2026-10-17T09:00:00.000Z",
+      });
+      const runId = accepted.value?.runId;
+      if (!runId) throw new Error("fixture did not return a run ID");
+
+      await history.appendEvent({
+        eventId: "revision-count-question",
+        runId,
+        type: "worker.question",
+        stage: "worker",
+        occurredAt: "2026-10-17T09:00:01.000Z",
+        status: "blocked",
+      });
+
+      // Recording a round while the run is blocked is the exact transition the ledger must permit.
+      const recorded = await recordPlanRevision(history, { runId, revisionId: "comment-1" });
+      expect(recorded.ok).toBe(true);
+
+      const result = await readPlanRevisionCount(history, runId);
+      expect(result.ok).toBe(true);
+      expect(result.count).toBe(1);
+    } finally {
+      await history.close();
+    }
   });
 });

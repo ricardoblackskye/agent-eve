@@ -502,6 +502,8 @@ async function main(): Promise<void> {
   // This block sits BEFORE the plan comment and BEFORE the park, so the amended plan is what gets posted
   // and what a human then approves. The coding phase is unreachable on a revision, because
   // `parksForHumanApproval()` returns true for one and the park path ends the run.
+  let revisionRound: number | undefined;
+
   if (isResume && isRevision) {
     const maxRevisions = resolveMaxPlanRevisions(env);
 
@@ -590,10 +592,14 @@ async function main(): Promise<void> {
     console.log(
       `  -> Amended plan: ${executionPlan.targetFiles.map((f) => f.path).join(", ")}`,
     );
+    revisionRound = counted.count + 1;
 
-    // Record the round. A ledger outage is logged LOUDLY but does NOT stop the run: the run still parks,
-    // and coding stays unreachable without an explicit approval, so failing open here cannot produce
-    // unapproved code - it can only under-count the cap, which is the safe direction.
+    // Record the round by RESUMING the run, which is what the reply actually is. A dedicated event was
+    // tried first and the ledger refused it, correctly: from `blocked` only `run.resumed` or
+    // `run.terminal` may follow, which is the rule that stops a parked run accumulating work while it
+    // waits. The re-park below then takes it back to `blocked`, so the pair describes the round exactly.
+    // A ledger outage is logged LOUDLY but does NOT stop the run: the run still parks, and coding stays
+    // unreachable without an explicit approval, so failing open can only under-count the cap.
     const recorded = await recordPlanRevision(runHistory, {
       runId,
       revisionId: `${counted.count + 1}:${answerResult.answer ?? ""}`,
@@ -744,6 +750,8 @@ async function main(): Promise<void> {
         repo: targetRepo,
         issue: issueNum,
         questionLabel: TRIGGER_LABELS.question,
+        // #378: a re-park after a revision is a DIFFERENT park, so it needs a distinct question event.
+        round: revisionRound,
         occurredAt: new Date().toISOString(),
       },
     );

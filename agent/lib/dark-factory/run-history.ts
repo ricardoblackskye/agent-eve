@@ -60,8 +60,7 @@ export type RunEventType =
   | "review.round"
   | "pr.opened"
   | "run.terminal"
-  | "run.cost"
-  | "run.plan_revised";
+  | "run.cost";
 
 /** One current, provider-neutral projection for a single execution. */
 export interface RunSummary {
@@ -260,7 +259,6 @@ const RUN_EVENT_TYPES: readonly RunEventType[] = [
   "pr.opened",
   "run.terminal",
   "run.cost",
-  "run.plan_revised",
 ];
 const TERMINAL_STATUSES: readonly RunStatus[] = [
   "aborted",
@@ -686,11 +684,6 @@ export function toRunEvent(input: Partial<RunEvent>): RunEvent {
   }
   if (type === "run.resumed" && status !== "running") {
     return invalid("status", status, 'to be "running" for run.resumed');
-  }
-  // #378: a plan revision is appended while the run re-parks around it, so the run is
-  // blocked. A revision recorded against a coding run would mean the guard ran too late.
-  if (type === "run.plan_revised" && status !== "blocked") {
-    return invalid("status", status, 'to be "blocked" for run.plan_revised');
   }
   if (type === "dispatch.attempt" && attempt === undefined) {
     return invalid("attempt", attempt, "to be present for dispatch.attempt");

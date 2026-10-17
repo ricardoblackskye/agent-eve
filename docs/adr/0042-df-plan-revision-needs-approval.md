@@ -24,9 +24,15 @@ which has no planning stage of its own.
   `parksForHumanApproval({ resuming, revision })` returns true for a revision, which is what makes the
   coding phase unreachable on that path rather than merely unvisited.
 - Revision rounds are CAPPED at `DF_MAX_PLAN_REVISIONS` (default 5). The count is durable: one
-  `run.plan_revised` event per round, recorded under an id derived from the run and the reply, so a
+  `run.resumed` event per round, because a round IS the human's reply. The ledger permits a BLOCKED run
+  only `run.resumed` or `run.terminal` — the rule that stops a parked run accumulating work while it
+  waits — so a dedicated event was refused by the ledger during a live run, correctly, and the design
+  was changed rather than the guard widened. The event id is derived from the run and the reply, so a
   re-delivered reply records once while a genuinely new reply is a new round. Past the cap the run ends
   terminally with a message naming the cap and the variable.
+- The re-park is a DIFFERENT park, so it needs a distinct question event id. With the id stable per run,
+  the second park's write would be deduped and the run would never return to `blocked` for the next
+  reply — a dead end that only appears on the SECOND round.
 - The ledger is read FAIL-CLOSED (an uncountable ledger refuses, because assuming zero would let a round
   through a cap the operator believes is enforced) and written FAIL-OPEN (a round that cannot be recorded
   is logged loudly and the run still parks, because coding is unreachable without an approval, so a failed
@@ -46,6 +52,8 @@ which has no planning stage of its own.
   terminal, legible stop that names how to raise it.
 - The deployed path will hold a revision reply it could in principle honor later. That is a deliberate,
   visible gap rather than a silent resume.
-- `run.plan_revised` is a schema-visible addition to a CLOSED event union, so the union, the accepted
-  list, the status rule and the module docs move together. Skipping the docs leaves `doc-drift-guards`
-  failing, which is the guard doing its job.
+- **No new event type was needed, and the ledger's state machine stays untouched.** The first design
+  added `run.plan_revised` to a closed union; the live end-to-end run showed both why that was wrong and
+  why the alternative is better — the reply already had a truthful event to be recorded as. The
+  unit suite could not have caught it: the store stubs accepted any page limit and enforced no
+  transitions, so only a run against the real store could refuse it.

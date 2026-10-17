@@ -164,7 +164,6 @@ const EVENT_LABELS: Record<string, string> = {
   "review.round": "Review round",
   "pr.opened": "Pull request opened",
   "run.terminal": "Definition of Done met",
-  "run.plan_revised": "Plan revised",
 };
 
 export function categorizeStatus(status: RunStatus): RunCategory {

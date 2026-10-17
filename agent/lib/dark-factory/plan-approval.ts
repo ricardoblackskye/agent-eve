@@ -28,8 +28,13 @@ export const PLAN_APPROVAL_QUESTION =
  * Stable for a run, so a re-delivery records the SAME question event rather than parking a second time.
  * The ledger keys events by id; a fresh id per attempt would stack duplicate questions on the ticket.
  */
-export function planApprovalEventId(runId: string): string {
-  return `${runId}:plan-approval`;
+export function planApprovalEventId(runId: string, round?: number): string {
+  // Stable PER PARK. The id must not change for a re-delivery of the SAME park, or the ledger would
+  // record a second question; but a genuine RE-park after a revision is a different park and needs a
+  // fresh id, or the write is deduped and the run never returns to `blocked` for the next reply.
+  return round === undefined
+    ? `${runId}:plan-approval`
+    : `${runId}:plan-approval:${round}`;
 }
 
 /** The worker report shape this needs, structurally, so it can be tested without a reporter. */
@@ -66,6 +71,11 @@ export interface ParkForApprovalOptions {
   issue: number;
   /** The label that marks a run as waiting for a human, e.g. `needs-answer`. */
   questionLabel: string;
+  /**
+   * Which park this is (#378). Absent for the first park; the revision round for a re-park, so the
+   * question event is distinct and the run genuinely returns to `blocked`.
+   */
+  round?: number;
   occurredAt?: string;
 }
 
@@ -89,7 +99,7 @@ export async function parkForApproval(
     runId: options.runId,
     repo: options.repo,
     issue: options.issue,
-    eventId: planApprovalEventId(options.runId),
+    eventId: planApprovalEventId(options.runId, options.round),
     occurredAt: options.occurredAt,
     question: PLAN_APPROVAL_QUESTION,
   });
