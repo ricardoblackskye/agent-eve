@@ -76,7 +76,10 @@ npm run coverage:ratchet -- --update   # record the new floor after an improveme
 ```
 
 `coverage-baseline.json` is the floor. Improve coverage and the gate tells you to run `--update`; a drop
-fails with the metric, both percentages, and the cause. Only `agent/` and `app/` are measured - see
+fails with the metric, both percentages, and the cause. The gate also requires the test run to have PASSED,
+reading the outcome from `coverage/vitest-report.json`, so a flaky failure is reported as a failing run
+rather than as a coverage drop, and `--update` refuses so a flake cannot lower the committed floor.
+Only `agent/` and `app/` are measured - see
 `coverage.include` in `vitest.config.ts`, which is the one line that decides what the number means.
 
 The baseline is recorded with the five Postgres test variables set (as CI does), because those suites RUN

@@ -40,6 +40,12 @@ was installed, and the `Unit Tests` job was `npm ci` then `npm test`. The suite 
 - **The baseline is measured under the same conditions as the gate.** CI sets five Postgres variables so the
   gated integration suites RUN rather than skip; a baseline measured locally without them understates the
   floor and weakens the gate.
+- **The gate requires a PASSING test run.** It reads `numFailedTests` from the Vitest JSON report and refuses
+  both modes when the run failed, because a failing test does not execute the code it would have covered and
+  the numbers fall for a reason unrelated to coverage. Measured here, two failing tests moved lines by 0.28pp,
+  which the ratchet reported as a drop and failed the gate on — a red build with no coverage change at all.
+  Gating is the harmless half: `--update` from a failing run would commit a permanently LOWER floor, and the
+  ratchet would then defend that floor forever. A missing or malformed report fails closed.
 
 ## Consequences
 
