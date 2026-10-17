@@ -129,8 +129,13 @@ not start with `//` or `\\`), so it still reports *"must be relative to the work
 
 ### Task 5 — measure the consequence
 
-- Re-run coverage and confirm `developer-agent.ts` covered lines are now identical on Linux and Windows, using the CI
-  artifact comparison recipe.
+- Re-run coverage and confirm the skeleton-map GUARD region now matches CI - in particular that the UNC rejection
+  branch is reached on Windows. Measured: it is, so this half of the expectation holds.
+- **Corrected during implementation.** The original expectation was that `developer-agent.ts` would report identical
+  covered lines on both platforms. It does not: 193 locally against 199 in CI. A file-level diff had made the guards
+  look like the whole cause; measured per line, they account for about one line, and the larger part is a SECOND
+  divergence in `createWorkspaceTools`' symlink containment that Windows never reaches. Filed as #396, and ADR 0044
+  now carries the corrected attribution. #395 therefore stays blocked.
 - **OUT OF SCOPE here:** committing a new `coverage-baseline.json`. This task *measures* the consequence; recording the
   new floor is #395, deliberately separate so it cannot mask the delta this change removes.
 
