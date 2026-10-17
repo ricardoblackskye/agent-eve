@@ -152,19 +152,22 @@ describe("Developer Agent Multi-File Workspace Tools", () => {
   // and it is built there with a FILE symlink - which cannot be created on Windows without a privilege.
   // The catch above swallows that failure and the test still PASSES, so the guard has never run on
   // Windows and the suite has been reporting otherwise. Note also that /symlink/i above is satisfied by
-  // EITHER symlink guard, so it never pinned which one refused. These two cases pin each reason.
+  // EITHER symlink guard, so it never pinned which one refused. These two cases pin each reason, and the
+  // first builds the condition with a DIRECTORY JUNCTION instead - freed of that privilege, so the guard
+  // is exercised on both platforms.
   it("refuses a write whose TARGET is an escaping link, naming the target guard (#396)", async () => {
     const { symlink } = await import("node:fs/promises");
-    const { existsSync, mkdtempSync, rmSync, writeFileSync } = await import("node:fs");
+    const { existsSync, mkdtempSync, rmSync } = await import("node:fs");
     const outsideDir = mkdtempSync(join(tmpdir(), "df-396-out-"));
-    const outsideFile = join(outsideDir, "outside.txt");
-    writeFileSync(outsideFile, "outside content", "utf8");
     const tools = createWorkspaceTools(tempDir);
+    // A directory junction needs no privilege on Windows, unlike a file symlink, and `lstat` still reports
+    // it as a symlink - so this builds the SAME condition here as it does on the CI platform.
+    const linkType = process.platform === "win32" ? "junction" : "dir";
 
     try {
       // The link's NAME must carry an allowed extension: the extension allow-list is checked before the
       // symlink guards, so a link named `escape` is refused for its name and never reaches them.
-      await symlink(outsideFile, join(tempDir, "escape.ts"));
+      await symlink(outsideDir, join(tempDir, "escape.ts"), linkType);
       // A fixture that silently did not get created is how this guard went untested here; assert it.
       expect(existsSync(join(tempDir, "escape.ts"))).toBe(true);
 
