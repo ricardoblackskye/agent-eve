@@ -38,7 +38,10 @@ All five were settled by the user on Issue #378 and in review of this plan. The 
 1. **Approval is OPT-IN and fail-closed.** Only explicit approval wording counts as approval. Any other comment is revision feedback. The run must never code without explicit approval.
 2. **A revision re-parks; it never falls through to coding.** A revision round costs one architect call and the run stays `blocked` until an explicit approval arrives.
 3. **Clearing the `needs-answer` label remains an approval.** The parked question advertises it, and it is an explicit human act. Unchanged by this change.
-4. **Revision rounds are capped at 5.** The cap is read from `DF_MAX_PLAN_REVISIONS` (default 5). On reaching the cap the run stops and ends terminally with a message naming the cap and the env var, rather than revising forever. A future change may replace the wording allow-list with a model-based classifier that scores whether a reply is genuinely asking for a revision; that is a recorded follow-up, not part of this change.
+4. **Revision rounds are capped at 5.** The cap is read from `DF_MAX_PLAN_REVISIONS` (default 5). On reaching the cap
+   the run stops and ends terminally with a message naming the cap and the env var, rather than revising forever.
+   A future change may replace the wording allow-list with a model-based classifier that scores whether a reply is
+   genuinely asking for a revision; that is a recorded follow-up, not part of this change.
 5. **The deployed path gets the GUARD only.** A revision comment must not start coding there. Full amendment on the deployed path is a later change, because that path resumes into the agent session and has no planning stage of its own.
 
 ## Proposed approach
@@ -237,7 +240,12 @@ Run: `npx vitest run tests/dark-factory/runner-config.test.ts`
 **Step 2: Implement the split** in STEP 3, where `isResume` is handled today (`scripts/dark-factory-runner.ts:360-426`):
 
 - Approval leads to today's path, unchanged: `loadApprovedPlan`, then code.
-- Revision leads to: count the run's `run.plan_revised` events; if the count has reached the cap, fail terminally naming the cap and the env var; otherwise `loadApprovedPlan` (this is the CURRENT plan), then `architectAgent.amendPlan({ story, currentPlan, feedback })`, then `validateExecutionPlan`, then `postPlanComment` (updates the plan comment IN PLACE), then record `run.plan_revised` under an event id derived from the comment id so a re-delivered comment is a no-op, then `parkForApproval`, then report and RETURN without coding.
+- Revision leads to: count the run's `run.plan_revised` events; if the count has reached the cap, fail terminally
+  naming the cap and the env var; otherwise `loadApprovedPlan` (this is the CURRENT plan), then
+  `architectAgent.amendPlan({ story, currentPlan, feedback })`, then `validateExecutionPlan`, then
+  `postPlanComment` (updates the plan comment IN PLACE), then record `run.plan_revised` under an event id derived
+  from the comment id so a re-delivered comment is a no-op, then `parkForApproval`, then report and RETURN
+  without coding.
 - Fail-closed: if the current plan cannot be read, or the amendment fails validation, apply the terminal failed lifecycle with the existing `explainPlanFailure` story, exactly as the fresh planning path does.
 
 Note the structure-preserving rule for the plan comment: the machine-readable block is anchored on the comment ENDING with `</details>`. `postPlanComment` already rebuilds it correctly, so use that builder and never a hand-rolled concatenation.
