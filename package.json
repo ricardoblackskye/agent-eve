@@ -12,7 +12,7 @@
     "start": "next start",
     "test:e2e": "playwright test",
     "test": "vitest run",
-    "test:coverage": "vitest run --coverage",
+    "test:coverage": "vitest run --coverage --reporter=default --reporter=json --outputFile.json=coverage/vitest-report.json",
     "coverage:ratchet": "tsx scripts/coverage-ratchet.ts",
     "eve:build": "eve build",
     "typecheck": "tsc --noEmit",

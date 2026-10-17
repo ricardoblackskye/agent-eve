@@ -51,6 +51,7 @@ export interface CoverageComparison {
 export interface CoverageRatchetPaths {
   baseline: string;
   summary: string;
+  report: string;
 }
 
 /** The file access and logging the CLI needs. Injected for the same reason. */
@@ -63,6 +64,8 @@ export interface CoverageRatchetIO {
 /** Defaults, relative to the repository root. */
 export const COVERAGE_BASELINE_PATH = "coverage-baseline.json";
 export const COVERAGE_SUMMARY_PATH = "coverage/coverage-summary.json";
+/** Written by the json reporter; the gate reads the run outcome from it. */
+export const COVERAGE_REPORT_PATH = "coverage/vitest-report.json";
 
 /**
  * Percentage points of slack, to absorb how the summary rounds to two decimals. Deliberately a parameter
@@ -86,6 +89,39 @@ export class CoverageSummaryError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "CoverageSummaryError";
+  }
+}
+
+/**
+ * Raised when the coverage came from a test run that did not pass.
+ *
+ * A failing test does not execute the code it would have covered, so the numbers fall for a reason that
+ * has nothing to do with coverage. Measured on this repository, two failing Postgres tests moved lines by
+ * 0.28pp - below the tolerance hint and inside the range an ordinary change produces - which failed the
+ * gate on a pull request that changed no coverage at all. `--update` is the worse half: run after a
+ * failing run it would commit a permanently lower floor.
+ */
+export class CoverageRunFailedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "CoverageRunFailedError";
+  }
+}
+
+/** Refuse to read coverage from a run that failed. */
+function requireGreenRun(report: unknown, label = "the test report"): void {
+  if (report === null || typeof report !== "object" || Array.isArray(report)) {
+    throw new CoverageSummaryError(`${label} is not a Vitest JSON report object.`);
+  }
+  const failed = (report as { numFailedTests?: unknown }).numFailedTests;
+  if (typeof failed !== "number" || !Number.isFinite(failed)) {
+    // Fail closed: an unreadable outcome is not a passing one.
+    throw new CoverageSummaryError(`${label} has no numeric "numFailedTests".`);
+  }
+  if (failed > 0 || (report as { success?: unknown }).success === false) {
+    throw new CoverageRunFailedError(
+      `the test run did not pass (${failed} failing test${failed === 1 ? "" : "s"}), so its coverage is not comparable with the baseline.`,
+    );
   }
 }
 
@@ -224,6 +260,23 @@ export function runCoverageRatchet(
     return 1;
   }
 
+  // Refuse a failing run before either mode: gating one reds a pull request that changed no coverage, and
+  // updating from one commits a lower floor that the ratchet then defends forever.
+  let reportText: string;
+  try {
+    reportText = io.readFile(paths.report);
+  } catch (error) {
+    io.log(`FAIL: the test report at ${paths.report} could not be read (${describeError(error)}).`);
+    io.log(`      Run \`npm run test:coverage\` first, so the gate knows the run passed.`);
+    return 1;
+  }
+  try {
+    requireGreenRun(JSON.parse(reportText));
+  } catch (error) {
+    io.log(`FAIL: ${describeError(error)}`);
+    return 1;
+  }
+
   if (update) {
     // Only the total block is stored: the baseline is a floor, not a second copy of the whole report.
     let total: unknown;
@@ -306,7 +359,11 @@ export function coverageRatchetMain(argv: readonly string[] = process.argv.slice
       writeFile: (path, contents) => writeFileSync(path, contents),
       log: (line) => console.log(line),
     },
-    { baseline: COVERAGE_BASELINE_PATH, summary: COVERAGE_SUMMARY_PATH },
+    {
+      baseline: COVERAGE_BASELINE_PATH,
+      summary: COVERAGE_SUMMARY_PATH,
+      report: COVERAGE_REPORT_PATH,
+    },
   );
 }
 
