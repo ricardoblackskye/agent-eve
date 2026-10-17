@@ -124,25 +124,31 @@ describe("Developer Agent Multi-File Workspace Tools", () => {
     );
   });
 
-  it("blocks reading or writing through symlinks resolving outside the workspace", async () => {
+  it("blocks reading or writing through symlinks resolving outside the workspace", async (ctx) => {
     const { symlink, writeFile } = await import("node:fs/promises");
     const tools = createWorkspaceTools(tempDir);
     const outsideFile = join(tmpdir(), `df-outside-${Date.now()}.txt`);
     await writeFile(outsideFile, "outside content", "utf8");
 
+    // Setup is deliberately OUTSIDE the assertions. This used to catch the setup error and carry on, so on
+    // a platform that cannot create a FILE symlink the test asserted nothing at all while still reporting
+    // PASS. A visible SKIP is honest about that; a swallowed error is not. The matchers stay loose here
+    // because the #396 cases below pin which symlink guard refuses.
     try {
       await symlink(outsideFile, join(tempDir, "symlink-escape.txt"));
+    } catch (err) {
+      await rm(outsideFile, { force: true });
+      if ((err as NodeJS.ErrnoException).code === "EPERM") return ctx.skip();
+      throw err;
+    }
+
+    try {
       await expect(tools.readFile("symlink-escape.txt")).rejects.toThrow(
         /symlink/i,
       );
       await expect(tools.writeFile("symlink-escape.txt", "overwrite")).rejects.toThrow(
         /symlink/i,
       );
-    } catch (err: any) {
-      // If OS environment does not permit non-admin symlink creation, verify graceful bypass
-      if (err.code !== "EPERM") {
-        throw err;
-      }
     } finally {
       await rm(outsideFile, { force: true });
     }
