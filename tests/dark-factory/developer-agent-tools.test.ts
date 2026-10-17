@@ -148,6 +148,51 @@ describe("Developer Agent Multi-File Workspace Tools", () => {
     }
   });
 
+  // #396: the target-is-a-symlink guard above is only reachable when the TARGET path itself is a symlink,
+  // and it is built there with a FILE symlink - which cannot be created on Windows without a privilege.
+  // The catch above swallows that failure and the test still PASSES, so the guard has never run on
+  // Windows and the suite has been reporting otherwise. Note also that /symlink/i above is satisfied by
+  // EITHER symlink guard, so it never pinned which one refused. These two cases pin each reason.
+  it("refuses a write whose TARGET is an escaping link, naming the target guard (#396)", async () => {
+    const { symlink } = await import("node:fs/promises");
+    const { existsSync, mkdtempSync, rmSync, writeFileSync } = await import("node:fs");
+    const outsideDir = mkdtempSync(join(tmpdir(), "df-396-out-"));
+    const outsideFile = join(outsideDir, "outside.txt");
+    writeFileSync(outsideFile, "outside content", "utf8");
+    const tools = createWorkspaceTools(tempDir);
+
+    try {
+      // The link's NAME must carry an allowed extension: the extension allow-list is checked before the
+      // symlink guards, so a link named `escape` is refused for its name and never reaches them.
+      await symlink(outsideFile, join(tempDir, "escape.ts"));
+      // A fixture that silently did not get created is how this guard went untested here; assert it.
+      expect(existsSync(join(tempDir, "escape.ts"))).toBe(true);
+
+      await expect(tools.writeFile("escape.ts", "pwned")).rejects.toThrow(
+        /is a symlink resolving outside workspace/,
+      );
+    } finally {
+      rmSync(outsideDir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a write THROUGH an escaping link, naming the ancestor guard (#396)", async () => {
+    const { symlink } = await import("node:fs/promises");
+    const { mkdtempSync, rmSync } = await import("node:fs");
+    const outsideDir = mkdtempSync(join(tmpdir(), "df-396-out-"));
+    const tools = createWorkspaceTools(tempDir);
+    const linkType = process.platform === "win32" ? "junction" : "dir";
+
+    try {
+      await symlink(outsideDir, join(tempDir, "escape"), linkType);
+      await expect(tools.writeFile("escape/evil.ts", "pwned")).rejects.toThrow(
+        /escapes workspace via directory symlink/,
+      );
+    } finally {
+      rmSync(outsideDir, { recursive: true, force: true });
+    }
+  });
+
   it("drives runMultiFileCodingLoop until tests pass", async () => {
     const tools = createWorkspaceTools(tempDir);
     const plan: ExecutionPlan = {
