@@ -117,9 +117,21 @@ describe("compareCoverage", () => {
 
 /** The gate around the comparison. IO is injected, so nothing here touches the disk. */
 describe("runCoverageRatchet", () => {
-  const PATHS = { baseline: "coverage-baseline.json", summary: "coverage/coverage-summary.json" };
+  const PATHS = {
+    baseline: "coverage-baseline.json",
+    summary: "coverage/coverage-summary.json",
+    report: "coverage/vitest-report.json",
+  };
 
-  function harness(files: Record<string, string>) {
+  /** The shape Vitest's json reporter writes; the gate reads numFailedTests from it. */
+  const REPORT_PASSED = { success: true, numTotalTests: 24, numFailedTests: 0, numPassedTests: 24 };
+
+  function harness(files: Record<string, string>, options: { omitReport?: boolean } = {}) {
+    // Every case states the test run's outcome, because the gate refuses to read coverage from a
+    // failing run. Cases that care pass their own report; the rest get a green one.
+    const withReport = options.omitReport
+      ? { ...files }
+      : { [PATHS.report]: JSON.stringify(REPORT_PASSED), ...files };
     const written: Record<string, string> = {};
     const lines: string[] = [];
     return {
@@ -128,7 +140,7 @@ describe("runCoverageRatchet", () => {
       output: () => lines.join("\n"),
       deps: {
         readFile: (p: string) => {
-          if (p in files) return files[p];
+          if (p in withReport) return withReport[p];
           throw new Error(`ENOENT: no such file or directory, open '${p}'`);
         },
         writeFile: (p: string, contents: string) => {
@@ -241,5 +253,78 @@ describe("runCoverageRatchet", () => {
     });
     expect(runCoverageRatchet([], h.deps, PATHS)).toBe(1);
     expect(h.output()).not.toMatch(/Postgres/i);
+  });
+});
+
+
+describe("runCoverageRatchet requires a passing run (#391)", () => {
+  const PATHS = {
+    baseline: "coverage-baseline.json",
+    summary: "coverage/coverage-summary.json",
+    report: "coverage/vitest-report.json",
+  };
+
+  function harness(files: Record<string, string>) {
+    const written: Record<string, string> = {};
+    const lines: string[] = [];
+    return {
+      written,
+      lines,
+      output: () => lines.join("\n"),
+      deps: {
+        readFile: (p: string) => {
+          if (p in files) return files[p];
+          throw new Error(`ENOENT: no such file or directory, open '${p}'`);
+        },
+        writeFile: (p: string, contents: string) => {
+          written[p] = contents;
+        },
+        log: (line: string) => {
+          lines.push(line);
+        },
+      },
+    };
+  }
+
+  it("refuses to gate on a failing run's coverage even when the numbers MATCH the baseline", () => {
+    // The summary is identical to the baseline, so nothing dropped: the ONLY reason to fail is the report.
+    const h = harness({
+      [PATHS.baseline]: JSON.stringify(BASELINE),
+      [PATHS.summary]: JSON.stringify(summary({})),
+      [PATHS.report]: JSON.stringify({ success: false, numFailedTests: 2 }),
+    });
+    expect(runCoverageRatchet([], h.deps, PATHS)).toBe(1);
+    expect(h.output()).toMatch(/did not pass/i);
+    expect(h.output()).toContain("2");
+  });
+
+  it("refuses --update from a failing run, so a flake cannot lower the committed floor", () => {
+    const h = harness({
+      [PATHS.summary]: JSON.stringify(summary({ lines: 60 })),
+      [PATHS.report]: JSON.stringify({ success: false, numFailedTests: 1 }),
+    });
+    expect(runCoverageRatchet(["--update"], h.deps, PATHS)).toBe(1);
+    expect(h.written[PATHS.baseline]).toBeUndefined();
+    expect(h.output()).toMatch(/did not pass/i);
+  });
+
+  it("fails closed when the report is missing, rather than assuming the run passed", () => {
+    const h = harness({
+      [PATHS.baseline]: JSON.stringify(BASELINE),
+      [PATHS.summary]: JSON.stringify(summary({})),
+    });
+    expect(runCoverageRatchet([], h.deps, PATHS)).toBe(1);
+    expect(h.output()).toMatch(/report/i);
+    expect(h.output()).toContain(PATHS.report);
+  });
+
+  it("fails closed when the report is not a Vitest report", () => {
+    const h = harness({
+      [PATHS.baseline]: JSON.stringify(BASELINE),
+      [PATHS.summary]: JSON.stringify(summary({})),
+      [PATHS.report]: JSON.stringify({ something: "else" }),
+    });
+    expect(runCoverageRatchet([], h.deps, PATHS)).toBe(1);
+    expect(h.output()).toMatch(/numFailedTests/);
   });
 });
