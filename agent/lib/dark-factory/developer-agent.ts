@@ -240,6 +240,10 @@ export const ALLOWED_SKELETON_EXTENSIONS = new Set([
  * ("C:foo") or UNC ("\\\\server\\share\\foo") string is just a normal-looking
  * relative name, so `resolve`/`relative` containment says nothing useful about
  * it. Refuse those forms outright instead of trying to normalise them.
+ *
+ * Callers must run this BEFORE any `isAbsolute` check (#394): these guards use textual tests rather
+ * than `path`, so they answer the same on every platform, and running them first is what keeps the
+ * reported reason platform-independent.
  */
 function assertSafeRelativePath(relPath: string): void {
   const reject = (why: string): never => {
@@ -278,12 +282,17 @@ export async function applySkeletalMap(
   const realRoot = await realpath(root);
 
   for (const [relPath, content] of Object.entries(map)) {
+    // #394: the SHAPE guards run FIRST so the stated reason is identical on every platform.
+    // `path.isAbsolute` is platform-specific - on win32 a backslash-UNC or drive-absolute path IS
+    // absolute, so checking absoluteness first skipped these guards entirely and reported the generic
+    // reason instead of the precise one. Both checks still run, so nothing refused before is accepted
+    // now; only which reason is reported changes.
+    assertSafeRelativePath(relPath);
     if (isAbsolute(relPath)) {
       throw new SkeletonMapError(
         `Skeleton path '${relPath}' must be relative to the workspace.`,
       );
     }
-    assertSafeRelativePath(relPath);
 
     const target = resolve(root, relPath);
     const rel = relative(root, target);

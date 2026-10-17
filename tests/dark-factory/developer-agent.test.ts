@@ -348,6 +348,76 @@ describe("applySkeletalMap", () => {
     }
   });
 
+  /**
+   * Run one map entry through applySkeletalMap in a throwaway workspace and give back what it threw.
+   *
+   * Returned rather than asserted so a case can pin BOTH what the reason must be and what it must not
+   * be - an assertion of the form "it threw SkeletonMapError" is satisfied by either guard, which is
+   * exactly how the platform divergence below stayed hidden.
+   */
+  async function rejectionFor(relPath: string): Promise<unknown> {
+    const { mkdtempSync, rmSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+
+    const dir = mkdtempSync(join(tmpdir(), "df-sk-"));
+    try {
+      await applySkeletalMap(dir, { [relPath]: "x" });
+      return undefined; // not rejected at all - the case asserts against this loudly
+    } catch (error) {
+      return error;
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  // #394: the shape guards must report the SAME reason on every platform.
+  //
+  // applySkeletalMap used to check `isAbsolute` BEFORE `assertSafeRelativePath`, and path.isAbsolute
+  // is platform-specific: on win32 a backslash-UNC or drive-absolute path IS absolute, so the shape
+  // guard never ran and the caller read "must be relative to the workspace" instead of the precise
+  // reason. Both refusals were correct; only the diagnosis differed.
+  //
+  // To pin the ORDER at all, the input must be absolute on BOTH platforms AND rejected by the shape
+  // guard - only the forward-slash UNC form qualifies (win32 true, posix true). The backslash and
+  // drive forms below cannot fail in Linux CI precisely because isAbsolute diverges for them, which
+  // is the bug; they are covered for reason stability, not as the ordering guard.
+  it("reports the SHAPE reason for a forward-slash UNC path, on every platform (#394)", async () => {
+    const error = await rejectionFor("//server/share/evil.ts");
+    expect(error).toBeInstanceOf(SkeletonMapError);
+    expect((error as Error).message).toMatch(/looks like a UNC path/);
+    expect((error as Error).message).not.toMatch(/must be relative to the workspace/);
+  });
+
+  it("reports the shape reason for the Windows drive and backslash-UNC forms (#394)", async () => {
+    const drive = await rejectionFor("C:\\evil.ts");
+    expect(drive).toBeInstanceOf(SkeletonMapError);
+    expect((drive as Error).message).toMatch(/looks like a Windows drive path/);
+
+    const unc = await rejectionFor("\\\\server\\share\\evil.ts");
+    expect(unc).toBeInstanceOf(SkeletonMapError);
+    expect((unc as Error).message).toMatch(/looks like a UNC path/);
+  });
+
+  // Control: the reorder must not swallow the absoluteness check. This path is absolute on both
+  // platforms and is NOT a drive/UNC shape, so it must still be refused for being absolute.
+  it("still reports the ABSOLUTENESS reason for a POSIX-absolute path (#394)", async () => {
+    const error = await rejectionFor("/abs/evil.ts");
+    expect(error).toBeInstanceOf(SkeletonMapError);
+    expect((error as Error).message).toMatch(/must be relative to the workspace/);
+    expect((error as Error).message).not.toMatch(/looks like a UNC path/);
+  });
+
+  // Control: a shape the absoluteness check never sees must keep its own reason, so reordering cannot
+  // quietly collapse every rejection into one message. (A positive case - that a VALID path still
+  // writes - is the first test in this describe; without it a "refuse everything" guard would pass.)
+  it("still reports the null-byte reason (#394)", async () => {
+    const nulDelimited = `bad${String.fromCharCode(0)}name.ts`;
+    const error = await rejectionFor(nulDelimited);
+    expect(error).toBeInstanceOf(SkeletonMapError);
+    expect((error as Error).message).toMatch(/contains a null byte/);
+  });
+
   // Review of PR #153: a symlink INSIDE the workspace pointing outside it defeats
   // a purely lexical containment check, so the real resolved parent is verified.
   it("refuses to write through a symlink that escapes the workspace", async () => {
