@@ -35,7 +35,7 @@ try {
 }
 ```
 
-`PERMISSION_DENIED` stands in for the errno that test swallows, reproduced below. Measured on this machine:
+`PERMISSION_DENIED` stands in for the error code that test swallows, reproduced below. Measured on this machine:
 
 | probe                                  | result                                                        |
 |----------------------------------------|---------------------------------------------------------------|
