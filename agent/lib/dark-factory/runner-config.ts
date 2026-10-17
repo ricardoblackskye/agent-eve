@@ -481,11 +481,38 @@ export type RunnerAnswerResult =
   | { ok: true; answer?: string }
   | { ok: false; error: string };
 
-export function resolveRunnerAnswer(_input: {
+/**
+ * The human's reply to a parked plan, read from `--answer-file` (#378).
+ *
+ * A FILE rather than an argument value: it keeps human text out of the process list and out of shell
+ * quoting. The reader is injected, so resolution is testable without touching the disk.
+ *
+ * A named file that cannot be read is REFUSED, never reported as "no answer". Falling back to "no
+ * answer" would make a revision reply indistinguishable from the label being cleared - it would turn
+ * feedback into an approval, which is the exact failure the approval gate exists to prevent.
+ */
+export function resolveRunnerAnswer(input: {
   argv: readonly string[];
   readFile: (path: string) => string;
 }): RunnerAnswerResult {
-  throw new Error("not implemented");
+  const argument = flagValue(input.argv, "--answer-file");
+  if (!argument.present) return { ok: true };
+
+  const path = (argument.value ?? "").trim();
+  if (path === "") {
+    return { ok: false, error: "No answer file: pass --answer-file <path>." };
+  }
+
+  try {
+    return { ok: true, answer: input.readFile(path) };
+  } catch (error) {
+    return {
+      ok: false,
+      error: `--answer-file ${JSON.stringify(path)} could not be read: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    };
+  }
 }
 
 /**
