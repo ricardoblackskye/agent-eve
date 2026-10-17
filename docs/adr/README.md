@@ -96,3 +96,4 @@ changes, write a new one that supersedes it.
 | [0040](0040-df-run-failure-is-terminal.md)                        | Any post-acceptance failure ends the run terminally, so a failure cannot hold its claim | Accepted |
 | [0041](0041-df-plan-approval-is-opt-in.md)                        | A plan is approved only by explicit approval wording                                    | Accepted |
 | [0042](0042-df-plan-revision-needs-approval.md)                   | A plan revision re-parks, is capped, and the deployed path holds rather than coding     | Accepted |
+| [0043](0043-coverage-is-gated-by-a-ratchet.md)                    | Unit test coverage is gated by a ratchet, and measures tests rather than types            | Accepted |

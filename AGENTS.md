@@ -63,3 +63,40 @@ This version has breaking changes — APIs, conventions, and file structure may 
 This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
 
 <!-- END:nextjs-agent-rules -->
+
+## Coverage (#391)
+
+Unit test coverage is measured by the `Unit Tests` job on every pull request, and gated by a RATCHET: the
+build fails if coverage DROPS. It never fails for sitting below a fixed target.
+
+```sh
+npm run test:coverage                  # run the suite with coverage (writes ./coverage)
+npm run coverage:ratchet               # the gate: compare against coverage-baseline.json
+npm run coverage:ratchet -- --update   # record the new floor after an improvement, then commit it
+```
+
+`coverage-baseline.json` is the floor. Improve coverage and the gate tells you to run `--update`; a drop
+fails with the metric, both percentages, and the cause. Only `agent/` and `app/` are measured - see
+`coverage.include` in `vitest.config.ts`, which is the one line that decides what the number means.
+
+The baseline is recorded with the five Postgres test variables set (as CI does), because those suites RUN
+in CI and SKIP without them; measuring without them understates the floor by about 5 points and weakens the
+gate to the point where a real 5-point regression would pass. CI provides Postgres as a service container;
+locally, start a disposable one first:
+
+```sh
+docker run -d --rm --name df-cov-pg -p 5432:5432 \
+  -e POSTGRES_HOST_AUTH_METHOD=trust -e POSTGRES_DB=darkfactory postgres:16-alpine
+
+export DF_TENANT_TEST_DATABASE_URL="postgres://postgres@localhost:5432/darkfactory?sslmode=disable"
+export DF_COST_BUDGET_TEST_DATABASE_URL="$DF_TENANT_TEST_DATABASE_URL"
+export DF_RUN_HISTORY_TEST_DATABASE_URL="$DF_TENANT_TEST_DATABASE_URL"
+export DF_USAGE_TEST_DATABASE_URL="$DF_TENANT_TEST_DATABASE_URL"
+export DF_CONTROL_DATABASE_URL="$DF_TENANT_TEST_DATABASE_URL"
+
+npm run test:coverage && npm run coverage:ratchet
+docker stop df-cov-pg
+```
+
+Measuring without the database is not wrong, but the numbers are not comparable to the baseline, and the
+gate says so when the drop is large enough to be that cause rather than a regression.
