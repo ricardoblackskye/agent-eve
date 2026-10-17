@@ -222,4 +222,24 @@ describe("runCoverageRatchet", () => {
       expect(h.output()).toContain(metric);
     }
   });
+
+  it("explains a missing-suite sized drop instead of leaving it looking like a regression", () => {
+    const h = harness({
+      [PATHS.baseline]: JSON.stringify(BASELINE),
+      [PATHS.summary]: JSON.stringify(summary({ lines: 75 })),
+    });
+    expect(runCoverageRatchet([], h.deps, PATHS)).toBe(1);
+    expect(h.output()).toMatch(/Postgres/i);
+    expect(h.output()).toMatch(/skip/i);
+    expect(h.output()).toMatch(/not a regression|measurement/i);
+  });
+
+  it("does NOT offer that explanation for an ordinary drop, so the hint stays meaningful", () => {
+    const h = harness({
+      [PATHS.baseline]: JSON.stringify(BASELINE),
+      [PATHS.summary]: JSON.stringify(summary({ lines: 77.5 })),
+    });
+    expect(runCoverageRatchet([], h.deps, PATHS)).toBe(1);
+    expect(h.output()).not.toMatch(/Postgres/i);
+  });
 });
