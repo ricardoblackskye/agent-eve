@@ -94,3 +94,5 @@ changes, write a new one that supersedes it.
 | [0038](0038-per-repo-factory-settings-in-config.md)               | Per-repo Factory settings live in config, not the database                              | Accepted |
 | [0039](0039-df-sandbox-push-trusts-egress-ca.md)                  | The in-sandbox push trusts the egress sidecar's CA and never disables verification      | Accepted |
 | [0040](0040-df-run-failure-is-terminal.md)                        | Any post-acceptance failure ends the run terminally, so a failure cannot hold its claim | Accepted |
+| [0041](0041-df-plan-approval-is-opt-in.md)                        | A plan is approved only by explicit approval wording                                    | Accepted |
+| [0042](0042-df-plan-revision-needs-approval.md)                   | A plan revision re-parks, is capped, and the deployed path holds rather than coding     | Accepted |

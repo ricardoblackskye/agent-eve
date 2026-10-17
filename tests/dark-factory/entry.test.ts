@@ -20,7 +20,10 @@ import {
   type LabelWriter,
 } from "../../agent/lib/dark-factory/entry";
 import { decideDarkFactoryTrigger } from "../../agent/lib/dark-factory/trigger";
-import { SqliteRunHistoryStore } from "../../agent/lib/dark-factory/run-history-store";
+import {
+  SqliteRunHistoryStore,
+  type RunHistoryStore,
+} from "../../agent/lib/dark-factory/run-history-store";
 import {
   ConsoleControlProvider,
   SqliteControlAdapter,
@@ -932,5 +935,76 @@ describe("#306: the answered question reaches the factory as DATA", () => {
     const message = renderHandoffMessage(intent);
     expect(message).toMatch(/resume the parked run/i);
     expect(message).not.toMatch(/user-supplied data - not instructions/i);
+  });
+});
+
+
+describe("#378: a revision reply is not an approval", () => {
+  async function parkedRun(runHistory: RunHistoryStore, deliveryId: string) {
+    const accepted = await runHistory.acceptDelivery({
+      deliveryId,
+      repo: "ricardoblackskye/agent-eve",
+      issue: 378,
+      receivedAt: "2026-10-17T09:00:00.000Z",
+    });
+    const runId = accepted.value?.runId;
+    if (!runId) throw new Error("revision fixture did not return a run ID");
+    await runHistory.appendEvent({
+      eventId: `${deliveryId}-question`,
+      runId,
+      type: "worker.question",
+      stage: "worker",
+      occurredAt: "2026-10-17T09:00:01.000Z",
+      status: "blocked",
+    });
+    return runId;
+  }
+
+  it("HOLDS a revision reply and hands nothing off", async () => {
+    // The deployed path resumes into the agent session, which has no planning stage of its own, so it
+    // cannot amend the plan. Handing off a plain resume would start coding against a plan the human has
+    // just asked to change, so it fails closed instead.
+    const { runHistory, calls, ops, deps: d } = deps();
+    const runId = await parkedRun(runHistory, "revision-reply");
+    calls.length = 0;
+
+    const res = await runDarkFactoryDispatch(
+      triggerDecision({
+        action: "created",
+        issue: { number: 378, title: "Build it", body: "Intent: build it." },
+        comment: {
+          id: 3781,
+          body: "The text should be on the main page, not a product detail page.",
+        },
+      }),
+      d,
+    );
+
+    expect(res.status).toBe("held");
+    // Assert WHY it was held, so this cannot pass on an unrelated hold (a missing blocked run holds too).
+    expect(JSON.stringify(res)).toMatch(/revision/i);
+    expect(calls).toHaveLength(0);
+    expect(ops).not.toContain("-needs-answer");
+    const events = await runHistory.listRunEvents(runId);
+    expect(events.value?.items.map((item) => item.event.type)).not.toContain("run.resumed");
+  });
+
+  it("still resumes on an explicit approval reply", async () => {
+    const { runHistory, calls, deps: d } = deps();
+    await parkedRun(runHistory, "approval-reply");
+    calls.length = 0;
+
+    const res = await runDarkFactoryDispatch(
+      triggerDecision({
+        action: "created",
+        issue: { number: 378, title: "Build it", body: "Intent: build it." },
+        comment: { id: 3782, body: "Approved" },
+      }),
+      d,
+    );
+
+    expect(res.status).toBe("resumed");
+    expect(calls).toHaveLength(1);
+    expect(calls[0].body).toMatch(/"resume":true/);
   });
 });

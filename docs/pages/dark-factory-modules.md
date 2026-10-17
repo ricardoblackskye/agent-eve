@@ -481,6 +481,22 @@ Dark Factory — Plan File Renderer (#361). Renders an ExecutionPlan as reviewab
 
 **Exports:** `PlanFileInput`, `PlanTask`, `renderPlanFile`
 
+## plan-response
+
+Dark Factory — Plan Response (#378). Decides whether a human's reply to a parked plan is an explicit approval or revision feedback. Approval is OPT-IN and fail-closed: only explicit approval wording counts, and every other reply is treated as feedback, which amends the plan and re-parks the run rather than coding. The approval test is a WHOLE-MESSAGE match against one allow-list, so a reply carrying both an approval and a request is feedback. Also resolves the revision cap from `DF_MAX_PLAN_REVISIONS`, refusing a malformed or non-positive value rather than defaulting it silently.
+
+**Source:** [`agent/lib/dark-factory/plan-response.ts`](../../agent/lib/dark-factory/plan-response.ts)
+
+**Exports:** `DEFAULT_MAX_PLAN_REVISIONS`, `MAX_PLAN_REVISIONS_ENV`, `PLAN_APPROVAL_PHRASES`, `PlanResponseDecision`, `PlanResponseKind`, `classifyPlanResponse`, `resolveMaxPlanRevisions`
+
+## plan-revision-recorder
+
+Dark Factory — Plan Revision Rounds (#378). The durable count of how many times a parked plan has been sent back, which the runner refuses against once the cap is reached. A reply that is not an explicit approval is plan feedback: it costs one architect call and re-parks the run, so without a bound an unrelated comment could send the architect round the loop indefinitely. A round is recorded as a `run.resumed` event, because that is what the reply IS — the ledger permits a BLOCKED run only `run.resumed` or `run.terminal`, which is the rule that stops a parked run accumulating work while it waits. The event id is derived from the run and the reply identity, so a re-delivered comment records once while a genuinely new reply is a new round. An unreadable ledger is REPORTED rather than answered as zero, because a zero fallback would silently disable the cap; a store that REJECTS is reported the same way as one that returns a failure, since a rejection would otherwise escape the caller. Paging is capped at the store's own maximum of 100 rows per read.
+
+**Source:** [`agent/lib/dark-factory/plan-revision-recorder.ts`](../../agent/lib/dark-factory/plan-revision-recorder.ts)
+
+**Exports:** `PlanRevisionCountResult`, `PlanRevisionWriteResult`, `RecordPlanRevisionInput`, `countPlanRevisions`, `isPlanRevisionCapReached`, `readPlanRevisionCount`, `recordPlanRevision`
+
 ## plan-validator
 
 Dark Factory — Execution Plan Domain Validator (#179). Pre-flight validation gate that evaluates an ExecutionPlan produced by the Architect Agent before code generation begins. Ensures plans touch appropriate repository domains (e.g. UI/Chat stories modify UI entrypoints) and that every Acceptance Criterion from the User Story is mapped to an automated test case.
