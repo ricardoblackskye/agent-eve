@@ -11,6 +11,7 @@ import {
   resolveBranchName,
   resolveIssueNumber,
   resolveRepoSettings,
+  resolveRunnerAnswer,
   resolveTargetRepo,
   type RunnerConfig,
 } from "../../agent/lib/dark-factory/runner-config";
@@ -590,5 +591,49 @@ describe("the sprint reporter's board wiring (#348 R2 Task 2)", () => {
   it("resolves the board through the shared module instead of composing it inline", () => {
     expect(source).toContain("resolveBoardSetting(");
     expect(source).toContain("loadRunnerConfig(");
+  });
+});
+
+
+/**
+ * #378 - the runner must be able to receive the human's reply to a parked plan. The reply is read from a
+ * FILE rather than an argument value: it keeps human text out of the process list and out of shell
+ * quoting.
+ */
+describe("resolveRunnerAnswer (#378)", () => {
+  it("reports no answer when the flag is absent", () => {
+    const result = resolveRunnerAnswer({ argv: ["--issue", "378"], readFile: () => "" });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.answer).toBeUndefined();
+  });
+
+  it("reads the reply from the named file", () => {
+    const result = resolveRunnerAnswer({
+      argv: ["--answer-file", "C:/tmp/reply.txt"],
+      readFile: () => "Approved",
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.answer).toBe("Approved");
+  });
+
+  it("REFUSES a named file it cannot read, rather than reporting no answer", () => {
+    // Falling back to "no answer" would make a revision reply indistinguishable from the label being
+    // cleared, i.e. it would turn feedback into an approval - the failure the gate exists to prevent.
+    const result = resolveRunnerAnswer({
+      argv: ["--answer-file", "C:/tmp/missing.txt"],
+      readFile: () => {
+        throw new Error("ENOENT: no such file");
+      },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain("missing.txt");
+  });
+
+  it("refuses a blank filename", () => {
+    const result = resolveRunnerAnswer({
+      argv: ["--answer-file", "   "],
+      readFile: () => "Approved",
+    });
+    expect(result.ok).toBe(false);
   });
 });

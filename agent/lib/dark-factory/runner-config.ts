@@ -477,6 +477,17 @@ export function resolveIssueNumber(argv: readonly string[]): IssueNumberResult {
   return { ok: true, issue: Number(raw) };
 }
 
+export type RunnerAnswerResult =
+  | { ok: true; answer?: string }
+  | { ok: false; error: string };
+
+export function resolveRunnerAnswer(_input: {
+  argv: readonly string[];
+  readFile: (path: string) => string;
+}): RunnerAnswerResult {
+  throw new Error("not implemented");
+}
+
 /**
  * The branch to work on: an explicit `--branch`, else one derived from the issue.
  *
