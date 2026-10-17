@@ -60,10 +60,85 @@ export class CoverageSummaryError extends Error {
   }
 }
 
+/**
+ * The `total` block of a summary.
+ *
+ * A summary with no `total` is not a summary, so this THROWS rather than reporting a violation: "I cannot
+ * read my input" and "coverage fell" are different failures, and collapsing them would report a broken
+ * file as a coverage regression.
+ */
+function readTotal(summary: unknown, label: string): Record<string, unknown> {
+  if (summary === null || typeof summary !== "object" || Array.isArray(summary)) {
+    throw new CoverageSummaryError(
+      `${label} is not a coverage summary object. Expected the JSON written by the json-summary reporter.`,
+    );
+  }
+  const total = (summary as { total?: unknown }).total;
+  if (total === null || typeof total !== "object" || Array.isArray(total)) {
+    throw new CoverageSummaryError(
+      `${label} has no "total" block. Expected the JSON written by the json-summary reporter.`,
+    );
+  }
+  return total as Record<string, unknown>;
+}
+
+/**
+ * One metric's percentage.
+ *
+ * ABSENT and MALFORMED are deliberately different. An absent key is reported by the caller as a `missing`
+ * violation, so the gate fails closed on an incomplete summary; a key that is present but not a numeric
+ * percentage means the file is not a summary, so it throws. Treating absent as 0, or malformed as absent,
+ * would both let a gate pass on input it could not actually verify.
+ */
+function readPct(
+  total: Record<string, unknown>,
+  metric: CoverageMetricName,
+  label: string,
+): number | undefined {
+  if (!(metric in total)) return undefined;
+  const entry = total[metric];
+  if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+    throw new CoverageSummaryError(`${label} has a "${metric}" entry that is not an object.`);
+  }
+  const pct = (entry as { pct?: unknown }).pct;
+  if (typeof pct !== "number" || !Number.isFinite(pct)) {
+    throw new CoverageSummaryError(`${label} has a "${metric}" entry with no numeric "pct".`);
+  }
+  return pct;
+}
+
+/** Compare a baseline summary against the current one. */
 export function compareCoverage(
-  _baseline: unknown,
-  _current: unknown,
-  _tolerancePct: number = DEFAULT_TOLERANCE_PCT,
+  baseline: unknown,
+  current: unknown,
+  tolerancePct: number = DEFAULT_TOLERANCE_PCT,
 ): CoverageComparison {
-  throw new Error("not implemented");
+  const baselineTotal = readTotal(baseline, "the baseline");
+  const currentTotal = readTotal(current, "the current summary");
+
+  const violations: CoverageViolation[] = [];
+  const deltas: CoverageDelta[] = [];
+  let improved = false;
+
+  for (const metric of COVERAGE_METRICS) {
+    const baselinePct = readPct(baselineTotal, metric, "the baseline");
+    const currentPct = readPct(currentTotal, metric, "the current summary");
+
+    if (baselinePct === undefined || currentPct === undefined) {
+      violations.push({ metric, reason: "missing", baselinePct, currentPct });
+      continue;
+    }
+
+    const deltaPct = Number((currentPct - baselinePct).toFixed(2));
+    deltas.push({ metric, baselinePct, currentPct, deltaPct });
+
+    if (deltaPct > 0) improved = true;
+
+    const dropPct = Number((baselinePct - currentPct).toFixed(2));
+    if (dropPct > tolerancePct) {
+      violations.push({ metric, reason: "dropped", baselinePct, currentPct, dropPct });
+    }
+  }
+
+  return { ok: violations.length === 0, violations, deltas, improved };
 }
