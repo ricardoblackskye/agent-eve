@@ -481,6 +481,14 @@ Dark Factory — Plan File Renderer (#361). Renders an ExecutionPlan as reviewab
 
 **Exports:** `PlanFileInput`, `PlanTask`, `renderPlanFile`
 
+## plan-response
+
+Dark Factory — Plan Response (#378). Decides whether a human's reply to a parked plan is an explicit approval or revision feedback. Approval is OPT-IN and fail-closed: only explicit approval wording counts, and every other reply is treated as feedback, which amends the plan and re-parks the run rather than coding. The approval test is a WHOLE-MESSAGE match against one allow-list, so a reply carrying both an approval and a request is feedback. Also resolves the revision cap from `DF_MAX_PLAN_REVISIONS`, refusing a malformed or non-positive value rather than defaulting it silently.
+
+**Source:** [`agent/lib/dark-factory/plan-response.ts`](../../agent/lib/dark-factory/plan-response.ts)
+
+**Exports:** `DEFAULT_MAX_PLAN_REVISIONS`, `MAX_PLAN_REVISIONS_ENV`, `PLAN_APPROVAL_PHRASES`, `PlanResponseDecision`, `PlanResponseKind`, `classifyPlanResponse`, `resolveMaxPlanRevisions`
+
 ## plan-validator
 
 Dark Factory — Execution Plan Domain Validator (#179). Pre-flight validation gate that evaluates an ExecutionPlan produced by the Architect Agent before code generation begins. Ensures plans touch appropriate repository domains (e.g. UI/Chat stories modify UI entrypoints) and that every Acceptance Criterion from the User Story is mapped to an automated test case.
