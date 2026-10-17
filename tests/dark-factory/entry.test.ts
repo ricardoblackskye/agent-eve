@@ -20,7 +20,10 @@ import {
   type LabelWriter,
 } from "../../agent/lib/dark-factory/entry";
 import { decideDarkFactoryTrigger } from "../../agent/lib/dark-factory/trigger";
-import { SqliteRunHistoryStore } from "../../agent/lib/dark-factory/run-history-store";
+import {
+  SqliteRunHistoryStore,
+  type RunHistoryStore,
+} from "../../agent/lib/dark-factory/run-history-store";
 import {
   ConsoleControlProvider,
   SqliteControlAdapter,
@@ -937,7 +940,7 @@ describe("#306: the answered question reaches the factory as DATA", () => {
 
 
 describe("#378: a revision reply is not an approval", () => {
-  async function parkedRun(runHistory: SqliteRunHistoryStore, deliveryId: string) {
+  async function parkedRun(runHistory: RunHistoryStore, deliveryId: string) {
     const accepted = await runHistory.acceptDelivery({
       deliveryId,
       repo: "ricardoblackskye/agent-eve",

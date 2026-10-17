@@ -30,6 +30,7 @@ import { resolveRunTenant } from "./run-attribution";
 import type { TenantStore } from "./tenant-store";
 import type { ControlStore } from "./control";
 import { createPlatformAdapter } from "./platform";
+import { classifyPlanResponse } from "./plan-response";
 
 /** The label operations the entry point needs; injected so tests need no GitHub. */
 export interface LabelWriter {
@@ -59,6 +60,19 @@ export interface DispatchIntent {
    * handoff and NEVER persisted in the ledger.
    */
   answer?: string;
+}
+
+/**
+ * Classify a resume reply, or return undefined when there is no reply at all (#378).
+ *
+ * No reply means the question label was cleared, which the parked question advertises as a way to begin -
+ * so it stays an approval. A reply is classified, and anything that is not explicit approval wording is
+ * feedback.
+ */
+function replyClassification(
+  answer: string | undefined,
+): ReturnType<typeof classifyPlanResponse> | undefined {
+  return answer === undefined ? undefined : classifyPlanResponse(answer);
 }
 
 export interface EntryDeps {
@@ -676,6 +690,18 @@ export async function runDarkFactoryDispatch(
     }
 
     const intent = { ...baseIntent, runId: receipt.runId };
+
+    // #378: on a resume the human's REPLY decides, and only explicit approval wording is an approval.
+    // This path can only ever RESUME into the agent session, which has no planning stage of its own, so
+    // it cannot amend the plan. Fail closed and say so: handing off a plain resume here would start
+    // coding against a plan the human has just asked to change.
+    const reply = replyClassification(intent.answer);
+    if (reply?.kind === "revision") {
+      return held(
+        "the reply asks for a plan revision, which this path cannot perform yet: the plan was not " +
+          "changed and nothing was coded. Revise via the runner path, or approve the plan as it stands.",
+      );
+    }
     if (!receipt.handoffSent) {
       const failure = await removeLabels(labels, intent, [
         TRIGGER_LABELS.question,
