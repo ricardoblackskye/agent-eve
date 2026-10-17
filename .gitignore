@@ -11,3 +11,6 @@ dist
 *.tsbuildinfo
 test-results
 playwright-report
+
+# #391: the coverage report is generated, not source.
+coverage/
