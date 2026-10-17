@@ -142,3 +142,25 @@ export function compareCoverage(
 
   return { ok: violations.length === 0, violations, deltas, improved };
 }
+
+/** Where the two files live. Injected so the CLI is testable without a filesystem. */
+export interface CoverageRatchetPaths {
+  baseline: string;
+  summary: string;
+}
+
+/** The file access and logging the CLI needs. Injected for the same reason. */
+export interface CoverageRatchetIO {
+  readFile: (path: string) => string;
+  writeFile: (path: string, contents: string) => void;
+  log: (line: string) => void;
+}
+
+/** Exit code 0 when the floor held, non-zero when it moved or could not be verified. */
+export function runCoverageRatchet(
+  _argv: readonly string[],
+  _io: CoverageRatchetIO,
+  _paths: CoverageRatchetPaths,
+): number {
+  throw new Error("not implemented");
+}

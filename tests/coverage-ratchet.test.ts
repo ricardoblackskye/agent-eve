@@ -3,6 +3,7 @@ import {
   COVERAGE_METRICS,
   CoverageSummaryError,
   compareCoverage,
+  runCoverageRatchet,
 } from "../scripts/coverage-ratchet";
 
 /** A coverage summary shaped like the one `json-summary` writes. */
@@ -110,5 +111,115 @@ describe("compareCoverage", () => {
     expect(compareCoverage(BASELINE, summary({})).ok).toBe(true);
     const broken = { total: { lines: 78, statements: 77, functions: 80, branches: 72 } };
     expect(() => compareCoverage(BASELINE, broken)).toThrow(CoverageSummaryError);
+  });
+});
+
+
+/** The gate around the comparison. IO is injected, so nothing here touches the disk. */
+describe("runCoverageRatchet", () => {
+  const PATHS = { baseline: "coverage-baseline.json", summary: "coverage/coverage-summary.json" };
+
+  function harness(files: Record<string, string>) {
+    const written: Record<string, string> = {};
+    const lines: string[] = [];
+    return {
+      written,
+      lines,
+      output: () => lines.join("\n"),
+      deps: {
+        readFile: (p: string) => {
+          if (p in files) return files[p];
+          throw new Error(`ENOENT: no such file or directory, open '${p}'`);
+        },
+        writeFile: (p: string, contents: string) => {
+          written[p] = contents;
+        },
+        log: (line: string) => {
+          lines.push(line);
+        },
+      },
+    };
+  }
+
+  it("exits 0 when coverage holds", () => {
+    const h = harness({
+      [PATHS.baseline]: JSON.stringify(BASELINE),
+      [PATHS.summary]: JSON.stringify(summary({})),
+    });
+    expect(runCoverageRatchet([], h.deps, PATHS)).toBe(0);
+  });
+
+  it("exits 1 on a drop, naming the metric and both percentages", () => {
+    const h = harness({
+      [PATHS.baseline]: JSON.stringify(BASELINE),
+      [PATHS.summary]: JSON.stringify(summary({ lines: 76 })),
+    });
+    expect(runCoverageRatchet([], h.deps, PATHS)).toBe(1);
+    expect(h.output()).toMatch(/lines/);
+    expect(h.output()).toMatch(/76/);
+    expect(h.output()).toMatch(/78\.34/);
+    expect(h.output()).toMatch(/dropped/i);
+  });
+
+  it("exits 1 when the summary is missing, and says how to produce one", () => {
+    const h = harness({ [PATHS.baseline]: JSON.stringify(BASELINE) });
+    expect(runCoverageRatchet([], h.deps, PATHS)).toBe(1);
+    expect(h.output()).toMatch(/test:coverage/);
+    expect(h.output()).toContain(PATHS.summary);
+  });
+
+  it("exits 1 when the baseline is missing, and says how to record one", () => {
+    const h = harness({ [PATHS.summary]: JSON.stringify(summary({})) });
+    expect(runCoverageRatchet([], h.deps, PATHS)).toBe(1);
+    expect(h.output()).toContain(PATHS.baseline);
+    expect(h.output()).toMatch(/--update/);
+  });
+
+  it("exits 1 when the baseline is not valid JSON", () => {
+    const h = harness({
+      [PATHS.baseline]: "{ not json",
+      [PATHS.summary]: JSON.stringify(summary({})),
+    });
+    expect(runCoverageRatchet([], h.deps, PATHS)).toBe(1);
+    expect(h.output()).toMatch(/JSON/i);
+  });
+
+  it("exits 1 when the summary is not valid JSON", () => {
+    const h = harness({
+      [PATHS.baseline]: JSON.stringify(BASELINE),
+      [PATHS.summary]: "not json at all",
+    });
+    expect(runCoverageRatchet([], h.deps, PATHS)).toBe(1);
+    expect(h.output()).toMatch(/JSON/i);
+  });
+
+  it("writes the baseline with --update and exits 0, without needing one to exist", () => {
+    const h = harness({ [PATHS.summary]: JSON.stringify(summary({ lines: 90 })) });
+    expect(runCoverageRatchet(["--update"], h.deps, PATHS)).toBe(0);
+    expect(h.written[PATHS.baseline]).toBeDefined();
+    const written = JSON.parse(h.written[PATHS.baseline]);
+    expect(written.total.lines.pct).toBe(90);
+    expect(h.output()).toMatch(/baseline/i);
+  });
+
+  it("exits 0 on an improvement and suggests recording the new floor", () => {
+    const h = harness({
+      [PATHS.baseline]: JSON.stringify(BASELINE),
+      [PATHS.summary]: JSON.stringify(summary({ lines: 90 })),
+    });
+    expect(runCoverageRatchet([], h.deps, PATHS)).toBe(0);
+    expect(h.output()).toMatch(/improved/i);
+    expect(h.output()).toMatch(/--update/);
+  });
+
+  it("prints a row for every metric, so the table is complete", () => {
+    const h = harness({
+      [PATHS.baseline]: JSON.stringify(BASELINE),
+      [PATHS.summary]: JSON.stringify(summary({})),
+    });
+    runCoverageRatchet([], h.deps, PATHS);
+    for (const metric of COVERAGE_METRICS) {
+      expect(h.output()).toContain(metric);
+    }
   });
 });
