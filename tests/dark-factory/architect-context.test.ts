@@ -123,7 +123,13 @@ describe("Architect reads the repository (#381 R1)", () => {
   });
 
   it("states what it omitted rather than silently dropping files", async () => {
-    const { agent, prompts } = agentOver({ maxPromptChars: 2_600 });
+    // Calibrated against the real instruction block rather than a magic number: a hard-coded budget would
+    // drift away from what the prompt actually costs and the case would quietly stop exercising omission.
+    const baseline = agentOver({ readFile: undefined });
+    await baseline.agent.planStory(STORY);
+    const base = baseline.prompts[0].length;
+
+    const { agent, prompts } = agentOver({ maxPromptChars: base + 900 });
     const result = await agent.planStory(STORY);
 
     expect(result.ok).toBe(true);
@@ -131,7 +137,10 @@ describe("Architect reads the repository (#381 R1)", () => {
   });
 
   it("keeps the prompt inside its budget", async () => {
-    const budget = 3_000;
+    const baseline = agentOver({ readFile: undefined });
+    await baseline.agent.planStory(STORY);
+    const budget = baseline.prompts[0].length + 2_000;
+
     const { agent, prompts } = agentOver({ maxPromptChars: budget });
     const result = await agent.planStory(STORY);
 
