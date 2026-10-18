@@ -147,12 +147,63 @@ export interface BoundedReader {
 /**
  * A reader the Architect cannot use to escape the workspace, exceed its budget, or mistake a fragment for a
  * whole file.
+ *
+ * The cache matters for more than speed: the same file is inspected during discovery and then read for the
+ * prompt, and charging it twice would silently halve the budget.
  */
 export function createBoundedReader(
-  _readFile: (path: string) => Promise<string>,
-  _limits: BoundedReaderLimits,
+  readFile: (path: string) => Promise<string>,
+  limits: BoundedReaderLimits,
 ): BoundedReader {
-  throw new Error("not implemented");
+  const cache = new Map<string, ReadResult>();
+  let filesRead = 0;
+  let totalChars = 0;
+
+  /**
+   * Cut on a LINE boundary. A half-line reads like a syntax error or, worse, like complete code that
+   * happens to end early, and the Architect would reason from it either way.
+   */
+  const truncate = (content: string, budget: number): { text: string; truncated: boolean } => {
+    if (content.length <= budget) return { text: content, truncated: false };
+    const slice = content.slice(0, budget);
+    const lastBreak = slice.lastIndexOf("\n");
+    return {
+      text: lastBreak > 0 ? slice.slice(0, lastBreak + 1) : slice,
+      truncated: true,
+    };
+  };
+
+  return {
+    async read(path: string): Promise<ReadResult | undefined> {
+      const safe = sanitizeRelativePath(path);
+      // Refuse before touching the reader: an escape that fails is still an attempt to escape.
+      if (!safe) return undefined;
+
+      const cached = cache.get(safe);
+      if (cached) return cached;
+
+      if (filesRead >= limits.maxFiles) return undefined;
+      const remaining = limits.maxTotalChars - totalChars;
+      if (remaining <= 0) return undefined;
+
+      let content: string;
+      try {
+        content = await readFile(safe);
+      } catch {
+        // Unreadable is nothing read, never an empty file: absence is not evidence.
+        return undefined;
+      }
+
+      const { text, truncated } = truncate(content, Math.min(limits.maxCharsPerFile, remaining));
+      const result: ReadResult = { path: safe, text, truncated, originalChars: content.length };
+      cache.set(safe, result);
+      filesRead += 1;
+      totalChars += text.length;
+      return result;
+    },
+
+    stats: () => ({ filesRead, totalChars }),
+  };
 }
 
 const WINDOWS_RESERVED_NAMES = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;
