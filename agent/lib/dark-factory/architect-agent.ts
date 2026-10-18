@@ -110,6 +110,51 @@ export const MAX_STORY_BODY_LENGTH = 10000;
 export const DEFAULT_LOWEST_PRIORITY_SCORE = 999;
 export const DEFAULT_MAX_CONTEXT_FILES = 100;
 
+/**
+ * Bounds on what the Architect may read (#381 R1).
+ *
+ * Defaults come from the model's real window: the project's model has 1,048,576 tokens, the governed call
+ * reserves 8,000 for output, and 400,000 chars is ~100,000 tokens - about 64% of the SMALLER window in the
+ * price table's models, so the budget is safe whichever model resolves.
+ */
+export const MAX_ARCHITECT_PROMPT_CHARS = 400_000;
+export const MAX_CONTEXT_FILES_READ = 24;
+export const MAX_CHARS_PER_FILE = 12_000;
+
+export interface BoundedReaderLimits {
+  /** Files read at most, counted across every reader call for this plan. */
+  maxFiles: number;
+  /** Characters taken from any single file, truncated on a line boundary. */
+  maxCharsPerFile: number;
+  /** Characters across all files, so a long file cannot consume the whole prompt. */
+  maxTotalChars: number;
+}
+
+export interface ReadResult {
+  path: string;
+  text: string;
+  /** True when the file was cut short, so a partial file is never presented as the whole file. */
+  truncated: boolean;
+  /** The file's real length, so a truncated read can say what it is missing. */
+  originalChars: number;
+}
+
+export interface BoundedReader {
+  read(path: string): Promise<ReadResult | undefined>;
+  stats(): { filesRead: number; totalChars: number };
+}
+
+/**
+ * A reader the Architect cannot use to escape the workspace, exceed its budget, or mistake a fragment for a
+ * whole file.
+ */
+export function createBoundedReader(
+  _readFile: (path: string) => Promise<string>,
+  _limits: BoundedReaderLimits,
+): BoundedReader {
+  throw new Error("not implemented");
+}
+
 const WINDOWS_RESERVED_NAMES = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;
 
 /**
