@@ -185,6 +185,34 @@ describe("Architect reads the repository (#381 R1)", () => {
     expect(prompts[0]).not.toContain("\u0000");
   });
 
+  it("keeps the chain ahead of an arbitrary high-relevance file when the budget is tight", async () => {
+    // GUARD, not a bug fix: the chain is already placed first in the read order, ahead of the
+    // relevance-sorted remainder. package.json outranks every path in PRIORITY_PATTERNS, so this pins that
+    // a high-relevance file cannot push the route table and the page out of a tight prompt.
+    const repo: Record<string, string> = {
+      ...REPO,
+      "package.json": JSON.stringify({ name: "probe", padding: "p".repeat(650) }),
+    };
+    const baseline = agentOver({
+      readFile: undefined,
+      listFiles: vi.fn().mockResolvedValue(Object.keys(repo)),
+    });
+    await baseline.agent.planStory(STORY);
+    const base = baseline.prompts[0].length;
+
+    const { agent, prompts } = agentOver({
+      listFiles: vi.fn().mockResolvedValue(Object.keys(repo)),
+      readFile: async (p: string) => repo[p] ?? "",
+      maxPromptChars: base + 1_400,
+    });
+    await agent.planStory(STORY);
+
+    expect(prompts[0]).toMatch(/<file path="src\/routes\.jsx"/);
+    expect(prompts[0]).toMatch(/<file path="src\/pages\/HomePage\.jsx"/);
+    // The high-relevance file is what gets dropped, and the drop is stated.
+    expect(prompts[0]).toMatch(/omitted/i);
+  });
+
   it("behaves as before when no reader is supplied", async () => {
     const { agent, prompts } = agentOver({ readFile: undefined });
     const result = await agent.planStory(STORY);
