@@ -129,9 +129,9 @@ export const MAX_CHARS_PER_FILE = 12_000;
 /**
  * Extensions that are not text.
  *
- * The runner lists EVERY workspace file, images included. Reading one spends budget on mojibake and can put
- * a null byte in the prompt - worse than a wasted token, because a fragment of a PNG is still untrustworthy
- * input dressed up as file contents.
+ * The runner lists EVERY workspace file, images included. Reading one spends budget on garbled text and can
+ * put a null byte in the prompt - worse than a wasted token, because a fragment of a PNG is still
+ * untrustworthy input dressed up as file contents.
  */
 const BINARY_FILE =
   /\.(?:png|jpe?g|gif|webp|avif|ico|bmp|tiff?|woff2?|ttf|otf|eot|pdf|zip|gz|tgz|tar|br|mp[34]|wav|ogg|oga|webm|mov|avi|so|dylib|dll|exe|bin|class|jar|war|wasm|db|sqlite3?|parquet|arrow|pkl|npy)$/i;

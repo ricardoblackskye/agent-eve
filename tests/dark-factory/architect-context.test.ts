@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { ArchitectAgent, type ArchitectDeps } from "../../agent/lib/dark-factory/architect-agent";
+import {
+  ArchitectAgent,
+  type ArchitectDeps,
+} from "../../agent/lib/dark-factory/architect-agent";
 import type { ExecutionPlan } from "../../agent/lib/dark-factory/plan-validator";
 
 /**
@@ -28,7 +31,7 @@ const REPO: Record<string, string> = {
   "src/pages/HomePage.jsx": [
     'import ProductList from "../components/ProductList";',
     "export default function HomePage() {",
-    '  return (<main><h1>Show HN</h1><ProductList /></main>);',
+    "  return (<main><h1>Show HN</h1><ProductList /></main>);",
     "}",
   ].join("\n"),
   "src/pages/CategoryPage.jsx": [
@@ -43,7 +46,10 @@ const REPO: Record<string, string> = {
 const STORY = {
   number: 166,
   title: "Change the heading on the main page",
-  body: ["**Acceptance Criteria**", "- AC1: the home page shows the new heading"].join("\n"),
+  body: [
+    "**Acceptance Criteria**",
+    "- AC1: the home page shows the new heading",
+  ].join("\n"),
 };
 
 const PLAN: ExecutionPlan = {
@@ -54,7 +60,8 @@ const PLAN: ExecutionPlan = {
     {
       path: "src/pages/HomePage.jsx",
       action: "modify",
-      rationale: 'route "/" -> src/pages/HomePage.jsx, the surface the story means',
+      rationale:
+        'route "/" -> src/pages/HomePage.jsx, the surface the story means',
     },
   ],
   acceptanceCriteriaMap: [
@@ -79,7 +86,11 @@ function agentOver(over: Partial<ArchitectDeps> = {}) {
     }),
     ...over,
   };
-  return { agent: new ArchitectAgent(deps), prompts, generateText: deps.generateText as ReturnType<typeof vi.fn> };
+  return {
+    agent: new ArchitectAgent(deps),
+    prompts,
+    generateText: deps.generateText as ReturnType<typeof vi.fn>,
+  };
 }
 
 describe("Architect reads the repository (#381 R1)", () => {
@@ -112,7 +123,8 @@ describe("Architect reads the repository (#381 R1)", () => {
   it("says WHEN a file it read was truncated", async () => {
     const big = `${"// padding line to exceed the per-file cap\n".repeat(400)}export const x = 1;`;
     const { agent, prompts } = agentOver({
-      readFile: async (p: string) => (p === "src/pages/HomePage.jsx" ? big : REPO[p] ?? ""),
+      readFile: async (p: string) =>
+        p === "src/pages/HomePage.jsx" ? big : (REPO[p] ?? ""),
       readerLimits: { maxCharsPerFile: 2_000 },
     });
     const result = await agent.planStory(STORY);
@@ -172,8 +184,11 @@ describe("Architect reads the repository (#381 R1)", () => {
 
   it("does not read a BINARY file into the prompt", async () => {
     // scanWorkspaceFiles lists every file, images included, so without a filter the budget would be spent
-    // on mojibake - and a null byte in the prompt is worse than a wasted one.
-    const repo: Record<string, string> = { ...REPO, "public/logo.png": "\u0089PNG\r\n\u0000\u0001\u0002binarypayload" };
+    // on garbled text - and a null byte in the prompt is worse than a wasted one.
+    const repo: Record<string, string> = {
+      ...REPO,
+      "public/logo.png": "\u0089PNG\r\n\u0000\u0001\u0002 corrupt binary",
+    };
     const { agent, prompts } = agentOver({
       listFiles: vi.fn().mockResolvedValue(Object.keys(repo)),
       readFile: async (p: string) => repo[p] ?? "",
@@ -181,7 +196,7 @@ describe("Architect reads the repository (#381 R1)", () => {
     const result = await agent.planStory(STORY);
 
     expect(result.ok).toBe(true);
-    expect(prompts[0]).not.toContain("binarypayload");
+    expect(prompts[0]).not.toContain("corrupt binary");
     expect(prompts[0]).not.toContain("\u0000");
   });
 
@@ -191,7 +206,10 @@ describe("Architect reads the repository (#381 R1)", () => {
     // a high-relevance file cannot push the route table and the page out of a tight prompt.
     const repo: Record<string, string> = {
       ...REPO,
-      "package.json": JSON.stringify({ name: "probe", padding: "p".repeat(650) }),
+      "package.json": JSON.stringify({
+        name: "probe",
+        padding: "p".repeat(650),
+      }),
     };
     const baseline = agentOver({
       readFile: undefined,

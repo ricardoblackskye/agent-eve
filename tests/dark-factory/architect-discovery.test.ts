@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { discoverArchitecture, type DiscoveryInput } from "../../agent/lib/dark-factory/architect-discovery";
+import {
+  discoverArchitecture,
+  type DiscoveryInput,
+} from "../../agent/lib/dark-factory/architect-discovery";
 
 /**
  * #381 R1 — discovery, against a fixture shaped like the case that actually failed.
@@ -41,7 +44,7 @@ const FIXTURE: Record<string, string> = {
   "src/pages/HomePage.jsx": [
     'import ProductList from "../components/ProductList";',
     "export default function HomePage() {",
-    '  return (<main><h1>Home</h1><ProductList /></main>);',
+    "  return (<main><h1>Home</h1><ProductList /></main>);",
     "}",
   ].join("\n"),
 
@@ -49,7 +52,7 @@ const FIXTURE: Record<string, string> = {
   "src/pages/CategoryPage.jsx": [
     'import ProductList from "../components/ProductList";',
     "export default function CategoryPage() {",
-    '  return (<main><h1>Category</h1><ProductList /></main>);',
+    "  return (<main><h1>Category</h1><ProductList /></main>);",
     "}",
   ].join("\n"),
 
@@ -66,17 +69,26 @@ function input(over: Partial<DiscoveryInput> = {}): DiscoveryInput {
   return {
     files: FILES,
     readFile: async (path: string) => FIXTURE[path] ?? "",
-    story: { title: "Change the heading on the main page", body: "The home page heading should read Hello." },
+    story: {
+      title: "Change the heading on the main page",
+      body: "The home page heading should read Hello.",
+    },
     maxInspectReads: 12,
     ...over,
   };
 }
 
-function roleOf(result: Awaited<ReturnType<typeof discoverArchitecture>>, path: string) {
+function roleOf(
+  result: Awaited<ReturnType<typeof discoverArchitecture>>,
+  path: string,
+) {
   return result.classified.find((f) => f.path === path)?.role;
 }
 
-function evidenceOf(result: Awaited<ReturnType<typeof discoverArchitecture>>, path: string) {
+function evidenceOf(
+  result: Awaited<ReturnType<typeof discoverArchitecture>>,
+  path: string,
+) {
   return result.classified.find((f) => f.path === path)?.evidence ?? "";
 }
 
@@ -112,9 +124,9 @@ describe("discoverArchitecture (#381 R1)", () => {
     expect(paths).toContain("src/pages/HomePage.jsx");
     expect(paths).toContain("src/components/ProductList.jsx");
     // The shell is NOT the page the story names, and must not appear as one.
-    expect(result.chain.filter((f) => f.role === "page").map((f) => f.path)).toEqual([
-      "src/pages/HomePage.jsx",
-    ]);
+    expect(
+      result.chain.filter((f) => f.role === "page").map((f) => f.path),
+    ).toEqual(["src/pages/HomePage.jsx"]);
   });
 
   it("derives roles from the repository, never from a file's name", async () => {
@@ -127,7 +139,10 @@ describe("discoverArchitecture (#381 R1)", () => {
       ].join("\n"),
     };
     const result = await discoverArchitecture(
-      input({ files: Object.keys(files), readFile: async (p: string) => files[p] ?? "" }),
+      input({
+        files: Object.keys(files),
+        readFile: async (p: string) => files[p] ?? "",
+      }),
     );
     expect(roleOf(result, "src/MainPage.jsx")).toBe("shell");
   });
@@ -146,7 +161,10 @@ describe("discoverArchitecture (#381 R1)", () => {
       ].join("\n"),
     };
     const result = await discoverArchitecture(
-      input({ files: Object.keys(files), readFile: async (p: string) => files[p] ?? "" }),
+      input({
+        files: Object.keys(files),
+        readFile: async (p: string) => files[p] ?? "",
+      }),
     );
     expect(result.surface?.page).toBe("src/pages/CategoryPage.jsx");
   });
@@ -164,12 +182,17 @@ describe("discoverArchitecture (#381 R1)", () => {
     );
     expect(reads).toBeLessThanOrEqual(2);
     // Bounded means it may not resolve a surface it cannot afford to inspect - and must say so rather than guess.
-    expect(result.surface === undefined || typeof result.surface.route === "string").toBe(true);
+    expect(
+      result.surface === undefined || typeof result.surface.route === "string",
+    ).toBe(true);
   });
 
   it("states the absence of a chain rather than inventing one", async () => {
     const result = await discoverArchitecture(
-      input({ files: ["README.md", "src/util.ts"], readFile: async () => "export const x = 1;" }),
+      input({
+        files: ["README.md", "src/util.ts"],
+        readFile: async () => "export const x = 1;",
+      }),
     );
     expect(result.chain).toEqual([]);
     expect(result.surface).toBeUndefined();
