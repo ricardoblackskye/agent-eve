@@ -88,6 +88,10 @@ export interface ArchitectDeps {
   backoffBaseMs?: number;
   sleepFn?: (ms: number) => Promise<void>;
   maxContextFiles?: number;
+  /** Caps the assembled prompt. Over budget the read set is trimmed and the prompt STATES what it omitted. */
+  maxPromptChars?: number;
+  /** Overrides the read bounds, so a test can exercise omission without a 400,000-char fixture. */
+  readerLimits?: Partial<BoundedReaderLimits>;
 }
 
 export interface ArchitectResult {
