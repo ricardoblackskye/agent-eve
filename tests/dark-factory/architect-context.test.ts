@@ -170,6 +170,21 @@ describe("Architect reads the repository (#381 R1)", () => {
     expect(prompts[0]).toContain("&lt;h1&gt;");
   });
 
+  it("does not read a BINARY file into the prompt", async () => {
+    // scanWorkspaceFiles lists every file, images included, so without a filter the budget would be spent
+    // on mojibake - and a null byte in the prompt is worse than a wasted one.
+    const repo = { ...REPO, "public/logo.png": "\u0089PNG\r\n\u0000\u0001\u0002binarypayload" };
+    const { agent, prompts } = agentOver({
+      listFiles: vi.fn().mockResolvedValue(Object.keys(repo)),
+      readFile: async (p: string) => repo[p] ?? "",
+    });
+    const result = await agent.planStory(STORY);
+
+    expect(result.ok).toBe(true);
+    expect(prompts[0]).not.toContain("binarypayload");
+    expect(prompts[0]).not.toContain("\u0000");
+  });
+
   it("behaves as before when no reader is supplied", async () => {
     const { agent, prompts } = agentOver({ readFile: undefined });
     const result = await agent.planStory(STORY);
