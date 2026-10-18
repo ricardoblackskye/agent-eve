@@ -134,7 +134,7 @@ export const MAX_CHARS_PER_FILE = 12_000;
  * untrustworthy input dressed up as file contents.
  */
 const BINARY_FILE =
-  /\.(?:png|jpe?g|gif|webp|avif|ico|bmp|tiff?|woff2?|ttf|otf|eot|pdf|zip|gz|tgz|tar|br|mp[34]|wav|ogg|oga|webm|mov|avi|so|dylib|dll|exe|bin|class|jar|war|wasm|db|sqlite3?|parquet|arrow|pkl|npy)$/i;
+  /\.(?:png|jpe?g|gif|webp|avif|ico|bmp|tiff?|woff2?|ttf|otf|eot|pdf|zip|gz|tgz|tar|br|mp[34]|wav|ogg|oga|webm|mov|avi|so|dll|exe|bin|class|jar|war|wasm|db|sqlite3?|parquet|arrow|pkl|npy)$/i;
 
 export interface BoundedReaderLimits {
   /** Files read at most, counted across every reader call for this plan. */
