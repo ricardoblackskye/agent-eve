@@ -20,6 +20,14 @@ never treated as authored code, and `withSandbox` always releases the sandbox.
 
 **Source:** [`agent/lib/dark-factory/agent-cli-author.ts`](../../agent/lib/dark-factory/agent-cli-author.ts)
 
+## architect-discovery
+
+Dark Factory - Architect discovery (#381 R1). Derives what each reachable file IS and how it composes, so the Architect can plan from evidence instead of a file list. A file rendering a route outlet is a shell; a component reached from more than one page is shared, with the pages named as the proof; the route table is parsed and each route's component resolved through that file's own imports. Deterministic by design - it makes NO model call, so planning stays one governed call per attempt. A role comes from what a file does, never from its name, which is why a file called MainPage that renders an outlet is still a shell.
+
+**Source:** [`agent/lib/dark-factory/architect-discovery.ts`](../../agent/lib/dark-factory/architect-discovery.ts)
+
+**Exports:** `DiscoveredFile`, `DiscoveryInput`, `DiscoveryResult`, `FileRole`, `discoverArchitecture`
+
 ## architect-agent
 
 Dark Factory — Architect Agent (#179). Pre-code planning agent that inspects the repository file tree, analyzes the User Story and Acceptance Criteria, and synthesizes an ExecutionPlan. Self-corrects via feedback loops when generated plans fail domain validation.
