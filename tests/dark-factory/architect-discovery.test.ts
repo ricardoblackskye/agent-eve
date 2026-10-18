@@ -119,7 +119,7 @@ describe("discoverArchitecture (#381 R1)", () => {
 
   it("derives roles from the repository, never from a file's name", async () => {
     // A file called MainPage.tsx that is reached from every route is still a shell.
-    const files = {
+    const files: Record<string, string> = {
       ...FIXTURE,
       "src/MainPage.jsx": [
         'import { Outlet } from "react-router-dom";',
@@ -135,7 +135,7 @@ describe("discoverArchitecture (#381 R1)", () => {
   it("derives its answer from file CONTENTS, not from filenames", async () => {
     // Same paths, different contents: the routes file no longer maps "/" to HomePage, so the surface must
     // change. A filename-based implementation would still say HomePage.
-    const files = {
+    const files: Record<string, string> = {
       ...FIXTURE,
       "src/routes.jsx": [
         'import { Routes, Route } from "react-router-dom";',
