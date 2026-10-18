@@ -126,6 +126,16 @@ export const MAX_ARCHITECT_PROMPT_CHARS = 400_000;
 export const MAX_CONTEXT_FILES_READ = 24;
 export const MAX_CHARS_PER_FILE = 12_000;
 
+/**
+ * Extensions that are not text.
+ *
+ * The runner lists EVERY workspace file, images included. Reading one spends budget on mojibake and can put
+ * a null byte in the prompt - worse than a wasted token, because a fragment of a PNG is still untrustworthy
+ * input dressed up as file contents.
+ */
+const BINARY_FILE =
+  /\.(?:png|jpe?g|gif|webp|avif|ico|bmp|tiff?|woff2?|ttf|otf|eot|pdf|zip|gz|tgz|tar|br|mp[34]|wav|ogg|oga|webm|mov|avi|so|dylib|dll|exe|bin|class|jar|war|wasm|db|sqlite3?|parquet|arrow|pkl|npy)$/i;
+
 export interface BoundedReaderLimits {
   /** Files read at most, counted across every reader call for this plan. */
   maxFiles: number;
@@ -428,7 +438,7 @@ export class ArchitectAgent {
     const ordered = [
       ...chainPaths,
       ...sortFilesByRelevance(repoFiles).filter((file) => !chainPaths.includes(file)),
-    ];
+    ].filter((file) => !BINARY_FILE.test(file));
 
     const blocks: string[] = [];
     const omitted: string[] = [];

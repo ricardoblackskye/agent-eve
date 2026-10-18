@@ -419,6 +419,10 @@ async function main(): Promise<void> {
   );
   const architectAgent = new ArchitectAgent({
     listFiles: async () => scanWorkspaceFiles(process.cwd()),
+    // #381 R1: the Architect plans from file CONTENTS, not just a file list. This is a thin adapter - the
+    // agent's own bounded reader applies sanitizeRelativePath before this is ever called, and bounds how
+    // many files are read and how much of each.
+    readFile: async (relPath: string) => readFileSync(join(process.cwd(), relPath), "utf8"),
     generateText: async (prompt) => {
       await checkpoint();
       // Governed (#270): an over-budget call is refused at THIS call site, and the
