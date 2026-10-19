@@ -25,6 +25,16 @@ export const PLAN_APPROVAL_QUESTION =
   "begin. The run will not consume further iterations while it waits.";
 
 /**
+ * The question a park asks when the Architect could not justify a target (#381 R2 AC4).
+ *
+ * Deliberately NOT the approval question: there is no plan to approve, and asking a human to approve one that
+ * does not exist is how a park becomes noise nobody can act on.
+ */
+export const TARGET_UNRESOLVED_QUESTION =
+  "I could not tell which surface this story means, so I will not guess a target. Name the page or route this " +
+  "belongs to and I will re-plan. Nothing has been coded.";
+
+/**
  * Stable for a run, so a re-delivery records the SAME question event rather than parking a second time.
  * The ledger keys events by id; a fresh id per attempt would stack duplicate questions on the ticket.
  */

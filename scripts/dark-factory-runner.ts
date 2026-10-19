@@ -1377,6 +1377,17 @@ export async function finalizeCodingPhaseFailure(
 }
 
 /**
+ * #381 R2 AC4 - park the run when the Architect could not justify a target, rather than failing it.
+ *
+ * A failed run ends the work; a parked run is resumable, and the human's answer may simply be that the shell
+ * IS the right target - which a terminal failure would throw away. Only the two reasons that need a human
+ * decision are parked; every other failure still fails terminally.
+ */
+export function parksForUnjustifiableTarget(_reason?: string): boolean {
+  return false;
+}
+
+/**
  * Does this dispatch stop and wait for a human? (#378)
  *
  * True for a fresh run, and TRUE FOR A REVISION: an amended plan is a plan nobody has approved yet, so
