@@ -77,6 +77,11 @@ export interface ParkForApprovalOptions {
    */
   round?: number;
   occurredAt?: string;
+  /**
+   * The question to ask, when this park is not about approving a plan (#381 R2 AC4): a target that cannot be
+   * justified asks "which surface did you mean?" instead. Defaults to `PLAN_APPROVAL_QUESTION`.
+   */
+  question?: string;
 }
 
 export type ParkResult =

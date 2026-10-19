@@ -52,6 +52,22 @@ describe("the park (#365 R4 Task 2)", () => {
     expect(report.eventId).toBe(planApprovalEventId("run-1"));
   });
 
+  it("asks a caller-supplied question, so a park need not always be about approval (#381 R2)", async () => {
+    // AC4 parks the run when the Architect cannot justify a target. The question there is not "approve
+    // this?" but "which surface did you mean?", and a human reading the ticket has to see the difference.
+    const d = deps();
+    const question =
+      "I could not tell which page this story means, so I will not guess a target. Name the surface and I will re-plan.";
+    const result = await parkForApproval(d, { ...options, question });
+
+    expect(result.ok).toBe(true);
+    const report = (d.reporter.report as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(report.kind).toBe("question");
+    expect(report.question).toBe(question);
+    // The event id stays keyed on the run and the round, so a re-delivery of the SAME park still records once.
+    expect(report.eventId).toBe(planApprovalEventId("run-1"));
+  });
+
   it("marks the ticket, because the comment is not the only way a human sees the request", async () => {
     const d = deps();
     const result = await parkForApproval(d, options);
