@@ -39,7 +39,10 @@ export const TARGET_UNRESOLVED_QUESTION =
  *
  * Deliberately not the approval question: there is no plan to approve.
  */
-export const PLAN_INVALID_QUESTION = "";
+export const PLAN_INVALID_QUESTION =
+  "I could not produce a valid plan for this story, so I have stopped before writing any code. The " +
+  "validation errors are listed above. Tell me what to change - the target file, the acceptance criteria, " +
+  "or the approach - and I will re-plan. Nothing has been coded.";
 
 /**
  * Stable for a run, so a re-delivery records the SAME question event rather than parking a second time.

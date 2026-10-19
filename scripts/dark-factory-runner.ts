@@ -76,6 +76,7 @@ import {
   explainPlanFailure,
   loadApprovedPlan,
   parkForApproval,
+  PLAN_INVALID_QUESTION,
   TARGET_UNRESOLVED_QUESTION,
 } from "../agent/lib/dark-factory/plan-approval";
 import {
@@ -478,10 +479,11 @@ async function main(): Promise<void> {
     );
     console.error(`[ERROR] ${explanation}`);
 
-    // #381 R2 AC4: a target that cannot be justified is a QUESTION for a human, not a failure. The run parks
-    // so it stays resumable - the answer may simply be "the shell is right, go ahead", and a terminal failure
-    // would have thrown that away. Only these two reasons reach here; every other fault still fails below.
-    if (parksForUnjustifiableTarget(planResult.reason)) {
+    // #381 R2 AC4 + Task 8: a target that cannot be justified, or a plan that never validated, is a QUESTION
+    // for a human rather than a failure. The run parks so it stays resumable - the answer may simply be "the
+    // shell is right, go ahead" - and a terminal failure would have thrown that away. Every other fault still
+    // fails below: parking is for the faults a person can actually answer.
+    if (parksForHumanDecision(planResult.reason)) {
       await issueWriter.postComment(
         repoOwner,
         repoName,
@@ -500,15 +502,20 @@ async function main(): Promise<void> {
           issue: issueNum,
           questionLabel: TRIGGER_LABELS.question,
           occurredAt: new Date().toISOString(),
-          // Not the approval question: there is no plan to approve.
-          question: TARGET_UNRESOLVED_QUESTION,
+          // Not the approval question: there is no plan to approve. The question matches the reason, so a
+          // plan-shape failure is never reported as a target problem (#381 R2 Task 8).
+          question: parkQuestionFor(planResult.reason),
         },
       );
       if (!parked.ok) {
         throw new Error(`the run could not be parked for a target decision: ${parked.error}`);
       }
+      const parkedFor =
+        planResult.reason === "plan-invalid"
+          ? "no attempt produced a valid plan"
+          : "the target could not be justified";
       console.log(
-        `\n[GATE] Parked on #${issueNum}: the target could not be justified (${parked.mode}). Nothing coded.`,
+        `\n[GATE] Parked on #${issueNum}: ${parkedFor} (${parked.mode}). Nothing coded.`,
       );
       return;
     }
@@ -1431,13 +1438,15 @@ export function parksForUnjustifiableTarget(reason?: string): boolean {
  * A plan that never passed validation is answerable by a person: the validation errors are on the ticket.
  * Aborting threw away a run that one sentence of clarification could unblock.
  */
-export function parksForHumanDecision(_reason?: string): boolean {
-  return false;
+export function parksForHumanDecision(reason?: string): boolean {
+  return parksForUnjustifiableTarget(reason) || reason === "plan-invalid";
 }
 
 /** The question matching the reason, so a park never asks about a plan that does not exist. */
-export function parkQuestionFor(_reason?: string): string {
-  return "";
+export function parkQuestionFor(reason?: string): string {
+  return reason === "plan-invalid"
+    ? PLAN_INVALID_QUESTION
+    : TARGET_UNRESOLVED_QUESTION;
 }
 
 /**

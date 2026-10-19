@@ -44,15 +44,17 @@ describe("the target park asks its own question (#381 R2)", () => {
 describe("the runner wires the target park (#381 R2)", () => {
   const source = readFileSync("scripts/dark-factory-runner.ts", "utf8");
 
-  it("decides through the shared function rather than an inline condition", () => {
-    // Assert the CALL, not the name: the runner also DEFINES this function, so a bare name match would pass
-    // on the definition alone and prove nothing about the wiring.
-    expect(source).toMatch(
-      /parksForUnjustifiableTarget\(\s*planResult\.reason\s*\)/,
-    );
+  it("decides through a shared predicate rather than an inline condition", () => {
+    // Assert the CALL carrying the reason, not the name: the runner also DEFINES these functions, so a bare
+    // name match would pass on the definition alone and prove nothing about the wiring. Task 8 widened the
+    // predicate and renamed it, so the guard names the decision function the branch actually calls - the
+    // property it has always protected is DELEGATION, not one particular identifier.
+    expect(source).toMatch(/parksForHumanDecision\(\s*planResult\.reason\s*\)/);
   });
 
-  it("parks with the target question", () => {
+  it("asks the question that matches the reason, rather than assuming a target problem", () => {
+    expect(source).toMatch(/parkQuestionFor\(\s*planResult\.reason\s*\)/);
+    // The target question remains reachable: it is what an unjustifiable target asks.
     expect(source).toContain("TARGET_UNRESOLVED_QUESTION");
   });
 });

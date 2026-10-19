@@ -772,8 +772,12 @@ export class ArchitectAgent {
       error: `ArchitectAgent max retries exceeded (${this.maxPlanRetries}). Errors: ${lastErrors.join("; ")}`,
       cause: lastError,
       // Spent every repair round still aiming at the shell or a shared component: the caller parks for a human
-      // rather than letting a refused target through (#381 R2 AC4).
-      ...(refusedTarget ? { reason: "refused-target" as const } : {}),
+      // rather than letting a refused target through (#381 R2 AC4). Any OTHER persistent validation failure is
+      // reported as `plan-invalid` for the same reason - it is answerable, and the errors travel with it
+      // (#381 R2 Task 8). The two stay distinct because they ask a human different questions.
+      ...(refusedTarget
+        ? { reason: "refused-target" as const }
+        : { reason: "plan-invalid" as const }),
       lastError,
     };
   }
