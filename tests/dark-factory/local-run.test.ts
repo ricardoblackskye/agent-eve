@@ -1,4 +1,6 @@
+import { existsSync } from "node:fs";
 import { isAbsolute } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import {
   buildLaunchDecision,
@@ -95,23 +97,28 @@ describe("#404 R1 Task 4 - buildLaunchDecision", () => {
     }
   });
 
-  it("names the runner script and the loader as ABSOLUTE file URLs, so the child works from the checkout as cwd", async () => {
+  it("names a runnable entry: an existing ABSOLUTE script path, and the loader as a file:// URL", async () => {
     // The child's cwd is the checkout of the TARGET repository, which contains neither `tsx` nor `scripts/`.
-    // A relative "scripts/dark-factory-runner.ts" would be resolved against the checkout and not found; a bare
-    // `--import tsx` would not resolve from there either; and a Windows path (C:\...) is rejected by --import as
-    // ERR_UNSUPPORTED_ESM_URL_SCHEME — so both must be absolute file:// URLs.
+    // Two distinct contracts, learned from two live failures:
+    //   - the ENTRY SCRIPT must be a plain absolute path; passing a file:// URL there is resolved against the
+    //     child's cwd (ERR_MODULE_NOT_FOUND);
+    //   - the `--import` LOADER must be a file:// URL; a Windows path is rejected as ERR_UNSUPPORTED_ESM_URL_SCHEME.
     const decision = await buildLaunchDecision(baseInput());
 
     expect(decision.kind).toBe("launch");
     if (decision.kind === "launch") {
       const { args, cmd } = decision.spawn;
       expect(isAbsolute(cmd)).toBe(true);
+
       const runnerArg = args.find((a) => a.toLowerCase().includes("dark-factory-runner.ts"));
       expect(runnerArg).toBeDefined();
-      expect((runnerArg as string).startsWith("file://")).toBe(true);
+      expect(isAbsolute(runnerArg as string)).toBe(true);
+      expect(existsSync(runnerArg as string)).toBe(true);
+
       const loader = args[args.indexOf("--import") + 1];
       expect(loader).toBeDefined();
       expect((loader as string).startsWith("file://")).toBe(true);
+      expect(existsSync(fileURLToPath(loader as string))).toBe(true);
     }
   });
 });
