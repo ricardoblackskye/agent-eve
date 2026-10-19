@@ -4,6 +4,7 @@ import {
   renderProblems,
   runLocalRun,
   type LaunchSpawn,
+  type RunnerSpawn,
   type SpawnResult,
 } from "../../agent/lib/dark-factory/local-run";
 
@@ -26,6 +27,7 @@ const goodEnv = (over: Record<string, string> = {}): Record<string, string> => (
   OPENROUTER_API_KEY: "sk-plain-4444444444",
   DF_WORKER_ALLOWED_REPOS: "ricardoblackskye/WebFeedPOC",
   DF_RUN_HISTORY_DRIVER: "postgres",
+  DF_CONTROL_DRIVER: "postgres",
   DF_RUN_HISTORY_DATABASE_URL: "postgres://postgres@localhost:5432/darkfactory?sslmode=disable",
   DF_CONTROL_DATABASE_URL: "postgres://postgres@localhost:5432/darkfactory?sslmode=disable",
   DF_SANDBOX_DRIVER: "opensandbox",
@@ -86,8 +88,9 @@ describe("#404 R1 Task 4 - buildLaunchDecision", () => {
 
     expect(decision.kind).toBe("launch");
     if (decision.kind === "launch") {
+      // The token must reach the child (the child needs it); the guarantee is that the refusal TEXT never prints
+      // it, which renderProblems asserts separately.
       expect(decision.spawn.env.GITHUB_TOKEN).toBe(SECRET);
-      expect(JSON.stringify(decision)).not.toContain(SECRET);
     }
   });
 });
@@ -114,7 +117,7 @@ describe("#404 R1 Task 4 - runLocalRun refuses before spawning", () => {
       return { exitCode: 0 };
     };
 
-    const code = await runLocalRun(baseInput({ env: goodEnv({ GITHUB_TOKEN: "" }), spawnRunner }) as never);
+    const code = await runLocalRun(baseInput({ env: goodEnv({ GITHUB_TOKEN: "" }), spawnRunner, gitClone: async () => 0 }) as never);
 
     expect(spawned).toHaveLength(0);
     expect(code).toBe(1);
@@ -127,7 +130,7 @@ describe("#404 R1 Task 4 - runLocalRun refuses before spawning", () => {
       return { exitCode: 0 };
     };
 
-    const code = await runLocalRun(baseInput({ spawnRunner }) as never);
+    const code = await runLocalRun(baseInput({ spawnRunner, gitClone: async () => 0 }) as never);
 
     expect(spawned).toHaveLength(1);
     expect(spawned[0].cwd.toLowerCase()).toContain("webfeedpoc-169");
@@ -137,7 +140,7 @@ describe("#404 R1 Task 4 - runLocalRun refuses before spawning", () => {
   it("propagates a non-zero child exit without mutating the refusal contract", async () => {
     const spawnRunner: RunnerSpawn = async () => ({ exitCode: 7 });
 
-    const code = await runLocalRun(baseInput({ spawnRunner }) as never);
+    const code = await runLocalRun(baseInput({ spawnRunner, gitClone: async () => 0 }) as never);
 
     expect(code).toBe(7);
   });
