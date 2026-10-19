@@ -10,6 +10,7 @@
  * is refused locally unless --allow-remote-store is passed (ADR 0039 governs trust).
  */
 import net from "node:net";
+import { join } from "node:path";
 import { loadLocalEnv } from "./load-env";
 import {
   runLocalRun,
@@ -28,10 +29,8 @@ interface Parsed {
 function parseArgs(argv: string[]): Parsed | { error: string } {
   let repo: string | undefined;
   let issue: number | undefined;
-  const fallbackRoot =
-    process.env.DF_WORKSPACE_ROOT ??
-    `${process.env.USERPROFILE ?? process.env.HOME}/df-workspaces`;
-  let workspaceRoot = fallbackRoot;
+  const fallbackRoot = join(process.cwd(), "df-workspaces");
+  let workspaceRoot = process.env.DF_WORKSPACE_ROOT ?? fallbackRoot;
   let allowRemoteStore = false;
 
   const args = argv.slice(2);
