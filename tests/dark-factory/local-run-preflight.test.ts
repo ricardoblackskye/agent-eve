@@ -213,6 +213,9 @@ describe("#404 R1 - the preflight reports every problem at once", () => {
     const problem = result.problems.find((p) => p.code === "claim-held");
     expect(problem?.subject).toContain("fda63901");
     expect(problem?.fix).toMatch(/blocked|finish|retire/i);
+    // #404 R2 Task 5: the refusal must name the ACTION, not merely the options — that is the whole complaint
+    // about "wait, or retire it" with nothing to run.
+    expect((problem?.fix ?? "").toLowerCase()).toContain("df:retire-claim");
   });
 
   it("SKIPS a check whose probe is absent - it never claims a check it did not run", async () => {
