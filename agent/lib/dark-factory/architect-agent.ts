@@ -10,7 +10,10 @@ import { normalize, isAbsolute } from "node:path";
 import {
   validateExecutionPlan,
   DefaultPlanParser,
+  isPageScopedStory,
   type ExecutionPlan,
+  type PlanFileRole,
+  type PlanValidationContext,
   type PlanValidationResult,
   type PlanParser,
 } from "./plan-validator";
@@ -95,6 +98,15 @@ export interface ArchitectDeps {
   readerLimits?: Partial<BoundedReaderLimits>;
 }
 
+/**
+ * Why an attempt produced no usable plan, when that reason is actionable by the caller (#381 R2).
+ *
+ * `unresolved-surface` means the story is scoped to one page and discovery could not decide which, so the
+ * caller must ask a human rather than accept a guess. `refused-target` means the plan kept targeting the
+ * shell or a shared component after the repair rounds were spent.
+ */
+export type ArchitectOutcomeReason = "unresolved-surface" | "refused-target";
+
 export interface ArchitectResult {
   ok: boolean;
   plan?: ExecutionPlan;
@@ -102,6 +114,12 @@ export interface ArchitectResult {
   error?: string;
   cause?: unknown;
   lastError?: Error | unknown;
+  /** Why there is no plan, when the caller can act on the reason (#381 R2 AC4). */
+  reason?: ArchitectOutcomeReason;
+  /** The role discovery assigned to each file it inspected, so the caller can judge the plan's targets. */
+  roles?: Record<string, PlanFileRole>;
+  /** The surface the story names, when discovery resolved one. */
+  surface?: { route?: string; page?: string };
 }
 
 export interface StoryInput {
