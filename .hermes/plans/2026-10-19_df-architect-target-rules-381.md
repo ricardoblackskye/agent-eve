@@ -1,0 +1,108 @@
+# #381 R2 — make the right target REQUIRED
+
+**Issue:** #381 (AC3, AC4) · **Branch:** `feat/df-architect-target-rules-381` · **Base:** `54be2bf` (R1 merged)
+
+**Release split.** R1 (`feat/df-architect-reads-381`, merged `54be2bf`) gave the Architect eyes: bounded reads,
+deterministic discovery, evidence in the prompt. R1 makes a better target **likely**. R2 makes the right target
+**required**, by refusing a shell or a shared component as the target of a page-scoped story, and by parking
+instead of guessing when the surface cannot be decided.
+
+## What already exists, and the gap that remains
+
+R1 computes, per plan attempt, a `DiscoveryResult`: every reachable file with a **role** (`route`, `shell`,
+`page`, `shared`, `component`), the **composition chain**, and the **surface** the story names (`{ route, page }`).
+All of it already reaches the prompt as escaped evidence.
+
+The gap: **nothing acts on it.** A plan can cite the evidence, ignore it, and still be accepted — which is how
+`src/App.jsx` (the shell) became a target in WebFeedPOC #168 round 2 with a confident rationale. AC3 closes that.
+
+## The distinction the rule depends on
+
+Two story scopes, and telling them apart is the whole design. A naive rule — "never target a shell" — would
+block legitimate work, because some stories are *about* the shell.
+
+| scope             | signal                                                                                                                                       | shell / shared target                         |
+|-------------------|----------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------|
+| **page-scoped**   | the story names one surface: the resolved surface exists, or the text carries a UI signal ("main page", "the settings screen", a route path) | **refused** — this is AC3                     |
+| **shell-scoped**  | the story is about something rendered everywhere: "every page", "all pages", "the nav", "the header", "the footer", "the layout"             | **allowed** — the shell is the correct target |
+| neither (backend) | no UI signal                                                                                                                                 | allowed (shared modules legitimately change)  |
+
+The shell-scoped signal **wins** over the page-scoped one, so "the heading on every page" stays shell work.
+That precedence is the false-positive guard, and it is tested explicitly.
+
+## The refusal (AC3)
+
+`validateExecutionPlan(plan, storyText, context?)` — currently pure over `(plan, storyText)` — gains an
+**optional** third argument:
+
+```ts
+context?: { roles?: Record<string, FileRole>; surface?: { route?: string; page?: string } }
+```
+
+For a page-scoped story, a target whose role is `shell` or `shared` becomes a validation error that names the
+file, its role, the evidence that proves the role, and the resolved page. Naming all four is what lets the
+existing repair loop fix it rather than re-guess.
+
+**Existing callers pass no context and behave exactly as today** — the property the current validator tests pin.
+
+## The park (AC4)
+
+When a story is page-scoped and the surface **cannot be resolved** — discovery found no chain, or no roles were
+available — the Architect must not guess a target. It reports that as a distinguishable outcome, and the runner
+**parks the run for a human** rather than failing it:
+
+- post WHY on the ticket (the #365 R4 precedent: a blocked ticket carrying only a label leaves a human guessing),
+- add the `question` label,
+- park through the existing `parkForApproval`, which marks the run `blocked` so `entry.ts` can resume it.
+
+`parkForApproval` currently reports one fixed `PLAN_APPROVAL_QUESTION`, so this task adds an **optional question
+override** — additive, defaulting to today's text, so the approval path is untouched.
+
+The same park fires when a plan still targets a shell or a shared component after the repair rounds are spent
+(`maxPlanRetries: 2`): refusing to proceed is the fail-closed outcome, and a human decides.
+
+**Why a park and not a terminal failure:** AC4 says *parks the run for a human*. A failed run ends the work; a
+parked run is resumable, and the answer may simply be "the shell is right, go ahead".
+
+## Tasks
+
+Each is a RED/GREEN pair as separate commits, per the standing workflow.
+
+| # | task                                                                                                                                                                 | AC       |
+|---|----------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------|
+| 1 | Scope classification: `isPageScopedStory` / `isShellScopedStory`, pure, driven by fixture stories including the precedence case                                      | AC3      |
+| 2 | The exclusion rule in `validateExecutionPlan` with the optional context; shell and shared both refused for a page-scoped story, naming file + role + evidence + page | AC3      |
+| 3 | The Architect surfaces `roles` and `surface` on `ArchitectResult`, and reports an unresolvable surface as a distinguishable outcome instead of a plan                | AC3, AC4 |
+| 4 | `parkForApproval` gains the optional question override                                                                                                               | AC4      |
+| 5 | The runner parks (blocked + reason on the ticket + question label) instead of `applyTerminalLifecycle(failed)` for both AC4 causes                                   | AC4      |
+| 6 | ADR 0048, module docs, ADR index                                                                                                                                     | —        |
+
+## Validation
+
+- **The case that failed:** a story saying "the main page", with the WebFeedPOC shape from R1's fixture. Targeting
+  `src/App.jsx` (shell) or `src/components/ProductList.jsx` (shared) is REFUSED, and the error names
+  `src/pages/HomePage.jsx` as the resolved page.
+- **The false-positive guard:** "the heading on every page" targeting the shell is ACCEPTED.
+- **The fail-closed case:** a page-scoped story where discovery resolves no surface parks, the ticket says why,
+  and the run is resumable rather than terminal.
+- **Backward compatibility:** callers without the context see identical behaviour; the existing validator and
+  architect suites pass unchanged.
+- A backend story may still change a shared module.
+- `tsc --noEmit`, full suite, root guards, doc-drift guards, and the local lint gate on every changed file.
+
+## Risks
+
+1. **False positives block legitimate work.** A shell change is legitimate; the precedence rule above is the
+   mitigation, tested as a task rather than reasoned about.
+2. **A repo whose routes are implied by file paths resolves no surface, so every page-scoped story parks.** Measured
+   in R1 on this repository: 718 files, no chain. Parking is fail-closed and correct in principle, but noisy in
+   practice. Extending discovery to path-implied routes is a **follow-up issue**, deliberately not solved here.
+3. **Each refusal costs a repair round** (`maxPlanRetries: 2`). Bounded, and tolerable precisely because the
+   refusal names the page, so the retry has something to act on.
+4. **Coverage** of new branches; the ratchet is measured with the Postgres variables set, as CI does.
+
+## Out of scope
+
+- Extending discovery to path-implied routes (follow-up issue).
+- Approval semantics: #378 / ADR 0041 opt-in approval is unchanged, and R2 adds no new way to approve.
+- Any change to the cost path; R2 adds no model call.
