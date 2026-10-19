@@ -150,7 +150,7 @@ function isTestFile(path: string): boolean {
  * "e2e/..." sorts before "src/...", so they consumed the entire inspection budget and the real route table
  * was never read (#381 Task 7b). Skip them when choosing what to READ - never when classifying what was read.
  */
-function isTestish(path: string): boolean {
+function isTestOrFixture(path: string): boolean {
   if (isTestFile(path)) return true;
   return /(^|\/)(e2e|tests?|__tests__|__mocks__|mocks?|fixtures?|cypress|playwright)(\/|$)/i.test(path);
 }
@@ -182,7 +182,7 @@ export async function discoverArchitecture(input: DiscoveryInput): Promise<Disco
   const ordered = files
     .filter((f) => SOURCE_FILE.test(f))
     // Tests are not architecture evidence and can outnumber the application source (#381 Task 7b).
-    .filter((f) => !isTestish(f))
+    .filter((f) => !isTestOrFixture(f))
     .sort((a, b) => {
       const byPriority = discoveryPriority(a) - discoveryPriority(b);
       return byPriority !== 0 ? byPriority : a.localeCompare(b);
@@ -216,7 +216,7 @@ export async function discoverArchitecture(input: DiscoveryInput): Promise<Disco
   for (const [path, content] of contents) {
     // A SPEC or TEST that renders <Routes> is a fixture, not the application's route table - and it can sort
     // before the real entry file, so it would otherwise win this selection.
-    if (isTestish(path)) continue;
+    if (isTestOrFixture(path)) continue;
     if (!declaresRoutes(content)) continue;
     if (!routeFilePath) {
       routeFilePath = path;

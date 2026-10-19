@@ -5,10 +5,10 @@ import { discoverArchitecture } from "../../agent/lib/dark-factory/architect-dis
  * #381 R2 Task 7b - the inspection BUDGET must be spent on application source, not on tests.
  *
  * The live run parked a second time even after the index-child fix, and a probe over the real checkout
- * said why: WebFeedPOC has 20 testish files and an `e2e/` directory, and "e2e/..." sorts before "src/...".
- * The whole 12-file inspection budget went to `e2e/*.spec.ts` and `e2e/fixtures.js`, so `src/main.jsx` -
- * the actual route table - was never read at all. Discovery then reported no surface, correctly, from no
- * evidence.
+ * said why: WebFeedPOC has 20 test and fixture files and an `e2e/` directory, and "e2e/..." sorts before
+ * "src/...". The whole 12-file inspection budget went to `e2e/*.spec.ts` and `e2e/fixtures.js`, so
+ * `src/main.jsx` - the actual route table - was never read at all. Discovery then reported no surface,
+ * correctly, from no evidence.
  *
  * These are the same defects measured, not read: a fixture where tests outnumber and out-sort the app.
  */
@@ -59,7 +59,7 @@ function testHeavyRepo(): Record<string, string> {
 const story = { title: "Dark Factory Test Issue 7", body: "create a new sub-heading on the main page of the application" };
 
 describe("#381 R2 Task 7b - test files must not consume the inspection budget", () => {
-  it("resolves the page even when testish files outnumber and out-sort the app", async () => {
+  it("resolves the page even when test and fixture files outnumber and out-sort the app", async () => {
     const repo = testHeavyRepo();
     const result = await discoverArchitecture({
       story,
