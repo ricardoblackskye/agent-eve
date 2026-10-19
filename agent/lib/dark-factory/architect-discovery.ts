@@ -135,6 +135,31 @@ function routeTable(content: string): Map<string, string> {
   return out;
 }
 
+/** A test is not the route table, and not evidence of what a page is. */
+function isTestFile(path: string): boolean {
+  return /\.(?:test|spec)\.[cm]?[jt]sx?$/i.test(path);
+}
+
+/**
+ * The INDEX CHILD of a parent route, given the component the parent renders.
+ *
+ * A real app often routes "/" to a SHELL that renders an `<Outlet>`, with the page the story means as the child
+ * that carries no `path`:
+ *
+ *   <Route path="/" element={<App />}>
+ *     <Route index element={<HomePage />} />
+ *
+ * Following that is the difference between naming the page and naming the shell. The window is bounded so a
+ * match cannot run past this parent into the next one's children.
+ */
+function indexChildComponent(content: string, parentElement: string): string | undefined {
+  const pattern = new RegExp(
+    `<Route\\b[^>]*?\\belement=\\{\\s*<${parentElement}\\b[\\s\\S]{0,800}?` +
+      `<Route\\b[^>]*?\\bindex\\b[^>]*?\\belement=\\{\\s*<([A-Za-z0-9_$]+)`,
+  );
+  return content.match(pattern)?.[1];
+}
+
 /** Discover the composition chain and file roles for the surface a story names. */
 export async function discoverArchitecture(input: DiscoveryInput): Promise<DiscoveryResult> {
   const { files, readFile, story, maxInspectReads } = input;
@@ -170,6 +195,9 @@ export async function discoverArchitecture(input: DiscoveryInput): Promise<Disco
   let routeFilePath: string | undefined;
   let routes = new Map<string, string>();
   for (const [path, content] of contents) {
+    // A SPEC or TEST that renders <Routes> is a fixture, not the application's route table - and it can sort
+    // before the real entry file, so it would otherwise win this selection.
+    if (isTestFile(path)) continue;
     if (!declaresRoutes(content)) continue;
     if (!routeFilePath) {
       routeFilePath = path;
@@ -185,11 +213,23 @@ export async function discoverArchitecture(input: DiscoveryInput): Promise<Disco
   // 3. Pages: what the route table points at, resolved through that file's own imports.
   const pageForRoute = new Map<string, string>();
   if (routeFilePath) {
-    const imports = namedImports(contents.get(routeFilePath) ?? "", routeFilePath, files);
+    const routeFileContent = contents.get(routeFilePath) ?? "";
+    const imports = namedImports(routeFileContent, routeFilePath, files);
     for (const [routePath, componentName] of routes) {
-      const file = imports.get(componentName);
+      let file = imports.get(componentName);
       if (!file) continue;
+      // When a route renders a SHELL, the page is that shell's INDEX CHILD. Reporting the parent would name the
+      // file rendered on every route - the exact wrong answer this whole feature exists to stop - and it would
+      // also feed R2 a "page" that R2 is supposed to refuse.
+      if (classified.get(file)?.role === "shell") {
+        const indexName = indexChildComponent(routeFileContent, componentName);
+        const indexFile = indexName ? imports.get(indexName) : undefined;
+        if (indexFile) file = indexFile;
+      }
       pageForRoute.set(routePath, file);
+      const existing = classified.get(file);
+      // Never demote a shell or the route table: what a file DOES outranks anything that points at it.
+      if (existing && (existing.role === "shell" || existing.role === "route")) continue;
       classified.set(file, {
         path: file,
         role: "page",
