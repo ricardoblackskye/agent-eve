@@ -13,6 +13,7 @@
 import type { LabelWriter } from "./definition-of-done";
 import type { RunHistoryStore } from "./run-history-store";
 import type { RunStatus } from "./run-history";
+import { CLEARED_LABELS } from "./run-finalizer";
 
 export type RetireOutcome =
   | "retired"
@@ -48,8 +49,98 @@ export interface RetireInput {
 }
 
 export async function retireStaleClaim(
-  _deps: RetireDeps,
-  _input: RetireInput,
+  deps: RetireDeps,
+  input: RetireInput,
 ): Promise<RetireReport> {
-  throw new Error("not implemented");
+  const { repo, issue } = input;
+  const base = { repo, issue, clearedLabels: [] as string[] };
+
+  const retired = await deps.store.retireRunClaim({ repo, issue, actor: input.actor });
+  if (!retired.ok) {
+    return {
+      ...base,
+      outcome: "store-unavailable",
+      lines: [
+        `the run ledger is unavailable (${retired.error ?? "no detail"}), so nothing was changed.`,
+      ],
+    };
+  }
+
+  const value = retired.value;
+
+  if (value?.outcome === "holder-is-live") {
+    return {
+      ...base,
+      outcome: "holder-is-live",
+      runId: value.runId,
+      lines: [
+        `${value.runId} is '${value.status}' — that is work in flight, so NOTHING was changed.`,
+        "Stop it from the control plane, or wait for it to finish.",
+      ],
+    };
+  }
+
+  if (!value || value.outcome === "no-claim") {
+    return {
+      ...base,
+      outcome: "no-claim",
+      lines: [`no active run holds ${repo}#${issue}, so there was nothing to retire.`],
+    };
+  }
+
+  const lines = [
+    `retired ${value.runId} (was '${value.previousStatus}'): it is terminal now, and its claim is released — ` +
+      "the next run for this issue may start.",
+  ];
+  if (input.reason) lines.push(`reason: ${input.reason}`);
+
+  if (!deps.labels) {
+    lines.push(
+      `the ticket's labels were NOT reconciled (no label writer is configured): it may still carry ` +
+        `${CLEARED_LABELS.join(", ")}.`,
+    );
+    return {
+      ...base,
+      outcome: "retired-unreconciled",
+      runId: value.runId,
+      previousStatus: value.previousStatus,
+      lines,
+    };
+  }
+
+  const cleared: string[] = [];
+  const failed: string[] = [];
+  for (const label of CLEARED_LABELS) {
+    const result = await deps.labels.remove(repo, issue, label);
+    if (result.ok) cleared.push(label);
+    else failed.push(`${label} (${result.error ?? "no detail"})`);
+  }
+
+  if (failed.length > 0) {
+    lines.push(
+      `the ledger retired the run, but these labels could NOT be cleared: ${failed.join(", ")} — the ticket still ` +
+        "claims a live run; clear them by hand.",
+    );
+    return {
+      ...base,
+      outcome: "retired-unreconciled",
+      runId: value.runId,
+      previousStatus: value.previousStatus,
+      clearedLabels: cleared,
+      lines,
+    };
+  }
+
+  lines.push(
+    `cleared the factory's in-flight labels: ${cleared.join(", ")}. No terminal label is applied — retiring is ` +
+      "neither a success nor a failure.",
+  );
+  return {
+    ...base,
+    outcome: "retired",
+    runId: value.runId,
+    previousStatus: value.previousStatus,
+    clearedLabels: cleared,
+    lines,
+  };
 }

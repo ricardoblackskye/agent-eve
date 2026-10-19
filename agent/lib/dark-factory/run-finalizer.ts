@@ -72,8 +72,8 @@ export class TerminalEventWriteError extends Error {
   }
 }
 
-/** In-flight labels cleared on every terminal transition. */
-const CLEARED_LABELS: readonly string[] = [
+/** In-flight labels cleared on every terminal transition. Exported so the operator's retire clears the SAME set. */
+export const CLEARED_LABELS: readonly string[] = [
   TRIGGER_LABELS.running,
   TRIGGER_LABELS.question,
 ];
