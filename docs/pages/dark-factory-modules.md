@@ -10,7 +10,7 @@
 > is [Dark Factory (R1)](dark-factory.md) and the flow walkthroughs in the
 > [flow deep-dives](flow-run-lifecycle.md).
 
-_106 modules._
+_107 modules._
 
 ## agent-cli-author
 
@@ -1000,3 +1000,13 @@ Dark Factory — local-run orchestrator (#404 R1 Task 4). The testable core behi
 **Source:** [`agent/lib/dark-factory/local-run.ts`](../../agent/lib/dark-factory/local-run.ts)
 
 **Exports:** `buildLaunchDecision`, `renderProblems`, `runLocalRun`, `LaunchDecision`, `LaunchInput`, `LaunchSpawn`, `RunnerSpawn`, `GitClone`, `defaultGitClone`, `defaultRunnerSpawn`, `loadLauncherEnv`
+
+## retire-claim
+
+Dark Factory — retiring a stale claim (#404 R2). The operator's "let go" for a run that stopped without finishing: it retires the claim through the store, then reconciles the ticket's factory-owned labels — reusing the run finalizer's own `CLEARED_LABELS` set, so a retired run leaves the same label state as any other terminal transition. A refusal changes nothing: a live holder, or no claim at all, returns without a single label write. No terminal label is applied, because retiring is neither a success nor a failure.
+
+**Source:** [`agent/lib/dark-factory/retire-claim.ts`](../../agent/lib/dark-factory/retire-claim.ts)
+
+**Exports:** `retireStaleClaim`, `RetireReport`, `RetireOutcome`, `RetireDeps`, `RetireInput`
+
+**Decisions:** [ADR 0051](../../docs/adr/0051-df-retiring-a-stale-claim-is-abandonment.md)
