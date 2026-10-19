@@ -65,7 +65,7 @@ function alwaysReplying(body: string) {
   return { agent: new ArchitectAgent(deps), prompts };
 }
 
-describe("#381 R2 Task 8 - an unvalidatable plan is answerable, so it is reported as such", () => {
+describe("#381 R2 Task 8 - a plan that never validates is answerable, so it is reported as such", () => {
   it("reports plan-invalid when every attempt fails on a target that does not exist", async () => {
     // The exact live failure: a path the repository does not contain, every time.
     const { agent: arch } = alwaysReplying(JSON.stringify(plan("src/components/Header.js")));

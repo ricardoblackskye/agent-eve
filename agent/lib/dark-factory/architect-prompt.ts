@@ -25,7 +25,7 @@ export interface TargetContractInput {
    *
    * A path maps to the discovery record at the Architect's call site (`{ role, evidence }`) and to a bare
    * role string in tests, so both shapes are accepted rather than importing either module's type: this
-   * module only needs to recognise "shell" and "shared".
+   * module only needs to recognize "shell" and "shared".
    */
   roles: Record<string, unknown>;
 }
@@ -41,7 +41,7 @@ function roleName(value: unknown): string | undefined {
 }
 
 /**
- * How many forbidden paths are listed before the list is summarised.
+ * How many forbidden paths are listed before the list is summarized.
  *
  * The contract is paid for out of the same prompt budget as the evidence, so its length has to be bounded:
  * a repository with fifty shared components must not push the plan prompt over budget.

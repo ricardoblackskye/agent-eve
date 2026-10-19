@@ -154,8 +154,8 @@ shared and shell files R2 exists to refuse - and offers Next.js paths as its exa
 proved which file the page is; the prompt sent the model elsewhere, and the schema error then exhausted the
 retries and aborted the run instead of parking.
 
-Three fixes, following obra/superpowers' discipline that a plan is "the set of decisions the implementer cannot
-make alone", and that anything enforceable should be validated rather than documented:
+Three fixes, following the superpowers methodology discipline that a plan is "the set of decisions the
+implementer cannot make alone", and that anything enforceable should be validated rather than documented:
 
 1. **A closed file contract in the prompt.** Every `targetFiles` path MUST appear in `Existing files`. For a
    page-scoped story the resolved page is the mandated target, and a `shell` or `shared` file is named as

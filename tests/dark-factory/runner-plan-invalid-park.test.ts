@@ -34,7 +34,7 @@ describe("#381 R2 Task 8 - parking on an invalid plan", () => {
 
   it("asks about the validation errors rather than approval, for an invalid plan", () => {
     expect(parkQuestionFor("plan-invalid")).toBe(PLAN_INVALID_QUESTION);
-    expect(PLAN_INVALID_QUESTION).toMatch(/validation|validat/i);
+    expect(PLAN_INVALID_QUESTION).toMatch(/validation/i);
     // It must NOT be the approval question: there is no plan to approve.
     expect(PLAN_INVALID_QUESTION).not.toBe(TARGET_UNRESOLVED_QUESTION);
   });
