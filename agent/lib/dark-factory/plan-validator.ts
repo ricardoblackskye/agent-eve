@@ -181,7 +181,7 @@ export interface PlanValidationContext {
 export function validateExecutionPlan(
   plan: ExecutionPlan,
   storyText: string,
-  _context?: PlanValidationContext,
+  context?: PlanValidationContext,
 ): PlanValidationResult {
   const errors: string[] = [];
 
@@ -271,6 +271,30 @@ export function validateExecutionPlan(
     if (!hasUiTarget) {
       errors.push(
         "UI/Chat story must modify or create files under app/ or components/ (e.g. app/page.tsx or app/chat.tsx).",
+      );
+    }
+  }
+
+  // 3b. Target role check (#381 R2 AC3). A story scoped to one page must not be planned against the shell or
+  // against a component that is rendered elsewhere: that is the mistake that shipped twice, and R1's evidence
+  // is what makes it detectable. The refusal names the file, the reason, and the page to use instead, because
+  // a repair round that is told only "wrong target" simply re-guesses.
+  //
+  // The shell-scoped reading wins inside isPageScopedStory, so a change that genuinely belongs in the shell is
+  // still accepted - the rule refuses mistaken targets, not legitimate ones.
+  if (context?.roles && isPageScopedStory(storyText)) {
+    const page = context.surface?.page;
+    for (const file of plan.targetFiles) {
+      const known = context.roles[file.path];
+      if (!known || (known.role !== "shell" && known.role !== "shared")) continue;
+      const what =
+        known.role === "shell"
+          ? "the application shell, which renders on every route"
+          : "a shared component, which renders on more than one page";
+      const proof = known.evidence ? ` [${known.evidence}]` : "";
+      const instead = page ? ` Target ${page} instead.` : "";
+      errors.push(
+        `Target '${file.path}' is ${what}${proof}, but the story is scoped to one page.${instead}`,
       );
     }
   }
