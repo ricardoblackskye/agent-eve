@@ -36,6 +36,14 @@ Dark Factory — Architect Agent (#179). Pre-code planning agent that inspects t
 
 **Exports:** `ArchitectAgent`, `ArchitectDeps`, `ArchitectResult`, `DEFAULT_LOWEST_PRIORITY_SCORE`, `DEFAULT_MAX_CONTEXT_FILES`, `MAX_STORY_BODY_LENGTH`, `MAX_STORY_TITLE_LENGTH`, `ProcessTimerRegistry`, `StoryInput`, `sanitizeRelativePath`, `sortFilesByRelevance`
 
+## architect-prompt
+
+Dark Factory — the Architect's target contract (#381 R2 Task 8). The part of the planning prompt that says what may be targeted, as a pure function, because it is prompt BEHAVIOUR and prompt behaviour is testable. It exists because a line of prompt asked for "UI entrypoints under app/ or components/" whenever a story mentioned "page" — which is how a story about the main page of a Vite app produced targets called `src/components/Header.js` and `src/index.js` for a repository containing neither, while discovery had already proved which file the page is. The contract mandates the resolved page for a page-scoped story, names the shell and shared files as forbidden WITH the reason, requires every path to appear in the file list, and keeps `app/` + `components/` only as a fallback for when discovery resolved no page. Its forbidden list is capped, so it has a bounded cost against the prompt budget.
+
+**Source:** [`agent/lib/dark-factory/architect-prompt.ts`](../../agent/lib/dark-factory/architect-prompt.ts)
+
+**Exports:** `TargetContractInput`, `buildTargetContract`
+
 ## breaker-trip-recorder
 
 Dark Factory — record a circuit-breaker trip on a run (#313). A trip halts the coding loop (#312), and an operator reading the ticket must be able to see WHY it stopped and what bound was exceeded — not just find it in a log. The trip is stored machine-readably (a closed vocabulary of reasons plus the numeric bound), never free text, and the breaker itself stays a pure in-memory guard: it is never taught about the ledger. Mirrors `cost-refusal-recorder.ts` (#270) deliberately — same shape, same idempotency, same honest failure reporting.
@@ -467,11 +475,11 @@ Operator CLI for the self-improvement gate (#159). The gate in `self-improve.ts`
 
 ## plan-approval
 
-Dark Factory — Plan Approval Gate (#365 R4). Parks the run after the plan is posted and before any code is written, so a human authorizes the plan first. Recording the question is the park itself: `run-history` derives the run's status from a `worker.question`, and the resume path (`trigger`, `entry`) only ever resumes a run whose status is `blocked`. The comment is recorded before the label is applied, so a label outage cannot hide the question. A park can ask something other than approval (#381 R2 AC4): when the Architect cannot justify a target, the question is which surface the story means, so a human is not asked to approve a plan that does not exist. The event id stays keyed on the run and the round, so a re-delivery of the same park still records once.
+Dark Factory — Plan Approval Gate (#365 R4). Parks the run after the plan is posted and before any code is written, so a human authorizes the plan first. Recording the question is the park itself: `run-history` derives the run's status from a `worker.question`, and the resume path (`trigger`, `entry`) only ever resumes a run whose status is `blocked`. The comment is recorded before the label is applied, so a label outage cannot hide the question. A park can ask something other than approval (#381 R2 AC4): when the Architect cannot justify a target, the question is which surface the story means, so a human is not asked to approve a plan that does not exist. A park can also answer a plan that never validated (#381 R2 Task 8): the question points at the validation errors on the ticket rather than at approval, because a human can say what should change and a terminal failure could not be answered at all. The event id stays keyed on the run and the round, so a re-delivery of the same park still records once.
 
 **Source:** [`agent/lib/dark-factory/plan-approval.ts`](../../agent/lib/dark-factory/plan-approval.ts)
 
-**Exports:** `PLAN_APPROVAL_QUESTION`, `TARGET_UNRESOLVED_QUESTION`, `ParkForApprovalOptions`, `ParkResult`, `PlanApprovalDeps`, `PlanApprovalLabels`, `PlanApprovalReporter`, `parkForApproval`, `planApprovalEventId`
+**Exports:** `PLAN_APPROVAL_QUESTION`, `PLAN_INVALID_QUESTION`, `TARGET_UNRESOLVED_QUESTION`, `ParkForApprovalOptions`, `ParkResult`, `PlanApprovalDeps`, `PlanApprovalLabels`, `PlanApprovalReporter`, `parkForApproval`, `planApprovalEventId`
 
 ## plan-comment
 
