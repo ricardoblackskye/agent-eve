@@ -30,6 +30,10 @@ export interface CoverageViolation {
   baselinePct?: number;
   currentPct?: number;
   dropPct?: number;
+  /** The metric's denominator in the baseline, so a grown code base can be told from a regression. */
+  baselineTotal?: number;
+  /** The metric's denominator in the current run. */
+  currentTotal?: number;
 }
 
 export interface CoverageDelta {
@@ -172,6 +176,32 @@ function readPct(
   return pct;
 }
 
+/** One metric's DENOMINATOR, which is what tells a grown code base apart from a regression. */
+function readMetricTotal(total: Record<string, unknown>, metric: CoverageMetricName): number | undefined {
+  const entry = total[metric];
+  if (entry === null || typeof entry !== "object" || Array.isArray(entry)) return undefined;
+  const value = (entry as { total?: unknown }).total;
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+/**
+ * Why a metric fell: the code base grew, or coverage of existing code fell.
+ *
+ * A percentage is a ratio, so the same fraction of a bigger denominator reads LOWER. When the repository gains
+ * functions or branches, a metric can fall without a single previously-covered line losing its test - and the gate
+ * used to say "Add tests for what this change touched" either way, which sends an author to a diff that cannot be
+ * the cause. Naming the denominator is what makes the two cases distinguishable.
+ */
+export function describeDrop(violation: CoverageViolation): string {
+  const dropped = `FAIL: ${violation.metric} dropped ${violation.dropPct?.toFixed(2)}pp, from ${violation.baselinePct?.toFixed(2)}% to ${violation.currentPct?.toFixed(2)}%.`;
+  const before = violation.baselineTotal;
+  const now = violation.currentTotal;
+  if (typeof before === "number" && typeof now === "number" && now > before) {
+    return `${dropped} Its denominator grew from ${before} to ${now}, so the code base gained ${violation.metric}: cover the new ones rather than assume a regression in what was already covered.`;
+  }
+  return `${dropped} Its denominator did not grow, so coverage of existing code fell.`;
+}
+
 /** Compare a baseline summary against the current one. */
 export function compareCoverage(
   baseline: unknown,
@@ -190,7 +220,7 @@ export function compareCoverage(
     const currentPct = readPct(currentTotal, metric, "the current summary");
 
     if (baselinePct === undefined || currentPct === undefined) {
-      violations.push({ metric, reason: "missing", baselinePct, currentPct });
+      violations.push({ metric, reason: "missing", baselinePct, currentPct, baselineTotal: readMetricTotal(baselineTotal, metric), currentTotal: readMetricTotal(currentTotal, metric) });
       continue;
     }
 
@@ -201,7 +231,7 @@ export function compareCoverage(
 
     const dropPct = Number((baselinePct - currentPct).toFixed(2));
     if (dropPct > tolerancePct) {
-      violations.push({ metric, reason: "dropped", baselinePct, currentPct, dropPct });
+      violations.push({ metric, reason: "dropped", baselinePct, currentPct, dropPct, baselineTotal: readMetricTotal(baselineTotal, metric), currentTotal: readMetricTotal(currentTotal, metric) });
     }
   }
 
@@ -323,7 +353,7 @@ export function runCoverageRatchet(
       io.log(
         violation.reason === "missing"
           ? `FAIL: ${violation.metric} could not be read from the baseline and the summary, so the gate cannot verify it.`
-          : `FAIL: ${violation.metric} dropped ${violation.dropPct?.toFixed(2)}pp, from ${violation.baselinePct?.toFixed(2)}% to ${violation.currentPct?.toFixed(2)}%.`,
+          : describeDrop(violation),
       );
     }
     const biggestDrop = Math.max(
@@ -340,7 +370,9 @@ export function runCoverageRatchet(
       io.log("skip unless the five test variables are set, and every metric then reads points lower.");
       io.log("See the Coverage section of AGENTS.md for the one-command setup.");
     }
-    io.log("Coverage must not go backwards. Add tests for what this change touched.");
+    io.log(
+      `Coverage must not go backwards. Measured on ${process.platform}; add tests for what this change touched.`,
+    );
     return 1;
   }
 
