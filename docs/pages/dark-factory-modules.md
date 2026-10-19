@@ -467,11 +467,11 @@ Operator CLI for the self-improvement gate (#159). The gate in `self-improve.ts`
 
 ## plan-approval
 
-Dark Factory — Plan Approval Gate (#365 R4). Parks the run after the plan is posted and before any code is written, so a human authorizes the plan first. Recording the question is the park itself: `run-history` derives the run's status from a `worker.question`, and the resume path (`trigger`, `entry`) only ever resumes a run whose status is `blocked`. The comment is recorded before the label is applied, so a label outage cannot hide the question.
+Dark Factory — Plan Approval Gate (#365 R4). Parks the run after the plan is posted and before any code is written, so a human authorizes the plan first. Recording the question is the park itself: `run-history` derives the run's status from a `worker.question`, and the resume path (`trigger`, `entry`) only ever resumes a run whose status is `blocked`. The comment is recorded before the label is applied, so a label outage cannot hide the question. A park can ask something other than approval (#381 R2 AC4): when the Architect cannot justify a target, the question is which surface the story means, so a human is not asked to approve a plan that does not exist. The event id stays keyed on the run and the round, so a re-delivery of the same park still records once.
 
 **Source:** [`agent/lib/dark-factory/plan-approval.ts`](../../agent/lib/dark-factory/plan-approval.ts)
 
-**Exports:** `PLAN_APPROVAL_QUESTION`, `ParkForApprovalOptions`, `ParkResult`, `PlanApprovalDeps`, `PlanApprovalLabels`, `PlanApprovalReporter`, `parkForApproval`, `planApprovalEventId`
+**Exports:** `PLAN_APPROVAL_QUESTION`, `TARGET_UNRESOLVED_QUESTION`, `ParkForApprovalOptions`, `ParkResult`, `PlanApprovalDeps`, `PlanApprovalLabels`, `PlanApprovalReporter`, `parkForApproval`, `planApprovalEventId`
 
 ## plan-comment
 
@@ -507,11 +507,11 @@ Dark Factory — Plan Revision Rounds (#378). The durable count of how many time
 
 ## plan-validator
 
-Dark Factory — Execution Plan Domain Validator (#179). Pre-flight validation gate that evaluates an ExecutionPlan produced by the Architect Agent before code generation begins. Ensures plans touch appropriate repository domains (e.g. UI/Chat stories modify UI entrypoints) and that every Acceptance Criterion from the User Story is mapped to an automated test case.
+Dark Factory — Execution Plan Domain Validator (#179). Pre-flight validation gate that evaluates an ExecutionPlan produced by the Architect Agent before code generation begins. Ensures plans touch appropriate repository domains (e.g. UI/Chat stories modify UI entrypoints) and that every Acceptance Criterion from the User Story is mapped to an automated test case. A plan is also judged against the repository when discovery supplies a context (#381 R2): a story scoped to one page may not target the application shell or a component rendered on more than one page, and the refusal names the file, the role, the evidence that proves it, and the page to use instead. The context is OPTIONAL, so the validator stays a pure function of its arguments and every earlier caller is unchanged.
 
 **Source:** [`agent/lib/dark-factory/plan-validator.ts`](../../agent/lib/dark-factory/plan-validator.ts)
 
-**Exports:** `AcceptanceCriteriaTestMapping`, `DefaultPlanParser`, `ExecutionPlan`, `PlanParser`, `PlanTargetFile`, `PlanValidationResult`, `extractStoryAcceptanceCriteria`, `safeJsonParse`, `validateExecutionPlan`
+**Exports:** `AcceptanceCriteriaTestMapping`, `DefaultPlanParser`, `ExecutionPlan`, `PlanFileRole`, `PlanParser`, `PlanTargetFile`, `PlanValidationContext`, `PlanValidationResult`, `StoryScope`, `extractStoryAcceptanceCriteria`, `isPageScopedStory`, `isShellScopedStory`, `safeJsonParse`, `validateExecutionPlan`
 
 ## platform-auth
 

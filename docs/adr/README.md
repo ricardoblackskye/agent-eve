@@ -101,3 +101,4 @@ changes, write a new one that supersedes it.
 | [0045](0045-workspace-escape-routes-use-junctions.md)             | Workspace escape routes are exercised with directory junctions, and a failed setup skips visibly    | Accepted |
 | [0046](0046-baseline-moves-state-their-cause.md)                  | A baseline re-record states whether the floor moved, or the measurement did                         | Accepted |
 | [0047](0047-architect-plans-from-bounded-evidence.md)             | The Architect reads repository contents within a derived budget, and cites the evidence             | Accepted |
+| [0048](0048-df-page-scoped-targets-and-unjustifiable-parks.md)    | A page-scoped story cannot target the shell, and an unjustifiable target parks for a human          | Accepted |
