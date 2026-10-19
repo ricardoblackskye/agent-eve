@@ -13,6 +13,8 @@ import type {
   RunHistoryStore,
   RunHistoryWriteResult,
   RunListOptions,
+  RetireRunClaim,
+  RunClaimRetirement,
 } from "./run-history-store";
 import type {
   RunEvent,
@@ -97,6 +99,18 @@ export class ConsoleRunHistoryStore implements RunHistoryStore {
   async recordRunSummary(
     _summary: RunSummary,
   ): Promise<RunHistoryWriteResult<RunSummary>> {
+    return {
+      ok: false,
+      mode: "blocked",
+      providerId: this.id,
+      error: RUN_HISTORY_NOT_CONFIGURED,
+    };
+  }
+
+  /** #404 R2 — the refusing store cannot retire anything: no ledger, so no claim to release. */
+  async retireRunClaim(
+    _input: RetireRunClaim,
+  ): Promise<RunHistoryWriteResult<RunClaimRetirement>> {
     return {
       ok: false,
       mode: "blocked",

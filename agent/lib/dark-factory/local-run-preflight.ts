@@ -296,7 +296,7 @@ export async function preflightLocalRun(input: PreflightInput): Promise<Prefligh
         subject: `${claim.holder.runId} holds ${repo}#${issue} (status '${claim.holder.status}')`,
         fix:
           "a run holds this issue's claim until it finishes or a human answers it; wait for it to finish, or " +
-          "retire the claim if the process is gone",
+          `retire the claim if the process is gone: npm run df:retire-claim -- --repo ${repo} --issue ${issue}`,
       });
     }
   }

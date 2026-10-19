@@ -92,4 +92,29 @@ The launcher never prints a secret value. The runner still fails closed on a mis
 - **Parked at the end?** Expected — the plan is on the issue awaiting approval (ADR 0041). Re-run after approving
   or retiring.
 - **Refused with `remote-store-refused`?** Point at the local Postgres, or pass `--allow-remote-store`.
-- **Refused with `claim-held`?** A previous run holds the issue; retire it (#404 R2) or wait for it to finish.
+- **Refused with `claim-held`?** A previous run holds the issue. The refusal names the holder and the command:
+  retire it with `npm run df:retire-claim -- --repo owner/repo --issue N` (see below).
+
+## Letting go of a stopped run (#404 R2)
+
+A run that stopped without finishing keeps holding its issue's claim (ADR 0026 — the claim is atomic), so the next
+run for that issue is refused. R1's acceptance ended exactly there, and the only way past it was destroying the
+ledger.
+
+```bash
+npm run df:retire-claim -- --repo ricardoblackskye/WebFeedPOC --issue 169 --reason "the process is gone"
+```
+
+The launcher reports a held claim in the **same one block** as every other prerequisite, and names this command, so
+"wait, or retire it" is actionable rather than advice.
+
+| exit | meaning |
+|---|---|
+| `0` | the claim is gone **and** the ticket's factory labels were reconciled |
+| `2` | the ledger let go, but the ticket still lies (a partial outcome must not read as clean) |
+| `1` | refused — a live holder, no claim, or an unavailable ledger |
+
+**A live (`running`) holder is refused and nothing is touched**: work in flight is never cut out from under itself.
+A parked holder **is** retired — a park is a wait, and the retirement is what stops it resuming. Retirement applies
+no terminal label (`df:done`/`df:failed` describe an attempt's outcome; retirement is neither). See
+[ADR 0051](../../docs/adr/0051-df-retiring-a-stale-claim-is-abandonment.md).
