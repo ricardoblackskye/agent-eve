@@ -107,6 +107,21 @@ export interface ArchitectDeps {
  */
 export type ArchitectOutcomeReason = "unresolved-surface" | "refused-target";
 
+/**
+ * What discovery produced for one plan attempt.
+ *
+ * `gated` records whether discovery actually RAN. Without a reader it did not, and an agent that cannot read
+ * must not refuse to plan - that would break every existing caller rather than protect it.
+ */
+interface PlanContext {
+  gated: boolean;
+  /** Whether discovery actually SAW anything: an empty or unreadable file is not evidence. */
+  sawEvidence: boolean;
+  section?: string;
+  roles: Record<string, PlanFileRole>;
+  surface?: { route?: string; page?: string };
+}
+
 export interface ArchitectResult {
   ok: boolean;
   plan?: ExecutionPlan;
@@ -428,9 +443,9 @@ export class ArchitectAgent {
     story: StoryInput,
     repoFiles: string[],
     budget: number,
-  ): Promise<string | undefined> {
+  ): Promise<PlanContext> {
     const readFile = this.deps.readFile;
-    if (!readFile || budget <= 0) return undefined;
+    if (!readFile || budget <= 0) return { gated: false, sawEvidence: false, roles: {} };
 
     const reader = createBoundedReader(readFile, {
       maxFiles: MAX_CONTEXT_FILES_READ,
@@ -452,6 +467,13 @@ export class ArchitectAgent {
     });
 
     const roles = new Map(discovery.classified.map((file) => [file.path, file]));
+    // The same roles, in the shape the validator takes, so the plan can be judged against the repository.
+    const rolesByPath: Record<string, PlanFileRole> = Object.fromEntries(
+      discovery.classified.map((file) => [
+        file.path,
+        { role: file.role, evidence: file.evidence },
+      ]),
+    );
     const chainPaths = discovery.chain.map((file) => file.path);
     const ordered = [
       ...chainPaths,
@@ -461,6 +483,7 @@ export class ArchitectAgent {
     const blocks: string[] = [];
     const omitted: string[] = [];
     let used = 0;
+    let sawEvidence = false;
     // Heading, guidance and notice are all paid for out of the same budget as the contents.
     const overhead = 500;
 
@@ -470,6 +493,11 @@ export class ArchitectAgent {
         omitted.push(path);
         continue;
       }
+      // An empty file is NOT evidence. Emitting a block for it would pad the prompt, and worse, would let a
+      // repository whose contents cannot be read look as though it had been inspected - which is the
+      // difference between "no page exists here" and "nothing could be read".
+      if (read.text.trim() === "") continue;
+      sawEvidence = true;
       const entry = roles.get(path);
       const header = [
         `<file path="${escapeXmlContent(path)}"`,
@@ -487,7 +515,9 @@ export class ArchitectAgent {
       used += block.length;
     }
 
-    if (blocks.length === 0 && omitted.length === 0) return undefined;
+    if (blocks.length === 0 && omitted.length === 0) {
+      return { gated: true, sawEvidence, roles: rolesByPath, surface: discovery.surface };
+    }
 
     const notice = omitted.length
       ? [
@@ -500,7 +530,14 @@ export class ArchitectAgent {
           .join("\n")
       : "";
 
-    return [blocks.join("\n\n"), notice].filter(Boolean).join("\n\n");
+    const section = [blocks.join("\n\n"), notice].filter(Boolean).join("\n\n");
+    return {
+      gated: true,
+      sawEvidence,
+      section: section || undefined,
+      roles: rolesByPath,
+      surface: discovery.surface,
+    };
   }
 
   /**
@@ -633,8 +670,11 @@ export class ArchitectAgent {
       previousOutput: string,
       validation: PlanValidationResult,
     ) => string,
+    context?: PlanValidationContext,
   ): Promise<ArchitectResult> {
     let retries = 0;
+    /** True when the target-role rule fired, so exhaustion can be reported as an actionable reason. */
+    let refusedTarget = false;
     let lastOutput = "";
     let lastErrors: string[] = [];
     let lastError: Error | unknown;
@@ -662,7 +702,13 @@ export class ArchitectAgent {
             parseResult.error ?? "Failed to parse valid JSON from LLM response.",
           ];
         } else {
-          const validation = validateExecutionPlan(parseResult.plan, story.body);
+          // Title AND body: the surface a story names is often only in the title ("the main page"), and
+          // validating on the body alone meant the target rule never fired on the stories that failed.
+          const validation = validateExecutionPlan(
+            parseResult.plan,
+            `${story.title}\n${story.body}`,
+            context,
+          );
           if (validation.valid) {
             return {
               ok: true,
@@ -670,6 +716,7 @@ export class ArchitectAgent {
               retries,
             };
           }
+          refusedTarget = (validation.codes ?? []).includes("target-role");
           lastErrors = validation.errors;
         }
       }
@@ -695,6 +742,9 @@ export class ArchitectAgent {
       retries,
       error: `ArchitectAgent max retries exceeded (${this.maxPlanRetries}). Errors: ${lastErrors.join("; ")}`,
       cause: lastError,
+      // Spent every repair round still aiming at the shell or a shared component: the caller parks for a human
+      // rather than letting a refused target through (#381 R2 AC4).
+      ...(refusedTarget ? { reason: "refused-target" as const } : {}),
       lastError,
     };
   }
@@ -722,13 +772,40 @@ export class ArchitectAgent {
       };
     }
 
-    const evidence = await this.buildEvidenceSection(story, repoFiles, budget - basePrompt.length);
-    return this.runPlanLoop(
+    const context = await this.buildEvidenceSection(story, repoFiles, budget - basePrompt.length);
+
+    // #381 R2 AC4: a story scoped to one page whose surface cannot be identified has no target that can be
+    // justified, so the model is never asked. Refusing BEFORE the call is what makes this fail closed rather
+    // than fail plausible - and it costs nothing to say so.
+    // `sawEvidence` matters: a repository whose contents could not be read is not evidence of "no page here",
+    // and refusing on it would park every run against a repo the reader cannot see.
+    if (
+      context.gated &&
+      context.sawEvidence &&
+      isPageScopedStory(`${story.title}\n${story.body}`) &&
+      !context.surface?.page
+    ) {
+      return {
+        ok: false,
+        retries: 0,
+        reason: "unresolved-surface",
+        roles: context.roles,
+        surface: context.surface,
+        error:
+          "The story is scoped to one page, but no page could be identified in the repository, so no target " +
+          "can be justified. A human needs to name the surface.",
+      };
+    }
+
+    const result = await this.runPlanLoop(
       story,
-      evidence ? this.buildInitialPrompt(story, repoFiles, evidence) : basePrompt,
+      context.section ? this.buildInitialPrompt(story, repoFiles, context.section) : basePrompt,
       (previousOutput, validation) =>
         this.buildRepairPrompt(story, previousOutput, validation),
+      { roles: context.roles, surface: context.surface },
     );
+    // The evidence is reported on both outcomes, so a caller can see what the plan was judged against.
+    return { ...result, roles: context.roles, surface: context.surface };
   }
 
   /**

@@ -57,6 +57,11 @@ export interface ExecutionPlan {
 export interface PlanValidationResult {
   valid: boolean;
   errors: string[];
+  /**
+   * Machine-readable codes for the rules that fired, so a caller can act on WHY rather than matching on
+   * message text (#381 R2). Optional: existing callers ignore it.
+   */
+  codes?: string[];
 }
 
 const UI_SIGNALS = [
@@ -184,6 +189,7 @@ export function validateExecutionPlan(
   context?: PlanValidationContext,
 ): PlanValidationResult {
   const errors: string[] = [];
+  const codes: string[] = [];
 
   // 0. Runtime schema integrity checks
   if (!plan || typeof plan !== "object") {
@@ -293,6 +299,7 @@ export function validateExecutionPlan(
           : "a shared component, which renders on more than one page";
       const proof = known.evidence ? ` [${known.evidence}]` : "";
       const instead = page ? ` Target ${page} instead.` : "";
+      codes.push("target-role");
       errors.push(
         `Target '${file.path}' is ${what}${proof}, but the story is scoped to one page.${instead}`,
       );
@@ -327,6 +334,7 @@ export function validateExecutionPlan(
   return {
     valid: errors.length === 0,
     errors,
+    codes,
   };
 }
 
