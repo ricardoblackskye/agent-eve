@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { PostgresControlAdapter } from "../../agent/lib/dark-factory/control-postgres";
+import { assertDisposableDsn, testDsnFor } from "./pg-test-helpers";
 
-const databaseUrl = process.env.DF_CONTROL_DATABASE_URL ?? process.env.DF_RUN_HISTORY_DATABASE_URL;
+// #409: this suite reads its OWN test variable, like its six siblings. It used to fall back to the
+// production-shaped DF_CONTROL_DATABASE_URL, which made it skip in every local run and left it able to write to a
+// live database. The global setup prepares the control tables in the schema this derives.
+const baseDsn = process.env.DF_CONTROL_TEST_DATABASE_URL;
+const databaseUrl = baseDsn ? testDsnFor(baseDsn, "control") : undefined;
+if (databaseUrl) assertDisposableDsn(databaseUrl);
 const integration = databaseUrl ? describe : describe.skip;
 
 integration("PostgresControlAdapter", () => {

@@ -178,6 +178,7 @@ export const PG_SUITES = [
   { file: "cost-budget-store-postgres.test.ts", dsnVar: "DF_COST_BUDGET_TEST_DATABASE_URL", schema: "df_test_cost_budget_store_postgres" },
   { file: "tenant-store-postgres.test.ts", dsnVar: "DF_TENANT_TEST_DATABASE_URL", schema: "df_test_tenant_store_postgres" },
   { file: "usage-store-postgres.test.ts", dsnVar: "DF_USAGE_TEST_DATABASE_URL", schema: "df_test_usage_store_postgres" },
+  { file: "control-postgres.test.ts", dsnVar: "DF_CONTROL_TEST_DATABASE_URL", schema: "df_test_control" },
 ] as const;
 
 /**
