@@ -105,3 +105,4 @@ changes, write a new one that supersedes it.
 | [0049](0049-df-architect-prompt-is-a-contract.md)                 | The Architect's prompt is a contract, and a plan that cannot validate parks instead of aborting     | Accepted |
 | [0050](0050-df-local-runs-are-provisioned-deliberately.md)    | A local run is provisioned deliberately, not discovered by refusal                                    | Accepted |
 | [0051](0051-df-retiring-a-stale-claim-is-abandonment.md)    | Retiring a stale claim abandons the run, and leaves a record                                          | Accepted |
+| [0052](0052-pg-suites-are-isolated-by-schema.md)    | Postgres test suites are isolated by a schema per suite                                               | Accepted |

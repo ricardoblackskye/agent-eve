@@ -1,8 +1,11 @@
-import { randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
+import { testDsnFor } from "./pg-test-helpers";
 import { afterAll, describe, expect, it } from "vitest";
 import { PostgresRunHistoryStore } from "../../agent/lib/dark-factory/run-history-postgres";
 
-const connectionString = process.env.DF_RUN_HISTORY_TEST_DATABASE_URL;
+const baseDsn = process.env.DF_RUN_HISTORY_TEST_DATABASE_URL;
+// #392: this suite owns its own SCHEMA, so parallel workers cannot collide with another suite.
+const connectionString = baseDsn ? testDsnFor(baseDsn, "run_history_postgres") : undefined;
 const describeWithDatabase = connectionString ? describe : describe.skip;
 const at = "2026-09-24T12:00:00.000Z";
 

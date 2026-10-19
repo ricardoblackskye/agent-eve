@@ -7,11 +7,15 @@
  */
 
 import { randomUUID } from "node:crypto";
+
+import { testDsnFor } from "./pg-test-helpers";
 import { afterEach, describe, expect, it } from "vitest";
 import { PostgresUsageStore } from "../../agent/lib/dark-factory/usage-store-postgres";
 import type { UsageEvent } from "../../agent/lib/dark-factory/usage-ledger";
 
-const connectionString = (process.env.DF_USAGE_TEST_DATABASE_URL ?? "").trim();
+const baseDsn = (process.env.DF_USAGE_TEST_DATABASE_URL ?? "").trim();
+// #392: this suite owns its own SCHEMA, so parallel workers cannot collide with another suite.
+const connectionString = baseDsn ? testDsnFor(baseDsn, "usage_store_postgres") : "";
 const suite = connectionString ? describe : describe.skip;
 
 const openStores: PostgresUsageStore[] = [];
