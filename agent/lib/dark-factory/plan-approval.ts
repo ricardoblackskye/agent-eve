@@ -106,7 +106,9 @@ export async function parkForApproval(
     issue: options.issue,
     eventId: planApprovalEventId(options.runId, options.round),
     occurredAt: options.occurredAt,
-    question: PLAN_APPROVAL_QUESTION,
+    // A target that cannot be justified asks a different question (#381 R2); everything else still asks
+    // for approval, which is the only path that reaches coding.
+    question: options.question ?? PLAN_APPROVAL_QUESTION,
   });
 
   if (!reported.ok) {
