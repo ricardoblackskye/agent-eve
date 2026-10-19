@@ -47,6 +47,19 @@ pre-existing #328 suite fail on a fresh database with a write error that looked 
    `-c+search_path=…` and silently leave the suite in `public` — a fix that looks applied and is not.
 6. **Suites are registered by the file that owns them**, so a duplicate schema is visible in the setup output.
 
+## Amendment (2026-10-19, #409)
+
+A seventh Postgres suite exists — `control-postgres.test.ts` — and it was not covered by this decision when it was
+recorded. It gated on `DF_CONTROL_DATABASE_URL`, a production-shaped name, while this plan's bootstrap prepares the
+control tables for `DF_CONTROL_TEST_DATABASE_URL`; so the suite skipped in every local run and ran only in CI. It now
+gates on its own test variable, is registered like the other six, and therefore gets its own schema. Local and CI
+coverage now agree.
+
+The rule this amendment makes explicit: **every Postgres suite is registered, gates on its own `DF_*_TEST_DATABASE_URL`,
+gets its own schema, and asserts a disposable DSN before it writes.** A suite gating on a name the bootstrap does not
+prepare is now a test failure — `tests/dark-factory/pg-suite-isolation.test.ts` discovers the suites by scanning, so a
+new one cannot be forgotten.
+
 ## Consequences
 
 - The interference is gone **by construction**: in a real run, the three run-history suites now own

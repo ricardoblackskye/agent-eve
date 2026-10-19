@@ -9,6 +9,9 @@
  * to its contract — including the two ways it must fail LOUDLY rather than quietly point a suite at the wrong
  * database — and then prove the isolation against a real database when one is configured.
  */
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -94,5 +97,52 @@ describe("#392 the fix must not cost the fast path", () => {
     // No per-file serialization of the Postgres suites: the isolation, not a queue, is what removes the race.
     expect(JSON.stringify(test.sequence ?? {})).not.toMatch(/active-run-claim|retire-run-claim|pg/i);
     expect(JSON.stringify(test.exclude ?? [])).not.toMatch(/active-run-claim|retire-run-claim/);
+  });
+});
+
+/**
+ * #409 — every Postgres suite must be registered, and each must declare exactly ONE database variable: its own.
+ *
+ * The suite this guard exists for gated on `DF_CONTROL_DATABASE_URL`, a production-shaped name, while the global
+ * setup prepared the control tables for `DF_CONTROL_TEST_DATABASE_URL`. It therefore skipped in every local run
+ * (0.5pp of coverage difference, one file, invisible for weeks) and would have run against a LIVE database had that
+ * production name been set. The list of suites is DISCOVERED by scanning, so a new suite cannot be forgotten.
+ */
+describe("#409 every pg suite declares its own variable", () => {
+  const DSN_REF = /process\.env\.(DF_[A-Z0-9_]*DATABASE_URL)/g;
+  const SELF = "pg-suite-isolation.test.ts";
+
+  function pgSuiteFiles(): { file: string; vars: string[] }[] {
+    const dir = join(process.cwd(), "tests", "dark-factory");
+    return readdirSync(dir)
+      .filter((name) => name.endsWith(".test.ts") && name !== SELF)
+      .map((file) => {
+        const source = readFileSync(join(dir, file), "utf8");
+        return { file, vars: [...new Set([...source.matchAll(DSN_REF)].map((m) => m[1]))] };
+      })
+      .filter((entry) => entry.vars.length > 0);
+  }
+
+  it("finds the Postgres suites by scanning, so a new one cannot be forgotten", () => {
+    const files = pgSuiteFiles().map((entry) => entry.file);
+    expect(files.length).toBeGreaterThanOrEqual(7);
+    expect(files).toContain("control-postgres.test.ts");
+  });
+
+  it("registers every suite file, and each declares only its own variable", () => {
+    for (const { file, vars } of pgSuiteFiles()) {
+      const entry = PG_SUITES.find((suite) => suite.file === file);
+      expect(entry, `${file} must be registered in PG_SUITES`).toBeDefined();
+      expect(vars, `${file} must read exactly one database variable: its own`).toEqual([entry!.dsnVar]);
+    }
+  });
+
+  it("gives the control suite its own schema, like its six siblings", () => {
+    const control = PG_SUITES.find((suite) => suite.file === "control-postgres.test.ts");
+    expect(control, "the control suite must be registered").toBeDefined();
+    expect(control!.dsnVar).toBe("DF_CONTROL_TEST_DATABASE_URL");
+    expect(new URL(testDsnFor(BASE, "control")).searchParams.get("options")).toBe(
+      "-c search_path=df_test_control",
+    );
   });
 });
