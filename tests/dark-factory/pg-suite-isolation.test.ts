@@ -42,7 +42,7 @@ describe("#392 testDsnFor", () => {
   it("REFUSES a DSN form it does not understand, loudly", () => {
     // A keyword/value DSN parses as something other than a URL; silently "fixing" it would point a suite at the
     // wrong database, which looks like a product bug.
-    expect(() => testDsnFor("host=localhost dbname=darkfactory_test", "x")).toThrow(/URL|understood/i);
+    expect(() => testDsnFor("host=localhost port=5432", "x")).toThrow(/URL|understood/i);
     expect(() => testDsnFor("", "x")).toThrow(/empty/i);
   });
 
@@ -74,5 +74,25 @@ describe("#392 the suite registry", () => {
       expect(suite.file).toMatch(/\.test\.ts$/);
       expect(suite.schema).toBe(schemaForSuite(suite.schema.replace(/^df_test_/, "")));
     }
+  });
+});
+
+/**
+ * #392 task 7 — a GUARD, not a RED: it passes today and exists so the flake can never be "fixed" by making the
+ * suite slow. Serializing everything would hide the interference instead of removing it, and the sqlite suites —
+ * the large majority — would pay for it on every run.
+ */
+describe("#392 the fix must not cost the fast path", () => {
+  it("keeps file parallelism on, and serializes no suite", async () => {
+    const mod = await import("../../vitest.config");
+    const config = (mod.default ?? mod) as { test?: Record<string, unknown> };
+    const test = config.test ?? {};
+
+    expect(test.fileParallelism).not.toBe(false);
+    expect(test.maxWorkers).not.toBe(1);
+    expect(test.singleThread).not.toBe(true);
+    // No per-file serialization of the Postgres suites: the isolation, not a queue, is what removes the race.
+    expect(JSON.stringify(test.sequence ?? {})).not.toMatch(/active-run-claim|retire-run-claim|pg/i);
+    expect(JSON.stringify(test.exclude ?? [])).not.toMatch(/active-run-claim|retire-run-claim/);
   });
 });
