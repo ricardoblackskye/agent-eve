@@ -52,8 +52,8 @@ pre-existing #328 suite fail on a fresh database with a write error that looked 
 - The interference is gone **by construction**: in a real run, the three run-history suites now own
   `df_test_active_run_claim`, `df_test_retire_run_claim` and `df_test_run_history_postgres`.
 - A **fresh** database works, because the schema is created rather than assumed.
-- The sqlite suites are untouched and still run in parallel: serialising everything would have "fixed" the flake by
-  making the suite slow, which is not a fix. **The fallback of serialising the Postgres suites was designed and
+- The sqlite suites are untouched and still run in parallel: serializing everything would have "fixed" the flake by
+  making the suite slow, which is not a fix. **The fallback of serializing the Postgres suites was designed and
   deliberately not needed.**
 - A new Postgres suite must be registered (and asked for its own schema) to be isolated; an unregistered one would
   fall back to the default schema and could contend again. That is the one thing this relies on being remembered, and
