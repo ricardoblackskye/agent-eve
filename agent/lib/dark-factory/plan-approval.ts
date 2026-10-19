@@ -35,6 +35,13 @@ export const TARGET_UNRESOLVED_QUESTION =
   "belongs to and I will re-plan. Nothing has been coded.";
 
 /**
+ * The question a park asks when no attempt produced a plan that validates (#381 R2 Task 8).
+ *
+ * Deliberately not the approval question: there is no plan to approve.
+ */
+export const PLAN_INVALID_QUESTION = "";
+
+/**
  * Stable for a run, so a re-delivery records the SAME question event rather than parking a second time.
  * The ledger keys events by id; a fresh id per attempt would stack duplicate questions on the ticket.
  */

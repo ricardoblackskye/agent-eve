@@ -1426,6 +1426,21 @@ export function parksForUnjustifiableTarget(reason?: string): boolean {
 }
 
 /**
+ * Reasons that ask a human for a decision instead of ending the run (#381 R2 Task 8).
+ *
+ * A plan that never passed validation is answerable by a person: the validation errors are on the ticket.
+ * Aborting threw away a run that one sentence of clarification could unblock.
+ */
+export function parksForHumanDecision(_reason?: string): boolean {
+  return false;
+}
+
+/** The question matching the reason, so a park never asks about a plan that does not exist. */
+export function parkQuestionFor(_reason?: string): string {
+  return "";
+}
+
+/**
  * Does this dispatch stop and wait for a human? (#378)
  *
  * True for a fresh run, and TRUE FOR A REVISION: an amended plan is a plan nobody has approved yet, so
