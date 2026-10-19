@@ -103,21 +103,57 @@ export function extractStoryAcceptanceCriteria(storyText: string): string[] {
  */
 export type StoryScope = "page" | "shell" | "unspecified";
 
+/** Signals that the story names ONE surface. */
+const PAGE_SCOPE_SIGNALS: readonly RegExp[] = [
+  /\b(?:main|home|landing|index|start|welcome|detail|details|settings|profile|checkout|login|sign[- ]?in|sign[- ]?up|dashboard|category|product|search|results?|error|not[- ]found)\s+page\b/i,
+  /\bpage\b/i,
+  /\b(?:screen|view|route)\b/i,
+  /(?:^|\s)\/(?:[a-z0-9:_-]+)/i,
+];
+
+/**
+ * Signals that the story is about something on EVERY route, in which case the shell is the correct target.
+ *
+ * `shell`, `wrapper` and `layout` belong here even when a story uses them loosely ("run the shell script"):
+ * the shell reading only ever ALLOWS a target, so a false positive here cannot block a change.
+ */
+const SHELL_SCOPE_SIGNALS: readonly RegExp[] = [
+  /\bevery\s+(?:page|route|screen|view)\b/i,
+  /\ball\s+(?:pages|routes|screens|views)\b/i,
+  /\b(?:nav|navbar|navigation|header|footer|sidebar|layout|shell|wrapper)\b/i,
+  /\bglobal(?:ly)?\b/i,
+];
+
+/** The word "page" in a non-UI context: paging, page size, page count. */
+const PAGE_NON_UI = /\bpage\s+(?:size|count|limit|fault)\b|\bpaginat\w*\b|\boffset\b/gi;
+
+function isUsableText(storyText: string): boolean {
+  return typeof storyText === "string" && storyText.trim() !== "";
+}
+
 /**
  * True when the story is about something rendered on EVERY route, so the application shell is the correct
  * target rather than a mistake. This takes precedence over the page signals: "the heading on every page" is
  * shell work, and a rule that refused it would block legitimate changes.
  */
-export function isShellScopedStory(_storyText: string): boolean {
-  throw new Error("not implemented");
+export function isShellScopedStory(storyText: string): boolean {
+  if (!isUsableText(storyText)) return false;
+  return SHELL_SCOPE_SIGNALS.some((pattern) => pattern.test(storyText));
 }
 
 /**
  * True when the story names ONE surface, so a shell or a shared component is the wrong target for it.
  * False when the story is shell-scoped, because the shell-scoped reading wins.
  */
-export function isPageScopedStory(_storyText: string): boolean {
-  throw new Error("not implemented");
+export function isPageScopedStory(storyText: string): boolean {
+  if (!isUsableText(storyText)) return false;
+  // The shell reading wins. A story about every route is shell work whatever else it mentions, and getting
+  // this precedence wrong is how the rule would block a legitimate change instead of a mistaken one.
+  if (isShellScopedStory(storyText)) return false;
+  // "page" outside a UI context is not a surface: page size, page count, pagination. Strip those phrases
+  // first, so a database story is not read as being about a screen.
+  const withoutNonUi = storyText.replace(PAGE_NON_UI, " ");
+  return PAGE_SCOPE_SIGNALS.some((pattern) => pattern.test(withoutNonUi));
 }
 
 /**
