@@ -57,6 +57,11 @@ export interface ExecutionPlan {
 export interface PlanValidationResult {
   valid: boolean;
   errors: string[];
+  /**
+   * Machine-readable codes for the rules that fired, so a caller can act on WHY rather than matching on
+   * message text (#381 R2). Optional: existing callers ignore it.
+   */
+  codes?: string[];
 }
 
 const UI_SIGNALS = [
@@ -98,13 +103,101 @@ export function extractStoryAcceptanceCriteria(storyText: string): string[] {
 }
 
 /**
+ * What a story is scoped to, which decides whether a shell or a shared component is a legitimate target
+ * (#381 R2, AC3).
+ */
+export type StoryScope = "page" | "shell" | "unspecified";
+
+/** Signals that the story names ONE surface. */
+const PAGE_SCOPE_SIGNALS: readonly RegExp[] = [
+  /\b(?:main|home|landing|index|start|welcome|detail|details|settings|profile|checkout|login|sign[- ]?in|sign[- ]?up|dashboard|category|product|search|results?|error|not[- ]found)\s+page\b/i,
+  /\bpage\b/i,
+  /\b(?:screen|view|route)\b/i,
+  /(?:^|\s)\/(?:[a-z0-9:_-]+)/i,
+];
+
+/**
+ * Signals that the story is about something on EVERY route, in which case the shell is the correct target.
+ *
+ * `shell`, `wrapper` and `layout` belong here even when a story uses them loosely ("run the shell script"):
+ * the shell reading only ever ALLOWS a target, so a false positive here cannot block a change.
+ */
+const SHELL_SCOPE_SIGNALS: readonly RegExp[] = [
+  /\bevery\s+(?:page|route|screen|view)\b/i,
+  /\ball\s+(?:pages|routes|screens|views)\b/i,
+  /\b(?:nav|navbar|navigation|header|footer|sidebar|layout|shell|wrapper)\b/i,
+  /\bglobal(?:ly)?\b/i,
+];
+
+/** The word "page" in a non-UI context: paging, page size, page count. */
+const PAGE_NON_UI = /\bpage\s+(?:size|count|limit|fault)\b|\bpagination\b|\boffset\b/gi;
+
+function isUsableText(storyText: string): boolean {
+  return typeof storyText === "string" && storyText.trim() !== "";
+}
+
+/**
+ * True when the story is about something rendered on EVERY route, so the application shell is the correct
+ * target rather than a mistake. This takes precedence over the page signals: "the heading on every page" is
+ * shell work, and a rule that refused it would block legitimate changes.
+ */
+export function isShellScopedStory(storyText: string): boolean {
+  if (!isUsableText(storyText)) return false;
+  return SHELL_SCOPE_SIGNALS.some((pattern) => pattern.test(storyText));
+}
+
+/**
+ * True when the story names ONE surface, so a shell or a shared component is the wrong target for it.
+ * False when the story is shell-scoped, because the shell-scoped reading wins.
+ */
+export function isPageScopedStory(storyText: string): boolean {
+  if (!isUsableText(storyText)) return false;
+  // The shell reading wins. A story about every route is shell work whatever else it mentions, and getting
+  // this precedence wrong is how the rule would block a legitimate change instead of a mistaken one.
+  if (isShellScopedStory(storyText)) return false;
+  // "page" outside a UI context is not a surface: page size, page count, pagination. Strip those phrases
+  // first, so a database story is not read as being about a screen.
+  const withoutNonUi = storyText.replace(PAGE_NON_UI, " ");
+  return PAGE_SCOPE_SIGNALS.some((pattern) => pattern.test(withoutNonUi));
+}
+
+/**
  * Validates an ExecutionPlan against the user story text and domain invariants.
  */
+/** A file's role, as discovery classified it (#381 R1). */
+export interface PlanFileRole {
+  role: "route" | "shell" | "page" | "shared" | "component";
+  /** The composition path that proves the role, quoted back in a refusal. */
+  evidence?: string;
+}
+
+/**
+ * What discovery found, so a plan can be judged against the repository rather than in the abstract.
+ *
+ * Optional by design: the validator stays a pure function of its arguments, and every existing caller
+ * keeps behaving exactly as it did.
+ */
+export interface PlanValidationContext {
+  roles?: Record<string, PlanFileRole>;
+  /** The surface the story names, when discovery resolved one. */
+  surface?: { route?: string; page?: string };
+  /**
+   * The repository's file list, so a target can be checked for EXISTENCE (#381 R2 Task 8).
+   *
+   * The live run invented five target files for a repository containing none of them; the model was told
+   * about a missing `action` field instead of the fact that the files do not exist. Existence is
+   * mechanical, which is exactly the kind of rule that belongs here rather than in the prompt alone.
+   */
+  files?: string[];
+}
+
 export function validateExecutionPlan(
   plan: ExecutionPlan,
   storyText: string,
+  context?: PlanValidationContext,
 ): PlanValidationResult {
   const errors: string[] = [];
+  const codes: string[] = [];
 
   // 0. Runtime schema integrity checks
   if (!plan || typeof plan !== "object") {
@@ -121,6 +214,22 @@ export function validateExecutionPlan(
   if (!Array.isArray(plan.targetFiles) || plan.targetFiles.length === 0) {
     errors.push("Plan must specify at least one target file.");
     return { valid: false, errors };
+  }
+
+  // 1b. Existence (#381 R2 Task 8). A target the repository does not contain is not a plan, it is a guess.
+  // Checked only when a file list is supplied, so every existing caller keeps its exact behaviour.
+  if (Array.isArray(context?.files)) {
+    for (const file of plan.targetFiles) {
+      const targetPath = file?.path;
+      if (typeof targetPath !== "string" || targetPath === "") continue;
+      if (!context.files.includes(targetPath)) {
+        errors.push(
+          `Target file '${targetPath}' does not exist in the repository: it is not in the file list, so it ` +
+            `cannot be modified.`,
+        );
+        codes.push("target-missing");
+      }
+    }
   }
 
   // 2. Path safety check (no path traversal, relative paths only)
@@ -196,6 +305,31 @@ export function validateExecutionPlan(
     }
   }
 
+  // 3b. Target role check (#381 R2 AC3). A story scoped to one page must not be planned against the shell or
+  // against a component that is rendered elsewhere: that is the mistake that shipped twice, and R1's evidence
+  // is what makes it detectable. The refusal names the file, the reason, and the page to use instead, because
+  // a repair round that is told only "wrong target" simply re-guesses.
+  //
+  // The shell-scoped reading wins inside isPageScopedStory, so a change that genuinely belongs in the shell is
+  // still accepted - the rule refuses mistaken targets, not legitimate ones.
+  if (context?.roles && isPageScopedStory(storyText)) {
+    const page = context.surface?.page;
+    for (const file of plan.targetFiles) {
+      const known = context.roles[file.path];
+      if (!known || (known.role !== "shell" && known.role !== "shared")) continue;
+      const what =
+        known.role === "shell"
+          ? "the application shell, which renders on every route"
+          : "a shared component, which renders on more than one page";
+      const proof = known.evidence ? ` [${known.evidence}]` : "";
+      const instead = page ? ` Target ${page} instead.` : "";
+      codes.push("target-role");
+      errors.push(
+        `Target '${file.path}' is ${what}${proof}, but the story is scoped to one page.${instead}`,
+      );
+    }
+  }
+
   // 4. Acceptance Criteria mapping check
   const requiredAcs = extractStoryAcceptanceCriteria(storyText);
   const mappedAcIds = new Set(
@@ -224,6 +358,7 @@ export function validateExecutionPlan(
   return {
     valid: errors.length === 0,
     errors,
+    codes,
   };
 }
 

@@ -25,6 +25,26 @@ export const PLAN_APPROVAL_QUESTION =
   "begin. The run will not consume further iterations while it waits.";
 
 /**
+ * The question a park asks when the Architect could not justify a target (#381 R2 AC4).
+ *
+ * Deliberately NOT the approval question: there is no plan to approve, and asking a human to approve one that
+ * does not exist is how a park becomes noise nobody can act on.
+ */
+export const TARGET_UNRESOLVED_QUESTION =
+  "I could not tell which surface this story means, so I will not guess a target. Name the page or route this " +
+  "belongs to and I will re-plan. Nothing has been coded.";
+
+/**
+ * The question a park asks when no attempt produced a plan that validates (#381 R2 Task 8).
+ *
+ * Deliberately not the approval question: there is no plan to approve.
+ */
+export const PLAN_INVALID_QUESTION =
+  "I could not produce a valid plan for this story, so I have stopped before writing any code. The " +
+  "validation errors are listed above. Tell me what to change - the target file, the acceptance criteria, " +
+  "or the approach - and I will re-plan. Nothing has been coded.";
+
+/**
  * Stable for a run, so a re-delivery records the SAME question event rather than parking a second time.
  * The ledger keys events by id; a fresh id per attempt would stack duplicate questions on the ticket.
  */
@@ -77,6 +97,11 @@ export interface ParkForApprovalOptions {
    */
   round?: number;
   occurredAt?: string;
+  /**
+   * The question to ask, when this park is not about approving a plan (#381 R2 AC4): a target that cannot be
+   * justified asks "which surface did you mean?" instead. Defaults to `PLAN_APPROVAL_QUESTION`.
+   */
+  question?: string;
 }
 
 export type ParkResult =
@@ -101,7 +126,9 @@ export async function parkForApproval(
     issue: options.issue,
     eventId: planApprovalEventId(options.runId, options.round),
     occurredAt: options.occurredAt,
-    question: PLAN_APPROVAL_QUESTION,
+    // A target that cannot be justified asks a different question (#381 R2); everything else still asks
+    // for approval, which is the only path that reaches coding.
+    question: options.question ?? PLAN_APPROVAL_QUESTION,
   });
 
   if (!reported.ok) {

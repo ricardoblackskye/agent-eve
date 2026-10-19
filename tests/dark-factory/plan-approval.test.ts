@@ -52,6 +52,22 @@ describe("the park (#365 R4 Task 2)", () => {
     expect(report.eventId).toBe(planApprovalEventId("run-1"));
   });
 
+  it("asks a caller-supplied question, so a park need not always be about approval (#381 R2)", async () => {
+    // AC4 parks the run when the Architect cannot justify a target. The question there is not "approve
+    // this?" but "which surface did you mean?", and a human reading the ticket has to see the difference.
+    const d = deps();
+    const question =
+      "I could not tell which page this story means, so I will not guess a target. Name the surface and I will re-plan.";
+    const result = await parkForApproval(d, { ...options, question });
+
+    expect(result.ok).toBe(true);
+    const report = (d.reporter.report as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(report.kind).toBe("question");
+    expect(report.question).toBe(question);
+    // The event id stays keyed on the run and the round, so a re-delivery of the SAME park still records once.
+    expect(report.eventId).toBe(planApprovalEventId("run-1"));
+  });
+
   it("marks the ticket, because the comment is not the only way a human sees the request", async () => {
     const d = deps();
     const result = await parkForApproval(d, options);
@@ -122,10 +138,17 @@ describe("the park (#365 R4 Task 2)", () => {
     // The ordering IS the requirement: parking before the plan is posted asks a human to approve something
     // they cannot see, and parking after the loop is not a gate at all. Asserted against the source because
     // neither ordering is observable from a unit test of this module or of the reporter.
+    //
+    // The search is anchored on `parksForHumanApproval`: #381 R2 added a SECOND park (for a target that
+    // cannot be justified) which correctly sits earlier, during planning, where no plan comment exists yet.
+    // A bare first-match on "parkForApproval(" would then measure the wrong call - the intent is the
+    // APPROVAL park, so this pins that one rather than whichever happens to appear first.
     const runner = readFileSync("scripts/dark-factory-runner.ts", "utf8");
+    const gateAt = runner.indexOf("parksForHumanApproval({");
     const commentAt = runner.indexOf("postPlanComment(");
-    const parkAt = runner.indexOf("parkForApproval(");
+    const parkAt = runner.indexOf("parkForApproval(", gateAt);
     const loopAt = runner.indexOf("await runCodingPhase(");
+    expect(gateAt).toBeGreaterThan(-1);
     expect(commentAt).toBeGreaterThan(-1);
     expect(parkAt).toBeGreaterThan(-1);
     expect(loopAt).toBeGreaterThan(-1);

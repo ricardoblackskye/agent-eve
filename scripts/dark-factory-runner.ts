@@ -76,6 +76,8 @@ import {
   explainPlanFailure,
   loadApprovedPlan,
   parkForApproval,
+  PLAN_INVALID_QUESTION,
+  TARGET_UNRESOLVED_QUESTION,
 } from "../agent/lib/dark-factory/plan-approval";
 import {
   MAX_PLAN_REVISIONS_ENV,
@@ -457,6 +459,8 @@ async function main(): Promise<void> {
       : {
           ok: false as const,
           error: `the approved plan could not be read: ${approvedPlan.error}`,
+          // No Architect ran on a resume, so there is no discovery reason to act on (#381 R2).
+          reason: undefined,
         }
     : await architectAgent.planStory({
         number: issueNum,
@@ -474,6 +478,47 @@ async function main(): Promise<void> {
       { resuming: isResume },
     );
     console.error(`[ERROR] ${explanation}`);
+
+    // #381 R2 AC4 + Task 8: a target that cannot be justified, or a plan that never validated, is a QUESTION
+    // for a human rather than a failure. The run parks so it stays resumable - the answer may simply be "the
+    // shell is right, go ahead" - and a terminal failure would have thrown that away. Every other fault still
+    // fails below: parking is for the faults a person can actually answer.
+    if (parksForHumanDecision(planResult.reason)) {
+      await issueWriter.postComment(
+        repoOwner,
+        repoName,
+        issueNum,
+        `🤖 **Eve** (Dark Factory) — ${explanation}`,
+      );
+      const reporter = createWorkerReporter(process.env, {
+        store: createStateStore(env),
+        runHistory,
+      });
+      const parked = await parkForApproval(
+        { reporter, labels: labelWriter },
+        {
+          runId,
+          repo: targetRepo,
+          issue: issueNum,
+          questionLabel: TRIGGER_LABELS.question,
+          occurredAt: new Date().toISOString(),
+          // Not the approval question: there is no plan to approve. The question matches the reason, so a
+          // plan-shape failure is never reported as a target problem (#381 R2 Task 8).
+          question: parkQuestionFor(planResult.reason),
+        },
+      );
+      if (!parked.ok) {
+        throw new Error(`the run could not be parked for a target decision: ${parked.error}`);
+      }
+      const parkedFor =
+        planResult.reason === "plan-invalid"
+          ? "no attempt produced a valid plan"
+          : "the target could not be justified";
+      console.log(
+        `\n[GATE] Parked on #${issueNum}: ${parkedFor} (${parked.mode}). Nothing coded.`,
+      );
+      return;
+    }
     await issueWriter.postComment(
       repoOwner,
       repoName,
@@ -1374,6 +1419,34 @@ export async function finalizeCodingPhaseFailure(
     { labelWriter: deps.labelWriter, runHistory: deps.runHistory },
     { repo: target.repo, issue: target.issue, runId: target.runId, terminalStatus: "failed" },
   );
+}
+
+/**
+ * #381 R2 AC4 - park the run when the Architect could not justify a target, rather than failing it.
+ *
+ * A failed run ends the work; a parked run is resumable, and the human's answer may simply be that the shell
+ * IS the right target - which a terminal failure would throw away. Only the two reasons that need a human
+ * decision are parked; every other failure still fails terminally.
+ */
+export function parksForUnjustifiableTarget(reason?: string): boolean {
+  return reason === "unresolved-surface" || reason === "refused-target";
+}
+
+/**
+ * Reasons that ask a human for a decision instead of ending the run (#381 R2 Task 8).
+ *
+ * A plan that never passed validation is answerable by a person: the validation errors are on the ticket.
+ * Aborting threw away a run that one sentence of clarification could unblock.
+ */
+export function parksForHumanDecision(reason?: string): boolean {
+  return parksForUnjustifiableTarget(reason) || reason === "plan-invalid";
+}
+
+/** The question matching the reason, so a park never asks about a plan that does not exist. */
+export function parkQuestionFor(reason?: string): string {
+  return reason === "plan-invalid"
+    ? PLAN_INVALID_QUESTION
+    : TARGET_UNRESOLVED_QUESTION;
 }
 
 /**
