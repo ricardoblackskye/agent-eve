@@ -44,7 +44,13 @@ export type GitClone = (plan: CheckoutPlan, authEnv: Record<string, string>) => 
 const HERE = dirname(fileURLToPath(import.meta.url));
 /** The repository root — so the runner's script path is absolute even when the child's cwd is a TARGET checkout. */
 const REPO_ROOT = resolve(HERE, "..", "..", "..");
-const RUNNER_SCRIPT = pathToFileURL(join(REPO_ROOT, "scripts", "dark-factory-runner.ts")).href;
+/**
+ * The runner script, as a plain absolute PATH.
+ *
+ * Node resolves a `file://` URL given as the ENTRY argument against the child's cwd (ERR_MODULE_NOT_FOUND), whereas
+ * a path is opened directly. The `--import` loader is the opposite case — see `resolveTsxLoader` below.
+ */
+const RUNNER_SCRIPT = join(REPO_ROOT, "scripts", "dark-factory-runner.ts");
 
 /**
  * The tsx loader, resolved to an absolute file:// URL from THIS package.
