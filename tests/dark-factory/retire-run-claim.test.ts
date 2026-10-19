@@ -165,6 +165,32 @@ function retireSuite(
       await store.close();
     });
 
+    it("finds the claim even when the CALLER passes MIXED CASE (the ledger stores the repo lowercased)", async () => {
+      // The live acceptance caught this: the runner normalises the target repo to lowercase, so a retire that
+      // compares the caller's raw casing matches nothing and reports no-claim while the ledger holds a claim.
+      const store = makeStore();
+      const repo = `owner/retire-case-${name}-${ns}`;
+      const first = await store.acceptDelivery({
+        deliveryId: `${name}-case1-${randomUUID()}`,
+        repo,
+        issue: 404,
+        receivedAt: at,
+      });
+      const runId = first.value?.runId as string;
+      await store.recordRunSummary(summaryFor(repo, 404, runId, "blocked"));
+
+      const result = await store.retireRunClaim({
+        repo: repo.toUpperCase(),
+        issue: 404,
+        actor: "operator",
+      });
+
+      expect(result.value?.outcome).toBe("retired");
+      const after = await store.getRun(runId);
+      expect(after.value?.status).toBe("aborted");
+      await store.close();
+    });
+
     it("is IDEMPOTENT: retiring an already-retired claim reports no-claim", async () => {
       const store = makeStore();
       const repo = `owner/retire-d-${name}-${ns}`;
