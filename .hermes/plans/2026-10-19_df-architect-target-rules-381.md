@@ -129,3 +129,45 @@ Task 7 fixes both, against a fixture shaped like WebFeedPOC's own `main.jsx` and
 simplified stand-in. **Acceptance is the end-to-end**: a page-scoped story on WebFeedPOC resolves the surface to
 `src/pages/HomePage.jsx`, the plan targets it rather than the shell, and an acceptable plan is posted on the
 issue. Unit tests alone do not close this task.
+
+## Task 8 (ADDED after the second live end-to-end) — the prompt must be a contract, not a bias
+
+The second live run resolved the surface correctly (`{ route: "/", page: "src/pages/HomePage.jsx" }`) and then
+failed on the PLAN, not on discovery:
+
+```text
+ArchitectAgent max retries exceeded (2). Errors:
+  Target file 'src/components/Header.js' action must be 'create', 'modify', or 'replace' (received 'undefined').
+```
+
+Five target files the repository does not contain (`Header.js`, `Footer.js`, `App.js`, `App.test.js`,
+`index.js`), aimed at the shell and the shared components - and a separate `ExecutionPlan` key the schema never
+asked for. The cause is a line in the prompt itself:
+
+```text
+- If the story touches UI/Chat (mentions "chat ui", "user navigates", "page", "browser", "screen"),
+  targetFiles MUST include UI entrypoints under app/ or components/ (e.g. app/page.tsx, app/chat.tsx).
+```
+
+The story says "on the main page", which matches "page", so the prompt ORDERS the model at `components/` - the
+shared and shell files R2 exists to refuse - and offers Next.js paths as its example. Discovery had already
+proved which file the page is; the prompt sent the model elsewhere, and the schema error then exhausted the
+retries and aborted the run instead of parking.
+
+Three fixes, following obra/superpowers' discipline that a plan is "the set of decisions the implementer cannot
+make alone", and that anything enforceable should be validated rather than documented:
+
+1. **A closed file contract in the prompt.** Every `targetFiles` path MUST appear in `Existing files`. For a
+   page-scoped story the resolved page is the mandated target, and a `shell` or `shared` file is named as
+   forbidden. The blind `app/` + `components/` heuristic is demoted to a fallback, used only when discovery
+   resolved no page at all.
+2. **Existence is validated, not requested.** `PlanValidationContext` gains `files?: string[]`; a target path
+   absent from it raises a `target-missing` error naming the path. This is mechanical, so it belongs in the
+   validator - it would have killed all five invented paths on the first attempt.
+3. **A prompt that cannot produce a valid plan is a QUESTION, not a crash.** Validation exhaustion currently
+   aborts the run. A plan-quality failure is answerable by a human, so the Architect reports a `plan-invalid`
+   reason and the runner parks with the validation error as the question - the same fail-closed but resumable
+   posture as AC4. Aborting stays reserved for faults a human cannot answer.
+
+**Acceptance is still the end-to-end**: WebFeedPOC #169 resolves `src/pages/HomePage.jsx`, the plan targets it
+rather than the shell, and an acceptable plan is posted on the issue.
