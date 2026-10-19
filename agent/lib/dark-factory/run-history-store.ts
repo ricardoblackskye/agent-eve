@@ -1279,13 +1279,16 @@ export class SqliteRunHistoryStore implements RunHistoryStore {
   ): Promise<RunHistoryWriteResult<RunClaimRetirement>> {
     try {
       const retirement = this.transaction((db): RunClaimRetirement => {
+        // Normalise EXACTLY as a write does. The ledger stores `repo` lowercased (acceptDelivery), so comparing the
+        // caller's raw casing matches no row and reports no-claim while a claim is plainly held — found live.
+        const repo = validateRepo(input.repo);
         const holder = db
           .prepare(
             `SELECT run_id, status FROM df_run_summaries
               WHERE repo = ? AND issue = ? AND status IN ('queued','running','blocked')
               LIMIT 1`,
           )
-          .get(input.repo, input.issue) as
+          .get(repo, input.issue) as
           | { run_id: string; status: RunStatus }
           | undefined;
         if (!holder) return { outcome: "no-claim" };

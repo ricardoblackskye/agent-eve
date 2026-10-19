@@ -1176,12 +1176,15 @@ export class PostgresRunHistoryStore implements RunHistoryStore {
     try {
       const retirement = await this.transaction(
         async (client): Promise<RunClaimRetirement> => {
+          // Normalise EXACTLY as a write does: the ledger stores `repo` lowercased, so comparing the caller's raw
+          // casing matches no row and reports no-claim while a claim is plainly held — found by the live acceptance.
+          const repo = validateRepo(input.repo);
           const holderResult = await client.query<RunSummaryRow>(
             `SELECT * FROM df_run_summaries
               WHERE repo = $1 AND issue = $2 AND status IN ('queued','running','blocked')
               LIMIT 1
               FOR UPDATE`,
-            [input.repo, input.issue],
+            [repo, input.issue],
           );
           const holderRow = holderResult.rows[0];
           if (!holderRow) return { outcome: "no-claim" };
