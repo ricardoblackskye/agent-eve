@@ -159,9 +159,29 @@ export function isPageScopedStory(storyText: string): boolean {
 /**
  * Validates an ExecutionPlan against the user story text and domain invariants.
  */
+/** A file's role, as discovery classified it (#381 R1). */
+export interface PlanFileRole {
+  role: "route" | "shell" | "page" | "shared" | "component";
+  /** The composition path that proves the role, quoted back in a refusal. */
+  evidence?: string;
+}
+
+/**
+ * What discovery found, so a plan can be judged against the repository rather than in the abstract.
+ *
+ * Optional by design: the validator stays a pure function of its arguments, and every existing caller
+ * keeps behaving exactly as it did.
+ */
+export interface PlanValidationContext {
+  roles?: Record<string, PlanFileRole>;
+  /** The surface the story names, when discovery resolved one. */
+  surface?: { route?: string; page?: string };
+}
+
 export function validateExecutionPlan(
   plan: ExecutionPlan,
   storyText: string,
+  _context?: PlanValidationContext,
 ): PlanValidationResult {
   const errors: string[] = [];
 
