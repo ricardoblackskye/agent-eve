@@ -98,6 +98,29 @@ export function extractStoryAcceptanceCriteria(storyText: string): string[] {
 }
 
 /**
+ * What a story is scoped to, which decides whether a shell or a shared component is a legitimate target
+ * (#381 R2, AC3).
+ */
+export type StoryScope = "page" | "shell" | "unspecified";
+
+/**
+ * True when the story is about something rendered on EVERY route, so the application shell is the correct
+ * target rather than a mistake. This takes precedence over the page signals: "the heading on every page" is
+ * shell work, and a rule that refused it would block legitimate changes.
+ */
+export function isShellScopedStory(_storyText: string): boolean {
+  throw new Error("not implemented");
+}
+
+/**
+ * True when the story names ONE surface, so a shell or a shared component is the wrong target for it.
+ * False when the story is shell-scoped, because the shell-scoped reading wins.
+ */
+export function isPageScopedStory(_storyText: string): boolean {
+  throw new Error("not implemented");
+}
+
+/**
  * Validates an ExecutionPlan against the user story text and domain invariants.
  */
 export function validateExecutionPlan(
