@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 import { spawn as nodeSpawn } from "node:child_process";
 import { loadLocalEnv } from "../../../scripts/load-env";
@@ -44,18 +44,19 @@ export type GitClone = (plan: CheckoutPlan, authEnv: Record<string, string>) => 
 const HERE = dirname(fileURLToPath(import.meta.url));
 /** The repository root — so the runner's script path is absolute even when the child's cwd is a TARGET checkout. */
 const REPO_ROOT = resolve(HERE, "..", "..", "..");
-const RUNNER_SCRIPT = join(REPO_ROOT, "scripts", "dark-factory-runner.ts");
+const RUNNER_SCRIPT = pathToFileURL(join(REPO_ROOT, "scripts", "dark-factory-runner.ts")).href;
 
 /**
- * The tsx loader, resolved to an absolute path from THIS package.
+ * The tsx loader, resolved to an absolute file:// URL from THIS package.
  *
  * A bare `--import tsx` is resolved against the CHILD's cwd — the checkout of the target repository, which has no
- * tsx installed — so the loader has to be named by absolute path. Falls back to the bare specifier only if the
- * resolution itself fails, so the failure is at spawn time and named, not silent.
+ * tsx installed — and a Windows path (`C:\...`) is rejected by `--import` as ERR_UNSUPPORTED_ESM_URL_SCHEME, since
+ * it is read as a URL whose scheme is `c:`. Both the loader and the runner script are therefore passed as file://
+ * URLs. Falls back to the bare specifier only if resolution itself fails, so that failure is named at spawn time.
  */
 function resolveTsxLoader(): string {
   try {
-    return createRequire(import.meta.url).resolve("tsx");
+    return pathToFileURL(createRequire(import.meta.url).resolve("tsx")).href;
   } catch {
     return "tsx";
   }
