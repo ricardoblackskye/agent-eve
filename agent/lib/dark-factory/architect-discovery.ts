@@ -58,6 +58,9 @@ const DEFAULT_SURFACE_WORDS = /\b(main|home|landing|index|root)\b/i;
  */
 function discoveryPriority(path: string): number {
   if (/(^|\/)(routes?|router|routing)\./i.test(path)) return 0;
+  // Entry points next. They NAME the surface, and without this a fixture directory can out-sort the whole
+  // application: "e2e/..." beats "src/...", so the route table was never read (#381 Task 7b).
+  if (/(^|\/)(main|index|app|entry(?:-[\w.-]+)?)\.[cm]?[jt]sx?$/i.test(path)) return 1;
   if (/(^|\/)app\/(?:.*\/)?(layout|page)\./i.test(path)) return 1;
   if (/(^|\/)pages?\//i.test(path)) return 3;
   if (/(^|\/)components?\//i.test(path)) return 4;
@@ -141,6 +144,18 @@ function isTestFile(path: string): boolean {
 }
 
 /**
+ * Test-ish: a spec, a test, or anything under a test/e2e/fixture directory.
+ *
+ * These are not architecture evidence, and there are enough of them to matter. WebFeedPOC has 20, and
+ * "e2e/..." sorts before "src/...", so they consumed the entire inspection budget and the real route table
+ * was never read (#381 Task 7b). Skip them when choosing what to READ - never when classifying what was read.
+ */
+function isTestish(path: string): boolean {
+  if (isTestFile(path)) return true;
+  return /(^|\/)(e2e|tests?|__tests__|__mocks__|mocks?|fixtures?|cypress|playwright)(\/|$)/i.test(path);
+}
+
+/**
  * The INDEX CHILD of a parent route, given the component the parent renders.
  *
  * A real app often routes "/" to a SHELL that renders an `<Outlet>`, with the page the story means as the child
@@ -164,10 +179,14 @@ function indexChildComponent(content: string, parentElement: string): string | u
 export async function discoverArchitecture(input: DiscoveryInput): Promise<DiscoveryResult> {
   const { files, readFile, story, maxInspectReads } = input;
 
-  const ordered = files.filter((f) => SOURCE_FILE.test(f)).sort((a, b) => {
-    const byPriority = discoveryPriority(a) - discoveryPriority(b);
-    return byPriority !== 0 ? byPriority : a.localeCompare(b);
-  });
+  const ordered = files
+    .filter((f) => SOURCE_FILE.test(f))
+    // Tests are not architecture evidence and can outnumber the application source (#381 Task 7b).
+    .filter((f) => !isTestish(f))
+    .sort((a, b) => {
+      const byPriority = discoveryPriority(a) - discoveryPriority(b);
+      return byPriority !== 0 ? byPriority : a.localeCompare(b);
+    });
 
   const contents = new Map<string, string>();
   for (const path of ordered.slice(0, Math.max(0, maxInspectReads))) {
@@ -197,7 +216,7 @@ export async function discoverArchitecture(input: DiscoveryInput): Promise<Disco
   for (const [path, content] of contents) {
     // A SPEC or TEST that renders <Routes> is a fixture, not the application's route table - and it can sort
     // before the real entry file, so it would otherwise win this selection.
-    if (isTestFile(path)) continue;
+    if (isTestish(path)) continue;
     if (!declaresRoutes(content)) continue;
     if (!routeFilePath) {
       routeFilePath = path;
