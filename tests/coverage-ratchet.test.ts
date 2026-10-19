@@ -3,6 +3,7 @@ import {
   COVERAGE_METRICS,
   CoverageSummaryError,
   compareCoverage,
+  describeDrop,
   runCoverageRatchet,
 } from "../scripts/coverage-ratchet";
 
@@ -326,5 +327,59 @@ describe("runCoverageRatchet requires a passing run (#391)", () => {
     });
     expect(runCoverageRatchet([], h.deps, PATHS)).toBe(1);
     expect(h.output()).toMatch(/numFailedTests/);
+  });
+});
+
+
+/**
+ * #409 — a metric can fall while the code base GROWS, and that is not a regression in what was covered: the same
+ * fraction of a bigger denominator reads lower. The gate used to say "Add tests for what this change touched" in both
+ * cases, which sends an author to a diff that cannot possibly be the cause. It also never named the platform, so a
+ * local-versus-CI difference read as a code problem.
+ */
+describe("#409 the failure message names the real cause", () => {
+  const grew = () => compareCoverage(summary({}, 1000), summary({ lines: 76.0 }, 1200));
+  const same = () => compareCoverage(summary({}, 1000), summary({ lines: 76.0 }, 1000));
+
+  it("carries both denominators, so a grown code base can be told from a regression", () => {
+    const violation = grew().violations[0];
+    expect(violation?.reason).toBe("dropped");
+    expect(violation?.baselineTotal).toBe(1000);
+    expect(violation?.currentTotal).toBe(1200);
+  });
+
+  it("names the DENOMINATOR growth, and stops pointing at the author's own diff", () => {
+    const line = describeDrop(grew().violations[0]!);
+    expect(line).toMatch(/denominator grew/i);
+    expect(line).toMatch(/1000/);
+    expect(line).toMatch(/1200/);
+    expect(line).not.toMatch(/Add tests for what this change touched/);
+  });
+
+  it("says coverage of EXISTING code fell when the denominator did not grow", () => {
+    const line = describeDrop(same().violations[0]!);
+    expect(line).toMatch(/existing code/i);
+    expect(line).not.toMatch(/denominator grew/i);
+  });
+
+  it("names the platform in the closing line, so a cross-environment gap is visible", () => {
+    const messages: string[] = [];
+    const io = {
+      readFile: (path: string) =>
+        path.endsWith("coverage-summary.json")
+          ? JSON.stringify(summary({ lines: 76.0 }, 1200))
+          : path.endsWith("vitest-report.json")
+            ? JSON.stringify({ numFailedTests: 0, success: true })
+            : JSON.stringify(summary({}, 1000)),
+      writeFile: () => undefined,
+      log: (message: string) => messages.push(message),
+    };
+    const result = runCoverageRatchet([], io, {
+      summary: "coverage-summary.json",
+      report: "vitest-report.json",
+      baseline: "coverage-baseline.json",
+    } as never);
+    expect(result).toBe(1);
+    expect(messages.join(" ")).toContain(process.platform);
   });
 });
