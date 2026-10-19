@@ -1,3 +1,4 @@
+import { isAbsolute } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   buildLaunchDecision,
@@ -91,6 +92,23 @@ describe("#404 R1 Task 4 - buildLaunchDecision", () => {
       // The token must reach the child (the child needs it); the guarantee is that the refusal TEXT never prints
       // it, which renderProblems asserts separately.
       expect(decision.spawn.env.GITHUB_TOKEN).toBe(SECRET);
+    }
+  });
+
+  it("resolves the runner script, the loader and the interpreter to ABSOLUTE paths", async () => {
+    // The child's cwd is the checkout of the TARGET repository, which contains neither `tsx` nor `scripts/`.
+    // A relative "scripts/dark-factory-runner.ts" would be resolved against the checkout and not found, and a
+    // bare `--import tsx` would fail to resolve from there too. Both must be absolute for the launch to work.
+    const decision = await buildLaunchDecision(baseInput());
+
+    expect(decision.kind).toBe("launch");
+    if (decision.kind === "launch") {
+      const { args, cmd } = decision.spawn;
+      expect(isAbsolute(cmd)).toBe(true);
+      expect(args.some((a) => isAbsolute(a) && a.toLowerCase().endsWith("dark-factory-runner.ts"))).toBe(true);
+      const loader = args[args.indexOf("--import") + 1];
+      expect(loader).toBeDefined();
+      expect(isAbsolute(loader as string)).toBe(true);
     }
   });
 });
