@@ -10,7 +10,7 @@
 > is [Dark Factory (R1)](dark-factory.md) and the flow walkthroughs in the
 > [flow deep-dives](flow-run-lifecycle.md).
 
-_103 modules._
+_106 modules._
 
 ## agent-cli-author
 
@@ -976,3 +976,27 @@ Dark Factory — secret-free git push (#282 R3/T2). Builds a bare-URL push comma
 **Exports:** `buildGitPushCommand`, `gitPushWithVault`, `GitPushCommand`, `BuildGitPushCommandArgs`, `GitPushWithVaultArgs`
 
 **Decisions:** [ADR 0035](../../docs/adr/0035-df-sandbox-credential-vault.md)
+
+## local-run-preflight
+
+Dark Factory — local-run preflight (#404 R1). Collects EVERY prerequisite problem of a local run and reports them together, so a missing variable is one block of output rather than an afternoon of refusals. A pure function of (env, target, probes): all I/O arrives through injected probes, so the chain is testable without a database, a cluster, or a network. Never prints a secret value — problems name the VARIABLE, never what is in it.
+
+**Source:** [`agent/lib/dark-factory/local-run-preflight.ts`](../../agent/lib/dark-factory/local-run-preflight.ts)
+
+**Exports:** `preflightLocalRun`, `PreflightProblem`, `PreflightEnv`, `PreflightProbes`, `PreflightInput`, `PreflightResult`, `PreflightProblemCode`
+
+## local-run-checkout
+
+Dark Factory — checkout planner (#404 R1 Task 3). Decides the per-issue workspace for the TARGET repository and how to produce it, because discovery reads `process.cwd()` (#405). The clone URL is always the clean public one; authentication travels in the git environment for the single clone invocation, so a token never reaches argv or `.git/config`. Containment uses `path.relative`, never a string prefix.
+
+**Source:** [`agent/lib/dark-factory/local-run-checkout.ts`](../../agent/lib/dark-factory/local-run-checkout.ts)
+
+**Exports:** `planCheckout`, `gitAuthEnv`, `CheckoutPlan`, `CheckoutPlanInput`
+
+## local-run
+
+Dark Factory — local-run orchestrator (#404 R1 Task 4). The testable core behind `npm run df:local-run`: runs the preflight, refuses before spawning, prepares the checkout, and runs the child. The decision and the rendering are pure; the only side effect (the spawn) is injected, so the contract holds without running a real agent. A park is printed as a park, not left as a silent hang.
+
+**Source:** [`agent/lib/dark-factory/local-run.ts`](../../agent/lib/dark-factory/local-run.ts)
+
+**Exports:** `buildLaunchDecision`, `renderProblems`, `runLocalRun`, `LaunchDecision`, `LaunchInput`, `LaunchSpawn`, `RunnerSpawn`, `GitClone`, `defaultGitClone`, `defaultRunnerSpawn`, `loadLauncherEnv`

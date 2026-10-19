@@ -17,6 +17,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { pathToFileURL } from "node:url";
 import { execSync } from "node:child_process";
+import { loadLocalEnv } from "./load-env";
 import { streamText } from "ai";
 import { resolveChatModel } from "../agent/chat-model";
 import {
@@ -208,6 +209,11 @@ async function main(): Promise<void> {
   console.log(
     "################################################################################\n",
   );
+
+  // #404 R1 Task 5: load the agent's .env.local before env is read, so a direct `tsx scripts/dark-factory-runner.ts`
+  // sees the same variables the launcher provides. `loadLocalEnv` never overrides a value the shell already set,
+  // so an explicit export stays authoritative; the launcher does the equivalent in dark-factory-local-run.ts.
+  loadLocalEnv();
 
   const env = initEnv();
   const token = resolveIssueToken(env);
