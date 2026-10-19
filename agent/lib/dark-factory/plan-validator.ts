@@ -181,6 +181,14 @@ export interface PlanValidationContext {
   roles?: Record<string, PlanFileRole>;
   /** The surface the story names, when discovery resolved one. */
   surface?: { route?: string; page?: string };
+  /**
+   * The repository's file list, so a target can be checked for EXISTENCE (#381 R2 Task 8).
+   *
+   * The live run invented five target files for a repository containing none of them; the model was told
+   * about a missing `action` field instead of the fact that the files do not exist. Existence is
+   * mechanical, which is exactly the kind of rule that belongs here rather than in the prompt alone.
+   */
+  files?: string[];
 }
 
 export function validateExecutionPlan(
@@ -206,6 +214,22 @@ export function validateExecutionPlan(
   if (!Array.isArray(plan.targetFiles) || plan.targetFiles.length === 0) {
     errors.push("Plan must specify at least one target file.");
     return { valid: false, errors };
+  }
+
+  // 1b. Existence (#381 R2 Task 8). A target the repository does not contain is not a plan, it is a guess.
+  // Checked only when a file list is supplied, so every existing caller keeps its exact behaviour.
+  if (Array.isArray(context?.files)) {
+    for (const file of plan.targetFiles) {
+      const targetPath = file?.path;
+      if (typeof targetPath !== "string" || targetPath === "") continue;
+      if (!context.files.includes(targetPath)) {
+        errors.push(
+          `Target file '${targetPath}' does not exist in the repository: it is not in the file list, so it ` +
+            `cannot be modified.`,
+        );
+        codes.push("target-missing");
+      }
+    }
   }
 
   // 2. Path safety check (no path traversal, relative paths only)

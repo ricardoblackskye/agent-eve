@@ -19,6 +19,7 @@ import {
 } from "./plan-validator";
 import { planningGuidanceForPrompt } from "./planning-guidance";
 import { discoverArchitecture } from "./architect-discovery";
+import { buildTargetContract } from "./architect-prompt";
 
 /**
  * Dedicated process-level timer registry following SRP and the Singleton pattern.
@@ -103,9 +104,22 @@ export interface ArchitectDeps {
  *
  * `unresolved-surface` means the story is scoped to one page and discovery could not decide which, so the
  * caller must ask a human rather than accept a guess. `refused-target` means the plan kept targeting the
- * shell or a shared component after the repair rounds were spent.
+ * shell or a shared component after the repair rounds were spent. `plan-invalid` means every attempt failed
+ * validation for some other reason - a mechanical fault a human can still answer, which is why it parks
+ * rather than ending the run (#381 R2 Task 8).
  */
-export type ArchitectOutcomeReason = "unresolved-surface" | "refused-target";
+export type ArchitectOutcomeReason =
+  | "unresolved-surface"
+  | "refused-target"
+  | "plan-invalid";
+
+/**
+ * What the TARGET CONTRACT heading and its blank lines cost the prompt (#381 R2 Task 8).
+ *
+ * Counted rather than guessed: the contract section is only sent when heading plus body fit the remaining
+ * budget, and the budget guard that existed before this section must keep holding.
+ */
+const CONTRACT_SECTION_OVERHEAD = 120;
 
 /**
  * What discovery produced for one plan attempt.
@@ -544,7 +558,12 @@ export class ArchitectAgent {
    * Constructs the initial planning prompt for the LLM.
    * Isolates user inputs inside strict XML/markdown containment to mitigate prompt injection.
    */
-  private buildInitialPrompt(story: StoryInput, repoFiles: string[], evidenceSection?: string): string {
+  private buildInitialPrompt(
+    story: StoryInput,
+    repoFiles: string[],
+    evidenceSection?: string,
+    targetContract?: string,
+  ): string {
     const sortedFiles = sortFilesByRelevance(repoFiles);
     const limit = Math.min(sortedFiles.length, this.maxContextFiles);
     const safeFiles = sortedFiles.slice(0, limit);
@@ -578,6 +597,17 @@ export class ArchitectAgent {
             ``,
           ]
         : []),
+      // #381 R2 Task 8. The contract is stated AFTER the evidence, because it refers to it: it names the
+      // page the evidence resolved and the shell/shared files it forbids. It is checked mechanically, so a
+      // plan that breaks it is rejected rather than discussed.
+      ...(targetContract
+        ? [
+            `### TARGET CONTRACT (checked mechanically: a plan that breaks it is rejected):`,
+            ``,
+            targetContract,
+            ``,
+          ]
+        : []),
       `### HOW TO WRITE THE PLAN:`,
       planningGuidanceForPrompt(),
       ``,
@@ -593,7 +623,6 @@ export class ArchitectAgent {
       `- "dependencies": optional array of npm packages to add`,
       ``,
       `IMPORTANT DOMAIN RULES:`,
-      `- If the story touches UI/Chat (mentions "chat ui", "user navigates", "page", "browser", "screen"), targetFiles MUST include UI entrypoints under app/ or components/ (e.g. app/page.tsx, app/chat.tsx).`,
       `- Every Acceptance Criterion from the story must be mapped to an automated test file and test case name.`,
       `- Each targetFiles rationale must state what the file IS, citing its role and composition path from REPOSITORY EVIDENCE. A rationale that would fit any other file in the repository is not acceptable.`,
       `- Return ONLY raw JSON. No conversational text or markdown code fences.`,
@@ -773,6 +802,21 @@ export class ArchitectAgent {
     }
 
     const context = await this.buildEvidenceSection(story, repoFiles, budget - basePrompt.length);
+    // The contract is paid for out of the same budget as the evidence, so it is sent only when it fits.
+    // Dropping it costs least: the contract is ADVICE, and the validator is the enforcement - a plan that
+    // invents a path is refused whether or not this section reached the model (#381 R2 Task 8).
+    const contractText = context.gated
+      ? buildTargetContract({
+          storyText: `${story.title}\n${story.body}`,
+          route: context.surface?.route,
+          page: context.surface?.page,
+          roles: context.roles,
+        })
+      : undefined;
+    const room =
+      budget - basePrompt.length - (context.section?.length ?? 0) - CONTRACT_SECTION_OVERHEAD;
+    const targetContract =
+      contractText && contractText.length <= room ? contractText : undefined;
 
     // #381 R2 AC4: a story scoped to one page whose surface cannot be identified has no target that can be
     // justified, so the model is never asked. Refusing BEFORE the call is what makes this fail closed rather
@@ -799,10 +843,18 @@ export class ArchitectAgent {
 
     const result = await this.runPlanLoop(
       story,
-      context.section ? this.buildInitialPrompt(story, repoFiles, context.section) : basePrompt,
+      this.buildInitialPrompt(story, repoFiles, context.section, targetContract),
       (previousOutput, validation) =>
         this.buildRepairPrompt(story, previousOutput, validation),
-      { roles: context.roles, surface: context.surface },
+      // `files` makes the existence rule ENFORCEABLE rather than merely requested (#381 R2 Task 8) - but
+      // only once discovery actually SAW the repository. Without content the file list is the only evidence
+      // there is, and refusing on it would break every caller that cannot read, exactly as the AC4 gate
+      // above would. Gated and saw: the real path, where a plan can be judged against what exists.
+      {
+        roles: context.roles,
+        surface: context.surface,
+        ...(context.gated && context.sawEvidence ? { files: repoFiles } : {}),
+      },
     );
     // The evidence is reported on both outcomes, so a caller can see what the plan was judged against.
     return { ...result, roles: context.roles, surface: context.surface };
