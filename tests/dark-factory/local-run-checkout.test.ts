@@ -18,7 +18,7 @@ import {
 const SECRET = "ghp_THIS-MUST-NEVER-APPEAR-2222222222";
 // path.join normalises to the platform separator, so the expected root must too - the planner builds its path
 // with path.join, and a forward-slash literal here would make a startsWith check false on Windows for no real reason.
-const ROOT = pathJoin("C:/Users/cuill/df-workspaces");
+const ROOT = pathJoin("C:/Users/tester/df-workspaces");
 
 const plan = (over: Partial<Parameters<typeof planCheckout>[0]> = {}) =>
   planCheckout({
