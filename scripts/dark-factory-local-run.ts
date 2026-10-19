@@ -12,6 +12,7 @@
 import net from "node:net";
 import { join } from "node:path";
 import { loadLocalEnv } from "./load-env";
+import { createRunHistoryStore } from "../agent/lib/dark-factory/run-history-provider";
 import {
   runLocalRun,
   defaultGitClone,
@@ -94,7 +95,26 @@ async function main(): Promise<number> {
   const probes = {
     reachStore: async (url: string) => tcpReachable(url),
     reachSandbox: async (endpoint: string) => httpReachable(endpoint),
-    // activeClaim is wired in R2 (#404): retiring a stale claim is its own operation.
+    // #404 R2 Task 5: the claim check is WIRED, so a held claim is reported in the same one block as every other
+    // prerequisite — and with the command that releases it. R1 built this probe and deliberately left it unwired.
+    activeClaim: async (repo: string, issue: number) => {
+      const store = createRunHistoryStore(process.env);
+      try {
+        const active = await store.listRuns({
+          repo,
+          issue,
+          statuses: ["queued", "running", "blocked"],
+          limit: 1,
+        });
+        if (!active.ok) return { ok: false, error: active.error };
+        const holder = active.value?.items[0];
+        return holder
+          ? { ok: true, holder: { runId: holder.runId, status: holder.status } }
+          : { ok: true };
+      } finally {
+        await store.close();
+      }
+    },
   };
 
   return runLocalRun({
