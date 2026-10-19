@@ -76,6 +76,7 @@ import {
   explainPlanFailure,
   loadApprovedPlan,
   parkForApproval,
+  TARGET_UNRESOLVED_QUESTION,
 } from "../agent/lib/dark-factory/plan-approval";
 import {
   MAX_PLAN_REVISIONS_ENV,
@@ -457,6 +458,8 @@ async function main(): Promise<void> {
       : {
           ok: false as const,
           error: `the approved plan could not be read: ${approvedPlan.error}`,
+          // No Architect ran on a resume, so there is no discovery reason to act on (#381 R2).
+          reason: undefined,
         }
     : await architectAgent.planStory({
         number: issueNum,
@@ -474,6 +477,41 @@ async function main(): Promise<void> {
       { resuming: isResume },
     );
     console.error(`[ERROR] ${explanation}`);
+
+    // #381 R2 AC4: a target that cannot be justified is a QUESTION for a human, not a failure. The run parks
+    // so it stays resumable - the answer may simply be "the shell is right, go ahead", and a terminal failure
+    // would have thrown that away. Only these two reasons reach here; every other fault still fails below.
+    if (parksForUnjustifiableTarget(planResult.reason)) {
+      await issueWriter.postComment(
+        repoOwner,
+        repoName,
+        issueNum,
+        `🤖 **Eve** (Dark Factory) — ${explanation}`,
+      );
+      const reporter = createWorkerReporter(process.env, {
+        store: createStateStore(env),
+        runHistory,
+      });
+      const parked = await parkForApproval(
+        { reporter, labels: labelWriter },
+        {
+          runId,
+          repo: targetRepo,
+          issue: issueNum,
+          questionLabel: TRIGGER_LABELS.question,
+          occurredAt: new Date().toISOString(),
+          // Not the approval question: there is no plan to approve.
+          question: TARGET_UNRESOLVED_QUESTION,
+        },
+      );
+      if (!parked.ok) {
+        throw new Error(`the run could not be parked for a target decision: ${parked.error}`);
+      }
+      console.log(
+        `\n[GATE] Parked on #${issueNum}: the target could not be justified (${parked.mode}). Nothing coded.`,
+      );
+      return;
+    }
     await issueWriter.postComment(
       repoOwner,
       repoName,
@@ -1383,8 +1421,8 @@ export async function finalizeCodingPhaseFailure(
  * IS the right target - which a terminal failure would throw away. Only the two reasons that need a human
  * decision are parked; every other failure still fails terminally.
  */
-export function parksForUnjustifiableTarget(_reason?: string): boolean {
-  return false;
+export function parksForUnjustifiableTarget(reason?: string): boolean {
+  return reason === "unresolved-surface" || reason === "refused-target";
 }
 
 /**

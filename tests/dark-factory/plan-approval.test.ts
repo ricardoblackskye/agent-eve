@@ -138,10 +138,17 @@ describe("the park (#365 R4 Task 2)", () => {
     // The ordering IS the requirement: parking before the plan is posted asks a human to approve something
     // they cannot see, and parking after the loop is not a gate at all. Asserted against the source because
     // neither ordering is observable from a unit test of this module or of the reporter.
+    //
+    // The search is anchored on `parksForHumanApproval`: #381 R2 added a SECOND park (for a target that
+    // cannot be justified) which correctly sits earlier, during planning, where no plan comment exists yet.
+    // A bare first-match on "parkForApproval(" would then measure the wrong call - the intent is the
+    // APPROVAL park, so this pins that one rather than whichever happens to appear first.
     const runner = readFileSync("scripts/dark-factory-runner.ts", "utf8");
+    const gateAt = runner.indexOf("parksForHumanApproval({");
     const commentAt = runner.indexOf("postPlanComment(");
-    const parkAt = runner.indexOf("parkForApproval(");
+    const parkAt = runner.indexOf("parkForApproval(", gateAt);
     const loopAt = runner.indexOf("await runCodingPhase(");
+    expect(gateAt).toBeGreaterThan(-1);
     expect(commentAt).toBeGreaterThan(-1);
     expect(parkAt).toBeGreaterThan(-1);
     expect(loopAt).toBeGreaterThan(-1);
