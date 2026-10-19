@@ -19,7 +19,7 @@ import { join } from "node:path";
 import { afterEach, beforeAll, afterAll, describe, expect, it } from "vitest";
 
 import { PostgresRunHistoryStore } from "../../agent/lib/dark-factory/run-history-postgres";
-import { pgTableExists } from "./pg-test-helpers";
+import { pgTableExists, testDsnFor } from "./pg-test-helpers";
 import { SqliteRunHistoryStore } from "../../agent/lib/dark-factory/run-history-store";
 import type { RunSummary } from "../../agent/lib/dark-factory/run-history";
 
@@ -214,7 +214,9 @@ function retireSuite(
 
 retireSuite("sqlite", makeSqlite);
 
-const dsn = process.env.DF_RUN_HISTORY_TEST_DATABASE_URL;
+const baseDsn = process.env.DF_RUN_HISTORY_TEST_DATABASE_URL;
+// #392: this suite owns its own SCHEMA, so parallel workers cannot collide with another suite.
+const dsn = baseDsn ? testDsnFor(baseDsn, "retire_run_claim") : undefined;
 const describePg = dsn ? describe : describe.skip;
 describePg("#404 R2 retire a claim (postgres)", () => {
   /**

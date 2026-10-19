@@ -1,4 +1,5 @@
-import { randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
+import { testDsnFor } from "./pg-test-helpers";
 import { describe, expect, it } from "vitest";
 import { PostgresCostBudgetAdapter } from "../../agent/lib/dark-factory/cost-budget-store-postgres";
 
@@ -8,7 +9,9 @@ import { PostgresCostBudgetAdapter } from "../../agent/lib/dark-factory/cost-bud
  * They are skipped (not failed) without it, matching the run-history pattern.
  * Never point this at a production database.
  */
-const databaseUrl = process.env.DF_COST_BUDGET_TEST_DATABASE_URL;
+const baseDsn = process.env.DF_COST_BUDGET_TEST_DATABASE_URL;
+// #392: this suite owns its own SCHEMA, so parallel workers cannot collide with another suite.
+const databaseUrl = baseDsn ? testDsnFor(baseDsn, "cost_budget_store_postgres") : undefined;
 const integration = databaseUrl ? describe : describe.skip;
 
 integration("Postgres cost budget store (integration)", () => {

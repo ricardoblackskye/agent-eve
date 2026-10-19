@@ -115,6 +115,72 @@ export async function pgRowCounts(
 }
 
 /**
+ * #392 — one SCHEMA per suite, derived from the DSN the operator already sets.
+ *
+ * Three suites share the run-history DSN *and its tables*, so per-row cleanup cannot isolate them: one suite's
+ * in-flight run still contends with another's against the shared partial UNIQUE claim index. Giving each suite its
+ * own schema makes isolation a property of the fixture instead of a discipline each suite must remember.
+ */
+const SUITE_NAME = /^[a-z0-9_]+$/;
+const SCHEMA_IDENTIFIER = /^[a-z_][a-z0-9_]*$/;
+
+/** The schema a suite owns. Refuses anything that is not a plain identifier: it becomes a SQL identifier AND a DSN. */
+export function schemaForSuite(suite: string): string {
+  if (!SUITE_NAME.test(suite)) {
+    throw new Error(
+      `unsafe schema identifier for suite '${suite}': use lowercase letters, digits and underscores`,
+    );
+  }
+  const schema = `df_test_${suite}`;
+  if (!SCHEMA_IDENTIFIER.test(schema)) throw new Error(`unsafe schema identifier: ${schema}`);
+  return schema;
+}
+
+/**
+ * The DSN a suite should use: the operator's, plus PostgreSQL's `search_path` option.
+ *
+ * Two ways this must fail LOUDLY rather than guess, because quietly pointing a suite at the wrong database looks
+ * like a product bug: a DSN form it does not understand, and a suite name that is not a safe identifier.
+ */
+export function testDsnFor(baseDsn: string, suite: string): string {
+  const trimmed = (baseDsn ?? "").trim();
+  if (trimmed === "") {
+    throw new Error("the Postgres test DSN is empty: set the DF_*_TEST_DATABASE_URL variable");
+  }
+  const schema = schemaForSuite(suite);
+
+  let url: URL;
+  try {
+    url = new URL(trimmed);
+  } catch {
+    throw new Error(
+      "this Postgres test DSN form is not understood: expected a postgres:// URL",
+    );
+  }
+  if (!/^postgres(ql)?:$/.test(url.protocol)) {
+    throw new Error(`this Postgres test DSN form is not understood: scheme '${url.protocol}'`);
+  }
+
+  const existing = (url.searchParams.get("options") ?? "").trim();
+  const searchPath = `-c search_path=${schema}`;
+  url.searchParams.set("options", existing === "" ? searchPath : `${existing} ${searchPath}`);
+
+  // `+` is a space to URLSearchParams but NOT to the connection-string parser (it percent-decodes only), so a
+  // path set with `+` would arrive as the literal `-c+search_path=...` and silently leave the suite in `public`.
+  return url.toString().replace(/\+/g, "%20");
+}
+
+/** The pg suites, by the file that owns them. Each owns a DISTINCT schema — the point of the exercise. */
+export const PG_SUITES = [
+  { file: "active-run-claim.test.ts", dsnVar: "DF_RUN_HISTORY_TEST_DATABASE_URL", schema: "df_test_active_run_claim" },
+  { file: "retire-run-claim.test.ts", dsnVar: "DF_RUN_HISTORY_TEST_DATABASE_URL", schema: "df_test_retire_run_claim" },
+  { file: "run-history-postgres.test.ts", dsnVar: "DF_RUN_HISTORY_TEST_DATABASE_URL", schema: "df_test_run_history_postgres" },
+  { file: "cost-budget-store-postgres.test.ts", dsnVar: "DF_COST_BUDGET_TEST_DATABASE_URL", schema: "df_test_cost_budget_store_postgres" },
+  { file: "tenant-store-postgres.test.ts", dsnVar: "DF_TENANT_TEST_DATABASE_URL", schema: "df_test_tenant_store_postgres" },
+  { file: "usage-store-postgres.test.ts", dsnVar: "DF_USAGE_TEST_DATABASE_URL", schema: "df_test_usage_store_postgres" },
+] as const;
+
+/**
  * Reset a suite's OWN tables so it starts from the same state on every run (#332).
  * Absent tables are skipped — a brand-new database has nothing to reset.
  */

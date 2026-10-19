@@ -7,11 +7,14 @@
  * Run against a scratch database only: the suite writes and then removes rows.
  */
 
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
+import { testDsnFor } from "./pg-test-helpers";
 import { PostgresTenantStore } from "../../agent/lib/dark-factory/tenant-store-postgres";
 import { InvalidTenantError } from "../../agent/lib/dark-factory/tenant";
 
-const DSN = process.env.DF_TENANT_TEST_DATABASE_URL;
+const baseDsn = process.env.DF_TENANT_TEST_DATABASE_URL;
+// #392: this suite owns its own SCHEMA, so parallel workers cannot collide with another suite.
+const DSN = baseDsn ? testDsnFor(baseDsn, "tenant_store_postgres") : undefined;
 const suite = DSN ? describe : describe.skip;
 
 // Unique per run so concurrent runs cannot collide, and cleanup is precise.
