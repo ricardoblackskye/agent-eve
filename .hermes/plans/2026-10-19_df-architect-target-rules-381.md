@@ -106,3 +106,26 @@ Each is a RED/GREEN pair as separate commits, per the standing workflow.
 - Extending discovery to path-implied routes (follow-up issue).
 - Approval semantics: #378 / ADR 0041 opt-in approval is unchanged, and R2 adds no new way to approve.
 - Any change to the cost path; R2 adds no model call.
+
+## Task 7 (ADDED after the first live end-to-end) — discovery must resolve the route shape real apps use
+
+The first live run against WebFeedPOC #169 parked instead of planning. The park was CORRECT for the evidence
+available, but the evidence was incomplete, and the reason is only visible by reading the target:
+
+```jsx
+<Route path="/" element={<App />}>        // "/" renders the SHELL: App renders an <Outlet>
+  <Route index element={<HomePage />} />  // the page "the main page" means is an INDEX CHILD
+```
+
+Two gaps, both found by running rather than by reading:
+
+1. **A route's page can be an index child.** Resolving `path="/"` yields the shell, and the page the story names
+   is the child that carries no `path`. Discovery must follow that, or the surface resolves to the shell - the
+   exact mistake R2 exists to prevent.
+2. **A test file can be selected as the route table.** `src/App.test.jsx` declares `<Routes>` and sorts before
+   `main.jsx`, so it wins the "first file that declares routes" rule. A test is not the route table.
+
+Task 7 fixes both, against a fixture shaped like WebFeedPOC's own `main.jsx` and `App.jsx` rather than a
+simplified stand-in. **Acceptance is the end-to-end**: a page-scoped story on WebFeedPOC resolves the surface to
+`src/pages/HomePage.jsx`, the plan targets it rather than the shell, and an acceptable plan is posted on the
+issue. Unit tests alone do not close this task.
