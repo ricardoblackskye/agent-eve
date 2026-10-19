@@ -36,7 +36,10 @@ const ROLES: NonNullable<PlanValidationContext["roles"]> = {
     role: "shared",
     evidence: "reached from src/pages/HomePage.jsx, src/pages/CategoryPage.jsx",
   },
-  "src/pages/HomePage.jsx": { role: "page", evidence: 'route "/" -> src/pages/HomePage.jsx' },
+  "src/pages/HomePage.jsx": {
+    role: "page",
+    evidence: 'route "/" -> src/pages/HomePage.jsx',
+  },
 };
 
 const SURFACE = { route: "/", page: "src/pages/HomePage.jsx" };
@@ -46,7 +49,9 @@ function planTargeting(path: string): ExecutionPlan {
     storyId: 166,
     title: "Change the heading on the main page",
     summary: "Move the heading",
-    targetFiles: [{ path, action: "modify", rationale: "the surface the story means" }],
+    targetFiles: [
+      { path, action: "modify", rationale: "the surface the story means" },
+    ],
     acceptanceCriteriaMap: [
       {
         acId: "AC1",
@@ -75,10 +80,14 @@ describe("target roles (#381 R2 AC3)", () => {
   });
 
   it("REFUSES a SHARED component for a page-scoped story, citing the pages that prove it", () => {
-    const result = validateExecutionPlan(planTargeting("src/components/ProductList.jsx"), STORY, {
-      roles: ROLES,
-      surface: SURFACE,
-    });
+    const result = validateExecutionPlan(
+      planTargeting("src/components/ProductList.jsx"),
+      STORY,
+      {
+        roles: ROLES,
+        surface: SURFACE,
+      },
+    );
 
     expect(result.valid).toBe(false);
     const message = result.errors.join("\n");
@@ -87,10 +96,14 @@ describe("target roles (#381 R2 AC3)", () => {
   });
 
   it("ACCEPTS the page the story names", () => {
-    const result = validateExecutionPlan(planTargeting("src/pages/HomePage.jsx"), STORY, {
-      roles: ROLES,
-      surface: SURFACE,
-    });
+    const result = validateExecutionPlan(
+      planTargeting("src/pages/HomePage.jsx"),
+      STORY,
+      {
+        roles: ROLES,
+        surface: SURFACE,
+      },
+    );
 
     expect(result.valid).toBe(true);
     expect(result.errors).toEqual([]);
@@ -98,10 +111,14 @@ describe("target roles (#381 R2 AC3)", () => {
 
   it("ACCEPTS the shell when the story is about every page", () => {
     // The false-positive guard. If this failed, R2 would block legitimate shell changes.
-    const result = validateExecutionPlan(planTargeting("src/App.jsx"), SHELL_STORY, {
-      roles: ROLES,
-      surface: SURFACE,
-    });
+    const result = validateExecutionPlan(
+      planTargeting("src/App.jsx"),
+      SHELL_STORY,
+      {
+        roles: ROLES,
+        surface: SURFACE,
+      },
+    );
 
     expect(result.valid).toBe(true);
     expect(result.errors).toEqual([]);
@@ -124,6 +141,8 @@ describe("target roles (#381 R2 AC3)", () => {
     plan.acceptanceCriteriaMap[0].description = "the retry count is bounded";
 
     // A shared module is a legitimate backend target; the rule is about UI scope, not about sharing.
-    expect(validateExecutionPlan(plan, backendStory, { roles: ROLES }).valid).toBe(true);
+    expect(
+      validateExecutionPlan(plan, backendStory, { roles: ROLES }).valid,
+    ).toBe(true);
   });
 });

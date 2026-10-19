@@ -130,7 +130,7 @@ const SHELL_SCOPE_SIGNALS: readonly RegExp[] = [
 ];
 
 /** The word "page" in a non-UI context: paging, page size, page count. */
-const PAGE_NON_UI = /\bpage\s+(?:size|count|limit|fault)\b|\bpaginat\w*\b|\boffset\b/gi;
+const PAGE_NON_UI = /\bpage\s+(?:size|count|limit|fault)\b|\bpagination\b|\boffset\b/gi;
 
 function isUsableText(storyText: string): boolean {
   return typeof storyText === "string" && storyText.trim() !== "";

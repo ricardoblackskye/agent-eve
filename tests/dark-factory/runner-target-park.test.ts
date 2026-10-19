@@ -47,7 +47,9 @@ describe("the runner wires the target park (#381 R2)", () => {
   it("decides through the shared function rather than an inline condition", () => {
     // Assert the CALL, not the name: the runner also DEFINES this function, so a bare name match would pass
     // on the definition alone and prove nothing about the wiring.
-    expect(source).toMatch(/parksForUnjustifiableTarget\(\s*planResult\.reason\s*\)/);
+    expect(source).toMatch(
+      /parksForUnjustifiableTarget\(\s*planResult\.reason\s*\)/,
+    );
   });
 
   it("parks with the target question", () => {

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { isPageScopedStory, isShellScopedStory } from "../../agent/lib/dark-factory/plan-validator";
+import {
+  isPageScopedStory,
+  isShellScopedStory,
+} from "../../agent/lib/dark-factory/plan-validator";
 
 /**
  * #381 R2 AC3 - telling a page-scoped story from a shell-scoped one.
@@ -12,14 +15,20 @@ describe("story scope (#381 R2)", () => {
   it("reads the stories that actually failed as page-scoped", () => {
     // WebFeedPOC #166: "the main page" meant src/pages/HomePage.jsx, and the plan targeted a shared component.
     expect(isPageScopedStory("Change the heading on the main page")).toBe(true);
-    expect(isPageScopedStory("The home page heading should read Hello.")).toBe(true);
+    expect(isPageScopedStory("The home page heading should read Hello.")).toBe(
+      true,
+    );
     // #168 round 2: the same wording, planned against src/App.jsx - the shell.
     expect(isPageScopedStory("Update the landing page copy")).toBe(true);
   });
 
   it("reads an explicitly named route as page-scoped", () => {
-    expect(isPageScopedStory("The /settings route renders the wrong title")).toBe(true);
-    expect(isPageScopedStory("On the checkout screen the total is stale")).toBe(true);
+    expect(
+      isPageScopedStory("The /settings route renders the wrong title"),
+    ).toBe(true);
+    expect(isPageScopedStory("On the checkout screen the total is stale")).toBe(
+      true,
+    );
   });
 
   it("reads an EVERY-route story as shell-scoped", () => {
@@ -37,15 +46,21 @@ describe("story scope (#381 R2)", () => {
   });
 
   it("does not claim a backend story is about a surface", () => {
-    expect(isPageScopedStory("Fix the retry count in the lease reaper")).toBe(false);
-    expect(isShellScopedStory("Fix the retry count in the lease reaper")).toBe(false);
+    expect(isPageScopedStory("Fix the retry count in the lease reaper")).toBe(
+      false,
+    );
+    expect(isShellScopedStory("Fix the retry count in the lease reaper")).toBe(
+      false,
+    );
     expect(isPageScopedStory("Migrate the tenant table")).toBe(false);
   });
 
   it("is not fooled by the word page in an unrelated phrase", () => {
     // A database "page" is not a UI surface. This is the cost of a text signal, so it is pinned deliberately
     // rather than left to chance: the rule must not fire on pagination work.
-    expect(isPageScopedStory("Increase the database page size to 8kb")).toBe(false);
+    expect(isPageScopedStory("Increase the database page size to 8kb")).toBe(
+      false,
+    );
   });
 
   it("tolerates empty and whitespace input", () => {
