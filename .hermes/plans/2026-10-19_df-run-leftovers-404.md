@@ -2,7 +2,7 @@
 
 **Issue:** #404 · **Branch:** `feat/df-run-leftovers-404` · **Base:** `9a6935d` (R1 merged via PR #407)
 
-**Goal.** R1 made a local run provisionable. R2 closes the loop the acceptance run exposed: a run that stops
+**Goal.** R1 made a local run a single command. R2 closes the loop the acceptance run exposed: a run that stops
 without finishing leaves the ledger holding its issue's claim, and there is **no in-repo way to release it**, so a
 clean re-run is refused. The live evidence, verbatim from the R1 acceptance:
 
