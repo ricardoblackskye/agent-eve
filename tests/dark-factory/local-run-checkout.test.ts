@@ -1,3 +1,4 @@
+import { join as pathJoin } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   gitAuthEnv,
@@ -15,7 +16,9 @@ import {
  *    scratch checkout's config. The URL must be clean; auth belongs in the environment of one git invocation.
  */
 const SECRET = "ghp_THIS-MUST-NEVER-APPEAR-2222222222";
-const ROOT = "C:/Users/cuill/df-workspaces";
+// path.join normalises to the platform separator, so the expected root must too - the planner builds its path
+// with path.join, and a forward-slash literal here would make a startsWith check false on Windows for no real reason.
+const ROOT = pathJoin("C:/Users/cuill/df-workspaces");
 
 const plan = (over: Partial<Parameters<typeof planCheckout>[0]> = {}) =>
   planCheckout({
