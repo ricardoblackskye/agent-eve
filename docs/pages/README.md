@@ -13,6 +13,7 @@ describes, and design decisions live as [Architecture Decision Records](../adr/R
 - [Platform adapters (R6 foundation)](platform-adapters.md)
 - [Dark Factory (R1)](dark-factory.md)
 - [Dark Factory operations](dark-factory-operations.md)
+- [Local runs: provisioning a local Dark Factory run (#404)](dark-factory-local-runs.md)
 
 ## Dark Factory flow deep-dives
 
