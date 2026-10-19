@@ -196,6 +196,11 @@ export class NotifyingRunHistoryStore implements RunHistoryStore {
     return this.inner.recordRunSummary(...args);
   }
 
+  /** #404 R2 — delegated like every other write, so a decorated store cannot silently lose the capability. */
+  retireRunClaim(...args: Parameters<RunHistoryStore["retireRunClaim"]>) {
+    return this.inner.retireRunClaim(...args);
+  }
+
   getRun(...args: Parameters<RunHistoryStore["getRun"]>) {
     return this.inner.getRun(...args);
   }

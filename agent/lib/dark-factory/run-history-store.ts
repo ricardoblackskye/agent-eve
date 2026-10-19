@@ -65,6 +65,31 @@ export interface ActiveRunConflict {
   status: RunStatus;
 }
 
+/**
+ * #404 R2 — retire the claim a STOPPED run holds, so a clean re-run becomes possible.
+ *
+ * The ledger deliberately stores no free-form operator text (see operator-actions.ts), so the human's reason is
+ * not carried here: the retirement is identified by the self-describing terminal event id `retire-claim:<runId>`,
+ * exactly as the #328 repair names its own terminations.
+ */
+export interface RetireRunClaim {
+  repo: string;
+  issue: number;
+  /** Who asked, for the caller's own record. */
+  actor?: string;
+}
+
+/**
+ * #404 R2 — the outcome of a retirement attempt.
+ *
+ * Deliberately NOT an error shape: refusing to retire a LIVE holder is a legitimate, expected result, and so is
+ * finding no claim to retire. Only a genuine fault produces `ok: false`.
+ */
+export type RunClaimRetirement =
+  | { outcome: "retired"; runId: string; previousStatus: RunStatus }
+  | { outcome: "holder-is-live"; runId: string; status: RunStatus }
+  | { outcome: "no-claim" };
+
 export interface RunHistoryWriteResult<T> {
   ok: boolean;
   mode: "live" | "blocked";
@@ -137,6 +162,17 @@ export interface RunHistoryStore {
   ): Promise<RunHistoryWriteResult<RunControlDeliveryReceipt>>;
 
   appendEvent(event: RunEvent): Promise<RunHistoryWriteResult<RunSummary>>;
+  /**
+   * #404 R2 — retire the claim a stopped run holds: a terminal transition (which releases the claim, #328) for a
+   * run that is no longer working.
+   *
+   * REFUSES a LIVE (`running`) holder — cutting the claim from under work in flight would put two agents on one
+   * issue, the very thing the claim exists to prevent. A `blocked` (parked) holder IS retired, because a park is a
+   * WAIT and retirement is what makes it unable to resume. Reports `no-claim` when nothing holds the claim.
+   */
+  retireRunClaim(
+    input: RetireRunClaim,
+  ): Promise<RunHistoryWriteResult<RunClaimRetirement>>;
   updateCommentReference(
     runId: string,
     eventId: string,
@@ -1224,6 +1260,67 @@ export class SqliteRunHistoryStore implements RunHistoryStore {
         providerId: this.id,
         value: appended.summary,
         duplicate: appended.duplicate,
+      };
+    } catch (error) {
+      return blocked(this.id, error);
+    }
+  }
+
+  /**
+   * #404 R2 — retire the claim a STOPPED run holds.
+   *
+   * The holder is located and re-read INSIDE one transaction, so a run that resumed to `running` since the holder
+   * query is refused (a live process is never cut out from under itself). The terminal transition then reuses the
+   * record layer's own rules — `applyRunEvent` + `writeSummary` — so a retired run satisfies exactly the same
+   * invariants as any other terminal one (it is written with `completed_at`, and the event makes it readable).
+   */
+  async retireRunClaim(
+    input: RetireRunClaim,
+  ): Promise<RunHistoryWriteResult<RunClaimRetirement>> {
+    try {
+      const retirement = this.transaction((db): RunClaimRetirement => {
+        const holder = db
+          .prepare(
+            `SELECT run_id, status FROM df_run_summaries
+              WHERE repo = ? AND issue = ? AND status IN ('queued','running','blocked')
+              LIMIT 1`,
+          )
+          .get(input.repo, input.issue) as
+          | { run_id: string; status: RunStatus }
+          | undefined;
+        if (!holder) return { outcome: "no-claim" };
+
+        const summary = readSummary(db, holder.run_id);
+        if (!summary) return { outcome: "no-claim" };
+
+        // The GUARD, re-read inside the transaction: a run that resumed since the query above is LIVE.
+        if (summary.status === "running") {
+          return { outcome: "holder-is-live", runId: summary.runId, status: summary.status };
+        }
+
+        const event: RunEvent = {
+          runId: summary.runId,
+          eventId: `retire-claim:${summary.runId}`,
+          type: "run.terminal",
+          stage: "terminal",
+          occurredAt: new Date().toISOString(),
+          status: "aborted",
+        };
+        const updated = applyRunEvent(summary, event);
+        writeEvent(db, event);
+        writeSummary(db, updated);
+        return {
+          outcome: "retired",
+          runId: summary.runId,
+          previousStatus: summary.status,
+        };
+      });
+      return {
+        ok: true,
+        mode: "live",
+        providerId: this.id,
+        value: retirement,
+        duplicate: false,
       };
     } catch (error) {
       return blocked(this.id, error);

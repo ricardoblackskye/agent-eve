@@ -32,6 +32,7 @@ import type {
   ActiveRunConflict,
   RunHistoryStore,
   RunHistoryWriteResult,
+  RunClaimRetirement,
   RunListOptions,
 } from "./run-history-store";
 
@@ -1154,6 +1155,70 @@ export class PostgresRunHistoryStore implements RunHistoryStore {
         mode: "live",
         providerId: this.id,
         value: written,
+        duplicate: false,
+      };
+    } catch (error) {
+      return failedWrite(error);
+    }
+  }
+
+  /**
+   * #404 R2 — retire the claim a STOPPED run holds.
+   *
+   * The holder is selected `FOR UPDATE` inside the transaction, so the guard cannot be raced: a run that resumed to
+   * `running` is seen as LIVE and REFUSED, never cut out from under itself. The terminal transition then reuses the
+   * record layer's own rules (`applyRunEvent` + `updateSummary`), so a retired run satisfies exactly the same
+   * invariants as any other terminal one — written with `completed_at`, and readable through its event.
+   */
+  async retireRunClaim(
+    input: Parameters<RunHistoryStore["retireRunClaim"]>[0],
+  ): ReturnType<RunHistoryStore["retireRunClaim"]> {
+    try {
+      const retirement = await this.transaction(
+        async (client): Promise<RunClaimRetirement> => {
+          const holderResult = await client.query<RunSummaryRow>(
+            `SELECT * FROM df_run_summaries
+              WHERE repo = $1 AND issue = $2 AND status IN ('queued','running','blocked')
+              LIMIT 1
+              FOR UPDATE`,
+            [input.repo, input.issue],
+          );
+          const holderRow = holderResult.rows[0];
+          if (!holderRow) return { outcome: "no-claim" };
+
+          const summary = rowToSummary(holderRow);
+          // The GUARD: a LIVE holder is refused, and nothing is written.
+          if (summary.status === "running") {
+            return {
+              outcome: "holder-is-live",
+              runId: summary.runId,
+              status: summary.status,
+            };
+          }
+
+          const event: RunEvent = {
+            runId: summary.runId,
+            eventId: `retire-claim:${summary.runId}`,
+            type: "run.terminal",
+            stage: "terminal",
+            occurredAt: new Date().toISOString(),
+            status: "aborted",
+          };
+          const updated = applyRunEvent(summary, event);
+          await insertEvent(client, event);
+          await updateSummary(client, updated);
+          return {
+            outcome: "retired",
+            runId: summary.runId,
+            previousStatus: summary.status,
+          };
+        },
+      );
+      return {
+        ok: true,
+        mode: "live",
+        providerId: this.id,
+        value: retirement,
         duplicate: false,
       };
     } catch (error) {
