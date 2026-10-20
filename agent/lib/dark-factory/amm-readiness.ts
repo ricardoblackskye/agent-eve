@@ -15,8 +15,14 @@
 export interface AmmSignal {
   id: string;
   label: string;
+  /** True only when the signal was MEASURED present. Unmeasured is not present. */
   present: boolean;
   level: number;
+  /**
+   * #382 - what the check found. Absent from R1/R3 fixtures, which predate the third state; a scan produced by the
+   * scorer always sets it, so the UI can tell "nobody looked" from "looked, and it is missing".
+   */
+  state?: "present" | "absent" | "unmeasured";
 }
 
 export interface AmmPillar {
@@ -25,7 +31,7 @@ export interface AmmPillar {
   level: number;
   label: string;
   benchmark: string;
-  evidence: string[];
+  evidence: readonly string[];
   signals?: AmmSignal[];
 }
 
@@ -109,17 +115,11 @@ export async function listedRepos(input: {
   return rows;
 }
 
-/** The headline leadership metric: the share of active repos at the production floor or above. */
-export function organizationalReadiness(rows: readonly RepoRow[]): {
-  atOrAboveFloor: number;
-  active: number;
-  pct: number;
-} {
-  const active = rows.length;
-  const atOrAboveFloor = rows.filter((row) => row.level >= AMM_FLOOR_LEVEL).length;
-  const pct = active === 0 ? 0 : Math.round((atOrAboveFloor / active) * 100);
-  return { atOrAboveFloor, active, pct };
-}
+/**
+ * The headline leadership metric lived here in R1 and now lives in `amm-scoring.ts` as `readinessOf`, beside the
+ * rest of the model. One implementation, because two copies of a leadership figure is how a repo list and a profile
+ * come to disagree about the same fleet.
+ */
 
 const signal = (
   id: string,

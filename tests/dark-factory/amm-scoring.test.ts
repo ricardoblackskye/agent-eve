@@ -19,6 +19,10 @@ import {
   catalogueTotal,
   signalsForPillar,
 } from "../../agent/lib/dark-factory/amm-signals";
+import type { AmmPillarId } from "../../agent/lib/dark-factory/amm-scoring";
+
+/** The scan stamp is an input, so every case here is deterministic. */
+const STAMP = "2026-10-21T00:00:00.000Z";
 import {
   levelForPoints,
   profileVsTarget,
@@ -56,7 +60,7 @@ describe("#382 the signal catalogue is data a reviewer can read", () => {
 
   it("covers all eight pillars, each with at least one signal", () => {
     for (let pillar = 1; pillar <= 8; pillar += 1) {
-      expect(signalsForPillar(pillar).length, `pillar ${pillar}`).toBeGreaterThan(0);
+      expect(signalsForPillar(pillar as AmmPillarId).length, `pillar ${pillar}`).toBeGreaterThan(0);
     }
   });
 
@@ -70,19 +74,27 @@ describe("#382 the signal catalogue is data a reviewer can read", () => {
     expect(AMM_POINT_VALUES).toEqual({ 1: 1, 2: 2, 3: 4, 4: 8, 5: 16 });
   });
 
-  it("totals exactly 100, or the top of the scale would be unreachable", () => {
-    // The whitepaper's own thresholds end at L5 = 100, so a catalogue that totalled anything else would make
-    // "everything present" either unreachable or an overshoot.
-    expect(catalogueTotal()).toBe(100);
+  it("normalises against the whole catalogue, so everything present IS the top of the scale", () => {
+    // The catalogue carries more than 100 points of weight, so a raw sum could never top out at the whitepaper's
+    // L5 = 100. The score is therefore the SHARE of available weight: everything present scores exactly 100, and
+    // nothing can overshoot it.
+    expect(catalogueTotal()).toBeGreaterThan(100);
     expect(AMM_LEVELS.at(-1)?.points).toBe(100);
+
+    const everythingPresent = Object.fromEntries(
+      AMM_SIGNAL_CATALOGUE.map((signal) => [signal.id, "present" as const]),
+    );
+    const scan = scoreRepo({ scannedAt: STAMP,  repo: "owner/repo", measurements: everythingPresent });
+    expect(scan.overall.points).toBe(100);
+    expect(scan.overall.level).toBe(5);
   });
 });
 
 describe("#382 scoring is a pure function of the levels", () => {
   it("is pure: the same measurements score the same, twice", () => {
     const measurements = { linter: "present" as const };
-    expect(scoreRepo({ repo: "owner/repo", measurements })).toEqual(
-      scoreRepo({ repo: "owner/repo", measurements }),
+    expect(scoreRepo({ scannedAt: STAMP,  repo: "owner/repo", measurements })).toEqual(
+      scoreRepo({ scannedAt: STAMP,  repo: "owner/repo", measurements }),
     );
   });
 
@@ -117,7 +129,7 @@ describe("#382 scoring is a pure function of the levels", () => {
   });
 
   it("returns a scan in the shape the UI already renders", () => {
-    const scan: AmmScan = scoreRepo({ repo: "owner/repo", measurements: {} });
+    const scan: AmmScan = scoreRepo({ scannedAt: STAMP,  repo: "owner/repo", measurements: {} });
 
     expect(scan.repo).toBe("owner/repo");
     expect(scan.overall.maxPoints).toBe(100);
@@ -133,7 +145,7 @@ describe("#382 scoring is a pure function of the levels", () => {
 
 describe("#382 unmeasured is not present", () => {
   it("marks a signal with no measurement as unmeasured, NEVER present", () => {
-    const scan = scoreRepo({ repo: "owner/repo", measurements: {} });
+    const scan = scoreRepo({ scannedAt: STAMP,  repo: "owner/repo", measurements: {} });
 
     const states = scan.pillars.flatMap((pillar) => pillar.signals ?? []);
     expect(states.length).toBe(AMM_SIGNAL_CATALOGUE.length);
@@ -144,7 +156,7 @@ describe("#382 unmeasured is not present", () => {
   });
 
   it("gives an unmeasured signal no points, so ignorance cannot earn a grade", () => {
-    const scan = scoreRepo({ repo: "owner/repo", measurements: {} });
+    const scan = scoreRepo({ scannedAt: STAMP,  repo: "owner/repo", measurements: {} });
 
     expect(scan.overall.points).toBe(0);
     expect(scan.overall.level, "an unmeasured repo must not claim a level").toBe(0);
@@ -152,7 +164,7 @@ describe("#382 unmeasured is not present", () => {
   });
 
   it("counts only what was MEASURED, however many signals exist", () => {
-    const scan = scoreRepo({
+    const scan = scoreRepo({ scannedAt: STAMP, 
       repo: "owner/repo",
       measurements: { linter: "present", formatter: "absent" },
     });
@@ -164,7 +176,7 @@ describe("#382 unmeasured is not present", () => {
   });
 
   it("distinguishes absent from unmeasured in the scan it produces", () => {
-    const scan = scoreRepo({
+    const scan = scoreRepo({ scannedAt: STAMP, 
       repo: "owner/repo",
       measurements: { linter: "present", formatter: "absent" },
     });
@@ -180,7 +192,7 @@ describe("#382 unmeasured is not present", () => {
 
 describe("#382 the profile reports current against the target", () => {
   it("gives every pillar a current level and the Level 5 target", () => {
-    const scan = scoreRepo({ repo: "owner/repo", measurements: {} });
+    const scan = scoreRepo({ scannedAt: STAMP,  repo: "owner/repo", measurements: {} });
     const profile = profileVsTarget(scan);
 
     expect(profile).toHaveLength(8);
@@ -192,7 +204,7 @@ describe("#382 the profile reports current against the target", () => {
   });
 
   it("reports a gap per pillar, so the work is a list rather than a number", () => {
-    const scan = scoreRepo({ repo: "owner/repo", measurements: {} });
+    const scan = scoreRepo({ scannedAt: STAMP,  repo: "owner/repo", measurements: {} });
     for (const entry of profileVsTarget(scan)) {
       expect(entry.gap).toBe(entry.target - entry.current);
       expect(entry.gap).toBeGreaterThanOrEqual(0);
