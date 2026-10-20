@@ -3,7 +3,10 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { AmmScale } from "../../app/dark-factory/ui/amm-scale";
-import { agentEveScan } from "../../agent/lib/dark-factory/amm-readiness";
+import {
+  agentEveScan,
+  type AmmReadinessProvider,
+} from "../../agent/lib/dark-factory/amm-readiness";
 
 /**
  * #415 (epic #403 R3) — the AMM readiness scale.
@@ -78,5 +81,27 @@ describe("#415 the AMM scale", () => {
     render(<AmmScale repo="owner/example" scan={undefined} />);
     expect(screen.getByText(/no readiness scan yet/i)).toBeTruthy();
     expect(screen.getByText(/owner\/example/)).toBeTruthy();
+  });
+});
+
+/**
+ * #415 task 4 — a GUARD, not a RED: the component already renders whatever a scan contains, so this passes by design.
+ * It holds the SEAM rather than the rendering: a database adapter satisfies the same interface as the fixture, so
+ * swapping them is wiring. Whoever builds the scanner should be able to replace the fixture and leave this file alone.
+ */
+describe("#415 the provider seam", () => {
+  it("renders a scan produced by a different adapter, with no component change", async () => {
+    const databaseAdapter: AmmReadinessProvider = {
+      async scan(repo: string) {
+        return repo === "owner/example"
+          ? minimalScan([{ id: 1, name: "Metric from the database", level: 4 }])
+          : undefined;
+      },
+    };
+
+    const scan = await databaseAdapter.scan("owner/example");
+    render(<AmmScale repo="owner/example" scan={scan} />);
+
+    expect(screen.getByText("Metric from the database")).toBeTruthy();
   });
 });
