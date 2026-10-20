@@ -8,7 +8,7 @@
 import { describe, expect, it } from "vitest";
 
 import { RUN_SORT_FIELDS } from "../../agent/lib/dark-factory/run-history-store";
-import { validateRunListParams } from "../../agent/lib/dark-factory/run-query";
+import { queryRunList, validateRunListParams } from "../../agent/lib/dark-factory/run-query";
 
 describe("#414 the list request carries the order", () => {
   it("passes an allowed sort and direction through to the request", () => {
@@ -48,5 +48,33 @@ describe("#414 the list request carries the order", () => {
 
   it("allows exactly the field the keyset cursor can serve, and nothing wider", () => {
     expect([...RUN_SORT_FIELDS]).toEqual(["createdAt"]);
+  });
+});
+
+describe("#414 the order reaches the store", () => {
+  const recorded: Record<string, unknown>[] = [];
+  const stubStore = {
+    async listRuns(options: Record<string, unknown>) {
+      recorded.push(options);
+      return {
+        ok: true as const,
+        mode: "live" as const,
+        providerId: "stub",
+        value: { items: [] },
+      };
+    },
+  } as never;
+
+  it("forwards the requested sort and direction into the store call", async () => {
+    recorded.length = 0;
+    await queryRunList(stubStore, { limit: 25, sort: "createdAt", direction: "asc" });
+    expect(recorded[0]).toMatchObject({ sort: "createdAt", direction: "asc" });
+  });
+
+  it("passes no order when the client asked for none, leaving the store default intact", async () => {
+    recorded.length = 0;
+    await queryRunList(stubStore, { limit: 25 });
+    expect(recorded[0].sort).toBeUndefined();
+    expect(recorded[0].direction).toBeUndefined();
   });
 });
