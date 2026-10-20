@@ -1019,3 +1019,26 @@ each, and the binary signals behind it. Supplies the fixture scan that the web r
 #403 R1) and the seam the AMM scanner will fill later, so the mocked phase and the real phase share one contract.
 
 **Source:** [`agent/lib/dark-factory/amm-readiness.ts`](../../agent/lib/dark-factory/amm-readiness.ts)
+
+## AMM signal catalogue
+
+The AMM model as DATA: one row per signal naming its pillar, the level that sets its point value, the automated check
+that decides whether it is present, what that check must show, how to fix it when absent, and the whitepaper line it
+comes from. A reviewer corrects the model here without touching the scorer, which is the whole reason it is data
+rather than code (#382).
+
+**Source:** [`agent/lib/dark-factory/amm-signals.ts`](../../agent/lib/dark-factory/amm-signals.ts)
+
+## AMM scoring
+
+Turns measurements into a scan: binary signals, points from the level (L1 1, L2 2, L3 4, L4 8, L5 16), and the
+whitepaper's thresholds (L1 5, L2 19, L3 36, L4 60, L5 100). The score is NORMALISED over the catalogue, so
+everything present is exactly 100 and nothing overshoots the top of the scale. UNMEASURED is a third state that
+earns no points: a repository cannot graduate on signals nobody could measure. Also owns Organizational Readiness -
+the share of active repositories at or above the production floor - so the repo list and a per-repo profile cannot
+disagree about the same fleet (#382).
+
+**Source:** [`agent/lib/dark-factory/amm-scoring.ts`](../../agent/lib/dark-factory/amm-scoring.ts)
+
+**Exports:** `scoreRepo`, `levelForPoints`, `profileVsTarget`, `readinessOf`, `labelForLevel`, `AMM_POINT_VALUES`,
+`AMM_TARGET_LEVEL`, `UNMEASURED_LABEL`

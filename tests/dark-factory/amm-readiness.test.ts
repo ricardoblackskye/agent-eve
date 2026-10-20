@@ -7,13 +7,13 @@
  */
 import { describe, expect, it } from "vitest";
 
+import { readinessOf } from "../../agent/lib/dark-factory/amm-scoring";
 import {
   AMM_FLOOR_LEVEL,
   agentEveScan,
   defaultAmmProvider,
   fixtureAmmProvider,
-  listedRepos,
-  organizationalReadiness,
+  listedRepos,
   type AmmScan,
 } from "../../agent/lib/dark-factory/amm-readiness";
 
@@ -81,17 +81,17 @@ describe("#413 organizational readiness", () => {
         scan("a/four", 3),
       ]),
     });
-    expect(organizationalReadiness(rows)).toEqual({ atOrAboveFloor: 3, active: 4, pct: 75 });
+    expect(readinessOf(rows)).toEqual({ atOrAboveFloor: 3, active: 4, pct: 75 });
   });
 
   it("does not treat below-Level-3 as a pass", async () => {
     const rows = await listedRepos({ configured: "a/one", provider: providerWith([scan("a/one", 2)]) });
-    expect(organizationalReadiness(rows).pct).toBe(0);
-    expect(organizationalReadiness(rows).atOrAboveFloor).toBe(0);
+    expect(readinessOf(rows).pct).toBe(0);
+    expect(readinessOf(rows).atOrAboveFloor).toBe(0);
   });
 
   it("is 0 with no repos rather than dividing by zero", () => {
-    expect(organizationalReadiness([])).toEqual({ atOrAboveFloor: 0, active: 0, pct: 0 });
+    expect(readinessOf([])).toEqual({ atOrAboveFloor: 0, active: 0, pct: 0 });
   });
 });
 

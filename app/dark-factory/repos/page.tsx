@@ -1,10 +1,10 @@
 import type { ReactNode } from "react";
 
 import { resolveWorkerAllowedRepos } from "../../../agent/lib/dark-factory/credentials";
+import { readinessOf } from "../../../agent/lib/dark-factory/amm-scoring";
 import {
   defaultAmmProvider,
-  listedRepos,
-  organizationalReadiness,
+  listedRepos,
 } from "../../../agent/lib/dark-factory/amm-readiness";
 import { RepoList } from "../ui/repo-list";
 
@@ -22,5 +22,5 @@ export const metadata = { title: "Repositories" };
 export default async function ReposPage(): Promise<ReactNode> {
   const configured = resolveWorkerAllowedRepos(process.env).join(",");
   const rows = await listedRepos({ configured, provider: defaultAmmProvider() });
-  return <RepoList readiness={organizationalReadiness(rows)} rows={rows} />;
+  return <RepoList readiness={readinessOf(rows)} rows={rows} />;
 }
