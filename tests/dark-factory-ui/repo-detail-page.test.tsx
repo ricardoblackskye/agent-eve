@@ -78,7 +78,11 @@ describe("#414 the repo detail page", () => {
 
   it("names the repository it is showing", async () => {
     render(<RepoDetailPage />);
-    expect(screen.getByText(/ricardoblackskye\/agent-eve/)).toBeTruthy();
+    // A heading, not any text: the repository name also appears inside the readiness panel, and a matcher that
+    // accepted either would pass even if the page lost its own title.
+    expect(
+      screen.getByRole("heading", { name: /ricardoblackskye\/agent-eve/ }),
+    ).toBeTruthy();
   });
 
   it("re-requests with the other direction when the order is reversed", async () => {
@@ -112,5 +116,12 @@ describe("#414 the repo detail page", () => {
       const last = new URL(requested.at(-1) ?? "http://localhost", "http://localhost");
       expect(last.searchParams.get("cursor")).toBeNull();
     });
+  });
+
+  it("hosts the readiness scale for the repository it is showing", async () => {
+    render(<RepoDetailPage />);
+    await waitFor(() =>
+      expect(screen.getByText(/level 4 \(optimized\)/i)).toBeTruthy(),
+    );
   });
 });
