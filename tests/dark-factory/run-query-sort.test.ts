@@ -46,8 +46,21 @@ describe("#414 the list request carries the order", () => {
     expect(result.error).toMatch(/direction/i);
   });
 
-  it("allows exactly the field the keyset cursor can serve, and nothing wider", () => {
-    expect([...RUN_SORT_FIELDS]).toEqual(["createdAt"]);
+  it("allows exactly the fields the keyset cursor can serve, and nothing wider", () => {
+    // #421 widened this from `createdAt` alone, once the cursor carried its own sort key and could therefore resume
+    // an ordering by another column. The intent is unchanged: the list is CLOSED, so a column no cursor can resume is
+    // refused rather than silently ignored. `issue` is the deliberate omission - its key is numeric, so a text cursor
+    // key would need typed parsing per sort.
+    expect([...RUN_SORT_FIELDS]).toEqual(["createdAt", "status", "repo"]);
+    expect([...RUN_SORT_FIELDS]).not.toContain("issue");
+  });
+
+  it("REFUSES a column the cursor cannot resume, so the closed list is real", () => {
+    const result = validateRunListParams({ sort: "issue" });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toMatch(/sort/i);
   });
 });
 
