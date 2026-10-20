@@ -8,6 +8,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  AMM_FLOOR_LEVEL,
+  agentEveScan,
+  defaultAmmProvider,
   fixtureAmmProvider,
   listedRepos,
   organizationalReadiness,
@@ -89,5 +92,29 @@ describe("#413 organizational readiness", () => {
 
   it("is 0 with no repos rather than dividing by zero", () => {
     expect(organizationalReadiness([])).toEqual({ atOrAboveFloor: 0, active: 0, pct: 0 });
+  });
+});
+
+describe("#413 the fixture scan", () => {
+  it("records the figures from the whitepaper scan of this repo", () => {
+    const scan = agentEveScan();
+    expect(scan.repo).toBe("ricardoblackskye/agent-eve");
+    expect(scan.overall).toMatchObject({ points: 74, maxPoints: 100, level: 4 });
+    expect(scan.overall.label).toBe("Level 4 (Optimized)");
+    expect(scan.pillars).toHaveLength(8);
+    expect(scan.pillars.map((entry) => entry.level)).toEqual([4, 4, 4, 5, 4, 4, 4, 4.5]);
+    expect(scan.capabilities.length).toBeGreaterThan(0);
+  });
+
+  it("keeps every pillar at or above the production floor", () => {
+    for (const entry of agentEveScan().pillars) {
+      expect(entry.level, entry.name).toBeGreaterThanOrEqual(AMM_FLOOR_LEVEL);
+    }
+  });
+
+  it("serves that scan for this repo and nothing for a repo with no scan", async () => {
+    const provider = defaultAmmProvider();
+    expect((await provider.scan("ricardoblackskye/agent-eve"))?.overall.points).toBe(74);
+    expect(await provider.scan("someone/else")).toBeUndefined();
   });
 });
