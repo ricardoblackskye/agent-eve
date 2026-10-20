@@ -113,13 +113,17 @@ function fakeStore(behavior: FakeBehavior): RunHistoryStore {
 describe("run-query cursor codec", () => {
   it("round-trips a list cursor into an opaque token", () => {
     const token = encodeListCursor({
-      createdAt: "2026-09-24T12:00:00.000Z",
+      sort: "createdAt",
+      direction: "desc",
+      key: "2026-09-24T12:00:00.000Z",
       runId: "run-9",
     });
     expect(typeof token).toBe("string");
     expect(token).not.toContain("run-9");
     expect(decodeListCursor(token)).toEqual({
-      createdAt: "2026-09-24T12:00:00.000Z",
+      sort: "createdAt",
+      direction: "desc",
+      key: "2026-09-24T12:00:00.000Z",
       runId: "run-9",
     });
   });
@@ -127,7 +131,14 @@ describe("run-query cursor codec", () => {
   it("rejects tampered or malformed list cursors", () => {
     expect(decodeListCursor("@@@not-base64@@@")).toBeNull();
     expect(
-      decodeListCursor(encodeListCursor({ createdAt: "", runId: "x" })),
+      decodeListCursor(
+        encodeListCursor({
+          sort: "createdAt",
+          direction: "desc",
+          key: "",
+          runId: "x",
+        }),
+      ),
     ).not.toBeNull();
     const tampered = Buffer.from(JSON.stringify({ foo: 1 }), "utf8").toString(
       "base64url",

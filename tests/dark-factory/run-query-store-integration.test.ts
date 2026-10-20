@@ -145,13 +145,17 @@ describe("run query service over a real SQLite store", () => {
 describe("list cursor codec", () => {
   it("round-trips a list cursor", () => {
     const token = encodeListCursor({
+      sort: "createdAt",
+      direction: "desc",
+      key: "2026-09-24T12:00:00.000Z",
       runId: "run-xyz",
-      createdAt: "2026-09-24T12:00:00.000Z",
     });
     expect(typeof token).toBe("string");
     expect(decodeListCursor(token)).toEqual({
+      sort: "createdAt",
+      direction: "desc",
+      key: "2026-09-24T12:00:00.000Z",
       runId: "run-xyz",
-      createdAt: "2026-09-24T12:00:00.000Z",
     });
   });
 });

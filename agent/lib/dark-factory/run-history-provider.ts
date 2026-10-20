@@ -4,7 +4,8 @@ import type {
   AcceptRunDelivery,
   AdvanceRunControlDelivery,
   ClaimRunControlDelivery,
-  RunControlDeliveryReceipt,
+  RunControlDeliveryReceipt,
+  RunCursor,
   EventCursor,
   Page,
   PersistedRunEvent,
@@ -131,7 +132,7 @@ export class ConsoleRunHistoryStore implements RunHistoryStore {
   async listRuns(
     _options: RunListOptions = {},
   ): Promise<
-    RunHistoryReadResult<Page<RunSummary, { createdAt: string; runId: string }>>
+    RunHistoryReadResult<Page<RunSummary, RunCursor>>
   > {
     return {
       ok: false,

@@ -554,7 +554,9 @@ describe("SqliteRunHistoryStore delivery acceptance", () => {
       second.value?.runId,
     ]);
     expect(page1.value?.nextCursor).toEqual({
-      createdAt: second.value?.createdAt,
+      sort: "createdAt",
+      direction: "desc",
+      key: second.value?.createdAt,
       runId: second.value?.runId,
     });
     expect(page2.value?.items.map((run) => run.runId)).toEqual([

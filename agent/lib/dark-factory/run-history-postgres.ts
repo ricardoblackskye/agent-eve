@@ -17,7 +17,11 @@ import {
   type RunTrendPoint,
 } from "./run-history";
 import { formatTerminatedRuns } from "./run-history";
-import { validateRunSort } from "./run-history-store";
+import {
+  runCursorAfter,
+  validateRunCursor,
+  validateRunSort,
+} from "./run-history-store";
 import type {
   AcceptRunDelivery,
   AdvanceRunControlDelivery,
@@ -484,17 +488,6 @@ function validateLimit(value: number | undefined): number {
     );
   }
   return value;
-}
-
-function validateRunCursor(cursor: RunCursor): RunCursor {
-  const runId = validateIdentifier(cursor.runId, "cursor.runId");
-  const parsed = Date.parse(cursor.createdAt);
-  if (!Number.isFinite(parsed)) {
-    throw new InvalidRunRecordError(
-      "Run history cursor createdAt must be an ISO timestamp.",
-    );
-  }
-  return { runId, createdAt: new Date(parsed).toISOString() };
 }
 
 function validateEventCursor(cursor: EventCursor): number {
@@ -1320,9 +1313,10 @@ export class PostgresRunHistoryStore implements RunHistoryStore {
       );
     }
     const { from, to } = normalizeRunDateRange(options.from, options.to);
-    const { order, comparison } = validateRunSort(options);
+    const { sort, direction, order, comparison, column } =
+      validateRunSort(options);
     const cursor = options.cursor
-      ? validateRunCursor(options.cursor)
+      ? validateRunCursor(options.cursor, options)
       : undefined;
     try {
       await this.ensureSchema();
@@ -1344,18 +1338,18 @@ export class PostgresRunHistoryStore implements RunHistoryStore {
       if (from !== undefined) clauses.push(`created_at >= ${bind(from)}`);
       if (to !== undefined) clauses.push(`created_at < ${bind(to)}`);
       if (cursor) {
-        const created = bind(cursor.createdAt);
-        const equalCreated = bind(cursor.createdAt);
+        const key = bind(cursor.key);
+        const equalKey = bind(cursor.key);
         const runId = bind(cursor.runId);
         clauses.push(
-          `(created_at ${comparison} ${created} OR (created_at = ${equalCreated} AND run_id ${comparison} ${runId}))`,
+          `(${column} ${comparison} ${key} OR (${column} = ${equalKey} AND run_id ${comparison} ${runId}))`,
         );
       }
       const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
       const result = await (
         await this.pool()
       ).query<RunSummaryRow>(
-        `SELECT * FROM df_run_summaries ${where} ORDER BY created_at ${order}, run_id ${order} LIMIT ${bind(limit + 1)}`,
+        `SELECT * FROM df_run_summaries ${where} ORDER BY ${column} ${order}, run_id ${order} LIMIT ${bind(limit + 1)}`,
         values,
       );
       const hasMore = result.rows.length > limit;
@@ -1368,7 +1362,7 @@ export class PostgresRunHistoryStore implements RunHistoryStore {
         value: {
           items,
           ...(hasMore && last
-            ? { nextCursor: { createdAt: last.createdAt, runId: last.runId } }
+            ? { nextCursor: runCursorAfter(last, sort, direction) }
             : {}),
         },
       };
