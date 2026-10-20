@@ -1010,3 +1010,12 @@ Dark Factory — retiring a stale claim (#404 R2). The operator's "let go" for a
 **Exports:** `retireStaleClaim`, `RetireReport`, `RetireOutcome`, `RetireDeps`, `RetireInput`
 
 **Decisions:** [ADR 0051](../../docs/adr/0051-df-retiring-a-stale-claim-is-abandonment.md)
+
+
+## AMM readiness
+
+Scores a repository against the whitepaper's Autonomy Maturity Model: the eight technical pillars, the level of
+each, and the binary signals behind it. Supplies the fixture scan that the web repository list renders (epic
+#403 R1) and the seam the AMM scanner will fill later, so the mocked phase and the real phase share one contract.
+
+**Source:** [`agent/lib/dark-factory/amm-readiness.ts`](../../agent/lib/dark-factory/amm-readiness.ts)
