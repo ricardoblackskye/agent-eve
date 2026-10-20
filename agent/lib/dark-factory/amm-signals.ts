@@ -438,7 +438,11 @@ export const AMM_SIGNAL_CATALOGUE: readonly AmmSignalDefinition[] = [
     label: "Code ownership rules",
     level: 2,
     points: AMM_POINT_VALUES[2],
+    // cspell:disable
+    // A FILENAME cannot be reworded the way prose can: this check has to name the real file, and the shared
+    // dictionary is deliberately not taught the word. Same scoped pattern as docs/superpowers/writing-plans.md.
     check: { kind: "file", path: "CODEOWNERS" },
+    // cspell:enable
     expected: "sensitive paths have declared owners",
     remediation: "Declare owners for sensitive paths.",
     source: "whitepaper: eight pillars, binary signals, points by level",
