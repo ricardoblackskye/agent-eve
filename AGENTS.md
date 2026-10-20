@@ -82,7 +82,7 @@ rather than as a coverage drop, and `--update` refuses so a flake cannot lower t
 Only `agent/` and `app/` are measured - see
 `coverage.include` in `vitest.config.ts`, which is the one line that decides what the number means.
 
-The baseline is recorded with the five Postgres test variables set (as CI does), because those suites RUN
+The baseline is recorded with the six Postgres test variables set (as CI does), because those suites RUN
 in CI and SKIP without them; measuring without them understates the floor by about 5 points and weakens the
 gate to the point where a real 5-point regression would pass. CI provides Postgres as a service container;
 locally, start a disposable one first:
@@ -95,7 +95,7 @@ export DF_TENANT_TEST_DATABASE_URL="postgres://postgres@localhost:5432/darkfacto
 export DF_COST_BUDGET_TEST_DATABASE_URL="$DF_TENANT_TEST_DATABASE_URL"
 export DF_RUN_HISTORY_TEST_DATABASE_URL="$DF_TENANT_TEST_DATABASE_URL"
 export DF_USAGE_TEST_DATABASE_URL="$DF_TENANT_TEST_DATABASE_URL"
-export DF_CONTROL_DATABASE_URL="$DF_TENANT_TEST_DATABASE_URL"
+export DF_CONTROL_TEST_DATABASE_URL="$DF_TENANT_TEST_DATABASE_URL"
 
 npm run test:coverage && npm run coverage:ratchet
 docker stop df-cov-pg
