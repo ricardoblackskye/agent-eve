@@ -14,6 +14,9 @@ export default function DarkFactoryLayout({
         <Link className="df-rail-link" href="/dark-factory/runs" title="Runs">
           Runs
         </Link>
+        <Link className="df-rail-link" href="/dark-factory/repos" title="Repositories">
+          Repositories
+        </Link>
       </aside>
       <div className="df-main">
         <header className="df-top">
