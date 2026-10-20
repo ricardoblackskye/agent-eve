@@ -1,9 +1,14 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
+import {
+  defaultAmmProvider,
+  type AmmScan,
+} from "../../../../../agent/lib/dark-factory/amm-readiness";
 import type { RunSummary } from "../../../../../agent/lib/dark-factory/run-history";
+import { AmmScale } from "../../../ui/amm-scale";
 import { PanelHead, RunTable, StatePanel } from "../../../ui/components";
 import { DEFAULT_POLL_INTERVAL_MS, useRunQuery } from "../../../ui/use-run-query";
 import { toTableRows } from "../../../ui/view-model";
@@ -37,6 +42,26 @@ export default function RepoDetailPage() {
   // Cursor paging has no back-pointer, so Previous walks a trail of the cursors already used. An empty string stands
   // for the first page, whose request carries no cursor at all.
   const [trail, setTrail] = useState<string[]>([]);
+
+  // The readiness scan arrives through the AmmReadinessProvider seam. Until the scanner exists this is the fixture,
+  // which is why it is read here rather than fetched: when the database adapter lands this becomes one request and the
+  // scale below does not change, because it renders whatever a scan contains.
+  const [scan, setScan] = useState<AmmScan | undefined>(undefined);
+
+  useEffect(() => {
+    let cancelled = false;
+    void defaultAmmProvider()
+      .scan(repo)
+      .then((found) => {
+        if (!cancelled) setScan(found);
+      })
+      .catch(() => {
+        if (!cancelled) setScan(undefined);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [repo]);
 
   const path = useMemo(() => {
     const search = new URLSearchParams({
@@ -125,6 +150,8 @@ export default function RepoDetailPage() {
           </button>
         </div>
       </div>
+
+      <AmmScale repo={repo} scan={scan} />
 
       <PanelHead title="Runs" />
       <RunTable
