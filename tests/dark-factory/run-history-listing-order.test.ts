@@ -99,10 +99,10 @@ describe("#414 the run list is orderable", () => {
   });
 
   it("REFUSES an unknown sort field rather than silently ignoring it", async () => {
-    // An ignored sort shows unsorted data, which an operator reads as a data bug rather than a bad parameter. The API
-    // layer rejects it too; the store refuses as well so a new caller cannot bypass the rule by skipping the route.
+    // An ignored sort shows unsorted data, which an operator reads as a data bug rather than a bad parameter. The store
+    // refuses the same way validateLimit and validateRunCursor do - by throwing - and the API layer turns that into a
+    // 400, so a caller cannot bypass the rule by skipping the route.
     const store = await seededStore();
-    const page = await store.listRuns({ sort: "costUsd" as never });
-    expect(page.ok).toBe(false);
+    await expect(store.listRuns({ sort: "costUsd" as never })).rejects.toThrow(/sort/i);
   });
 });

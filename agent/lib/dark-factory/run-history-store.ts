@@ -117,6 +117,16 @@ export interface RunCursor {
   runId: string;
 }
 
+/**
+ * The columns the list may be ordered by.
+ *
+ * Deliberately ONE field: the keyset cursor is `{ createdAt, runId }` and its WHERE compares those columns, so an
+ * ordering by any other column cannot resume from this cursor. Ordering by status, repo or issue needs a cursor that
+ * carries ITS sort key - a separate change, not a wider list here.
+ */
+export const RUN_SORT_FIELDS = ["createdAt"] as const;
+export type RunSortField = (typeof RUN_SORT_FIELDS)[number];
+
 export interface EventCursor {
   sequence: number;
 }
@@ -137,6 +147,10 @@ export interface RunListOptions {
   to?: string;
   limit?: number;
   cursor?: RunCursor;
+  /** Ordering column. Defaults to `createdAt`; see RUN_SORT_FIELDS for why only that one is allowed today. */
+  sort?: RunSortField;
+  /** Ordering direction. Defaults to `desc`, i.e. newest first, which is what this list has always returned. */
+  direction?: "asc" | "desc";
 }
 
 export interface RunEventListOptions {
@@ -731,6 +745,28 @@ function validateRunCursor(cursor: RunCursor): RunCursor {
     );
   }
   return { runId, createdAt: new Date(parsed).toISOString() };
+}
+
+/** Refuse an ordering the cursor cannot serve, rather than returning rows in an order nobody asked for. */
+export function validateRunSort(options: RunListOptions): {
+  order: "ASC" | "DESC";
+  comparison: "<" | ">";
+} {
+  const sort = options.sort ?? "createdAt";
+  if (!(RUN_SORT_FIELDS as readonly string[]).includes(sort as string)) {
+    throw new InvalidRunRecordError(
+      `Run history sort must be one of: ${RUN_SORT_FIELDS.join(", ")}.`,
+    );
+  }
+  const direction = options.direction ?? "desc";
+  if (direction !== "asc" && direction !== "desc") {
+    throw new InvalidRunRecordError(
+      "Run history sort direction must be asc or desc.",
+    );
+  }
+  return direction === "asc"
+    ? { order: "ASC", comparison: ">" }
+    : { order: "DESC", comparison: "<" };
 }
 
 function validateEventCursor(cursor: EventCursor): number {
@@ -1400,6 +1436,7 @@ export class SqliteRunHistoryStore implements RunHistoryStore {
       );
     }
     const { from, to } = normalizeRunDateRange(options.from, options.to);
+    const { order, comparison } = validateRunSort(options);
     const cursor = options.cursor
       ? validateRunCursor(options.cursor)
       : undefined;
@@ -1433,14 +1470,14 @@ export class SqliteRunHistoryStore implements RunHistoryStore {
         values.push(to);
       }
       if (cursor) {
-        clauses.push("(created_at < ? OR (created_at = ? AND run_id < ?))");
+        clauses.push(`(created_at ${comparison} ? OR (created_at = ? AND run_id ${comparison} ?))`);
         values.push(cursor.createdAt, cursor.createdAt, cursor.runId);
       }
       const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
       const rows = db
         .prepare(
           `SELECT * FROM df_run_summaries ${where} ` +
-            "ORDER BY created_at DESC, run_id DESC LIMIT ?",
+            `ORDER BY created_at ${order}, run_id ${order} LIMIT ?`,
         )
         .all(...values, limit + 1) as unknown as RunSummaryRow[];
       const hasMore = rows.length > limit;
