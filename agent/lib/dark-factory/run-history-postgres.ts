@@ -17,6 +17,7 @@ import {
   type RunTrendPoint,
 } from "./run-history";
 import { formatTerminatedRuns } from "./run-history";
+import { validateRunSort } from "./run-history-store";
 import type {
   AcceptRunDelivery,
   AdvanceRunControlDelivery,
@@ -1319,6 +1320,7 @@ export class PostgresRunHistoryStore implements RunHistoryStore {
       );
     }
     const { from, to } = normalizeRunDateRange(options.from, options.to);
+    const { order, comparison } = validateRunSort(options);
     const cursor = options.cursor
       ? validateRunCursor(options.cursor)
       : undefined;
@@ -1346,14 +1348,14 @@ export class PostgresRunHistoryStore implements RunHistoryStore {
         const equalCreated = bind(cursor.createdAt);
         const runId = bind(cursor.runId);
         clauses.push(
-          `(created_at < ${created} OR (created_at = ${equalCreated} AND run_id < ${runId}))`,
+          `(created_at ${comparison} ${created} OR (created_at = ${equalCreated} AND run_id ${comparison} ${runId}))`,
         );
       }
       const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
       const result = await (
         await this.pool()
       ).query<RunSummaryRow>(
-        `SELECT * FROM df_run_summaries ${where} ORDER BY created_at DESC, run_id DESC LIMIT ${bind(limit + 1)}`,
+        `SELECT * FROM df_run_summaries ${where} ORDER BY created_at ${order}, run_id ${order} LIMIT ${bind(limit + 1)}`,
         values,
       );
       const hasMore = result.rows.length > limit;

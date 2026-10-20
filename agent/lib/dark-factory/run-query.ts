@@ -12,6 +12,7 @@ import {
   type RunCursor,
   type RunHistoryStore,
 } from "./run-history-store";
+import { RUN_SORT_FIELDS, type RunSortField } from "./run-history-store";
 import type { MembershipRole } from "./membership";
 
 export const DEFAULT_PAGE_SIZE = 25;
@@ -105,6 +106,8 @@ export interface RunListParams {
   to?: string;
   limit?: string;
   cursor?: string;
+  sort?: string;
+  direction?: string;
 }
 
 export interface RunEventParams {
@@ -126,6 +129,8 @@ export type RunListRequest = {
   to?: string;
   limit: number;
   cursor?: RunCursor;
+  sort?: RunSortField;
+  direction?: "asc" | "desc";
 };
 
 export type RunEventRequest = {
@@ -185,6 +190,21 @@ export function validateRunListParams(
     if (limit > MAX_PAGE_SIZE)
       return { ok: false, error: `limit must not exceed ${MAX_PAGE_SIZE}` };
     request.limit = limit;
+  }
+
+  if (params.sort !== undefined) {
+    if (!(RUN_SORT_FIELDS as readonly string[]).includes(params.sort))
+      return { ok: false, error: `unknown sort '${params.sort}'` };
+    request.sort = params.sort as RunSortField;
+  }
+
+  if (params.direction !== undefined) {
+    if (params.direction !== "asc" && params.direction !== "desc")
+      return {
+        ok: false,
+        error: `sort direction must be asc or desc, got '${params.direction}'`,
+      };
+    request.direction = params.direction;
   }
 
   if (params.cursor !== undefined) {
@@ -291,6 +311,8 @@ export async function queryRunList(
       to: request.to,
       limit: request.limit,
       cursor,
+      sort: request.sort,
+      direction: request.direction,
     });
     if (!result.ok || !result.value)
       return { ok: false, status: 503, error: "run history is unavailable" };
