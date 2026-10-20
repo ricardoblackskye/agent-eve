@@ -48,7 +48,7 @@ export function isRunVisible(
 
 /**
  * Opaque, URL-safe pagination cursor codec. The public API never exposes the
- * store's internal cursor shape (createdAt + runId, or sequence), so a host
+ * store's internal cursor shape (sort, direction, key and runId, or a sequence), so a host
  * change cannot leak storage-specific identifiers and a tampered cursor fails
  * closed to a 400 rather than being trusted.
  */
@@ -81,9 +81,12 @@ export function encodeListCursor(cursor: RunCursor): string {
 export function decodeListCursor(token: string): RunCursor | null {
   const payload = base64UrlDecode<ListCursorPayload>(token);
   if (!payload || payload.v !== 1 || !payload.c) return null;
-  const { createdAt, runId } = payload.c;
-  if (typeof createdAt !== "string" || typeof runId !== "string") return null;
-  return { createdAt, runId };
+  const { sort, direction, key, runId } = payload.c;
+  // Structural check only: whether this ordering and key are ones the store can serve is the STORE's call, so a
+  // tampered cursor is refused there with a specific reason rather than being reinterpreted here.
+  if (typeof sort !== "string" || typeof direction !== "string") return null;
+  if (typeof key !== "string" || typeof runId !== "string") return null;
+  return { sort, direction, key, runId } as RunCursor;
 }
 
 export function encodeEventCursor(cursor: EventCursor): string {

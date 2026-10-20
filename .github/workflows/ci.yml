@@ -213,7 +213,10 @@ jobs:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           VERCEL_PROTECTION_BYPASS: ${{ secrets.VERCEL_PROTECTION_BYPASS }}
           # Dev-mode sign-in so the gated pages can be tested (fail-closed in production)
-          AUTH_DEV_MODE: "1"
+          AUTH_DEV_MODE: "1"
+          # The repos page reads the same resolver as the worker, so the browser job must configure a repository,
+          # or the list is empty and the journey has nothing to open.
+          DF_WORKER_ALLOWED_REPOS: ricardoblackskye/agent-eve
           # The same fixture the seed step wrote, so the dev server reads the
           # same rows and the dev-mode operator resolves (#215, #258).
           #
