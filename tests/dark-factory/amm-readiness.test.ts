@@ -118,3 +118,29 @@ describe("#413 the fixture scan", () => {
     expect(await provider.scan("someone/else")).toBeUndefined();
   });
 });
+
+/**
+ * #415 (epic #403 R3) — the fixture has to carry the SIGNALS, not just the levels.
+ *
+ * The whitepaper's model scores binary signals, each worth its level's points, so a scale showing only "Level 4" hides
+ * the thing that produced it. These pin the shape the scale renders and fail while the fixture still reports empty
+ * benchmarks and no signals at all.
+ */
+describe("#415 the fixture's signal catalogue", () => {
+  it("carries binary signals per pillar, each with the level that gives it its point value", () => {
+    for (const scanPillar of agentEveScan().pillars) {
+      expect(scanPillar.signals?.length, scanPillar.name).toBeGreaterThan(0);
+      for (const signal of scanPillar.signals ?? []) {
+        expect(typeof signal.present, signal.label).toBe("boolean");
+        expect(signal.level, signal.label).toBeGreaterThanOrEqual(1);
+        expect(signal.level, signal.label).toBeLessThanOrEqual(5);
+      }
+    }
+  });
+
+  it("keeps a benchmark with each pillar, so the scale can say WHY a level was earned", () => {
+    for (const scanPillar of agentEveScan().pillars) {
+      expect(scanPillar.benchmark.length, scanPillar.name).toBeGreaterThan(0);
+    }
+  });
+});
