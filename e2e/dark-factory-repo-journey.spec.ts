@@ -1,5 +1,4 @@
 import { expect, test } from "@playwright/test";
-import { signInAsAllowed } from "./auth";
 
 /**
  * #421 (R2 follow-up) — the list -> detail -> runs journey.
@@ -14,7 +13,17 @@ import { signInAsAllowed } from "./auth";
  */
 test.describe("repository journey (#421)", () => {
   test.beforeEach(async ({ page }) => {
-    await signInAsAllowed(page);
+    // Sign in through the dev-only door, then PROVE it granted a session. Without this check a missing session
+    // surfaces as "element(s) not found" on a page that quietly redirected to Google - naming the symptom instead of
+    // the cause. 404 means AUTH_DEV_MODE is off for the server; 302 means a session cookie was issued.
+    const signIn = await page.request.get(
+      "/api/auth/dev?email=cuillinguy@gmail.com&next=/dark-factory/repos",
+      { maxRedirects: 0 },
+    );
+    expect(
+      signIn.status(),
+      `dev sign-in did not grant a session (status ${signIn.status()})`,
+    ).toBe(302);
   });
 
   test("opens a repository from the list and loads that repository's runs", async ({
