@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 /**
  * #382 - the AMM signal catalogue as DATA.
  *
@@ -541,3 +543,16 @@ export const AMM_PILLARS: Record<AmmPillarId, { name: string; benchmark: string;
     evidence: [".gitleaks.toml", ".checkov.yml", "opensandbox-credential-vault.ts", "db/migrations/006_df_rls_coverage.sql"],
   },
 };
+
+/**
+ * A digest over the catalogue's (id, level) pairs - the identity of the WEIGHTS, not of the file. Stamped onto every
+ * stored scan (#424 AC2) so a score can always be traced to the catalogue that produced it: change a level and the
+ * version changes, which makes comparing across that change a deliberate act instead of a silent one.
+ */
+export function catalogueVersion(): string {
+  const digest = createHash("sha256");
+  for (const signal of AMM_SIGNAL_CATALOGUE) {
+    digest.update(`${signal.id}:${signal.level};`);
+  }
+  return digest.digest("hex").slice(0, 12);
+}

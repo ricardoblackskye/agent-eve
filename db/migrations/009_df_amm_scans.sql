@@ -1,0 +1,12 @@
+-- #424 — AMM scans.
+--
+-- The table itself is created by the store's ensureSchema(), as every other df_ table in this repo is. This migration
+-- exists for the one thing the DDL deliberately does not do: row-level security. Migration 006 established that every
+-- df_ table is covered, and the guard test enforces it, so a new table without this line fails the suite rather than
+-- shipping unguarded.
+--
+-- Note what is NOT here: no boolean for a signal's state. The scan's per-signal detail is stored as JSON because a scan
+-- produces 39 signals and rows for them would grow the table sideways for no query benefit, but the triad
+-- (present / absent / unmeasured) is enforced in the store's write path so a two-state shape can never reach the table.
+-- #426's runner is what produces those states, and it must not have to migrate the schema to express "unmeasured".
+ALTER TABLE IF EXISTS df_amm_scans ENABLE ROW LEVEL SECURITY;

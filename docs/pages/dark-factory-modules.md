@@ -1042,3 +1042,50 @@ disagree about the same fleet (#382).
 
 **Exports:** `scoreRepo`, `levelForPoints`, `profileVsTarget`, `readinessOf`, `labelForLevel`, `AMM_POINT_VALUES`,
 `AMM_TARGET_LEVEL`, `UNMEASURED_LABEL`
+
+## AMM scan store
+
+#424 - the storage seam for AMM scans, plus the local driver. A scan is APPEND-ONLY: a repeat scan is a new row, because the
+series is the value and "current vs target" is just the newest one. Per-signal detail is stored as JSON while the
+queryable fields (repo, tenant, scanned_at, catalogue_version, points, level) are real columns, so the list queries stay
+indexed without growing the table sideways.
+
+The signal TRIAD is the load-bearing invariant. The model distinguishes "nobody looked" from "looked, and it is
+missing" - so `present` / `absent` / `unmeasured` is carried verbatim and never reduced to a boolean on the way to disk.
+#426's runner is what decides those states; storing a two-state shape here would mean the schema had to be migrated the
+moment the runner landed. `assertTriad` is exported and called by BOTH drivers, because enforcing it in one write path
+only would leave the other accepting rows this one refuses. `comparable()` refuses a set of scans that spans two
+catalogue versions, since a trend drawn across a weight change is an artifact wearing a trend's clothes (#424).
+
+**Source:** [`agent/lib/dark-factory/amm-scan-store.ts`](../../agent/lib/dark-factory/amm-scan-store.ts)
+
+**Exports:** `SqliteAmmScanStore`, `AmmScanStore`, `StoredAmmScan`, `AmmScanState`, `AMM_SCAN_STATES`, `toStoredScan`,
+`catalogueVersion`, `scanCatalogueVersion`, `comparable`, `assertTriad`, `ammScanRowId`
+
+**Decisions:** [ADR 0006](../../docs/adr/0006-provider-neutral-seams.md)
+
+## AMM scan postgres
+
+#424 - the deployed driver for AMM scans. Same interface as the SQLite store, so the pages cannot tell them apart. It
+creates its own schema with `CREATE TABLE IF NOT EXISTS` on first use, as every other Dark Factory Postgres adapter does;
+RLS is enabled by migration 009 rather than by the DDL.
+
+**Source:** [`agent/lib/dark-factory/amm-scan-postgres.ts`](../../agent/lib/dark-factory/amm-scan-postgres.ts)
+
+**Exports:** `PostgresAmmScanStore`
+
+**Decisions:** [ADR 0006](../../docs/adr/0006-provider-neutral-seams.md)
+
+## AMM scan provider
+
+#424 - chooses the AMM scan store and exposes it through the seam the pages already read. FAIL-CLOSED: an unconfigured
+driver throws rather than falling back to the fixture or to an empty table, because an empty table renders as "no
+repositories are ready" - which looks like a measurement and is not one. A read that FAILS throws too: a broken database
+must not be indistinguishable from a repository nobody has scanned.
+
+**Source:** [`agent/lib/dark-factory/amm-scan-provider.ts`](../../agent/lib/dark-factory/amm-scan-provider.ts)
+
+**Exports:** `createAmmScanStore`, `databaseAmmProvider`, `AmmScanStoreEnv`
+
+**Decisions:** [ADR 0006](../../docs/adr/0006-provider-neutral-seams.md)
+
