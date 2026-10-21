@@ -50,11 +50,14 @@ describe("#382 the signal catalogue is data a reviewer can read", () => {
   it("keeps every check automated, so no signal rests on judgement", () => {
     for (const signal of AMM_SIGNAL_CATALOGUE) {
       const value = signal.check.kind === "file" ? signal.check.path : signal.check.command;
-      // A check must be something a machine can run: a path or a command, never a sentence of opinion.
-      expect(value.trim(), signal.id).not.toBe("");
-      expect(value, `${signal.id}: checks are paths or commands, not prose`).not.toMatch(
-        /\s(is|are|should|ought)\s/i,
-      );
+      // A check must be something a machine can run: a path or a command, never a sentence of opinion. A row with no
+      // path of its own is not unchecked - a layout supplies its location, which the layout guard proves (#426).
+      expect(value === undefined || value.trim() !== "", signal.id).toBe(true);
+      if (value !== undefined) {
+        expect(value, `${signal.id}: checks are paths or commands, not prose`).not.toMatch(
+          /\s(is|are|should|ought)\s/i,
+        );
+      }
     }
   });
 
