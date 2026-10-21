@@ -941,6 +941,60 @@ header {
   text-transform: uppercase;
 }
 
+/* AMM readiness results (#433): the scan renders as a table. Reuses the cost
+   and policy table idiom so a new table cannot ship unstyled (#258). */
+.df-amm-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.df-amm-table th,
+.df-amm-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid #20252d;
+  text-align: left;
+  vertical-align: top;
+}
+
+.df-amm-table thead th {
+  color: #8993a0;
+  font-size: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border-bottom: 1px solid #2a3039;
+}
+
+.df-amm-pillar {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.df-amm-level {
+  color: #8993a0;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.df-amm-result {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* "Not measured" is muted rather than alarming: nobody looked, which is not
+   the same claim as "absent". */
+.df-amm-result[data-result="unmeasured"] {
+  color: #8993a0;
+  font-style: italic;
+}
+
+.df-amm-meta td {
+  color: #6f7885;
+  font-size: 11px;
+  border-bottom: 1px solid #2a3039;
+}
+
 /* LLM usage, customer usage and customer budget tables (#258): these shipped
    with no styles at all, so they rendered untidily beside the cost and policy
    tables. Columns are sized by their content: labels left, values right. */
