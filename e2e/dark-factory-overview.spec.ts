@@ -176,3 +176,51 @@ test.describe("#278 the cost panels render data, not empty states", () => {
     ).toHaveCount(0);
   });
 });
+
+/**
+ * #427 — a partial outage must not blank the board.
+ *
+ * Reported from a locally-running main: with the run-history store down the overview page rendered nothing but
+ * an error panel, and the LLM cost and usage tiles went with it even though they are served by DIFFERENT stores
+ * that were healthy and answering 200 with real data.
+ *
+ * The unit guard covers the decision function; this proves the behaviour where it was REPORTED — a real page
+ * with one dead store. The run-history endpoints are failed at the BROWSER, so the test needs no broken store of
+ * its own and cannot pass by accident on a machine whose Postgres happens to be down. The cost and usage panels
+ * are deliberately NOT intercepted: those stores are the ones that must keep working.
+ *
+ * Anti-vacuity: these two panel locators are what fail against the defect. The unit guard for the same behaviour
+ * (tests/dark-factory-ui/overview-partial-outage.test.tsx) was observed failing with "Unable to find an element
+ * with the text: LLM USAGE" before the fix, and passing after it.
+ */
+test.describe("#427 the board survives one source being down", () => {
+  test.beforeEach(async ({ page }) => {
+    await signInAsAllowed(page);
+  });
+
+  test("panels served by healthy stores still render when run history is unavailable", async ({
+    page,
+  }) => {
+    const unavailable = {
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "Run history is unavailable" }),
+    };
+    await page.route("**/api/dark-factory/metrics*", (route) =>
+      route.fulfill(unavailable),
+    );
+    await page.route("**/api/dark-factory/runs*", (route) =>
+      route.fulfill(unavailable),
+    );
+
+    await page.goto("/dark-factory");
+
+    // The board is shown at all — the regression replaced the whole page.
+    await expect(page.getByRole("heading", { name: "Factory status" })).toBeVisible();
+    // The two panels reported as gone, both fed by stores that are still up.
+    await expect(page.getByText("LLM COST BUDGETS").first()).toBeVisible();
+    await expect(page.getByText("LLM USAGE").first()).toBeVisible();
+    // The failed source is named rather than silently rendered as zeroes.
+    await expect(page.getByText("Run history is unavailable").first()).toBeVisible();
+  });
+});

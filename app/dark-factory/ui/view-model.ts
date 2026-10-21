@@ -62,21 +62,38 @@ export interface OverviewErrorInput {
 }
 
 export interface OverviewErrorState {
-  /** Rendered full-page only when NO data is available to keep on screen. */
-  blocking: string | null;
-  /** Rendered as a non-blocking banner while the last-good data stays. */
+  /**
+   * A banner naming every source that failed, or null.
+   *
+   * Deliberately NOT a "may this page be shown" verdict. The overview page's other panels — LLM cost budgets, LLM
+   * usage, customer usage, the call policy — read their OWN stores, and this function cannot see any of them. A
+   * blocking verdict here replaced the whole board for a run-history outage and took those healthy panels with it
+   * (#427).
+   */
   banner: string | null;
+  /**
+   * True when the metrics source failed AND has no last-good data to keep, so its sections must say so rather than
+   * presenting absent data as zeroes.
+   */
+  metricsUnavailable: boolean;
+  /** The same for the runs source. */
+  runsUnavailable: boolean;
 }
 
 export function resolveOverviewError(
   input: OverviewErrorInput,
 ): OverviewErrorState {
-  const error = input.metricsError ?? input.runsError;
-  if (!error) return { blocking: null, banner: null };
-  const hasData = input.metricsHasData || input.runsHasData;
-  return hasData
-    ? { blocking: null, banner: error }
-    : { blocking: error, banner: null };
+  // Both are reported: the two sources can fail for unrelated reasons and are fixed in different places. A message
+  // both of them give is named once rather than twice.
+  const failed = [
+    ...new Set([input.metricsError, input.runsError].filter((e): e is string => e !== null)),
+  ];
+
+  return {
+    banner: failed.length > 0 ? failed.join(" · ") : null,
+    metricsUnavailable: input.metricsError !== null && !input.metricsHasData,
+    runsUnavailable: input.runsError !== null && !input.runsHasData,
+  };
 }
 
 export interface TimelineEntry {

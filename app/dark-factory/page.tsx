@@ -30,6 +30,10 @@ import {
   toTableRows,
 } from "./ui/view-model";
 
+/** Shown by a section whose source failed with nothing to keep - zeroes would read as a measurement. */
+const RUN_HISTORY_UNAVAILABLE =
+  "Run history is unavailable, so this section has no data to show.";
+
 export default function DarkFactoryOverviewPage() {
   const intervalMs = DEFAULT_POLL_INTERVAL_MS;
   const control = useFactoryControl({ intervalMs });
@@ -51,17 +55,15 @@ export default function DarkFactoryOverviewPage() {
     );
   }
 
-  // A transient poll failure must not blank a board that already has data: keep
-  // the last-good tiles on screen and surface the failure as a banner instead.
+  // A run-history failure is NOT a reason to withhold the page: the LLM cost, usage, customer and policy panels
+  // read their own stores and may be perfectly healthy. Report the failure, and let each affected section say so,
+  // instead of replacing a board that has usable data on it (#427).
   const overviewError = resolveOverviewError({
     metricsError: metrics.error,
     metricsHasData: metrics.data !== null,
     runsError: runs.error,
     runsHasData: runs.data !== null,
   });
-  if (overviewError.blocking) {
-    return <StatePanel state="error" message={overviewError.blocking} />;
-  }
 
   if (metrics.loading && !metrics.data) {
     return <StatePanel state="loading" message="Loading factory status…" />;
@@ -97,7 +99,9 @@ export default function DarkFactoryOverviewPage() {
 
       {overviewError.banner ? (
         <p className="df-banner" role="alert">
-          {`Showing last known state — ${overviewError.banner}`}
+          {overviewError.metricsUnavailable || overviewError.runsUnavailable
+            ? `Unavailable — ${overviewError.banner}. The panels it feeds say so below; the rest of the board is unaffected.`
+            : `Showing last known state — ${overviewError.banner}`}
         </p>
       ) : null}
 
@@ -155,26 +159,42 @@ export default function DarkFactoryOverviewPage() {
         </div>
       </section>
 
-      <KpiTiles tiles={toKpiTiles(statusCounts)} />
+      {overviewError.metricsUnavailable ? (
+        <StatePanel state="error" message={RUN_HISTORY_UNAVAILABLE} />
+      ) : (
+        <KpiTiles tiles={toKpiTiles(statusCounts)} />
+      )}
 
       <div className="df-grid">
         <div className="df-stack">
           <section className="df-panel">
             <PanelHead title="OUTCOME MIX" />
             <div className="df-panel-body">
-              <OutcomeMix total={mix.total} segments={mix.segments} />
+              {overviewError.metricsUnavailable ? (
+                <StatePanel state="error" message={RUN_HISTORY_UNAVAILABLE} />
+              ) : (
+                <OutcomeMix total={mix.total} segments={mix.segments} />
+              )}
             </div>
           </section>
           <section className="df-panel">
             <PanelHead title="RESOURCE SNAPSHOT" badges={["MEASURED ONLY"]} />
             <div className="df-panel-body">
-              <ResourceSnapshot snapshot={snapshot} />
+              {overviewError.metricsUnavailable ? (
+                <StatePanel state="error" message={RUN_HISTORY_UNAVAILABLE} />
+              ) : (
+                <ResourceSnapshot snapshot={snapshot} />
+              )}
             </div>
           </section>
           <section className="df-panel">
             <PanelHead title="OUTCOME TREND" badges={["TERMINAL BY DAY"]} />
             <div className="df-panel-body">
-              <TrendChart points={metrics.data?.metrics.trend ?? []} />
+              {overviewError.metricsUnavailable ? (
+                <StatePanel state="error" message={RUN_HISTORY_UNAVAILABLE} />
+              ) : (
+                <TrendChart points={metrics.data?.metrics.trend ?? []} />
+              )}
             </div>
           </section>
         </div>
@@ -188,7 +208,11 @@ export default function DarkFactoryOverviewPage() {
             }
           />
           <div className="df-panel-body">
-            <RecentRunsList rows={recentRows} />
+            {overviewError.runsUnavailable ? (
+              <StatePanel state="error" message={RUN_HISTORY_UNAVAILABLE} />
+            ) : (
+              <RecentRunsList rows={recentRows} />
+            )}
           </div>
         </section>
       </div>
