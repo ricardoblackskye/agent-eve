@@ -118,7 +118,7 @@ describe("#424 the read seam keeps 'no scan' and 'broken' apart", () => {
     expect(await provider.scan("a/one")).toEqual(expected);
   });
 
-  it("THROWS when the read fails, so a broken store is not read as an unscanned repo", async () => {
+  it("THROWS when the read fails, so a broken store is not read as a repo that has never been scanned", async () => {
     const provider = databaseAmmProvider(
       storeReturning({ ok: false, error: "connection refused" }),
     );
