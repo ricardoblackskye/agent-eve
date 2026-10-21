@@ -1089,3 +1089,35 @@ must not be indistinguishable from a repository nobody has scanned.
 
 **Decisions:** [ADR 0006](../../docs/adr/0006-provider-neutral-seams.md)
 
+## AMM repository layout
+
+#426 - where each signal's check lives in a SPECIFIC repository. The catalogue declares WHAT to look for; this
+declares WHERE. The split exists because a scan runs against repositories other than the one the catalogue was
+written for: ten rows name locations that exist only here, and left in the catalogue they reported ABSENT against
+every other repository - a false negative wearing the costume of a measurement.
+
+Those rows carry no path, and a layout supplies it. A repository with no layout gets UNMEASURED on them, never
+absent: we never looked, so we cannot report having looked and found nothing. Three paths here also CORRECT errors
+in the catalogue: `remote-execution`, `diff-capture` and `vault-injection` named bare filenames while the files live
+under `agent/lib/dark-factory/`, so even a scan of this repository reported them absent.
+
+**Source:** [`agent/lib/dark-factory/amm-layout.ts`](../../agent/lib/dark-factory/amm-layout.ts)
+
+**Exports:** `AmmRepoLayout`, `REFERENCE_REPO`, `referenceAmmLayout`, `layoutFor`, `resolveSignalPath`
+
+## AMM scan runner
+
+#426 - the scanner. It evaluates every catalogue row against a real workspace and hands the readings to `scoreRepo`,
+so an AMM figure becomes a measurement of a repository rather than a fixture. `file` checks are READ-ONLY, so they
+read the workspace confined to its root; `command` checks EXECUTE code, so they run only through a `SandboxProvider`
+whose default REFUSES. With no sandbox configured the command rows come back `unmeasured` - never executed on the
+host (AC5) and never reported absent.
+
+UNMEASURED is not a soft absent: it means nobody looked. Counting it absent fails a repository on ignorance, and
+counting it present lets one graduate on it. A workspace that cannot be read yields all-unmeasured and no grade.
+Run it with `npm run df:amm-scan -- --repo <owner/repo> --workspace <dir>`.
+
+**Source:** [`agent/lib/dark-factory/amm-scan-runner.ts`](../../agent/lib/dark-factory/amm-scan-runner.ts)
+
+**Exports:** `runAmmScan`, `RunAmmScanInput`, `AmmScanResult`
+
