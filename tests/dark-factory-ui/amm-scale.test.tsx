@@ -105,3 +105,89 @@ describe("#415 the provider seam", () => {
     expect(screen.getByText("Metric from the database")).toBeTruthy();
   });
 });
+
+/**
+ * #433 - the AMM readiness scan renders as a TABLE, not a bullet list.
+ *
+ * The scan contract is unchanged; these assert the presentation. The result
+ * column carries three states, because the board's standing rule is that
+ * "unmeasured" is neither "present" nor "absent" - nobody looked.
+ */
+describe("#433 the AMM readiness table", () => {
+  function scanWithSignals(
+    signals: Array<{
+      id: string;
+      label: string;
+      present: boolean;
+      level: number;
+      state?: "present" | "absent" | "unmeasured";
+    }>,
+  ) {
+    const scan = minimalScan([{ id: 1, name: "Style & Validation", level: 3 }]);
+    scan.pillars[0].signals = signals;
+    return scan;
+  }
+
+  it("renders the scan as a table with a pillar/signal/level/result header", () => {
+    const { container } = render(
+      <AmmScale
+        repo="owner/example"
+        scan={scanWithSignals([
+          { id: "linter", label: "Linter enforced", present: true, level: 1 },
+        ])}
+      />,
+    );
+
+    expect(screen.getByRole("table")).toBeTruthy();
+    const headers = Array.from(container.querySelectorAll("thead th")).map(
+      (th) => th.textContent,
+    );
+    expect(headers).toEqual(["Pillar", "Signal", "Level", "Result"]);
+  });
+
+  it("gives every signal its own row, still findable by its hook", () => {
+    const { container } = render(
+      <AmmScale
+        repo="owner/example"
+        scan={scanWithSignals([
+          { id: "linter", label: "Linter enforced", present: true, level: 1 },
+          { id: "pre-commit", label: "Pre-commit hooks", present: false, level: 2 },
+        ])}
+      />,
+    );
+
+    const linter = container.querySelector('[data-signal="linter"]');
+    const preCommit = container.querySelector('[data-signal="pre-commit"]');
+    expect(linter?.tagName).toBe("TR");
+    expect(preCommit?.tagName).toBe("TR");
+    expect(linter?.getAttribute("data-present")).toBe("yes");
+    expect(preCommit?.getAttribute("data-present")).toBe("no");
+  });
+
+  it("distinguishes an UNMEASURED signal from an absent one", () => {
+    const { container } = render(
+      <AmmScale
+        repo="owner/example"
+        scan={scanWithSignals([
+          { id: "absent-one", label: "Alpha check", present: false, level: 2, state: "absent" },
+          { id: "unmeasured-one", label: "Beta check", present: false, level: 2, state: "unmeasured" },
+        ])}
+      />,
+    );
+
+    const resultCell = (id: string) => {
+      const row = container.querySelector(`[data-signal="${id}"]`);
+      return row ? Array.from(row.querySelectorAll("td"))[2]?.textContent : null;
+    };
+
+    expect(resultCell("absent-one")).toBe("Absent");
+    expect(resultCell("unmeasured-one")).toBe("Not measured");
+    expect(
+      container.querySelector('[data-signal="unmeasured-one"]')?.getAttribute("data-present"),
+    ).toBe("no");
+    expect(
+      container.querySelector('[data-signal="unmeasured-one"]')?.getAttribute("data-state"),
+    ).toBe("unmeasured");
+  });
+});
+
