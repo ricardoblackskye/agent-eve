@@ -19,6 +19,7 @@ import {
   comparable,
   SqliteAmmScanStore,
   toStoredScan,
+  type StoredAmmScan,
 } from "../../agent/lib/dark-factory/amm-scan-store";
 import { databaseAmmProvider } from "../../agent/lib/dark-factory/amm-scan-provider";
 import { catalogueVersion } from "../../agent/lib/dark-factory/amm-signals";
@@ -83,15 +84,19 @@ describe("#424 the triad survives storage", () => {
     await store.recordScan(scanAt("a/one", STAMP, "tenant-1", { linter: "present" }));
 
     const read = await store.latestScans();
-    const signals = (read.value?.[0]?.pillars ?? []).flatMap((pillar) => pillar.signals ?? []);
+    const scan = read.value?.[0];
+    const signals = (scan?.pillars ?? []).flatMap((pillar) => pillar.signals ?? []);
     const linter = signals.find((signal) => signal.id === "linter");
 
     expect(linter?.level).toBeGreaterThanOrEqual(1);
-    expect(linter?.points).toBeGreaterThan(0);
     expect(signals.length).toBeGreaterThan(1);
+    // The weight lives in `level`: the model derives points from it (L1 1 ... L5 16), and it is the level the row
+    // stores per signal, so a score can be explained after the fact without recomputing the catalogue.
+    expect(scan.overall.points).toBeGreaterThan(0);
+    expect(scan.overall.maxPoints).toBeGreaterThan(0);
 
     const unmeasured = signals.find((signal) => signal.state === "unmeasured");
-    expect(unmeasured, "an unmeasured signal is stored with its weight, not dropped").toBeTruthy();
+    expect(unmeasured, "an unmeasured signal keeps its weight, it is not dropped").toBeTruthy();
   });
 });
 
@@ -118,7 +123,7 @@ describe("#424 a scan is attributed to its tenant", () => {
     const rowsFor = async (tenantId: string) =>
       (await store.latestScans({ tenantId })).value?.map((scan) => ({
         repo: scan.repo,
-        level: scan.level,
+        level: scan.overall.level,
       })) ?? [];
 
     expect(readinessOf(await rowsFor("tenant-1")).active).toBe(1);
@@ -143,7 +148,7 @@ describe("#424 history is append-only and the latest wins", () => {
 
     const latest = await store.latestScans({ tenantId: "tenant-1" });
     expect(latest.value?.[0]?.scannedAt).toBe("2026-10-21T00:00:00.000Z");
-    expect(latest.value?.[0]?.points).toBeGreaterThan(0);
+    expect(latest.value?.[0]?.overall.points).toBeGreaterThan(0);
   });
 });
 
@@ -162,15 +167,16 @@ describe("#424 every score records the catalogue that produced it", () => {
     const newer = scanAt("a/two", STAMP, "tenant-1");
     const otherVersion = { ...newer, catalogueVersion: "not-the-current-one" };
 
-    const rows = [read0(await store.latestScans()), otherVersion];
+    const stored = (await store.latestScans()).value ?? [];
+    const rows: StoredAmmScan[] = [...stored, otherVersion];
 
     // A trend drawn across a weight change is an artifact, not a measurement.
     expect(() => comparable(rows)).toThrow();
-    expect(comparable([rows[0]])).toBe(true);
+    expect(comparable(stored)).toBe(true);
   });
 });
 
-describe("#424 nothing is fabricated for an unscanned repository", () => {
+describe("#424 nothing is fabricated for a repository nobody has scanned", () => {
   it("returns undefined rather than a level a repository has not earned", async () => {
     const store = createStore();
     const provider = databaseAmmProvider(store);
@@ -189,7 +195,3 @@ describe("#424 nothing is fabricated for an unscanned repository", () => {
     expect(scan?.pillars.length).toBe(8);
   });
 });
-
-function read0(result: { value?: readonly never[] | null }): never {
-  return (result.value ?? [])[0] as never;
-}
