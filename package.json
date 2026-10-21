@@ -20,6 +20,7 @@
     "seed:tenants": "tsx scripts/seed-tenant-assignments.ts",
     "seed:test-data": "tsx scripts/seed-test-data.ts",
     "df:membership": "tsx scripts/df-membership.ts",
+    "df:amm-scan": "tsx scripts/amm-scan.ts",
     "df:local-run": "tsx scripts/dark-factory-local-run.ts",
     "df:retire-claim": "tsx scripts/df-retire-claim.ts",
     "df:sandbox-up": "bash scripts/sandbox-server-up.sh",
