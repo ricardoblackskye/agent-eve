@@ -91,7 +91,11 @@ export function AmmScale({ repo, scan }: AmmScaleProps): ReactNode {
                         data-state={result}
                       >
                         {index === 0 ? (
-                          <th className="df-amm-pillar" scope="rowgroup" rowSpan={signals.length}>
+                          <th
+                            className="df-amm-pillar"
+                            scope="rowgroup"
+                            rowSpan={signals.length}
+                          >
                             {pillar.name}
                           </th>
                         ) : null}

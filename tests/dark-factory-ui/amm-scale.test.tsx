@@ -151,7 +151,12 @@ describe("#433 the AMM readiness table", () => {
         repo="owner/example"
         scan={scanWithSignals([
           { id: "linter", label: "Linter enforced", present: true, level: 1 },
-          { id: "pre-commit", label: "Pre-commit hooks", present: false, level: 2 },
+          {
+            id: "pre-commit",
+            label: "Pre-commit hooks",
+            present: false,
+            level: 2,
+          },
         ])}
       />,
     );
@@ -169,25 +174,42 @@ describe("#433 the AMM readiness table", () => {
       <AmmScale
         repo="owner/example"
         scan={scanWithSignals([
-          { id: "absent-one", label: "Alpha check", present: false, level: 2, state: "absent" },
-          { id: "unmeasured-one", label: "Beta check", present: false, level: 2, state: "unmeasured" },
+          {
+            id: "absent-one",
+            label: "Alpha check",
+            present: false,
+            level: 2,
+            state: "absent",
+          },
+          {
+            id: "unmeasured-one",
+            label: "Beta check",
+            present: false,
+            level: 2,
+            state: "unmeasured",
+          },
         ])}
       />,
     );
 
     const resultCell = (id: string) => {
       const row = container.querySelector(`[data-signal="${id}"]`);
-      return row ? Array.from(row.querySelectorAll("td"))[2]?.textContent : null;
+      return row
+        ? Array.from(row.querySelectorAll("td"))[2]?.textContent
+        : null;
     };
 
     expect(resultCell("absent-one")).toBe("Absent");
     expect(resultCell("unmeasured-one")).toBe("Not measured");
     expect(
-      container.querySelector('[data-signal="unmeasured-one"]')?.getAttribute("data-present"),
+      container
+        .querySelector('[data-signal="unmeasured-one"]')
+        ?.getAttribute("data-present"),
     ).toBe("no");
     expect(
-      container.querySelector('[data-signal="unmeasured-one"]')?.getAttribute("data-state"),
+      container
+        .querySelector('[data-signal="unmeasured-one"]')
+        ?.getAttribute("data-state"),
     ).toBe("unmeasured");
   });
 });
-
