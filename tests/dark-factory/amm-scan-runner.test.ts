@@ -17,8 +17,11 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { referenceAmmLayout } from "../../agent/lib/dark-factory/amm-layout";
 import type { AmmScan } from "../../agent/lib/dark-factory/amm-readiness";
 import { runAmmScan } from "../../agent/lib/dark-factory/amm-scan-runner";
-import { catalogueVersion } from "../../agent/lib/dark-factory/amm-signals";
-import type { WorkspaceTools } from "../../agent/lib/dark-factory/developer-agent";
+import { AMM_SIGNAL_CATALOGUE, catalogueVersion } from "../../agent/lib/dark-factory/amm-signals";
+import {
+  ALLOWED_TEST_COMMAND_PREFIXES,
+  type WorkspaceTools,
+} from "../../agent/lib/dark-factory/developer-agent";
 import { createRefusingSandboxProvider, type SandboxProvider } from "../../agent/lib/dark-factory/sandbox";
 
 /** The scan stamp is an input, so every scan here is deterministic. */
@@ -174,25 +177,29 @@ describe("#426 the scan that comes out is one the product can already render", (
  */
 function sandboxSpy(options: { isolated: boolean; project?: boolean; passes?: boolean }) {
   const commands: string[] = [];
+  const offers: { allowedCommands?: readonly string[] }[] = [];
   const provider: SandboxProvider = {
     driver: options.isolated ? "opensandbox" : "local",
     isolated: options.isolated,
-    create: (): WorkspaceTools => ({
-      readFile: async (relPath: string) => {
-        if (options.project === false) throw new Error(`ENOENT: ${relPath}`);
-        return relPath === "package.json" ? '{ "name": "sandbox-spy" }' : "";
-      },
-      writeFile: async () => undefined,
-      listFiles: async (): Promise<string[]> => (options.project === false ? [] : ["package.json"]),
-      runTests: async (cmd?: string) => {
-        commands.push(cmd ?? "");
-        // A command in a directory with no project fails naturally; a passing stub would hide the
-        // very false-absent this suite exists to catch.
-        return { passed: options.passes ?? options.project !== false, output: "" };
-      },
-    }),
+    create: (_workspaceDir: string, opts?: { allowedCommands?: readonly string[] }): WorkspaceTools => {
+      offers.push(opts ?? {});
+      return {
+        readFile: async (relPath: string) => {
+          if (options.project === false) throw new Error(`ENOENT: ${relPath}`);
+          return relPath === "package.json" ? '{ "name": "sandbox-spy" }' : "";
+        },
+        writeFile: async () => undefined,
+        listFiles: async (): Promise<string[]> => (options.project === false ? [] : ["package.json"]),
+        runTests: async (cmd?: string) => {
+          commands.push(cmd ?? "");
+          // A command in a directory with no project fails naturally; a passing stub would hide the
+          // very false-absent this suite exists to catch.
+          return { passed: options.passes ?? options.project !== false, output: "" };
+        },
+      };
+    },
   };
-  return { provider, commands };
+  return { provider, commands, offers };
 }
 
 /**
@@ -248,5 +255,30 @@ describe("#437 a sandbox with no project must never be read as an ABSENT reposit
     expect(commands.length).toBeGreaterThan(0);
     const states = COMMAND_ROWS.map((id) => stateOf(scan, id));
     expect(states, "a command that ran and failed is a real absent").toContain("absent");
+  });
+});
+
+describe("#437 the scan states its OWN command set instead of widening the agent's", () => {
+  it("offers the sandbox exactly the catalogue's command rows", async () => {
+    const { provider, offers } = sandboxSpy({ isolated: true, project: true });
+
+    await runAmmScan({ repo: "owner/repo", workspace, provider, now: stamp });
+
+    const fromCatalogue = AMM_SIGNAL_CATALOGUE.flatMap((definition) =>
+      definition.check.kind === "command" ? [definition.check.command] : [],
+    );
+    expect(fromCatalogue.length, "the catalogue is the authority for what the scan runs").toBeGreaterThan(0);
+    expect(offers.length, "an isolated provider must be offered an allowlist").toBeGreaterThan(0);
+    const offered = [...(offers[0]?.allowedCommands ?? [])].sort();
+    expect(offered, "the sandbox must be allowed the catalogue's commands and nothing else").toEqual(
+      [...fromCatalogue].sort(),
+    );
+  });
+
+  // GUARD, not a bug fix: the Developer Agent's blast radius must NOT widen. This fails the moment the
+  // scan is "simplified" by folding its commands into the shared constant - which would let the agent
+  // execute npm ci, i.e. a repository's lifecycle scripts.
+  it("leaves the Developer Agent's shared command prefixes untouched", () => {
+    expect([...ALLOWED_TEST_COMMAND_PREFIXES]).toEqual(["npx vitest", "npm test", "npx tsc"]);
   });
 });
