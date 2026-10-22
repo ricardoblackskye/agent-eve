@@ -213,3 +213,36 @@ describe("#433 the AMM readiness table", () => {
     ).toBe("unmeasured");
   });
 });
+
+/**
+ * #433 review - the table and the capability list sat flush against the panel
+ * edge. AmmScale was the one panel that did not wrap its content in
+ * .df-panel-body, the 14px inset every other panel uses.
+ */
+describe("#433 layout - panel content is inset", () => {
+  it("wraps the readiness table in a panel body so it is not flush", () => {
+    const { container } = render(
+      <AmmScale
+        repo="owner/example"
+        scan={minimalScan([{ id: 1, name: "Style & Validation", level: 3 }])}
+      />,
+    );
+
+    const body = container.querySelector(".df-panel-body");
+    expect(body).not.toBeNull();
+    expect(body?.querySelector("table.df-amm-table")).not.toBeNull();
+  });
+
+  it("wraps the capability list in a panel body too", () => {
+    const scan = {
+      ...minimalScan([{ id: 1, name: "Style & Validation", level: 3 }]),
+      capabilities: [{ name: "Model Routing", stage: "L4 (Optimized)" }],
+    };
+
+    const { container } = render(<AmmScale repo="owner/example" scan={scan} />);
+
+    const list = container.querySelector("ul.df-amm-capabilities");
+    expect(list).not.toBeNull();
+    expect(list?.closest(".df-panel-body")).not.toBeNull();
+  });
+});
