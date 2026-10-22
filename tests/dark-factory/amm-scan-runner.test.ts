@@ -335,6 +335,7 @@ describe("#437 one sandbox per scan, and no-egress is not a repository failure",
     const { provider } = sandboxSpy({
       isolated: true,
       project: true,
+      passes: false,
       output: "npm ERR! code ENOTFOUND - request to registry.npmjs.org failed",
     });
 

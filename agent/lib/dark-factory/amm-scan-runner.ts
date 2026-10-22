@@ -19,6 +19,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve, sep } from "node:path";
 
+import type { WorkspaceTools } from "./developer-agent";
 import { layoutFor, resolveSignalPath, type AmmRepoLayout } from "./amm-layout";
 import type { AmmScan } from "./amm-readiness";
 import { scoreRepo, type AmmMeasurement } from "./amm-scoring";
@@ -88,50 +89,77 @@ function measureFile(
   return "unmeasured";
 }
 
-/** A check that executes: it may only run inside a sandbox, so a refused sandbox yields unmeasured. */
-async function measureCommand(
-  definition: AmmSignalDefinition,
-  provider: SandboxProvider,
-  workspaceRoot: string,
-): Promise<AmmMeasurement> {
-  const expectation = definition.expectation;
-  if (definition.check.kind !== "command" || expectation.kind !== "exitCode") return "unmeasured";
+/**
+ * Where a scan's command checks execute. Built ONCE per scan: a real provider's `create()` builds a
+ * SANDBOX, so doing it per row would spend five sandboxes on one scan - slow, and a leak until dispose.
+ */
+interface CommandRunner {
+  /** Absent when no command may run at all - not isolated, or a sandbox that holds no project. */
+  tools?: WorkspaceTools;
+}
 
-  // A command EXECUTES, so it may only run somewhere other than THIS filesystem. `local` is a provider
-  // too - and an unset DF_SANDBOX_DRIVER resolves to it - so the gate reads the provider's own `isolated`
-  // property rather than trusting the call site to have chosen wisely.
-  if (!provider.isolated) return "unmeasured";
-
+async function prepareCommandRunner(provider: SandboxProvider, workspaceRoot: string): Promise<CommandRunner> {
+  // A command EXECUTES, so it may only run somewhere other than THIS filesystem. `local` is a provider too
+  // - and an unset DF_SANDBOX_DRIVER resolves to it - so the gate reads the provider's own `isolated`.
+  if (!provider.isolated) return {};
   const tools = provider.create(workspaceRoot, { allowedCommands: ammCommandAllowlist() });
 
-  // Confirm the sandbox holds the project BEFORE anything runs. An unprovisioned sandbox is "nobody
-  // looked", never "the repository has no linter", so it is unmeasured and no command is executed.
-  let holdsProject = false;
+  // Confirm the sandbox holds the project BEFORE anything runs: an unprovisioned sandbox is "nobody
+  // looked", never "the repository has no linter".
   try {
-    holdsProject = (await tools.readFile(PROJECT_MARKER)).trim().length > 0;
+    if ((await tools.readFile(PROJECT_MARKER)).trim().length === 0) return {};
   } catch {
-    holdsProject = false;
+    return {};
   }
-  if (!holdsProject) return "unmeasured";
+  return { tools };
+}
+
+/**
+ * Markers a sandbox reports when it cannot reach the network. Network-specific on purpose: a bare
+ * "timed out" is just as likely to be a slow test, and mis-reading that as unmeasurable would hide a
+ * real failure.
+ */
+const NO_EGRESS_MARKERS = [
+  "enotfound",
+  "eai_again",
+  "econnrefused",
+  "getaddrinfo",
+  "could not resolve host",
+  "registry.npmjs.org",
+];
+
+function isNoEgress(output: string): boolean {
+  const text = output.toLowerCase();
+  return NO_EGRESS_MARKERS.some((marker) => text.includes(marker));
+}
+
+/** A check that executes: it may only run inside an isolated sandbox, so anything else yields unmeasured. */
+async function measureCommand(definition: AmmSignalDefinition, runner: CommandRunner): Promise<AmmMeasurement> {
+  const expectation = definition.expectation;
+  if (definition.check.kind !== "command" || expectation.kind !== "exitCode") return "unmeasured";
+  const tools = runner.tools;
+  if (!tools) return "unmeasured";
 
   const startedAt = Date.now();
   try {
     const result = await tools.runTests(definition.check.command);
+    // A command that failed because the SANDBOX has no egress failed for OUR environment's reason, not the
+    // repository's, so it is unmeasured - never a repository marked down for our sandbox's isolation.
+    if (!result.passed && isNoEgress(result.output)) return "unmeasured";
+    // The time bound IS the signal on these rows: an exit code alone would call a ten-minute run present.
     if (expectation.withinMs !== undefined && Date.now() - startedAt > expectation.withinMs) {
-      // The time bound IS the signal on these rows: an exit code alone would call a ten-minute run present.
       return "unmeasured";
     }
     return result.passed ? "present" : "absent";
-  } catch (err) {
+  } catch {
     // No sandbox, a refused sandbox, or missing tooling: it never ran, so nobody looked.
-    if (err instanceof SandboxRefusedError) return "unmeasured";
     return "unmeasured";
   }
 }
 
 async function measureOne(
   definition: AmmSignalDefinition,
-  input: { workspaceRoot: string; layout?: AmmRepoLayout; provider: SandboxProvider },
+  input: { workspaceRoot: string; layout?: AmmRepoLayout; runner: CommandRunner },
 ): Promise<AmmMeasurement> {
   try {
     if (definition.check.kind === "file") {
@@ -140,7 +168,7 @@ async function measureOne(
       if (relPath === undefined) return "unmeasured";
       return measureFile(definition, relPath, input.workspaceRoot);
     }
-    return await measureCommand(definition, input.provider, input.workspaceRoot);
+    return await measureCommand(definition, input.runner);
   } catch {
     // A target we could not read is not a target we found missing, so it is never reported absent.
     return "unmeasured";
@@ -159,11 +187,13 @@ export async function runAmmScan(input: RunAmmScanInput): Promise<AmmScanResult>
   const now = input.now ?? (() => new Date().toISOString());
   const workspaceRoot = resolve(input.workspace);
   const readable = existsSync(workspaceRoot);
+  // One sandbox per SCAN, and none at all when there is nothing to scan.
+  const runner = readable ? await prepareCommandRunner(provider, workspaceRoot) : {};
 
   const measurements: Record<string, AmmMeasurement> = {};
   for (const definition of AMM_SIGNAL_CATALOGUE) {
     measurements[definition.id] = readable
-      ? await measureOne(definition, { workspaceRoot, layout, provider })
+      ? await measureOne(definition, { workspaceRoot, layout, runner })
       : "unmeasured";
   }
 
