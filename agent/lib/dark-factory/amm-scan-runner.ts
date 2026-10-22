@@ -46,7 +46,7 @@ const REFUSAL = "no sandbox is configured, so no command may run outside one (AC
 /**
  * Proof that a sandbox actually holds the repository. Without it, a command run in an EMPTY sandbox fails
  * for our reason rather than the repository's, and a non-zero exit is indistinguishable from a real
- * `absent` - our own misprovisioning reported as the repository's failure.
+ * `absent` - our own oversight reported as the repository's failure.
  */
 const PROJECT_MARKER = "package.json";
 

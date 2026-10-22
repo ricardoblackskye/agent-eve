@@ -240,7 +240,7 @@ describe("#437 a sandbox with no project must never be read as an ABSENT reposit
     const scan = await runAmmScan({ repo: "owner/repo", workspace, provider, now: stamp });
 
     for (const id of COMMAND_ROWS) {
-      expect(stateOf(scan, id), `${id}: our own misprovisioning is not the repo's failure`).toBe("unmeasured");
+      expect(stateOf(scan, id), `${id}: our own oversight is not the repo's failure`).toBe("unmeasured");
     }
     expect(commands, "nothing may run against a workspace with no project in it").toEqual([]);
   });
