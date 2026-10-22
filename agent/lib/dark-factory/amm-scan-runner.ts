@@ -49,6 +49,16 @@ const REFUSAL = "no sandbox is configured, so no command may run outside one (AC
  */
 const PROJECT_MARKER = "package.json";
 
+/**
+ * The commands THIS scanner may execute: exactly its catalogue's command rows, and nothing else. The
+ * alternative - adding them to the shared test prefixes - would widen what the Developer Agent may run.
+ */
+function ammCommandAllowlist(): readonly string[] {
+  return AMM_SIGNAL_CATALOGUE.flatMap((definition) =>
+    definition.check.kind === "command" ? [definition.check.command] : [],
+  );
+}
+
 /** Confine a relative path to the workspace. A layout may not point the scanner at the rest of the filesystem. */
 function resolveWithin(workspaceRoot: string, relPath: string): string {
   const target = resolve(workspaceRoot, relPath);
@@ -91,7 +101,7 @@ async function measureCommand(
   // property rather than trusting the call site to have chosen wisely.
   if (!provider.isolated) return "unmeasured";
 
-  const tools = provider.create(workspaceRoot);
+  const tools = provider.create(workspaceRoot, { allowedCommands: ammCommandAllowlist() });
 
   // Confirm the sandbox holds the project BEFORE anything runs. An unprovisioned sandbox is "nobody
   // looked", never "the repository has no linter", so it is unmeasured and no command is executed.
