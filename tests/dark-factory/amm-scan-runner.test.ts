@@ -175,7 +175,12 @@ describe("#426 the scan that comes out is one the product can already render", (
  * A provider whose ONLY interesting property is `isolated`, plus a record of every command requested.
  * The runner's guard must read that property rather than trusting that "a provider was configured".
  */
-function sandboxSpy(options: { isolated: boolean; project?: boolean; passes?: boolean }) {
+function sandboxSpy(options: {
+  isolated: boolean;
+  project?: boolean;
+  passes?: boolean;
+  output?: string;
+}) {
   const commands: string[] = [];
   const offers: { allowedCommands?: readonly string[] }[] = [];
   const provider: SandboxProvider = {
@@ -194,7 +199,10 @@ function sandboxSpy(options: { isolated: boolean; project?: boolean; passes?: bo
           commands.push(cmd ?? "");
           // A command in a directory with no project fails naturally; a passing stub would hide the
           // very false-absent this suite exists to catch.
-          return { passed: options.passes ?? options.project !== false, output: "" };
+          return {
+            passed: options.passes ?? options.project !== false,
+            output: options.output ?? "",
+          };
         },
       };
     },
@@ -310,5 +318,30 @@ describe("#437 the CLI's provider choice is made on ISOLATION, not on the driver
 
     expect(choice.refused).toMatch(/no isolated sandbox could be configured/);
     expect(choice.provider.driver).toBe("refusing");
+  });
+});
+
+describe("#437 one sandbox per scan, and no-egress is not a repository failure", () => {
+  it("builds the sandbox tools ONCE per scan, not once per command row", async () => {
+    const { provider, offers } = sandboxSpy({ isolated: true, project: true });
+
+    await runAmmScan({ repo: "owner/repo", workspace, provider, now: stamp });
+
+    // A real provider's create() builds a SANDBOX: five command rows must not mean five sandboxes.
+    expect(offers.length, "one scan, one sandbox").toBe(1);
+  });
+
+  it("reports a command that could not reach the network as UNMEASURED, not absent", async () => {
+    const { provider } = sandboxSpy({
+      isolated: true,
+      project: true,
+      output: "npm ERR! code ENOTFOUND - request to registry.npmjs.org failed",
+    });
+
+    const scan = await runAmmScan({ repo: "owner/repo", workspace, provider, now: stamp });
+
+    const states = COMMAND_ROWS.map((id) => stateOf(scan, id));
+    expect(states, "no egress is OUR environment, not the repository's failure").not.toContain("absent");
+    expect(states).toContain("unmeasured");
   });
 });
