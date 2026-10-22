@@ -12,7 +12,7 @@
  */
 import { readFileSync } from "node:fs";
 
-import { runAmmScan } from "../agent/lib/dark-factory/amm-scan-runner";
+import { resolveScanProvider, runAmmScan } from "../agent/lib/dark-factory/amm-scan-runner";
 import type { AmmRepoLayout } from "../agent/lib/dark-factory/amm-layout";
 
 interface Parsed {
@@ -61,10 +61,14 @@ async function main(): Promise<number> {
     return 2;
   }
 
+  // #437 - command checks run ONLY through an isolated provider; anything else refuses, so a scan
+  // never executes a repository's code on this machine.
+  const choice = resolveScanProvider();
   const scan = await runAmmScan({
     repo: parsed.repo,
     workspace: parsed.workspace,
     ...(parsed.layoutPath ? { layout: readLayout(parsed.layoutPath) } : {}),
+    provider: choice.provider,
   });
 
   const measured = scan.pillars
@@ -76,6 +80,11 @@ async function main(): Promise<number> {
   process.stderr.write(
     `\n${scan.repo}: ${scan.overall.label} — ${scan.overall.points}/${scan.overall.maxPoints}\n` +
       `${measured}/${total} signals measured (the rest could not be measured and are NOT counted absent)\n` +
+      (choice.refused
+        ? `command checks were NOT measured: ${choice.refused}
+`
+        : `command checks ran through the '${choice.provider.driver}' sandbox
+`) +
       `catalogue ${scan.catalogueVersion}\n`,
   );
   return 0;
