@@ -71,9 +71,10 @@ Assertions, in order, on the `/eve/v1/info` payload:
 - **The wire value is `"dynamic"`, not `"governed"`.** "Governed" is this plan's gloss, borrowed
   from `buildGovernedDynamicModel`; only `"dynamic"` may be compared against. A check on the
   literal word `governed` would never pass.
-- **Locating the helper.** The repo's evals are currently self-contained; adding a shared unit-
-  testable helper is a small convention change. The alternative is inlining and accepting that
-  this check has **no honest RED**, which the SDLC would have to record rather than hide.
+- **Locating the helper.** CORRECTED after checking: `evals/helpers/` already exists with a
+  precedent (`evals/webhook.eval.ts` imports `./helpers/sign`), so extracting a helper follows
+  the existing convention rather than introducing one. The alternative - inlining it - would
+  leave this check with **no honest RED**, which the SDLC would have to record rather than hide.
 - **Option A's blind spot is real** and must be stated in the eval's own message, not only in
   this plan: with a gate configured, a wrong model is invisible to `/eve/v1/info`.
 - **Verification is CI-only.** The eval target needs `VERCEL_PROTECTION_BYPASS` and `EVE_API_KEY`;
