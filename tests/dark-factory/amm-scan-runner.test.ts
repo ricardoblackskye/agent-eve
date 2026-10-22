@@ -18,7 +18,8 @@ import { referenceAmmLayout } from "../../agent/lib/dark-factory/amm-layout";
 import type { AmmScan } from "../../agent/lib/dark-factory/amm-readiness";
 import { runAmmScan } from "../../agent/lib/dark-factory/amm-scan-runner";
 import { catalogueVersion } from "../../agent/lib/dark-factory/amm-signals";
-import { createRefusingSandboxProvider } from "../../agent/lib/dark-factory/sandbox";
+import type { WorkspaceTools } from "../../agent/lib/dark-factory/developer-agent";
+import { createRefusingSandboxProvider, type SandboxProvider } from "../../agent/lib/dark-factory/sandbox";
 
 /** The scan stamp is an input, so every scan here is deterministic. */
 const stamp = () => "2026-10-21T00:00:00.000Z";
@@ -164,5 +165,61 @@ describe("#426 the scan that comes out is one the product can already render", (
     // A capability the product genuinely lacks (#430): measured, looked for, and correctly reported missing.
     expect(stateOf(scan, "persistent-sessions")).toBe("absent");
     expect(Object.keys(referenceAmmLayout).length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * A provider whose ONLY interesting property is `isolated`, plus a record of every command requested.
+ * The runner's guard must read that property rather than trusting that "a provider was configured".
+ */
+function sandboxSpy(options: { isolated: boolean; project?: boolean }) {
+  const commands: string[] = [];
+  const provider: SandboxProvider = {
+    driver: options.isolated ? "opensandbox" : "local",
+    isolated: options.isolated,
+    create: (): WorkspaceTools => ({
+      readFile: async (relPath: string) => {
+        if (options.project === false) throw new Error(`ENOENT: ${relPath}`);
+        return relPath === "package.json" ? '{ "name": "sandbox-spy" }' : "";
+      },
+      writeFile: async () => undefined,
+      listFiles: async (): Promise<string[]> => (options.project === false ? [] : ["package.json"]),
+      runTests: async (cmd?: string) => {
+        commands.push(cmd ?? "");
+        return { passed: true, output: "" };
+      },
+    }),
+  };
+  return { provider, commands };
+}
+
+/**
+ * #437 - a command check executes ONLY where the provider says it is isolated.
+ *
+ * The refusal already pinned above is not enough on its own: `local` IS a provider, and it runs commands
+ * on THIS machine. `sandbox-provider.ts` resolves an UNSET driver to `local`, so a caller that merely
+ * "configured a provider" could still execute a repository's code outside any sandbox. The guard
+ * therefore reads the provider's own `isolated` property.
+ */
+describe("#437 a command runs only inside an isolated provider", () => {
+  it("never executes a command through a provider that is NOT isolated", async () => {
+    const { provider, commands } = sandboxSpy({ isolated: false, project: true });
+
+    const scan = await runAmmScan({ repo: "owner/repo", workspace, provider, now: stamp });
+
+    for (const id of COMMAND_ROWS) {
+      expect(stateOf(scan, id), `${id}: a command we did not run has not been shown missing`).toBe("unmeasured");
+    }
+    expect(commands, "a non-isolated provider must never be asked to run anything").toEqual([]);
+  });
+
+  // GUARD, not a bug fix: the isolation gate must not silently disable every command. This passes before
+  // and after the gate lands, and it fails if the gate is "fixed" by refusing everything.
+  it("executes the command once the provider IS isolated", async () => {
+    const { provider, commands } = sandboxSpy({ isolated: true, project: true });
+
+    await runAmmScan({ repo: "owner/repo", workspace, provider, now: stamp });
+
+    expect(commands.length, "an isolated provider must still be used").toBeGreaterThan(0);
   });
 });
