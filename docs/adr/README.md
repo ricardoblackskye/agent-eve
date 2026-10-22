@@ -103,6 +103,7 @@ changes, write a new one that supersedes it.
 | [0047](0047-architect-plans-from-bounded-evidence.md)             | The Architect reads repository contents within a derived budget, and cites the evidence             | Accepted |
 | [0048](0048-df-page-scoped-targets-and-unjustifiable-parks.md)    | A page-scoped story cannot target the shell, and an unjustifiable target parks for a human          | Accepted |
 | [0049](0049-df-architect-prompt-is-a-contract.md)                 | The Architect's prompt is a contract, and a plan that cannot validate parks instead of aborting     | Accepted |
-| [0050](0050-df-local-runs-are-provisioned-deliberately.md)    | A local run is provisioned deliberately, not discovered by refusal                                    | Accepted |
-| [0051](0051-df-retiring-a-stale-claim-is-abandonment.md)    | Retiring a stale claim abandons the run, and leaves a record                                          | Accepted |
-| [0052](0052-pg-suites-are-isolated-by-schema.md)    | Postgres test suites are isolated by a schema per suite                                               | Accepted |
+| [0050](0050-df-local-runs-are-provisioned-deliberately.md)        | A local run is provisioned deliberately, not discovered by refusal                                  | Accepted |
+| [0051](0051-df-retiring-a-stale-claim-is-abandonment.md)          | Retiring a stale claim abandons the run, and leaves a record                                        | Accepted |
+| [0052](0052-pg-suites-are-isolated-by-schema.md)                  | Postgres test suites are isolated by a schema per suite                                             | Accepted |
+| [0053](0053-amm-scan-commands-come-from-its-catalogue.md)         | The AMM scanner's command set comes from its catalogue, not the shared test list                    | Accepted |
