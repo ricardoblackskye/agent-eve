@@ -25,6 +25,7 @@ import type { AmmScan } from "./amm-readiness";
 import { scoreRepo, type AmmMeasurement } from "./amm-scoring";
 import { AMM_SIGNAL_CATALOGUE, catalogueVersion, type AmmSignalDefinition } from "./amm-signals";
 import { createRefusingSandboxProvider, SandboxRefusedError, type SandboxProvider } from "./sandbox";
+import { DEFAULT_SANDBOX_WORKSPACE } from "./opensandbox-driver";
 import { createSandboxProvider } from "./sandbox-provider";
 
 export interface RunAmmScanInput {
@@ -35,6 +36,8 @@ export interface RunAmmScanInput {
   layout?: AmmRepoLayout;
   /** Where command checks execute. Defaults to a provider that REFUSES, keeping the scan off the host (AC5). */
   provider?: SandboxProvider;
+  /** Called once with the reason when no command may run, so a refusal is never silent. */
+  onCommandNote?: (note: string) => void;
   /** The scan stamp, supplied so a scan is reproducible. */
   now?: () => string;
 }
@@ -96,29 +99,49 @@ function measureFile(
 interface CommandRunner {
   /** Absent when no command may run at all - not isolated, or a sandbox that holds no project. */
   tools?: WorkspaceTools;
+  /** WHY nothing may run. Surfaced to the caller: a refusal nobody can see is one nobody can act on. */
+  refused?: string;
 }
 
-async function prepareCommandRunner(provider: SandboxProvider, workspaceRoot: string): Promise<CommandRunner> {
+/**
+ * Where THIS repository lives inside a sandbox. `process.cwd()` is a HOST path, and the isolated driver
+ * treats the directory it is handed as the SANDBOX-side root, so passing the host path asked the sandbox
+ * for a file under `<container-root>/<host-path>` - which cannot exist. That is the live failure.
+ */
+function sandboxWorkspacePath(env: NodeJS.ProcessEnv = process.env): string {
+  return (env.DF_SANDBOX_WORKSPACE ?? "").trim() || DEFAULT_SANDBOX_WORKSPACE;
+}
+
+async function prepareCommandRunner(provider: SandboxProvider): Promise<CommandRunner> {
   // A command EXECUTES, so it may only run somewhere other than THIS filesystem. `local` is a provider too
   // - and an unset DF_SANDBOX_DRIVER resolves to it - so the gate reads the provider's own `isolated`.
-  if (!provider.isolated) return {};
-  const tools = provider.create(workspaceRoot, { allowedCommands: ammCommandAllowlist() });
+  if (!provider.isolated) {
+    return { refused: `the resolved provider '${provider.driver}' is not isolated (AC5: refuse, never the host)` };
+  }
+
+  const sandboxRoot = sandboxWorkspacePath();
+  let tools: WorkspaceTools;
+  try {
+    tools = provider.create(sandboxRoot, { allowedCommands: ammCommandAllowlist() });
+  } catch (err) {
+    return { refused: `the sandbox could not be prepared: ${err instanceof Error ? err.message : String(err)}` };
+  }
 
   // Confirm the sandbox holds the project BEFORE anything runs: an unprovisioned sandbox is "nobody
   // looked", never "the repository has no linter".
   try {
-    if ((await tools.readFile(PROJECT_MARKER)).trim().length === 0) return {};
-  } catch {
-    return {};
+    if ((await tools.readFile(PROJECT_MARKER)).trim().length === 0) {
+      return { refused: `the sandbox at '${sandboxRoot}' holds no ${PROJECT_MARKER}` };
+    }
+  } catch (err) {
+    return {
+      refused:
+        `the sandbox at '${sandboxRoot}' could not be read (${err instanceof Error ? err.message : String(err)})`,
+    };
   }
   return { tools };
 }
 
-/**
- * Markers a sandbox reports when it cannot reach the network. Network-specific on purpose: a bare
- * "timed out" is just as likely to be a slow test, and mis-reading that as unmeasurable would hide a
- * real failure.
- */
 const NO_EGRESS_MARKERS = [
   "enotfound",
   "eai_again",
@@ -188,7 +211,8 @@ export async function runAmmScan(input: RunAmmScanInput): Promise<AmmScanResult>
   const workspaceRoot = resolve(input.workspace);
   const readable = existsSync(workspaceRoot);
   // One sandbox per SCAN, and none at all when there is nothing to scan.
-  const runner = readable ? await prepareCommandRunner(provider, workspaceRoot) : {};
+  const runner = readable ? await prepareCommandRunner(provider) : {};
+  if (runner.refused) input.onCommandNote?.(runner.refused);
 
   const measurements: Record<string, AmmMeasurement> = {};
   for (const definition of AMM_SIGNAL_CATALOGUE) {

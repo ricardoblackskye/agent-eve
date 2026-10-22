@@ -64,11 +64,15 @@ async function main(): Promise<number> {
   // #437 - command checks run ONLY through an isolated provider; anything else refuses, so a scan
   // never executes a repository's code on this machine.
   const choice = resolveScanProvider();
+  // #437 - report what the scan DID, not what the provider was. A resolved sandbox is not evidence
+  // that any command ran, and the two were conflated here.
+  const commandNotes: string[] = [];
   const scan = await runAmmScan({
     repo: parsed.repo,
     workspace: parsed.workspace,
     ...(parsed.layoutPath ? { layout: readLayout(parsed.layoutPath) } : {}),
     provider: choice.provider,
+    onCommandNote: (note: string) => commandNotes.push(note),
   });
 
   const measured = scan.pillars
@@ -83,8 +87,10 @@ async function main(): Promise<number> {
       (choice.refused
         ? `command checks were NOT measured: ${choice.refused}
 `
-        : `command checks ran through the '${choice.provider.driver}' sandbox
-`) +
+        : "") +
+      (commandNotes.length > 0 ? `command checks did NOT run: ${commandNotes.join("; ")}
+`
+ : "") +
       `catalogue ${scan.catalogueVersion}\n`,
   );
   return 0;
