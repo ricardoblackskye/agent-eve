@@ -79,6 +79,11 @@ async function measureCommand(
   const expectation = definition.expectation;
   if (definition.check.kind !== "command" || expectation.kind !== "exitCode") return "unmeasured";
 
+  // A command EXECUTES, so it may only run somewhere other than THIS filesystem. `local` is a provider
+  // too - and an unset DF_SANDBOX_DRIVER resolves to it - so the gate reads the provider's own `isolated`
+  // property rather than trusting the call site to have chosen wisely.
+  if (!provider.isolated) return "unmeasured";
+
   const tools = provider.create(workspaceRoot);
   const startedAt = Date.now();
   try {
