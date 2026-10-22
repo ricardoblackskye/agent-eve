@@ -945,6 +945,7 @@ header {
    and policy table idiom so a new table cannot ship unstyled (#258). */
 .df-amm-table {
   width: 100%;
+  margin-top: 12px;
   border-collapse: collapse;
   font-size: 12px;
 }
@@ -994,6 +995,38 @@ header {
   font-size: 11px;
   border-bottom: 1px solid #2a3039;
 }
+
+/* The capability list is a plain <ul> and this file resets `ul { padding: 0 }`,
+   so it shipped flush against the panel edge. Rows read like the table above:
+   the capability left, its stage right. */
+.df-amm-capabilities {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+}
+
+.df-amm-capabilities li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 10px;
+  border-bottom: 1px solid #20252d;
+}
+
+.df-amm-capabilities li:last-child {
+  border-bottom: none;
+}
+
+.df-amm-capabilities small {
+  color: #8993a0;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 
 /* LLM usage, customer usage and customer budget tables (#258): these shipped
    with no styles at all, so they rendered untidily beside the cost and policy
