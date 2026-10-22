@@ -16,7 +16,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { referenceAmmLayout } from "../../agent/lib/dark-factory/amm-layout";
 import type { AmmScan } from "../../agent/lib/dark-factory/amm-readiness";
-import { runAmmScan } from "../../agent/lib/dark-factory/amm-scan-runner";
+import { resolveScanProvider, runAmmScan } from "../../agent/lib/dark-factory/amm-scan-runner";
 import { AMM_SIGNAL_CATALOGUE, catalogueVersion } from "../../agent/lib/dark-factory/amm-signals";
 import {
   ALLOWED_TEST_COMMAND_PREFIXES,
@@ -280,5 +280,35 @@ describe("#437 the scan states its OWN command set instead of widening the agent
   // execute npm ci, i.e. a repository's lifecycle scripts.
   it("leaves the Developer Agent's shared command prefixes untouched", () => {
     expect([...ALLOWED_TEST_COMMAND_PREFIXES]).toEqual(["npx vitest", "npm test", "npx tsc"]);
+  });
+});
+
+describe("#437 the CLI's provider choice is made on ISOLATION, not on the driver name", () => {
+  it("refuses a resolved provider that is NOT isolated, and names it", () => {
+    const notIsolated = sandboxSpy({ isolated: false }).provider;
+
+    const choice = resolveScanProvider({} as NodeJS.ProcessEnv, () => notIsolated);
+
+    expect(choice.refused, "a non-isolated driver must be refused WITH a reason").toBeTruthy();
+    expect(choice.refused, "an operator must be able to see which driver was turned down").toMatch(/local/);
+    expect(choice.provider.driver, "the refusing provider keeps the scan off the host").toBe("refusing");
+  });
+
+  it("uses an isolated provider and carries no refusal", () => {
+    const isolated = sandboxSpy({ isolated: true }).provider;
+
+    const choice = resolveScanProvider({} as NodeJS.ProcessEnv, () => isolated);
+
+    expect(choice.refused).toBeUndefined();
+    expect(choice.provider).toBe(isolated);
+  });
+
+  it("refuses - rather than throwing - when no provider can be configured at all", () => {
+    const choice = resolveScanProvider({} as NodeJS.ProcessEnv, () => {
+      throw new Error("no isolated sandbox could be configured");
+    });
+
+    expect(choice.refused).toMatch(/no isolated sandbox could be configured/);
+    expect(choice.provider.driver).toBe("refusing");
   });
 });

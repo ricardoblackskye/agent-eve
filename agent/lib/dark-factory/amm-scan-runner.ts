@@ -169,3 +169,19 @@ export async function runAmmScan(input: RunAmmScanInput): Promise<AmmScanResult>
   const scan = scoreRepo({ repo: input.repo, measurements, scannedAt: now() });
   return { ...scan, catalogueVersion: catalogueVersion() };
 }
+
+/**
+ * #437 - choose where command checks execute, by ISOLATION rather than by driver name. The factory
+ * resolves an unset DF_SANDBOX_DRIVER to `local`, which executes on THIS filesystem, so a scan that
+ * simply took whatever it was handed would run a repository's code on the operator's machine.
+ *
+ * TDD RED stub - the signature only. The behaviour lands with its GREEN.
+ */
+export function resolveScanProvider(
+  env: NodeJS.ProcessEnv = process.env,
+  create: (env: NodeJS.ProcessEnv) => SandboxProvider = () => {
+    throw new Error("not implemented");
+  },
+): { provider: SandboxProvider; refused?: string } {
+  throw new Error("not implemented");
+}
