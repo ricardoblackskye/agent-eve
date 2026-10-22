@@ -172,7 +172,7 @@ describe("#426 the scan that comes out is one the product can already render", (
  * A provider whose ONLY interesting property is `isolated`, plus a record of every command requested.
  * The runner's guard must read that property rather than trusting that "a provider was configured".
  */
-function sandboxSpy(options: { isolated: boolean; project?: boolean }) {
+function sandboxSpy(options: { isolated: boolean; project?: boolean; passes?: boolean }) {
   const commands: string[] = [];
   const provider: SandboxProvider = {
     driver: options.isolated ? "opensandbox" : "local",
@@ -186,7 +186,9 @@ function sandboxSpy(options: { isolated: boolean; project?: boolean }) {
       listFiles: async (): Promise<string[]> => (options.project === false ? [] : ["package.json"]),
       runTests: async (cmd?: string) => {
         commands.push(cmd ?? "");
-        return { passed: true, output: "" };
+        // A command in a directory with no project fails naturally; a passing stub would hide the
+        // very false-absent this suite exists to catch.
+        return { passed: options.passes ?? options.project !== false, output: "" };
       },
     }),
   };
@@ -221,5 +223,30 @@ describe("#437 a command runs only inside an isolated provider", () => {
     await runAmmScan({ repo: "owner/repo", workspace, provider, now: stamp });
 
     expect(commands.length, "an isolated provider must still be used").toBeGreaterThan(0);
+  });
+});
+
+describe("#437 a sandbox with no project must never be read as an ABSENT repository", () => {
+  it("leaves every command row UNMEASURED when the sandbox holds no project", async () => {
+    const { provider, commands } = sandboxSpy({ isolated: true, project: false });
+
+    const scan = await runAmmScan({ repo: "owner/repo", workspace, provider, now: stamp });
+
+    for (const id of COMMAND_ROWS) {
+      expect(stateOf(scan, id), `${id}: our own misprovisioning is not the repo's failure`).toBe("unmeasured");
+    }
+    expect(commands, "nothing may run against a workspace with no project in it").toEqual([]);
+  });
+
+  // The control: the preflight must not turn every command row into unmeasured. A populated sandbox whose
+  // command genuinely fails IS an absent - that is the measurement this row exists to make.
+  it("still reports ABSENT when the project is there and the command genuinely fails", async () => {
+    const { provider, commands } = sandboxSpy({ isolated: true, project: true, passes: false });
+
+    const scan = await runAmmScan({ repo: "owner/repo", workspace, provider, now: stamp });
+
+    expect(commands.length).toBeGreaterThan(0);
+    const states = COMMAND_ROWS.map((id) => stateOf(scan, id));
+    expect(states, "a command that ran and failed is a real absent").toContain("absent");
   });
 });

@@ -42,6 +42,13 @@ export type AmmScanResult = AmmScan & { catalogueVersion: string };
 
 const REFUSAL = "no sandbox is configured, so no command may run outside one (AC5: refuse, never the host)";
 
+/**
+ * Proof that a sandbox actually holds the repository. Without it, a command run in an EMPTY sandbox fails
+ * for our reason rather than the repository's, and a non-zero exit is indistinguishable from a real
+ * `absent` - our own misprovisioning reported as the repository's failure.
+ */
+const PROJECT_MARKER = "package.json";
+
 /** Confine a relative path to the workspace. A layout may not point the scanner at the rest of the filesystem. */
 function resolveWithin(workspaceRoot: string, relPath: string): string {
   const target = resolve(workspaceRoot, relPath);
@@ -85,6 +92,17 @@ async function measureCommand(
   if (!provider.isolated) return "unmeasured";
 
   const tools = provider.create(workspaceRoot);
+
+  // Confirm the sandbox holds the project BEFORE anything runs. An unprovisioned sandbox is "nobody
+  // looked", never "the repository has no linter", so it is unmeasured and no command is executed.
+  let holdsProject = false;
+  try {
+    holdsProject = (await tools.readFile(PROJECT_MARKER)).trim().length > 0;
+  } catch {
+    holdsProject = false;
+  }
+  if (!holdsProject) return "unmeasured";
+
   const startedAt = Date.now();
   try {
     const result = await tools.runTests(definition.check.command);
