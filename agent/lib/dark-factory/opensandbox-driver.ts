@@ -174,11 +174,14 @@ function assertAllowedExtension(relPath: string): void {
   }
 }
 
-function assertAllowedTestCommand(command: string): void {
-  const allowed = ALLOWED_TEST_COMMAND_PREFIXES.some(
+function assertAllowedTestCommand(
+  command: string,
+  allowed: readonly string[] = ALLOWED_TEST_COMMAND_PREFIXES,
+): void {
+  const permitted = allowed.some(
     (prefix) => command === prefix || command.startsWith(`${prefix} `),
   );
-  if (!allowed) {
+  if (!permitted) {
     throw new InvalidTaskError(
       `Command '${command}' is not allowed. Only test commands starting with [${ALLOWED_TEST_COMMAND_PREFIXES.join(", ")}] are permitted.`,
     );
@@ -445,7 +448,15 @@ export function createOpenSandboxProvider(
     driver: "opensandbox",
     isolated: true,
     ...gitCapability,
-    create: (workspaceDir: string): WorkspaceTools => {
+    create: (
+
+      workspaceDir: string,
+
+      options?: { allowedCommands?: readonly string[] },
+
+    ): WorkspaceTools => {
+
+      const allowedCommands = options?.allowedCommands ?? ALLOWED_TEST_COMMAND_PREFIXES;
       const root = (
         workspaceDir ||
         env.DF_SANDBOX_WORKSPACE ||
@@ -493,7 +504,7 @@ export function createOpenSandboxProvider(
             ALLOWED_TEST_COMMAND_PREFIXES[0] ??
             "npx vitest"
           ).trim();
-          assertAllowedTestCommand(command);
+          assertAllowedTestCommand(command, allowedCommands);
           const handle = await sandbox();
           const execution = await handle.commands.run(command);
           const stdout = execution.logs.stdout

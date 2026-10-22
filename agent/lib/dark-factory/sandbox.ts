@@ -41,7 +41,15 @@ export interface SandboxProvider {
    */
   readonly isolated: boolean;
   /** Build the tools for a workspace directory. `local` must reproduce existing behaviour exactly. */
-  create(workspaceDir: string): WorkspaceTools;
+  create(
+    workspaceDir: string,
+    /**
+     * #437 - lets a caller with a legitimately different command set STATE ITS OWN rather than widening
+     * the shared test prefixes, which would widen what the Developer Agent may execute. Absent means the
+     * shared list, exactly as before.
+     */
+    options?: { allowedCommands?: readonly string[] },
+  ): WorkspaceTools;
   /**
    * Release any REMOTE resource this provider owns. Optional, because local/dry-run/refusing own none.
    *

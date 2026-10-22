@@ -19,11 +19,14 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve, sep } from "node:path";
 
+import type { WorkspaceTools } from "./developer-agent";
 import { layoutFor, resolveSignalPath, type AmmRepoLayout } from "./amm-layout";
 import type { AmmScan } from "./amm-readiness";
 import { scoreRepo, type AmmMeasurement } from "./amm-scoring";
 import { AMM_SIGNAL_CATALOGUE, catalogueVersion, type AmmSignalDefinition } from "./amm-signals";
 import { createRefusingSandboxProvider, SandboxRefusedError, type SandboxProvider } from "./sandbox";
+import { DEFAULT_SANDBOX_WORKSPACE } from "./opensandbox-driver";
+import { createSandboxProvider } from "./sandbox-provider";
 
 export interface RunAmmScanInput {
   repo: string;
@@ -33,6 +36,8 @@ export interface RunAmmScanInput {
   layout?: AmmRepoLayout;
   /** Where command checks execute. Defaults to a provider that REFUSES, keeping the scan off the host (AC5). */
   provider?: SandboxProvider;
+  /** Called once with the reason when no command may run, so a refusal is never silent. */
+  onCommandNote?: (note: string) => void;
   /** The scan stamp, supplied so a scan is reproducible. */
   now?: () => string;
 }
@@ -41,6 +46,23 @@ export interface RunAmmScanInput {
 export type AmmScanResult = AmmScan & { catalogueVersion: string };
 
 const REFUSAL = "no sandbox is configured, so no command may run outside one (AC5: refuse, never the host)";
+
+/**
+ * Proof that a sandbox actually holds the repository. Without it, a command run in an EMPTY sandbox fails
+ * for our reason rather than the repository's, and a non-zero exit is indistinguishable from a real
+ * `absent` - our own oversight reported as the repository's failure.
+ */
+const PROJECT_MARKER = "package.json";
+
+/**
+ * The commands THIS scanner may execute: exactly its catalogue's command rows, and nothing else. The
+ * alternative - adding them to the shared test prefixes - would widen what the Developer Agent may run.
+ */
+function ammCommandAllowlist(): readonly string[] {
+  return AMM_SIGNAL_CATALOGUE.flatMap((definition) =>
+    definition.check.kind === "command" ? [definition.check.command] : [],
+  );
+}
 
 /** Confine a relative path to the workspace. A layout may not point the scanner at the rest of the filesystem. */
 function resolveWithin(workspaceRoot: string, relPath: string): string {
@@ -70,34 +92,97 @@ function measureFile(
   return "unmeasured";
 }
 
-/** A check that executes: it may only run inside a sandbox, so a refused sandbox yields unmeasured. */
-async function measureCommand(
-  definition: AmmSignalDefinition,
-  provider: SandboxProvider,
-  workspaceRoot: string,
-): Promise<AmmMeasurement> {
+/**
+ * Where a scan's command checks execute. Built ONCE per scan: a real provider's `create()` builds a
+ * SANDBOX, so doing it per row would spend five sandboxes on one scan - slow, and a leak until dispose.
+ */
+interface CommandRunner {
+  /** Absent when no command may run at all - not isolated, or a sandbox that holds no project. */
+  tools?: WorkspaceTools;
+  /** WHY nothing may run. Surfaced to the caller: a refusal nobody can see is one nobody can act on. */
+  refused?: string;
+}
+
+/**
+ * Where THIS repository lives inside a sandbox. `process.cwd()` is a HOST path, and the isolated driver
+ * treats the directory it is handed as the SANDBOX-side root, so passing the host path asked the sandbox
+ * for a file under `<container-root>/<host-path>` - which cannot exist. That is the live failure.
+ */
+function sandboxWorkspacePath(env: NodeJS.ProcessEnv = process.env): string {
+  return (env.DF_SANDBOX_WORKSPACE ?? "").trim() || DEFAULT_SANDBOX_WORKSPACE;
+}
+
+async function prepareCommandRunner(provider: SandboxProvider): Promise<CommandRunner> {
+  // A command EXECUTES, so it may only run somewhere other than THIS filesystem. `local` is a provider too
+  // - and an unset DF_SANDBOX_DRIVER resolves to it - so the gate reads the provider's own `isolated`.
+  if (!provider.isolated) {
+    return { refused: `the resolved provider '${provider.driver}' is not isolated (AC5: refuse, never the host)` };
+  }
+
+  const sandboxRoot = sandboxWorkspacePath();
+  let tools: WorkspaceTools;
+  try {
+    tools = provider.create(sandboxRoot, { allowedCommands: ammCommandAllowlist() });
+  } catch (err) {
+    return { refused: `the sandbox could not be prepared: ${err instanceof Error ? err.message : String(err)}` };
+  }
+
+  // Confirm the sandbox holds the project BEFORE anything runs: an unprovisioned sandbox is "nobody
+  // looked", never "the repository has no linter".
+  try {
+    if ((await tools.readFile(PROJECT_MARKER)).trim().length === 0) {
+      return { refused: `the sandbox at '${sandboxRoot}' holds no ${PROJECT_MARKER}` };
+    }
+  } catch (err) {
+    return {
+      refused:
+        `the sandbox at '${sandboxRoot}' could not be read (${err instanceof Error ? err.message : String(err)})`,
+    };
+  }
+  return { tools };
+}
+
+const NO_EGRESS_MARKERS = [
+  "enotfound",
+  "eai_again",
+  "econnrefused",
+  "getaddrinfo",
+  "could not resolve host",
+  "registry.npmjs.org",
+];
+
+function isNoEgress(output: string): boolean {
+  const text = output.toLowerCase();
+  return NO_EGRESS_MARKERS.some((marker) => text.includes(marker));
+}
+
+/** A check that executes: it may only run inside an isolated sandbox, so anything else yields unmeasured. */
+async function measureCommand(definition: AmmSignalDefinition, runner: CommandRunner): Promise<AmmMeasurement> {
   const expectation = definition.expectation;
   if (definition.check.kind !== "command" || expectation.kind !== "exitCode") return "unmeasured";
+  const tools = runner.tools;
+  if (!tools) return "unmeasured";
 
-  const tools = provider.create(workspaceRoot);
   const startedAt = Date.now();
   try {
     const result = await tools.runTests(definition.check.command);
+    // A command that failed because the SANDBOX has no egress failed for OUR environment's reason, not the
+    // repository's, so it is unmeasured - never a repository marked down for our sandbox's isolation.
+    if (!result.passed && isNoEgress(result.output)) return "unmeasured";
+    // The time bound IS the signal on these rows: an exit code alone would call a ten-minute run present.
     if (expectation.withinMs !== undefined && Date.now() - startedAt > expectation.withinMs) {
-      // The time bound IS the signal on these rows: an exit code alone would call a ten-minute run present.
       return "unmeasured";
     }
     return result.passed ? "present" : "absent";
-  } catch (err) {
+  } catch {
     // No sandbox, a refused sandbox, or missing tooling: it never ran, so nobody looked.
-    if (err instanceof SandboxRefusedError) return "unmeasured";
     return "unmeasured";
   }
 }
 
 async function measureOne(
   definition: AmmSignalDefinition,
-  input: { workspaceRoot: string; layout?: AmmRepoLayout; provider: SandboxProvider },
+  input: { workspaceRoot: string; layout?: AmmRepoLayout; runner: CommandRunner },
 ): Promise<AmmMeasurement> {
   try {
     if (definition.check.kind === "file") {
@@ -106,7 +191,7 @@ async function measureOne(
       if (relPath === undefined) return "unmeasured";
       return measureFile(definition, relPath, input.workspaceRoot);
     }
-    return await measureCommand(definition, input.provider, input.workspaceRoot);
+    return await measureCommand(definition, input.runner);
   } catch {
     // A target we could not read is not a target we found missing, so it is never reported absent.
     return "unmeasured";
@@ -125,14 +210,45 @@ export async function runAmmScan(input: RunAmmScanInput): Promise<AmmScanResult>
   const now = input.now ?? (() => new Date().toISOString());
   const workspaceRoot = resolve(input.workspace);
   const readable = existsSync(workspaceRoot);
+  // One sandbox per SCAN, and none at all when there is nothing to scan.
+  const runner = readable ? await prepareCommandRunner(provider) : {};
+  if (runner.refused) input.onCommandNote?.(runner.refused);
 
   const measurements: Record<string, AmmMeasurement> = {};
   for (const definition of AMM_SIGNAL_CATALOGUE) {
     measurements[definition.id] = readable
-      ? await measureOne(definition, { workspaceRoot, layout, provider })
+      ? await measureOne(definition, { workspaceRoot, layout, runner })
       : "unmeasured";
   }
 
   const scan = scoreRepo({ repo: input.repo, measurements, scannedAt: now() });
   return { ...scan, catalogueVersion: catalogueVersion() };
+}
+
+/**
+ * #437 - choose where command checks execute, by ISOLATION rather than by driver name. The factory
+ * resolves an unset DF_SANDBOX_DRIVER to `local`, which executes on THIS filesystem, so a scan that
+ * simply took whatever it was handed would run a repository's code on the operator's machine.
+ */
+export function resolveScanProvider(
+  env: NodeJS.ProcessEnv = process.env,
+  create: (env: NodeJS.ProcessEnv) => SandboxProvider = (e) => createSandboxProvider(e as never),
+): { provider: SandboxProvider; refused?: string } {
+  const requested = (env.DF_SANDBOX_DRIVER ?? "").trim();
+  try {
+    const resolved = create(env);
+    if (resolved.isolated) return { provider: resolved };
+    return {
+      provider: createRefusingSandboxProvider(REFUSAL),
+      refused:
+        `DF_SANDBOX_DRIVER='${requested || "(unset)"}' resolves to '${resolved.driver}', which is NOT ` +
+        "isolated, so no command may run there (AC5: refuse, never the host)",
+    };
+  } catch (err) {
+    // A driver that cannot be configured is a refusal, not a crash: the scan still measures every file check.
+    return {
+      provider: createRefusingSandboxProvider(REFUSAL),
+      refused: `no isolated sandbox could be configured: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
 }

@@ -16,9 +16,14 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { referenceAmmLayout } from "../../agent/lib/dark-factory/amm-layout";
 import type { AmmScan } from "../../agent/lib/dark-factory/amm-readiness";
-import { runAmmScan } from "../../agent/lib/dark-factory/amm-scan-runner";
-import { catalogueVersion } from "../../agent/lib/dark-factory/amm-signals";
-import { createRefusingSandboxProvider } from "../../agent/lib/dark-factory/sandbox";
+import { resolveScanProvider, runAmmScan } from "../../agent/lib/dark-factory/amm-scan-runner";
+import { AMM_SIGNAL_CATALOGUE, catalogueVersion } from "../../agent/lib/dark-factory/amm-signals";
+import { DEFAULT_SANDBOX_WORKSPACE } from "../../agent/lib/dark-factory/opensandbox-driver";
+import {
+  ALLOWED_TEST_COMMAND_PREFIXES,
+  type WorkspaceTools,
+} from "../../agent/lib/dark-factory/developer-agent";
+import { createRefusingSandboxProvider, type SandboxProvider } from "../../agent/lib/dark-factory/sandbox";
 
 /** The scan stamp is an input, so every scan here is deterministic. */
 const stamp = () => "2026-10-21T00:00:00.000Z";
@@ -164,5 +169,204 @@ describe("#426 the scan that comes out is one the product can already render", (
     // A capability the product genuinely lacks (#430): measured, looked for, and correctly reported missing.
     expect(stateOf(scan, "persistent-sessions")).toBe("absent");
     expect(Object.keys(referenceAmmLayout).length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * A provider whose ONLY interesting property is `isolated`, plus a record of every command requested.
+ * The runner's guard must read that property rather than trusting that "a provider was configured".
+ */
+function sandboxSpy(options: {
+  isolated: boolean;
+  project?: boolean;
+  passes?: boolean;
+  output?: string;
+}) {
+  const commands: string[] = [];
+  const offers: { dir: string; allowedCommands?: readonly string[] }[] = [];
+  const provider: SandboxProvider = {
+    driver: options.isolated ? "opensandbox" : "local",
+    isolated: options.isolated,
+    create: (workspaceDir: string, opts?: { allowedCommands?: readonly string[] }): WorkspaceTools => {
+      offers.push({ dir: workspaceDir, ...(opts ?? {}) });
+      return {
+        readFile: async (relPath: string) => {
+          if (options.project === false) throw new Error(`ENOENT: ${relPath}`);
+          return relPath === "package.json" ? '{ "name": "sandbox-spy" }' : "";
+        },
+        writeFile: async () => undefined,
+        listFiles: async (): Promise<string[]> => (options.project === false ? [] : ["package.json"]),
+        runTests: async (cmd?: string) => {
+          commands.push(cmd ?? "");
+          // A command in a directory with no project fails naturally; a passing stub would hide the
+          // very false-absent this suite exists to catch.
+          return {
+            passed: options.passes ?? options.project !== false,
+            output: options.output ?? "",
+          };
+        },
+      };
+    },
+  };
+  return { provider, commands, offers };
+}
+
+/**
+ * #437 - a command check executes ONLY where the provider says it is isolated.
+ *
+ * The refusal already pinned above is not enough on its own: `local` IS a provider, and it runs commands
+ * on THIS machine. `sandbox-provider.ts` resolves an UNSET driver to `local`, so a caller that merely
+ * "configured a provider" could still execute a repository's code outside any sandbox. The guard
+ * therefore reads the provider's own `isolated` property.
+ */
+describe("#437 a command runs only inside an isolated provider", () => {
+  it("never executes a command through a provider that is NOT isolated", async () => {
+    const { provider, commands } = sandboxSpy({ isolated: false, project: true });
+
+    const scan = await runAmmScan({ repo: "owner/repo", workspace, provider, now: stamp });
+
+    for (const id of COMMAND_ROWS) {
+      expect(stateOf(scan, id), `${id}: a command we did not run has not been shown missing`).toBe("unmeasured");
+    }
+    expect(commands, "a non-isolated provider must never be asked to run anything").toEqual([]);
+  });
+
+  // GUARD, not a bug fix: the isolation gate must not silently disable every command. This passes before
+  // and after the gate lands, and it fails if the gate is "fixed" by refusing everything.
+  it("executes the command once the provider IS isolated", async () => {
+    const { provider, commands } = sandboxSpy({ isolated: true, project: true });
+
+    await runAmmScan({ repo: "owner/repo", workspace, provider, now: stamp });
+
+    expect(commands.length, "an isolated provider must still be used").toBeGreaterThan(0);
+  });
+});
+
+describe("#437 a sandbox with no project must never be read as an ABSENT repository", () => {
+  it("leaves every command row UNMEASURED when the sandbox holds no project", async () => {
+    const { provider, commands } = sandboxSpy({ isolated: true, project: false });
+
+    const scan = await runAmmScan({ repo: "owner/repo", workspace, provider, now: stamp });
+
+    for (const id of COMMAND_ROWS) {
+      expect(stateOf(scan, id), `${id}: our own oversight is not the repo's failure`).toBe("unmeasured");
+    }
+    expect(commands, "nothing may run against a workspace with no project in it").toEqual([]);
+  });
+
+  // The control: the preflight must not turn every command row into unmeasured. A populated sandbox whose
+  // command genuinely fails IS an absent - that is the measurement this row exists to make.
+  it("still reports ABSENT when the project is there and the command genuinely fails", async () => {
+    const { provider, commands } = sandboxSpy({ isolated: true, project: true, passes: false });
+
+    const scan = await runAmmScan({ repo: "owner/repo", workspace, provider, now: stamp });
+
+    expect(commands.length).toBeGreaterThan(0);
+    const states = COMMAND_ROWS.map((id) => stateOf(scan, id));
+    expect(states, "a command that ran and failed is a real absent").toContain("absent");
+  });
+});
+
+describe("#437 the scan states its OWN command set instead of widening the agent's", () => {
+  it("offers the sandbox exactly the catalogue's command rows", async () => {
+    const { provider, offers } = sandboxSpy({ isolated: true, project: true });
+
+    await runAmmScan({ repo: "owner/repo", workspace, provider, now: stamp });
+
+    const fromCatalogue = AMM_SIGNAL_CATALOGUE.flatMap((definition) =>
+      definition.check.kind === "command" ? [definition.check.command] : [],
+    );
+    expect(fromCatalogue.length, "the catalogue is the authority for what the scan runs").toBeGreaterThan(0);
+    expect(offers.length, "an isolated provider must be offered an allowlist").toBeGreaterThan(0);
+    const offered = [...(offers[0]?.allowedCommands ?? [])].sort();
+    expect(offered, "the sandbox must be allowed the catalogue's commands and nothing else").toEqual(
+      [...fromCatalogue].sort(),
+    );
+  });
+
+  // GUARD, not a bug fix: the Developer Agent's blast radius must NOT widen. This fails the moment the
+  // scan is "simplified" by folding its commands into the shared constant - which would let the agent
+  // execute npm ci, i.e. a repository's lifecycle scripts.
+  it("leaves the Developer Agent's shared command prefixes untouched", () => {
+    expect([...ALLOWED_TEST_COMMAND_PREFIXES]).toEqual(["npx vitest", "npm test", "npx tsc"]);
+  });
+});
+
+describe("#437 the CLI's provider choice is made on ISOLATION, not on the driver name", () => {
+  it("refuses a resolved provider that is NOT isolated, and names it", () => {
+    const notIsolated = sandboxSpy({ isolated: false }).provider;
+
+    const choice = resolveScanProvider({} as NodeJS.ProcessEnv, () => notIsolated);
+
+    expect(choice.refused, "a non-isolated driver must be refused WITH a reason").toBeTruthy();
+    expect(choice.refused, "an operator must be able to see which driver was turned down").toMatch(/local/);
+    expect(choice.provider.driver, "the refusing provider keeps the scan off the host").toBe("refusing");
+  });
+
+  it("uses an isolated provider and carries no refusal", () => {
+    const isolated = sandboxSpy({ isolated: true }).provider;
+
+    const choice = resolveScanProvider({} as NodeJS.ProcessEnv, () => isolated);
+
+    expect(choice.refused).toBeUndefined();
+    expect(choice.provider).toBe(isolated);
+  });
+
+  it("refuses - rather than throwing - when no provider can be configured at all", () => {
+    const choice = resolveScanProvider({} as NodeJS.ProcessEnv, () => {
+      throw new Error("no isolated sandbox could be configured");
+    });
+
+    expect(choice.refused).toMatch(/no isolated sandbox could be configured/);
+    expect(choice.provider.driver).toBe("refusing");
+  });
+});
+
+describe("#437 one sandbox per scan, and no-egress is not a repository failure", () => {
+  it("builds the sandbox tools ONCE per scan, not once per command row", async () => {
+    const { provider, offers } = sandboxSpy({ isolated: true, project: true });
+
+    await runAmmScan({ repo: "owner/repo", workspace, provider, now: stamp });
+
+    // A real provider's create() builds a SANDBOX: five command rows must not mean five sandboxes.
+    expect(offers.length, "one scan, one sandbox").toBe(1);
+  });
+
+  it("reports a command that could not reach the network as UNMEASURED, not absent", async () => {
+    const { provider } = sandboxSpy({
+      isolated: true,
+      project: true,
+      passes: false,
+      output: "npm ERR! code ENOTFOUND - request to registry.npmjs.org failed",
+    });
+
+    const scan = await runAmmScan({ repo: "owner/repo", workspace, provider, now: stamp });
+
+    const states = COMMAND_ROWS.map((id) => stateOf(scan, id));
+    expect(states, "no egress is OUR environment, not the repository's failure").not.toContain("absent");
+    expect(states).toContain("unmeasured");
+  });
+});
+
+describe("#437 the sandbox is handed a CONTAINER path, and a refusal carries its reason", () => {
+  it("builds the command tools at the SANDBOX workspace, never the host path", async () => {
+    const { provider, offers } = sandboxSpy({ isolated: true, project: true });
+
+    await runAmmScan({ repo: "owner/repo", workspace, provider, now: stamp });
+
+    // The live failure: the HOST workspace was passed as the sandbox-side directory, so the sandbox was
+    // asked for a file under <container-root>/<host-path>, which cannot exist.
+    expect(offers[0]?.dir).toBe(DEFAULT_SANDBOX_WORKSPACE);
+    expect(offers[0]?.dir ?? "").not.toBe(process.cwd());
+  });
+
+  it("surfaces WHY no command ran, instead of swallowing it", async () => {
+    const notes: string[] = [];
+    const { provider } = sandboxSpy({ isolated: true, project: false });
+
+    await runAmmScan({ repo: "owner/repo", workspace, provider, now: stamp, onCommandNote: (n: string) => notes.push(n) });
+
+    expect(notes.length, "a refusal nobody can see is a refusal nobody can act on").toBeGreaterThan(0);
+    expect(notes.join(" ")).toMatch(/package\.json/);
   });
 });
