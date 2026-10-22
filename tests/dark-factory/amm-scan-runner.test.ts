@@ -18,6 +18,7 @@ import { referenceAmmLayout } from "../../agent/lib/dark-factory/amm-layout";
 import type { AmmScan } from "../../agent/lib/dark-factory/amm-readiness";
 import { resolveScanProvider, runAmmScan } from "../../agent/lib/dark-factory/amm-scan-runner";
 import { AMM_SIGNAL_CATALOGUE, catalogueVersion } from "../../agent/lib/dark-factory/amm-signals";
+import { DEFAULT_SANDBOX_WORKSPACE } from "../../agent/lib/dark-factory/opensandbox-driver";
 import {
   ALLOWED_TEST_COMMAND_PREFIXES,
   type WorkspaceTools,
@@ -182,12 +183,12 @@ function sandboxSpy(options: {
   output?: string;
 }) {
   const commands: string[] = [];
-  const offers: { allowedCommands?: readonly string[] }[] = [];
+  const offers: { dir: string; allowedCommands?: readonly string[] }[] = [];
   const provider: SandboxProvider = {
     driver: options.isolated ? "opensandbox" : "local",
     isolated: options.isolated,
-    create: (_workspaceDir: string, opts?: { allowedCommands?: readonly string[] }): WorkspaceTools => {
-      offers.push(opts ?? {});
+    create: (workspaceDir: string, opts?: { allowedCommands?: readonly string[] }): WorkspaceTools => {
+      offers.push({ dir: workspaceDir, ...(opts ?? {}) });
       return {
         readFile: async (relPath: string) => {
           if (options.project === false) throw new Error(`ENOENT: ${relPath}`);
@@ -344,5 +345,28 @@ describe("#437 one sandbox per scan, and no-egress is not a repository failure",
     const states = COMMAND_ROWS.map((id) => stateOf(scan, id));
     expect(states, "no egress is OUR environment, not the repository's failure").not.toContain("absent");
     expect(states).toContain("unmeasured");
+  });
+});
+
+describe("#437 the sandbox is handed a CONTAINER path, and a refusal carries its reason", () => {
+  it("builds the command tools at the SANDBOX workspace, never the host path", async () => {
+    const { provider, offers } = sandboxSpy({ isolated: true, project: true });
+
+    await runAmmScan({ repo: "owner/repo", workspace, provider, now: stamp });
+
+    // The live failure: the HOST workspace was passed as the sandbox-side directory, so the sandbox was
+    // asked for a file under <container-root>/<host-path>, which cannot exist.
+    expect(offers[0]?.dir).toBe(DEFAULT_SANDBOX_WORKSPACE);
+    expect(offers[0]?.dir ?? "").not.toBe(process.cwd());
+  });
+
+  it("surfaces WHY no command ran, instead of swallowing it", async () => {
+    const notes: string[] = [];
+    const { provider } = sandboxSpy({ isolated: true, project: false });
+
+    await runAmmScan({ repo: "owner/repo", workspace, provider, now: stamp, onCommandNote: (n: string) => notes.push(n) });
+
+    expect(notes.length, "a refusal nobody can see is a refusal nobody can act on").toBeGreaterThan(0);
+    expect(notes.join(" ")).toMatch(/package\.json/);
   });
 });
