@@ -659,6 +659,14 @@ Dark Factory — resolve a run's target repository instead of hardcoding one (#3
 
 **Exports:** `RUNNER_CONFIG_PATH`, `RunnerConfig`, `RunnerConfigResult`, `parseRunnerConfig`, `loadRunnerConfig`, `TargetRepoResult`, `TargetRepoSource`, `resolveTargetRepo`, `TargetRepoAuthorization`, `authorizeTargetRepo`, `IssueNumberResult`, `resolveIssueNumber`, `BranchNameResult`, `resolveBranchName`, `RepoSettings`, `RepoBoardSettings`, `RepoSettingsResult`, `resolveRepoSettings`, `resolveBoard`, `SettingSource`, `BoardSettingResult`, `resolveBoardSetting`, `OwnerRepoResult`, `resolveOwnerRepo`
 
+## runner-env
+
+Dark Factory - the runner's environment bootstrap, extracted so it can be tested without running the pipeline (#400). It loads `.env` from a directory the caller names, or from `process.cwd()`, into `process.env` or an injected object. It **carries no model default**: an unset `EVE_CHAT_MODEL` must fall through to `DEFAULT_MODEL_ID` in `agent/model-config.ts`, because a default here silently replaced the canonical model with a legacy one. Same rule as `DF_WORKER_ALLOWED_REPOS` (#348) - the absence of configuration must never be read as a value somebody chose.
+
+**Source:** [`agent/lib/dark-factory/runner-env.ts`](../../agent/lib/dark-factory/runner-env.ts)
+
+**Exports:** `InitRunnerEnvOptions`, `initRunnerEnv`
+
 ## sandbox-reaper
 
 Dark Factory — reap orphaned sandboxes by run id (#281, R2b/B4). Lists sandboxes labelled `metadata.run` and deletes them, reclaiming any sandbox left behind by a client-timeout create-leak. Defense in depth behind runCodingPhase's dispose; never aborts the run on a stuck orphan.
