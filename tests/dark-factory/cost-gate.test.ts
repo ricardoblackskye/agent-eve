@@ -27,8 +27,25 @@ describe("createCostGate (#270)", () => {
     const gate = createCostGate({ ...BASE, governor: { admit } as never });
 
     expect(gate).not.toBeNull();
-    await expect(gate?.admit()).resolves.toBeUndefined();
+    await expect(gate?.admit()).resolves.toMatchObject({ settle: expect.any(Function) });
     expect(admit).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns an admission that settles the reservation it took (#443)", async () => {
+    const settle = vi.fn(async () => ({ ok: true }));
+    const gate = createCostGate({
+      ...BASE,
+      governor: {
+        admit: vi.fn(async () => ({ admitted: true, reservationId: "res-1", estimatedUsd: 2.5 })),
+        settle,
+      } as never,
+    });
+
+    const admission = await gate?.admit();
+
+    expect(admission?.settle).toBeTypeOf("function");
+    await admission?.settle(12.5);
+    expect(settle).toHaveBeenCalledWith("res-1", 12.5);
   });
 
   it("THROWS on refusal so the caller fails before the provider call", async () => {

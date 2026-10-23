@@ -21,9 +21,21 @@ import type { CostCategory } from "./cost-budget";
 /** Default upper bound for a completion, used for the pre-call reservation. */
 export const DEFAULT_MAX_OUTPUT_TOKENS = 8_000;
 
+/**
+ * A reservation an admission took, with the means to reconcile it (#443).
+ */
+export interface CostAdmission {
+  /**
+   * Reconcile the reservation: the measured cost when the provider reported one,
+   * `null` when the call ran but usage was unavailable (the estimate is charged),
+   * and `0` when the call never reached the provider.
+   */
+  settle(actualCostUsd: number | null): Promise<void>;
+}
+
 export interface CostGate {
   /** Admit a model call. Throws to refuse it before the provider call. */
-  admit(): Promise<void>;
+  admit(): Promise<CostAdmission | void>;
 }
 
 export interface CostGateInput {
@@ -62,7 +74,7 @@ export function createCostGate(input: CostGateInput): CostGate | null {
   if (!governor) return null;
 
   return {
-    async admit(): Promise<void> {
+    async admit(): Promise<CostAdmission> {
       const decision = await governor.admit({
         category,
         model,
