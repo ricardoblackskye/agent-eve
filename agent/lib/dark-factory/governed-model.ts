@@ -61,9 +61,95 @@ export function buildGovernedDynamicModel(input: GovernedModelInput) {
   });
 }
 
+/** Usage as reported by the provider, when it reports one. */
+type UsageLike = { inputTokens?: number; outputTokens?: number };
+
+function usageOf(value: unknown): UsageLike | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const usage = (value as { usage?: unknown }).usage;
+  if (typeof usage !== "object" || usage === null) return undefined;
+  const { inputTokens, outputTokens } = usage as UsageLike;
+  if (typeof inputTokens !== "number" && typeof outputTokens !== "number") return undefined;
+  return usage as UsageLike;
+}
+
+/** A finish part is the only stream part that carries usage. */
+function usageFromPart(part: unknown): UsageLike | undefined {
+  if (typeof part !== "object" || part === null) return undefined;
+  if ((part as { type?: string }).type !== "finish") return undefined;
+  return usageOf(part);
+}
+
+function settleStream(stream: ReadableStream, admission: CostAdmission): ReadableStream {
+  let seen: UsageLike | undefined;
+  return new ReadableStream({
+    async start(controller) {
+      const reader = stream.getReader();
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const usage = usageFromPart(value);
+          if (usage != null) seen = usage;
+          controller.enqueue(value);
+        }
+        await admission.settleFromUsage(seen);
+        controller.close();
+      } catch (error) {
+        await admission.settle(null);
+        controller.error(error);
+      }
+    },
+  });
+}
+
 /**
- * RED STUB - returns the model untouched, so every settling case fails on its assertion.
+ * Wrap a model so the reservation admitted for the turn is settled once the call
+ * that reservation paid for has finished, failed or stopped streaming (#443).
+ *
+ * A string model id is returned untouched: there is no call to observe.
  */
-export function withSettlement<T>(model: T, _admission: CostAdmission): T {
-  return model;
+export function withSettlement<T>(model: T, admission: CostAdmission): T {
+  if (typeof model !== "object" || model === null) return model;
+  const target = model as Record<string, unknown>;
+
+  return new Proxy(target, {
+    get(object, property) {
+      const value = Reflect.get(object, property, object);
+      if (typeof value !== "function") return value;
+
+      if (property === "doGenerate") {
+        return async (...args: unknown[]) => {
+          try {
+            const result = await value.apply(object, args);
+            await admission.settleFromUsage(usageOf(result));
+            return result;
+          } catch (error) {
+            await admission.settle(null);
+            throw error;
+          }
+        };
+      }
+
+      if (property === "doStream") {
+        return async (...args: unknown[]) => {
+          try {
+            const result = await value.apply(object, args);
+            const stream = (result as { stream?: unknown } | null)?.stream;
+            if (!(stream instanceof ReadableStream)) {
+              await admission.settleFromUsage(usageOf(result));
+              return result;
+            }
+            const patched = Object.create(Object.getPrototypeOf(result) ?? Object.prototype);
+            return Object.assign(patched, result, { stream: settleStream(stream, admission) });
+          } catch (error) {
+            await admission.settle(null);
+            throw error;
+          }
+        };
+      }
+
+      return value.bind(object);
+    },
+  }) as T;
 }
