@@ -26,7 +26,7 @@ describe("createOrchestratorGate", () => {
     });
 
     expect(gate).not.toBeNull();
-    await expect(gate?.admit()).resolves.toBeUndefined();
+    await expect(gate?.admit()).resolves.toMatchObject({ settle: expect.any(Function) });
     expect(admit).toHaveBeenCalledTimes(1);
   });
 

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -166,6 +166,70 @@ describe("in-memory cost budget store", () => {
     expect((await store.listBudgets("2026-02")).value).toHaveLength(1);
     expect((await store.listBudgets("2026-03")).value).toHaveLength(1);
     expect((await store.listBudgets()).value).toHaveLength(2);
+  });
+});
+
+describe("admission visibility and stale reservations (#443)", () => {
+  const makeStore = async () => {
+    const store = new InMemoryCostBudgetProvider();
+    await store.ensureBudget(PERIOD, "developer", 10);
+    return store;
+  };
+
+  it("counts the call at admission, before it is settled", async () => {
+    const store = await makeStore();
+    await store.reserve(PERIOD, "developer", 2);
+
+    const [budget] = (await store.listBudgets(PERIOD)).value;
+    // The row must show that a call was admitted. Before #443 call_count stayed 0 until
+    // settlement, so an admitted-but-unsettled call was invisible in the operator panel.
+    expect(budget!.callCount).toBe(1);
+    expect(budget!.reservedUsd).toBe(2);
+  });
+
+  it("reaps a reservation older than the TTL and releases its reserve", async () => {
+    vi.useFakeTimers();
+    try {
+      const store = await makeStore();
+      await store.reserve(PERIOD, "developer", 2);
+      vi.advanceTimersByTime(61_000);
+
+      const reaped = await store.reapStaleReservations(60_000);
+
+      const [budget] = (await store.listBudgets(PERIOD)).value;
+      expect(reaped).toBe(1);
+      expect(budget!.reservedUsd).toBe(0);
+      expect(budget!.spentUsd).toBe(0);
+      // The attempt stays visible even though nothing was charged.
+      expect(budget!.callCount).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("leaves a fresh reservation alone", async () => {
+    const store = await makeStore();
+    const { reservationId } = await store.reserve(PERIOD, "developer", 2);
+
+    const reaped = await store.reapStaleReservations(60_000);
+
+    expect(reaped).toBe(0);
+    const [budget] = (await store.listBudgets(PERIOD)).value;
+    expect(budget!.reservedUsd).toBe(2);
+    // Can still be settled after a reap that did not touch it.
+    await store.settle(reservationId!, 1);
+    const [after] = (await store.listBudgets(PERIOD)).value;
+    expect(after!.spentUsd).toBe(1);
+    expect(after!.reservedUsd).toBe(0);
+  });
+
+  it("treats age exactly equal to the TTL as stale", async () => {
+    const store = await makeStore();
+    await store.reserve(PERIOD, "developer", 2);
+
+    const reaped = await store.reapStaleReservations(0);
+
+    expect(reaped).toBe(1);
   });
 });
 

@@ -262,7 +262,7 @@ export class PostgresCostBudgetAdapter implements CostBudgetStore {
           [reservationId, id, estimatedUsd, new Date().toISOString()],
         );
         await client.query(
-          "UPDATE df_cost_budgets SET reserved_usd = reserved_usd + $1, updated_at = $2 WHERE budget_id = $3",
+          "UPDATE df_cost_budgets SET reserved_usd = reserved_usd + $1, call_count = call_count + 1, updated_at = $2 WHERE budget_id = $3",
           [estimatedUsd, new Date().toISOString(), id],
         );
         return { ok: true, mode: "live", providerId: this.id, reservationId };
@@ -295,7 +295,6 @@ export class PostgresCostBudgetAdapter implements CostBudgetStore {
           `UPDATE df_cost_budgets
              SET spent_usd = spent_usd + $1,
                  reserved_usd = GREATEST(0, reserved_usd - $2),
-                 call_count = call_count + 1,
                  updated_at = $3
            WHERE budget_id = $4`,
           [charged, estimated, new Date().toISOString(), reservation.budget_id],
@@ -307,6 +306,35 @@ export class PostgresCostBudgetAdapter implements CostBudgetStore {
       });
     } catch (error) {
       return { ok: false, mode: "blocked", providerId: this.id, error: this.failed(error, "settle") };
+    }
+  }
+
+  async reapStaleReservations(ttlMs: number): Promise<number> {
+    const cutoff = new Date(Date.now() - ttlMs).toISOString();
+    try {
+      return await this.transaction(async (client) => {
+        const { rows } = await client.query<{
+          reservation_id: string;
+          budget_id: string;
+          estimated_usd: number;
+        }>(
+          "SELECT reservation_id, budget_id, estimated_usd FROM df_cost_reservations WHERE settled = FALSE AND created_at <= $1",
+          [cutoff],
+        );
+        for (const row of rows) {
+          await client.query(
+            "UPDATE df_cost_budgets SET reserved_usd = GREATEST(0, reserved_usd - $1), updated_at = $2 WHERE budget_id = $3",
+            [Number(row.estimated_usd), new Date().toISOString(), row.budget_id],
+          );
+          await client.query(
+            "UPDATE df_cost_reservations SET settled = TRUE WHERE reservation_id = $1",
+            [row.reservation_id],
+          );
+        }
+        return rows.length;
+      });
+    } catch {
+      return 0;
     }
   }
 

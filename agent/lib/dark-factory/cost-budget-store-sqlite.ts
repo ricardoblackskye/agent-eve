@@ -239,7 +239,7 @@ export class SqliteCostBudgetAdapter implements CostBudgetStore {
         "INSERT INTO df_cost_reservations (reservation_id, budget_id, estimated_usd, created_at, settled) VALUES (?, ?, ?, ?, 0)",
       ).run(reservationId, id, estimatedUsd, new Date().toISOString());
       db.prepare(
-        "UPDATE df_cost_budgets SET reserved_usd = reserved_usd + ?, updated_at = ? WHERE budget_id = ?",
+        "UPDATE df_cost_budgets SET reserved_usd = reserved_usd + ?, call_count = call_count + 1, updated_at = ? WHERE budget_id = ?",
       ).run(estimatedUsd, new Date().toISOString(), id);
       db.exec("COMMIT");
       return { ok: true, mode: "live", providerId: this.id, reservationId };
@@ -282,7 +282,6 @@ export class SqliteCostBudgetAdapter implements CostBudgetStore {
         `UPDATE df_cost_budgets
            SET spent_usd = spent_usd + ?,
                reserved_usd = MAX(0, reserved_usd - ?),
-               call_count = call_count + 1,
                updated_at = ?
          WHERE budget_id = ?`,
       ).run(charged, estimated, new Date().toISOString(), reservation.budget_id);
@@ -296,6 +295,41 @@ export class SqliteCostBudgetAdapter implements CostBudgetStore {
         // Transaction already closed.
       }
       return { ok: false, mode: "blocked", providerId: this.id, error: `Cost budget store settle failed: ${this.detail(error)}` };
+    }
+  }
+
+  async reapStaleReservations(ttlMs: number): Promise<number> {
+    const db = this.handle();
+    if (!db) return 0;
+    const cutoff = new Date(Date.now() - ttlMs).toISOString();
+    try {
+      db.exec("BEGIN IMMEDIATE");
+      const stale = db
+        .prepare(
+          "SELECT reservation_id, budget_id, estimated_usd FROM df_cost_reservations WHERE settled = 0 AND created_at <= ?",
+        )
+        .all(cutoff) as unknown as Array<{
+        reservation_id: string;
+        budget_id: string;
+        estimated_usd: number;
+      }>;
+      for (const row of stale) {
+        db.prepare(
+          "UPDATE df_cost_budgets SET reserved_usd = MAX(0, reserved_usd - ?), updated_at = ? WHERE budget_id = ?",
+        ).run(Number(row.estimated_usd), new Date().toISOString(), row.budget_id);
+        db.prepare(
+          "UPDATE df_cost_reservations SET settled = 1 WHERE reservation_id = ?",
+        ).run(row.reservation_id);
+      }
+      db.exec("COMMIT");
+      return stale.length;
+    } catch (error) {
+      try {
+        db.exec("ROLLBACK");
+      } catch {
+        // Transaction already closed.
+      }
+      return 0;
     }
   }
 
