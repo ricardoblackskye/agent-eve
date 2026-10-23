@@ -216,7 +216,7 @@ describe("admission visibility and stale reservations (#443)", () => {
     expect(reaped).toBe(0);
     const [budget] = (await store.listBudgets(PERIOD)).value;
     expect(budget!.reservedUsd).toBe(2);
-    // Still settleable after a reap that did not touch it.
+    // Can still be settled after a reap that did not touch it.
     await store.settle(reservationId!, 1);
     const [after] = (await store.listBudgets(PERIOD)).value;
     expect(after!.spentUsd).toBe(1);
