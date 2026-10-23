@@ -13,9 +13,16 @@
 import { defineDynamic } from "eve";
 import type { AgentStaticModelDefinition } from "eve";
 
+import type { CostAdmission } from "./cost-gate";
+
 export interface GovernedGate {
-  /** Admit a model call. Throws to refuse it before the provider call. */
-  admit(): Promise<void>;
+  /**
+   * Admit a model call. Throws to refuse it before the provider call.
+   *
+   * Returns the reservation so the caller can settle it (#443). A gate that has
+   * nothing to reconcile may return nothing.
+   */
+  admit(): Promise<CostAdmission | void>;
 }
 
 export interface GovernedModelInput {

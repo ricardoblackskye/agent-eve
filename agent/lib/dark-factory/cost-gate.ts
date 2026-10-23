@@ -23,12 +23,19 @@ export const DEFAULT_MAX_OUTPUT_TOKENS = 8_000;
 
 /**
  * A reservation an admission took, with the means to reconcile it (#443).
+ *
+ * Without this the reservationId returned by the governor had nowhere to go: the
+ * gate admitted, the model call ran, and the reserved budget was never released
+ * or converted to spend.
  */
 export interface CostAdmission {
   /**
-   * Reconcile the reservation: the measured cost when the provider reported one,
-   * `null` when the call ran but usage was unavailable (the estimate is charged),
-   * and `0` when the call never reached the provider.
+   * Reconcile the reservation.
+   *
+   * - the measured cost, when the provider reported one
+   * - `null` when the call ran but usage was unavailable - the reserved estimate
+   *   is charged, matching the store's long-standing rule
+   * - `0` when the call never reached the provider, so nothing was consumed
    */
   settle(actualCostUsd: number | null): Promise<void>;
 }
@@ -90,6 +97,16 @@ export function createCostGate(input: CostGateInput): CostGate | null {
           `${category} cost gate refused the call${forTenant}: ${decision.reason ?? "budget_unavailable"}`,
         );
       }
+
+      // #443: hand the reservation back to the caller. It used to be discarded here,
+      // so the reserved budget could never be settled - the gate admitted, the call
+      // ran, and `reserved_usd` grew forever.
+      const reservationId = decision.reservationId;
+      return {
+        async settle(actualCostUsd: number | null): Promise<void> {
+          if (reservationId) await governor.settle(reservationId, actualCostUsd);
+        },
+      };
     },
   };
 }
