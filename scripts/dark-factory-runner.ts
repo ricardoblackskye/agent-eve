@@ -273,6 +273,26 @@ async function main(): Promise<void> {
     console.log(`\n[REPLY] ${planResponse.reason}`);
   }
 
+  // #405: resolved BEFORE the run claims the issue. A refusal here must not mint a claim:
+  // the top-level catch has no path that retires a run, so refusing afterwards would leave
+  // the issue claimed by a run that can never plan - the #375 deadlock.
+  // #405: planning reads a checkout, so the checkout is resolved deliberately and REFUSED when it
+  // cannot be shown to be the target. The Architect no longer infers its root from process.cwd().
+  const workspaceResult = resolvePlanWorkspace({
+    targetRepo,
+    cwd: process.cwd(),
+    override: resolveWorkspaceOverride(process.argv, env),
+    remoteOf: readOriginRemote,
+  });
+  if (!workspaceResult.ok) {
+    console.error("[ERROR] The plan workspace cannot be used:");
+    for (const problem of workspaceResult.problems) {
+      console.error(problem === "" ? "" : `  ${problem}`);
+    }
+    throw new Error("Dark Factory Runner stopped after the preceding error.");
+  }
+  const planWorkspace = workspaceResult.path;
+
   const begun = await beginRunRecord({
     history: runHistory,
     attemptId,
@@ -303,23 +323,6 @@ async function main(): Promise<void> {
   await checkpoint();
 
   const { model, modelId } = resolveChatModelWithId();
-
-  // #405: planning reads a checkout, so the checkout is resolved deliberately and REFUSED when it
-  // cannot be shown to be the target. The Architect no longer infers its root from process.cwd().
-  const workspaceResult = resolvePlanWorkspace({
-    targetRepo,
-    cwd: process.cwd(),
-    override: resolveWorkspaceOverride(process.argv, env),
-    remoteOf: readOriginRemote,
-  });
-  if (!workspaceResult.ok) {
-    console.error("[ERROR] The plan workspace cannot be used:");
-    for (const problem of workspaceResult.problems) {
-      console.error(problem === "" ? "" : `  ${problem}`);
-    }
-    throw new Error("Dark Factory Runner stopped after the preceding error.");
-  }
-  const planWorkspace = workspaceResult.path;
 
   line("Target Repository", `${targetRepo} (from ${repoResult.source})`);
   line("Allowed Repositories", allowed);
