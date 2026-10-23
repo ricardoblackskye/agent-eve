@@ -1,3 +1,6 @@
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
+
 /**
  * The PLAN WORKSPACE gate (#405).
  *
@@ -115,12 +118,83 @@ export function resolvePlanWorkspace(input: PlanWorkspaceInput): PlanWorkspaceRe
   return { ok: true, path: candidate, source };
 }
 
+/** Directories that describe a machine, not a repository. */
+const SKIPPED_DIRS = new Set(["node_modules", ".git", ".next"]);
+
 /** The Architect's reader, rooted at one directory. */
 export interface WorkspaceReader {
   listFiles: (dir: string) => Promise<string[]>;
   readFile: (path: string) => Promise<string>;
 }
 
+/**
+ * Containment by `path.relative`, never by a string prefix.
+ *
+ * `path.resolve` does not normalize case, so a prefix compare false-rejects a legitimate path whose
+ * drive letter differs, and on a case-insensitive filesystem it is subtly wrong in the other
+ * direction. `relative` follows the platform instead.
+ */
+function isInside(root: string, candidate: string): boolean {
+  const rel = relative(root, candidate);
+  return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
+}
+
+/** Walk `dir`, returning paths relative to `base` with forward slashes. */
+function scan(dir: string, base: string): string[] {
+  const results: string[] = [];
+  let entries: string[];
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    // An unreadable directory is not a reason to fail discovery.
+    return results;
+  }
+
+  for (const entry of entries) {
+    if (SKIPPED_DIRS.has(entry)) continue;
+    const full = join(dir, entry);
+    let stat;
+    try {
+      stat = statSync(full);
+    } catch {
+      continue;
+    }
+    if (stat.isDirectory()) {
+      results.push(...scan(full, base));
+    } else {
+      results.push(relative(base, full).replace(/\\/g, "/"));
+    }
+  }
+  return results;
+}
+
+/**
+ * A reader bound to one workspace root, so the Architect cannot reach outside the repository it was
+ * given. Paths are always relative to the root; an escape is refused rather than clamped, because a
+ * silent clamp would read a file the run did not mean to read.
+ */
 export function createWorkspaceReader(root: string): WorkspaceReader {
-  throw new Error("not implemented");
+  const absoluteRoot = resolve(root);
+
+  const contained = (path: string): string => {
+    const target = resolve(absoluteRoot, path);
+    if (!isInside(absoluteRoot, target) || target === absoluteRoot) {
+      throw new Error(`refusing to read outside the plan workspace: ${path}`);
+    }
+    return target;
+  };
+
+  return {
+    async listFiles(dir: string): Promise<string[]> {
+      const target = dir === "." || dir === "" ? absoluteRoot : resolve(absoluteRoot, dir);
+      if (!isInside(absoluteRoot, target)) {
+        throw new Error(`refusing to list outside the plan workspace: ${dir}`);
+      }
+      return scan(target, absoluteRoot).sort();
+    },
+
+    async readFile(path: string): Promise<string> {
+      return readFileSync(contained(path), "utf8");
+    },
+  };
 }
