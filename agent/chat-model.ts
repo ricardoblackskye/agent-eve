@@ -61,3 +61,15 @@ export function resolveChatModel(opts?: {
 
   return openrouter().chat(modelId);
 }
+
+/**
+ * Resolve the model and the id together, so the id reported to a caller (and
+ * therefore to cost governance) cannot differ from the model that is called.
+ */
+export function resolveChatModelWithId(opts?: {
+  unreachable?: boolean;
+  fallback?: string;
+  modelId?: string;
+}): { modelId: string; model: ReturnType<typeof resolveChatModel> } {
+  throw new Error("not implemented");
+}
