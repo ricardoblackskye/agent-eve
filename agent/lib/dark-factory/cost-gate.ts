@@ -38,6 +38,12 @@ export interface CostAdmission {
    * - `0` when the call never reached the provider, so nothing was consumed
    */
   settle(actualCostUsd: number | null): Promise<void>;
+  /**
+   * Settle from provider-reported usage, priced with the model this gate reserved
+   * against. An unknown price falls back to `null` (the estimate is charged),
+   * because settling 0 would release budget for a call that DID run.
+   */
+  settleFromUsage(usage: { inputTokens?: number; outputTokens?: number } | null | undefined): Promise<void>;
 }
 
 export interface CostGate {
@@ -106,6 +112,7 @@ export function createCostGate(input: CostGateInput): CostGate | null {
         async settle(actualCostUsd: number | null): Promise<void> {
           if (reservationId) await governor.settle(reservationId, actualCostUsd);
         },
+        async settleFromUsage(): Promise<void> {},
       };
     },
   };

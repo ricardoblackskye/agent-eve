@@ -48,6 +48,44 @@ describe("createCostGate (#270)", () => {
     expect(settle).toHaveBeenCalledWith("res-1", 12.5);
   });
 
+  it("settles from provider usage, priced with the model the gate reserved against (#443)", async () => {
+    const settle = vi.fn(async () => ({ ok: true }));
+    const gate = createCostGate({
+      ...BASE,
+      governor: {
+        admit: vi.fn(async () => ({ admitted: true, reservationId: "res-1" })),
+        settle,
+      } as never,
+    });
+
+    const admission = await gate?.admit();
+    // 1k in + 1k out of deepseek/deepseek-chat is priced by the shared table, not guessed.
+    await admission?.settleFromUsage({ inputTokens: 1000, outputTokens: 1000 });
+
+    expect(settle).toHaveBeenCalledTimes(1);
+    const [id, cost] = settle.mock.calls[0] as unknown as [string, number];
+    expect(id).toBe("res-1");
+    expect(cost).toBeCloseTo(0.0004, 10);
+  });
+
+  it("falls back to the estimate when the model has no price, rather than releasing (#443)", async () => {
+    const settle = vi.fn(async () => ({ ok: true }));
+    const gate = createCostGate({
+      ...BASE,
+      model: "unpriced/model",
+      governor: {
+        admit: vi.fn(async () => ({ admitted: true, reservationId: "res-2" })),
+        settle,
+      } as never,
+    });
+
+    const admission = await gate?.admit();
+    await admission?.settleFromUsage({ inputTokens: 1000, outputTokens: 1000 });
+
+    // null charges the reserved estimate; 0 would release budget for a call that ran.
+    expect(settle).toHaveBeenCalledWith("res-2", null);
+  });
+
   it("THROWS on refusal so the caller fails before the provider call", async () => {
     const gate = createCostGate({
       ...BASE,
