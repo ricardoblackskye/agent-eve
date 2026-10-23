@@ -114,3 +114,13 @@ export function resolvePlanWorkspace(input: PlanWorkspaceInput): PlanWorkspaceRe
 
   return { ok: true, path: candidate, source };
 }
+
+/** The Architect's reader, rooted at one directory. */
+export interface WorkspaceReader {
+  listFiles: (dir: string) => Promise<string[]>;
+  readFile: (path: string) => Promise<string>;
+}
+
+export function createWorkspaceReader(root: string): WorkspaceReader {
+  throw new Error("not implemented");
+}
