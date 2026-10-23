@@ -95,6 +95,14 @@ export interface CostBudgetStore {
     reservationId: string,
     actualCostUsd: number | null,
   ): Promise<CostBudgetStoreSettleResult>;
+  /**
+   * Release reservations older than `ttlMs` that were never settled (#443).
+   *
+   * A process killed mid-call runs no code, so no wrapper can settle its reservation.
+   * This releases the reserve without charging and leaves the call counted: the
+   * attempt stays visible in the row even though it consumed nothing.
+   */
+  reapStaleReservations(ttlMs: number): Promise<number>;
   close?(): void | Promise<void>;
 }
 
@@ -123,6 +131,11 @@ export class ConsoleCostBudgetProvider implements CostBudgetStore {
   async settle(): Promise<CostBudgetStoreSettleResult> {
     return { ok: false, mode: "blocked", providerId: this.id, error: NOT_CONFIGURED };
   }
+
+  async reapStaleReservations(): Promise<number> {
+    // The console provider governs nothing, so it has no reservations to release.
+    return 0;
+  }
 }
 
 /** `period|category` for the global budget, `tenant:<id>|period|category` for a tenant's. */
@@ -140,6 +153,8 @@ interface Reservation {
   period: string;
   category: CostCategory;
   estimatedUsd: number;
+  /** Epoch ms. A reservation past the TTL is released by reapStaleReservations(). */
+  createdAt: number;
   settled: boolean;
   /** Absent for a global reservation. */
   tenantId?: string;
@@ -238,12 +253,15 @@ export class InMemoryCostBudgetProvider implements CostBudgetStore {
       period,
       category,
       estimatedUsd,
+      createdAt: Date.now(),
       settled: false,
       ...(tenantId ? { tenantId } : {}),
     });
     this.budgets.set(id, {
       ...budget,
       reservedUsd: (budget.reservedUsd ?? 0) + estimatedUsd,
+      // #443: count the call at admission so an admitted-but-unsettled call is visible.
+      callCount: budget.callCount + 1,
     });
     return { ok: true, mode: "live", providerId: this.id, reservationId };
   }
@@ -273,10 +291,30 @@ export class InMemoryCostBudgetProvider implements CostBudgetStore {
       ...budget,
       spentUsd: budget.spentUsd + charged,
       reservedUsd: Math.max(0, (budget.reservedUsd ?? 0) - reservation.estimatedUsd),
-      callCount: budget.callCount + 1,
+      // callCount was already incremented at admission; settling must not count it twice.
     });
     reservation.settled = true;
     return { ok: true, mode: "live", providerId: this.id };
+  }
+
+  async reapStaleReservations(ttlMs: number): Promise<number> {
+    const cutoff = Date.now() - ttlMs;
+    let released = 0;
+    for (const [reservationId, reservation] of this.reservations) {
+      if (reservation.settled) continue;
+      // Age exactly equal to the TTL counts as stale: the boundary belongs to the reaper.
+      if (reservation.createdAt > cutoff) continue;
+      const id = costBudgetId(reservation.period, reservation.category, reservation.tenantId);
+      const budget = this.budgets.get(id);
+      this.reservations.delete(reservationId);
+      released += 1;
+      if (!budget) continue;
+      this.budgets.set(id, {
+        ...budget,
+        reservedUsd: Math.max(0, (budget.reservedUsd ?? 0) - reservation.estimatedUsd),
+      });
+    }
+    return released;
   }
 }
 
