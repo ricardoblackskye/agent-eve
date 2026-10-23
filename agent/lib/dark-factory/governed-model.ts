@@ -49,12 +49,21 @@ export function buildGovernedDynamicModel(input: GovernedModelInput) {
       "step.started": async () => {
         // The gate runs FIRST: a throw here fails the turn before any provider
         // call is made (#217 / #270).
-        if (gate != null) await gate.admit();
+        const admission = gate != null ? await gate.admit() : undefined;
         return {
-          model: chatModel,
+          // #443: the reservation must travel with the model, so it can be settled
+          // once the call it paid for has actually happened (or failed).
+          model: admission ? withSettlement(chatModel, admission) : chatModel,
           modelContextWindowTokens: contextWindowTokens,
         };
       },
     },
   });
+}
+
+/**
+ * RED STUB - returns the model untouched, so every settling case fails on its assertion.
+ */
+export function withSettlement<T>(model: T, _admission: CostAdmission): T {
+  return model;
 }
