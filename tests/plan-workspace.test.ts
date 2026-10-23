@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { resolvePlanWorkspace } from "../agent/lib/dark-factory/plan-workspace";
+import {
+  resolvePlanWorkspace,
+  resolveWorkspaceOverride,
+} from "../agent/lib/dark-factory/plan-workspace";
 
 const TARGET = "ricardoblackskye/WebFeedPOC";
 
@@ -107,5 +110,35 @@ describe("plan workspace gate (issue #405)", () => {
     if (!r.ok) {
       expect(r.problems.join("\n")).toContain("ricardoblackskye/agent-eve");
     }
+  });
+});
+
+describe("workspace override resolution (issue #405)", () => {
+  const none: Record<string, string | undefined> = {};
+
+  it("is undefined when nothing supplies one", () => {
+    expect(resolveWorkspaceOverride(["node", "runner.ts"], none)).toBeUndefined();
+  });
+
+  it("reads --workspace <dir>", () => {
+    expect(resolveWorkspaceOverride(["--workspace", "/w/x"], none)).toBe("/w/x");
+  });
+
+  it("reads --workspace=<dir>", () => {
+    expect(resolveWorkspaceOverride(["--workspace=/w/x"], none)).toBe("/w/x");
+  });
+
+  it("reads DF_PLAN_WORKSPACE", () => {
+    expect(resolveWorkspaceOverride([], { DF_PLAN_WORKSPACE: "/w/env" })).toBe("/w/env");
+  });
+
+  it("prefers the argument over the environment", () => {
+    expect(
+      resolveWorkspaceOverride(["--workspace", "/w/arg"], { DF_PLAN_WORKSPACE: "/w/env" }),
+    ).toBe("/w/arg");
+  });
+
+  it("ignores a blank value rather than treating it as a choice", () => {
+    expect(resolveWorkspaceOverride([], { DF_PLAN_WORKSPACE: "   " })).toBeUndefined();
   });
 });

@@ -198,3 +198,11 @@ export function createWorkspaceReader(root: string): WorkspaceReader {
     },
   };
 }
+
+/** An explicit workspace choice from the command line or the environment. */
+export function resolveWorkspaceOverride(
+  argv: string[],
+  env: Record<string, string | undefined>,
+): string | undefined {
+  throw new Error("not implemented");
+}
