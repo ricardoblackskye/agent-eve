@@ -204,5 +204,19 @@ export function resolveWorkspaceOverride(
   argv: string[],
   env: Record<string, string | undefined>,
 ): string | undefined {
-  throw new Error("not implemented");
+  const flag = "--workspace";
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i]!;
+    if (arg === flag) {
+      const value = argv[i + 1]?.trim();
+      // A following flag is not a value; a blank value is not a choice.
+      if (value && !value.startsWith("--")) return value;
+    } else if (arg.startsWith(flag + "=")) {
+      const value = arg.slice(flag.length + 1).trim();
+      if (value) return value;
+    }
+  }
+
+  const fromEnv = env.DF_PLAN_WORKSPACE?.trim();
+  return fromEnv ? fromEnv : undefined;
 }
