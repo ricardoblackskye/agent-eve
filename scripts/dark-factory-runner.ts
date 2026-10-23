@@ -13,14 +13,19 @@
  * Run: npx tsx scripts/dark-factory-runner.ts [--issue <num>] [--branch <name>]
  */
 
-import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { execSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
 import { loadLocalEnv } from "./load-env";
 import { streamText } from "ai";
 import { resolveChatModelWithId } from "../agent/chat-model";
 import { initRunnerEnv } from "../agent/lib/dark-factory/runner-env";
+import {
+  createWorkspaceReader,
+  resolvePlanWorkspace,
+  resolveWorkspaceOverride,
+} from "../agent/lib/dark-factory/plan-workspace";
 import {
   runDefinitionOfDone,
   type DefinitionOfDoneDeps,
@@ -129,26 +134,22 @@ const line = (label: string, value: unknown) =>
     `  ${label.padEnd(32)} ${typeof value === "string" ? value : JSON.stringify(value)}`,
   );
 
-/** Recursively scan workspace to build file tree for the Architect Agent. */
-function scanWorkspaceFiles(dir: string, base: string = dir): string[] {
-  const results: string[] = [];
+/**
+ * The `origin` of a checkout, or null when the directory is not one (#405).
+ *
+ * `execFileSync` rather than a shell string: the path comes from the operator and must never be
+ * parsed by a shell.
+ */
+function readOriginRemote(dir: string): string | null {
   try {
-    const entries = readdirSync(dir);
-    for (const entry of entries) {
-      if (entry === "node_modules" || entry === ".git" || entry === ".next")
-        continue;
-      const full = join(dir, entry);
-      const stat = statSync(full);
-      if (stat.isDirectory()) {
-        results.push(...scanWorkspaceFiles(full, base));
-      } else {
-        results.push(relative(base, full).replace(/\\/g, "/"));
-      }
-    }
+    const url = execFileSync("git", ["-C", dir, "remote", "get-url", "origin"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    return url === "" ? null : url;
   } catch {
-    // Ignore unreadable dirs
+    return null;
   }
-  return results;
 }
 
 let activeControlStore: ControlStore | null = null;
@@ -303,9 +304,27 @@ async function main(): Promise<void> {
 
   const { model, modelId } = resolveChatModelWithId();
 
+  // #405: planning reads a checkout, so the checkout is resolved deliberately and REFUSED when it
+  // cannot be shown to be the target. The Architect no longer infers its root from process.cwd().
+  const workspaceResult = resolvePlanWorkspace({
+    targetRepo,
+    cwd: process.cwd(),
+    override: resolveWorkspaceOverride(process.argv, env),
+    remoteOf: readOriginRemote,
+  });
+  if (!workspaceResult.ok) {
+    console.error("[ERROR] The plan workspace cannot be used:");
+    for (const problem of workspaceResult.problems) {
+      console.error(problem === "" ? "" : `  ${problem}`);
+    }
+    throw new Error("Dark Factory Runner stopped after the preceding error.");
+  }
+  const planWorkspace = workspaceResult.path;
+
   line("Target Repository", `${targetRepo} (from ${repoResult.source})`);
   line("Allowed Repositories", allowed);
   line("Target Issue", `#${issueNum}`);
+  line("Plan Workspace", `${planWorkspace} (from ${workspaceResult.source})`);
   line("Configured Chat Model", modelId);
   line("GitHub Token Present?", Boolean(token));
   line("OpenRouter Key Present?", Boolean(env.OPENROUTER_API_KEY));
@@ -403,12 +422,14 @@ async function main(): Promise<void> {
       ? `\n[STEP 3] Resuming: reading the approved plan back from the ticket...`
       : `\n[STEP 3] Architect Agent discovering repository structure and planning story...`,
   );
+  const planReader = createWorkspaceReader(planWorkspace);
   const architectAgent = new ArchitectAgent({
-    listFiles: async () => scanWorkspaceFiles(process.cwd()),
-    // #381 R1: the Architect plans from file CONTENTS, not just a file list. This is a thin adapter - the
-    // agent's own bounded reader applies sanitizeRelativePath before this is ever called, and bounds how
-    // many files are read and how much of each.
-    readFile: async (relPath: string) => readFileSync(join(process.cwd(), relPath), "utf8"),
+    // #405: both readers are rooted at the verified plan workspace, so `dir` is honored instead of
+    // being replaced by process.cwd(). #381 R1: the Architect plans from file CONTENTS, not just a
+    // file list; the agent's own bounded reader still applies sanitizeRelativePath and bounds how
+    // many files are read and how much of each. The reader also refuses a path outside the root.
+    listFiles: planReader.listFiles,
+    readFile: planReader.readFile,
     generateText: async (prompt) => {
       await checkpoint();
       // Governed (#270): an over-budget call is refused at THIS call site, and the

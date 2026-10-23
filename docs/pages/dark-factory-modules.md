@@ -473,6 +473,14 @@ Operator CLI for the self-improvement gate (#159). The gate in `self-improve.ts`
 
 **Exports:** `OPERATOR_CLI_USAGE`, `OperatorCliCommand`, `OperatorCliDeps`, `OperatorCliResult`, `OperatorCliUsageError`, `OperatorDecisionValue`, `ProposalKind`, `parseOperatorArgs`, `runOperatorCli`
 
+## plan-workspace
+
+Dark Factory - the checkout PLANNING reads, and the reader rooted at it (#405). Discovery used to infer its root from `process.cwd()`, so a run launched anywhere but a checkout of the target planned against that directory instead: the refusal in the #169 probe was correct behavior and the wrong input, and it measured `agent-eve` while the story was about WebFeedPOC. The workspace now resolves from `--workspace`, then `DF_PLAN_WORKSPACE`, then the working directory, and is accepted only when its `origin` remote identifies the target repo (https, ssh and scp forms; a trailing `.git` and case tolerated). Anything else is REFUSED, because a plan about the wrong repository reads as evidence and every page-scoped story parks. The reader paths are root-relative and an escape is refused rather than clamped. The launcher already clones the target before spawning; this makes the runner verify that rather than assume it.
+
+**Source:** [`agent/lib/dark-factory/plan-workspace.ts`](../../agent/lib/dark-factory/plan-workspace.ts)
+
+**Exports:** `PlanWorkspaceInput`, `PlanWorkspaceResult`, `PlanWorkspaceSource`, `WorkspaceReader`, `createWorkspaceReader`, `normalizeRepo`, `resolvePlanWorkspace`, `resolveWorkspaceOverride`
+
 ## plan-approval
 
 Dark Factory — Plan Approval Gate (#365 R4). Parks the run after the plan is posted and before any code is written, so a human authorizes the plan first. Recording the question is the park itself: `run-history` derives the run's status from a `worker.question`, and the resume path (`trigger`, `entry`) only ever resumes a run whose status is `blocked`. The comment is recorded before the label is applied, so a label outage cannot hide the question. A park can ask something other than approval (#381 R2 AC4): when the Architect cannot justify a target, the question is which surface the story means, so a human is not asked to approve a plan that does not exist. A park can also answer a plan that never validated (#381 R2 Task 8): the question points at the validation errors on the ticket rather than at approval, because a human can say what should change and a terminal failure could not be answered at all. The event id stays keyed on the run and the round, so a re-delivery of the same park still records once.
