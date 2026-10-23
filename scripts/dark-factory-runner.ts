@@ -13,13 +13,14 @@
  * Run: npx tsx scripts/dark-factory-runner.ts [--issue <num>] [--branch <name>]
  */
 
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { pathToFileURL } from "node:url";
 import { execSync } from "node:child_process";
 import { loadLocalEnv } from "./load-env";
 import { streamText } from "ai";
-import { resolveChatModel } from "../agent/chat-model";
+import { resolveChatModelWithId } from "../agent/chat-model";
+import { initRunnerEnv } from "../agent/lib/dark-factory/runner-env";
 import {
   runDefinitionOfDone,
   type DefinitionOfDoneDeps,
@@ -119,32 +120,9 @@ import {
 import { withNotifications } from "../agent/lib/dark-factory/notifying-run-history";
 import { runGovernedAgentCall } from "../agent/lib/dark-factory/governed-agent-call";
 
-// Load .env variables into process.env
-function initEnv(): Record<string, string | undefined> {
-  const envPath = join(process.cwd(), ".env");
-  if (existsSync(envPath)) {
-    const lines = readFileSync(envPath, "utf8").split("\n");
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith("#")) continue;
-      const idx = trimmed.indexOf("=");
-      if (idx !== -1) {
-        const key = trimmed.slice(0, idx).trim();
-        const val = trimmed.slice(idx + 1).trim();
-        process.env[key] = val;
-      }
-    }
-  }
-  // #348: DF_WORKER_ALLOWED_REPOS is deliberately NOT defaulted here. Setting it when unset made an
-  // unconfigured deployment look authorized instead of refusing, so the fail-closed gate in credentials.ts
-  // existed on paper and was defeated at this call site.
-  if (!process.env.EVE_CHAT_MODEL) {
-    process.env.EVE_CHAT_MODEL = "deepseek/deepseek-chat";
-  }
-  return process.env;
-}
-
-initEnv();
+// The .env bootstrap lives in runner-env.ts so it can be tested without running the pipeline.
+// It carries NO model default: agent/model-config.ts is the single source of truth (#400).
+initRunnerEnv();
 
 const line = (label: string, value: unknown) =>
   console.log(
@@ -215,7 +193,7 @@ async function main(): Promise<void> {
   // so an explicit export stays authoritative; the launcher does the equivalent in dark-factory-local-run.ts.
   loadLocalEnv();
 
-  const env = initEnv();
+  const env = initRunnerEnv();
   const token = resolveIssueToken(env);
   const allowed = resolveWorkerAllowedRepos(env);
   // #348: RESOLUTION and AUTHORIZATION are separate questions, answered in runner-config.ts.
@@ -323,10 +301,12 @@ async function main(): Promise<void> {
   activeControlStore = runControlStore;
   await checkpoint();
 
+  const { model, modelId } = resolveChatModelWithId();
+
   line("Target Repository", `${targetRepo} (from ${repoResult.source})`);
   line("Allowed Repositories", allowed);
   line("Target Issue", `#${issueNum}`);
-  line("Configured Chat Model", env.EVE_CHAT_MODEL);
+  line("Configured Chat Model", modelId);
   line("GitHub Token Present?", Boolean(token));
   line("OpenRouter Key Present?", Boolean(env.OPENROUTER_API_KEY));
 
@@ -342,8 +322,6 @@ async function main(): Promise<void> {
   const prWriter = new GitHubPrWriter({ token, env });
   const metrics = createMetricsStore();
   const developerAgent = new DeveloperAgent({ metrics });
-  const model = resolveChatModel();
-  const modelId = env.EVE_CHAT_MODEL ?? "deepseek/deepseek-chat";
 
   // Cost governance (#270): OPT-IN — `null` unless a budget backend is configured.
   const governor = isCostGovernanceConfigured(env)
@@ -396,7 +374,7 @@ async function main(): Promise<void> {
     issueNum,
     `🤖 **Eve** (Dark Factory) — Dispatched Hardened Pipeline on #${issueNum}\n\n` +
       `- **Task Branch**: \`${branchName}\`\n` +
-      `- **Assigned Agents**: Architect Agent & Multi-File Developer Agent (Model: \`${env.EVE_CHAT_MODEL}\`)\n` +
+      `- **Assigned Agents**: Architect Agent & Multi-File Developer Agent (Model: \`${modelId}\`)\n` +
       `- **Status**: Synthesizing ExecutionPlan and running pre-flight domain validation...`,
   );
 
