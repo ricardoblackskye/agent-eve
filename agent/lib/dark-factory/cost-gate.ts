@@ -16,7 +16,7 @@ import {
   createCostGovernor,
   type CostGovernor,
 } from "./cost-governor";
-import type { CostCategory } from "./cost-budget";
+import { estimateCost, type CostCategory } from "./cost-budget";
 
 /** Default upper bound for a completion, used for the pre-call reservation. */
 export const DEFAULT_MAX_OUTPUT_TOKENS = 8_000;
@@ -112,7 +112,17 @@ export function createCostGate(input: CostGateInput): CostGate | null {
         async settle(actualCostUsd: number | null): Promise<void> {
           if (reservationId) await governor.settle(reservationId, actualCostUsd);
         },
-        async settleFromUsage(): Promise<void> {},
+        async settleFromUsage(usage): Promise<void> {
+          if (!reservationId) return;
+          const priced = estimateCost(
+            model,
+            usage?.inputTokens ?? 0,
+            usage?.outputTokens ?? 0,
+          );
+          // estimateCost returns 0 for an unpriced model. Settling 0 would RELEASE budget for a
+          // call that ran, so settle null and let the reserved estimate be charged instead.
+          await governor.settle(reservationId, priced > 0 ? priced : null);
+        },
       };
     },
   };
