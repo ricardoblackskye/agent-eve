@@ -213,7 +213,7 @@ budget row equals the estimate — the existing Task-1 assertion in the untouche
 ### Task 7 — ADR 0057 and the index
 
 **Files:**
-- Create: `docs/adr/0057-a-stale-reservation-is-released-by-the-next-admission.md`
+- Create: `docs/adr/0057-a-stale-reservation-is-reaped-on-admission.md`
 - Modify: `docs/adr/README.md` (index entry; an orphan ADR fails `adr-integrity`)
 
 Record the decision (schedule on the admission path rather than a cron), the stated TTL and
@@ -235,12 +235,12 @@ DF_PLATFORM_PROVIDER=generic npm run build             # the build-only break vi
 
 ## Files likely to change
 
-| File                                                                     | Change                                                             |
-|--------------------------------------------------------------------------|--------------------------------------------------------------------|
-| `agent/lib/dark-factory/cost-governor.ts`                                | reaper call in `admit()`, the throttle, the two exported constants |
-| `tests/dark-factory/cost-governor.test.ts`                               | new `describe` block for #457                                      |
-| `docs/adr/0057-a-stale-reservation-is-released-by-the-next-admission.md` | new ADR                                                            |
-| `docs/adr/README.md`                                                     | index entry for 0057                                               |
+| File                                                          | Change                                                             |
+|---------------------------------------------------------------|--------------------------------------------------------------------|
+| `agent/lib/dark-factory/cost-governor.ts`                     | reaper call in `admit()`, the throttle, the two exported constants |
+| `tests/dark-factory/cost-governor.test.ts`                    | new `describe` block for #457                                      |
+| `docs/adr/0057-a-stale-reservation-is-reaped-on-admission.md` | new ADR                                                            |
+| `docs/adr/README.md`                                          | index entry for 0057                                               |
 
 No new module under `agent/lib/dark-factory/`, so the `docs/pages/` catalog row is untouched.
 No new environment variable, so `.env.example` and the env-coverage guard are untouched.
