@@ -17,6 +17,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { PostgresAmmScanStore } from "../../agent/lib/dark-factory/amm-scan-postgres";
 import {
+  ammProviderFromEnv,
   createAmmScanStore,
   databaseAmmProvider,
 } from "../../agent/lib/dark-factory/amm-scan-provider";
@@ -132,5 +133,36 @@ describe("#424 the read seam keeps 'no scan' and 'broken' apart", () => {
     const provider = databaseAmmProvider(storeReturning({ ok: false }));
 
     await expect(provider.scan("a/one")).rejects.toThrow(/unknown error/);
+  });
+});
+
+describe("#465 the page-facing selector reads the measure, or refuses", () => {
+  it("reads back the scan the store holds", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "df-amm-select-"));
+    directories.push(directory);
+    const dbPath = join(directory, "scans.sqlite");
+
+    const recorder = createAmmScanStore({
+      DF_AMM_SCAN_DRIVER: "sqlite",
+      DF_AMM_SCAN_DB_PATH: dbPath,
+    });
+    const expected = scan();
+    const written = await recorder.recordScan(expected);
+    expect(written.ok).toBe(true);
+    await recorder.close();
+
+    const provider = ammProviderFromEnv({
+      DF_AMM_SCAN_DRIVER: "sqlite",
+      DF_AMM_SCAN_DB_PATH: dbPath,
+    });
+    const found = await provider.scan("a/one");
+
+    expect(found?.repo).toBe("a/one");
+    expect(found?.overall.level).toBe(expected.overall.level);
+    expect(found?.pillars).toHaveLength(expected.pillars.length);
+  });
+
+  it("REFUSES to build a provider with nothing configured, rather than inventing one", () => {
+    expect(() => ammProviderFromEnv({})).toThrow(/DF_AMM_SCAN_DRIVER is not set/);
   });
 });

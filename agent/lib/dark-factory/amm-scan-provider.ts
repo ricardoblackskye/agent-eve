@@ -60,3 +60,14 @@ export function databaseAmmProvider(store: AmmScanStore): AmmReadinessProvider {
     },
   };
 }
+
+/**
+ * #465 - the source the PAGES read. A configured driver gives the store; with no driver this refuses, so a page
+ * that cannot measure will not render a figure nobody took. This is #424's fail-closed decision applied to the
+ * pages, which until now read the fixture instead.
+ */
+export function ammProviderFromEnv(
+  env: AmmScanStoreEnv = process.env as AmmScanStoreEnv,
+): AmmReadinessProvider {
+  throw new Error(`ammProviderFromEnv is not implemented for driver ${env.DF_AMM_SCAN_DRIVER ?? "unset"}`);
+}
