@@ -5,9 +5,14 @@
  * empty table renders as "no repositories are ready", which looks like a measurement and is not one. This mirrors
  * `run-history-provider.ts`: unset keeps nothing running, an unknown value throws.
  */
-import type { AmmReadinessProvider } from "./amm-readiness";
+import { normalizeRepo, type AmmReadinessProvider } from "./amm-readiness";
 import type { AmmScanResult } from "./amm-scan-runner";
-import { SqliteAmmScanStore, type AmmScanStore } from "./amm-scan-store";
+import {
+  SqliteAmmScanStore,
+  ammScanRowId,
+  toStoredScan,
+  type AmmScanStore,
+} from "./amm-scan-store";
 import { PostgresAmmScanStore } from "./amm-scan-postgres";
 
 export interface AmmScanStoreEnv {
@@ -53,7 +58,8 @@ export function createAmmScanStore(env: AmmScanStoreEnv = process.env as AmmScan
 export function databaseAmmProvider(store: AmmScanStore): AmmReadinessProvider {
   return {
     async scan(repo: string) {
-      const result = await store.latestScans({ repo, limit: 1 });
+      // #465 - normalize the lookup, so the adapter answers for `Owner/Repo` exactly as the fixture adapter does.
+      const result = await store.latestScans({ repo: normalizeRepo(repo), limit: 1 });
       if (!result.ok) {
         throw new Error(`reading the AMM scan for ${repo} failed: ${result.error ?? "unknown error"}`);
       }
@@ -98,9 +104,30 @@ export async function recordAmmScan(
   env: AmmScanStoreEnv = process.env as AmmScanStoreEnv,
   tenantId?: string,
 ): Promise<RecordScanOutcome> {
-  return {
-    recorded: false,
-    configured: false,
-    reason: `recordAmmScan is not implemented for ${scan.repo}/${tenantId ?? "-"}`,
-  };
+  if (!env.DF_AMM_SCAN_DRIVER) {
+    return {
+      recorded: false,
+      configured: false,
+      reason:
+        "DF_AMM_SCAN_DRIVER is not set, so the scan was measured and printed but NOT persisted",
+    };
+  }
+
+  const store = createAmmScanStore(env);
+  try {
+    const stored = toStoredScan(scan, tenantId);
+    const written = await store.recordScan(stored);
+    if (!written.ok) {
+      return {
+        recorded: false,
+        configured: true,
+        storeId: store.id,
+        reason: written.error ?? "the store refused the scan without saying why",
+      };
+    }
+    return { recorded: true, configured: true, storeId: store.id, rowId: ammScanRowId(stored) };
+  } finally {
+    // The command creates this store, so it releases it; otherwise the handle outlives the process's useful work.
+    store.close();
+  }
 }

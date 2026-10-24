@@ -64,12 +64,14 @@ describe("Dark Factory repos page", () => {
 
     render(await ReposPage());
 
-    const link = screen.getByText("ricardoblackskye/WebFeedPOC");
-    expect(link.closest("a")?.getAttribute("href")).toBe(
-      "/dark-factory/repos/ricardoblackskye/WebFeedPOC",
+    // The list renders the NORMALIZED repo (parseConfiguredRepos lowercases the config), so match case-insensitively
+    // and pin the href: a mixed-case scan must still be found, which is the point of storing it normalized.
+    const link = screen.getByText(/webfeedpoc/i).closest("a");
+    expect(link?.getAttribute("href")).toBe(
+      "/dark-factory/repos/ricardoblackskye/webfeedpoc",
     );
     // The fixture's repo is configured but has no scan in the store, so it is NOT listed.
-    expect(screen.queryByText("ricardoblackskye/agent-eve")).toBeNull();
+    expect(screen.queryByText(/agent-eve/i)).toBeNull();
   });
 
   it("says why the list is empty when nothing has been scanned", async () => {
