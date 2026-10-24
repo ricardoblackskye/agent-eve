@@ -1,9 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   InMemoryCostBudgetProvider,
   createCostBudgetStore,
 } from "../../agent/lib/dark-factory/cost-budget-store";
-import { createCostGovernor, utcMonth } from "../../agent/lib/dark-factory/cost-governor";
+import { estimateCost } from "../../agent/lib/dark-factory/cost-budget";
+import {
+  REAP_INTERVAL_MS,
+  RESERVATION_TTL_MS,
+  createCostGovernor,
+  utcMonth,
+} from "../../agent/lib/dark-factory/cost-governor";
 
 const ENV: Record<string, string | undefined> = {
   DF_COST_BUDGET_ORCHESTRATOR_USD: "10",
@@ -155,5 +161,120 @@ describe("cost governor", () => {
       DF_COST_BUDGET_PERIOD: "2026-03",
     });
     expect(pinned.period(new Date("2026-02-15T00:00:00.000Z"))).toBe("2026-03");
+  });
+});
+
+
+/**
+ * #457 - the reaper has to be SCHEDULED, not merely available.
+ *
+ * ADR 0054 shipped reapStaleReservations as the backstop for a reservation no JS can settle: a
+ * killed process, a deployment swap, a platform timeout. Nothing called it, so 27 reservations
+ * worth 42% of the production ceiling sat unreleased and every turn was refused. These tests pin
+ * the schedule: reap on the admission path, at most once per interval, and never a hard
+ * dependency of the call it protects.
+ */
+describe("scheduling the reaper (#457)", () => {
+  /** One orchestrator call's estimate, read from the pricing table the governor uses. */
+  const ONE_CALL = estimateCost(MODEL, 1_000, 1_000);
+
+  /** A cap that fits ONE call: a second one needs the stale reserve released first. */
+  const TIGHT = { DF_COST_BUDGET_ORCHESTRATOR_USD: String(ONE_CALL * 1.5) };
+  /** Room for many calls, so an assertion is never about a refusal. */
+  const ROOMY = { DF_COST_BUDGET_ORCHESTRATOR_USD: String(ONE_CALL * 100) };
+
+  const admit = (governor: ReturnType<typeof createCostGovernor>) =>
+    governor.admit({
+      category: "orchestrator",
+      model: MODEL,
+      inputTokens: 1_000,
+      outputTokens: 1_000,
+    });
+
+  it("releases a stale reservation on the next admission, which is then admitted", async () => {
+    vi.useFakeTimers();
+    try {
+      const store = new InMemoryCostBudgetProvider();
+      const governor = createCostGovernor(store, TIGHT);
+
+      expect((await admit(governor)).admitted).toBe(true);
+
+      // The process that took it is gone: nothing settles it, and its TTL passes.
+      vi.advanceTimersByTime(RESERVATION_TTL_MS + 1);
+
+      const second = await admit(governor);
+
+      // Without the reap the stale reserve is still committed, so the cap refuses this call.
+      expect(second.admitted).toBe(true);
+      expect(second.reason).toBeUndefined();
+
+      const [budget] = await governor.status();
+      // Only the second reservation remains.
+      expect(budget!.reservedUsd).toBeCloseTo(ONE_CALL, 10);
+      // The stranded attempt stays visible even though it consumed nothing.
+      expect(budget!.callCount).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not release a reservation younger than the TTL, and hands the TTL to the store", async () => {
+    vi.useFakeTimers();
+    try {
+      const store = new InMemoryCostBudgetProvider();
+      const reap = vi.spyOn(store, "reapStaleReservations");
+      const governor = createCostGovernor(store, ROOMY);
+
+      await admit(governor);
+      // Past the interval (so the throttle permits a second pass) but inside the TTL: this
+      // reservation is LIVE, and releasing it would let a slow turn overspend.
+      vi.advanceTimersByTime(REAP_INTERVAL_MS + 1);
+      await admit(governor);
+
+      expect(reap).toHaveBeenCalledTimes(2);
+      expect(reap).toHaveBeenLastCalledWith(RESERVATION_TTL_MS);
+      const [budget] = await governor.status();
+      expect(budget!.reservedUsd).toBeCloseTo(ONE_CALL * 2, 10);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reaps at most once per interval", async () => {
+    vi.useFakeTimers();
+    try {
+      const store = new InMemoryCostBudgetProvider();
+      const reap = vi.spyOn(store, "reapStaleReservations");
+      const governor = createCostGovernor(store, ROOMY);
+
+      // A fresh process reaps on its first admission: that is the serverless cold-start schedule.
+      await admit(governor);
+      expect(reap).toHaveBeenCalledTimes(1);
+
+      // Inside the interval: no second store round trip for a turn of the same process.
+      await admit(governor);
+      expect(reap).toHaveBeenCalledTimes(1);
+
+      vi.advanceTimersByTime(REAP_INTERVAL_MS);
+      await admit(governor);
+      expect(reap).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("admits the call even when the reaper itself throws", async () => {
+    const store = new InMemoryCostBudgetProvider();
+    const reap = vi
+      .spyOn(store, "reapStaleReservations")
+      .mockRejectedValue(new Error("store unreachable"));
+    const governor = createCostGovernor(store, ROOMY);
+
+    const decision = await admit(governor);
+
+    // Attempted (so this case is not vacuous) AND absorbed: a backstop must never veto the
+    // call it exists to protect, and the store's own refusal path still reports itself.
+    expect(reap).toHaveBeenCalledTimes(1);
+    expect(decision.admitted).toBe(true);
   });
 });

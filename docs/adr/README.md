@@ -110,3 +110,4 @@ changes, write a new one that supersedes it.
 | [0054](0054-a-reservation-is-settled-where-the-call-happens.md)   | A reservation is settled where the call happens, and a reaper covers the rest                       | Accepted |
 | [0055](0055-the-factory-carries-no-model-default.md)              | The Dark Factory carries no model default of its own                                                | Accepted |
 | [0056](0056-planning-refuses-a-workspace-it-cannot-justify.md)    | Planning refuses a workspace it cannot justify                                                      | Accepted |
+| [0057](0057-a-stale-reservation-is-reaped-on-admission.md)        | A stale reservation is reaped on admission                                                          | Accepted |

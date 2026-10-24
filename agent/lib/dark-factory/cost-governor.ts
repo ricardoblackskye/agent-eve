@@ -78,6 +78,18 @@ export function utcMonth(now: Date = new Date()): string {
   return now.toISOString().slice(0, 7);
 }
 
+/**
+ * #457 - the reaper's schedule. A reservation covers ONE model call, so 30 minutes is far
+ * beyond any legitimate call (Vercel's maximum function duration is 900 s) and far inside the
+ * 11 days a stranded reservation survived in production. ADR 0054 states plainly that this
+ * TTL is a guess: too short reaps a live call and lets a slow turn overspend; too long
+ * strands budget.
+ */
+export const RESERVATION_TTL_MS = 30 * 60 * 1000;
+
+/** At most one reap per process per interval: one extra store round trip, not one per turn. */
+export const REAP_INTERVAL_MS = 10 * 60 * 1000;
+
 const CONCRETE_PERIOD = /^\d{4}-\d{2}$/;
 
 export function createCostGovernor(
@@ -86,6 +98,12 @@ export function createCostGovernor(
 ): CostGovernor {
   const resolved = createCostGovernanceEnv(env);
   const configuredPeriod = resolved.period;
+
+  /**
+   * Epoch ms of the last reap THIS process ran; `0` means never, so the first admission in
+   * every process reaps. Per governor instance, so two governors never share the throttle.
+   */
+  let lastReapMs = 0;
 
   const resolvePeriod = (now: Date = new Date()): string =>
     CONCRETE_PERIOD.test(configuredPeriod) ? configuredPeriod : utcMonth(now);
@@ -149,6 +167,21 @@ export function createCostGovernor(
             period,
             error: ensured.error ?? "Cost budget store is unavailable.",
           };
+        }
+      }
+
+      // #457 - schedules the reaper that ADR 0054 Slice B shipped but nothing called. The
+      // leak is created only by processes that admit, so the release belongs here too; reaping
+      // BEFORE the reservation means the freed budget is available to this very call. It is
+      // throttled per process so a turn does not pay a store round trip, and best-effort so a
+      // store that cannot reap still reports its own admission refusal.
+      const nowMs = Date.now();
+      if (nowMs - lastReapMs >= REAP_INTERVAL_MS) {
+        lastReapMs = nowMs;
+        try {
+          await store.reapStaleReservations(RESERVATION_TTL_MS);
+        } catch {
+          // Swallowed on purpose: the backstop must never veto the call it protects.
         }
       }
 
