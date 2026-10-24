@@ -36,6 +36,8 @@ Dark Factory — Architect Agent (#179). Pre-code planning agent that inspects t
 
 **Exports:** `ArchitectAgent`, `ArchitectDeps`, `ArchitectResult`, `DEFAULT_LOWEST_PRIORITY_SCORE`, `DEFAULT_MAX_CONTEXT_FILES`, `MAX_STORY_BODY_LENGTH`, `MAX_STORY_TITLE_LENGTH`, `ProcessTimerRegistry`, `StoryInput`, `sanitizeRelativePath`, `sortFilesByRelevance`
 
+**Decisions:** [ADR 0059](../../docs/adr/0059-repair-stays-grounded-in-the-target-repository.md)
+
 ## architect-prompt
 
 Dark Factory — the Architect's target contract (#381 R2 Task 8). The part of the planning prompt that says what may be targeted, as a pure function, because it is prompt BEHAVIOUR and prompt behaviour is testable. It exists because a line of prompt asked for "UI entrypoints under app/ or components/" whenever a story mentioned "page" — which is how a story about the main page of a Vite app produced targets called `src/components/Header.js` and `src/index.js` for a repository containing neither, while discovery had already proved which file the page is. The contract mandates the resolved page for a page-scoped story, names the shell and shared files as forbidden WITH the reason, requires every path to appear in the file list, and keeps `app/` + `components/` only as a fallback for when discovery resolved no page. Its forbidden list is capped, so it has a bounded cost against the prompt budget.

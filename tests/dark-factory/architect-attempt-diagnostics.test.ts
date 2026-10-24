@@ -142,7 +142,13 @@ describe("#450 - the park reason reflects every attempt, not the last one", () =
   });
 
   it("stays plan-invalid when NO attempt hit the target rule (control)", async () => {
-    const { agent } = agentReplying([JSON.stringify(plan("src/components/Header.js"))]);
+    // #451 moved a target-missing plan to refused-target, so the control uses a failure that is NOT
+    // about the target: an empty target list. Otherwise this would only re-test the refusal.
+    const invalidPlan: ExecutionPlan = {
+      ...plan("src/pages/HomePage.jsx"),
+      targetFiles: [],
+    };
+    const { agent } = agentReplying([JSON.stringify(invalidPlan)]);
 
     const result = await agent.planStory(STORY);
 

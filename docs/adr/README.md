@@ -112,3 +112,4 @@ changes, write a new one that supersedes it.
 | [0056](0056-planning-refuses-a-workspace-it-cannot-justify.md)    | Planning refuses a workspace it cannot justify                                                      | Accepted |
 | [0057](0057-a-stale-reservation-is-reaped-on-admission.md)        | A stale reservation is reaped on admission                                                          | Accepted |
 | [0058](0058-a-refusal-names-itself-where-an-operator-looks.md)    | A refusal names itself where an operator looks                                                      | Accepted |
+| [0059](0059-repair-stays-grounded-in-the-target-repository.md) | A repair stays grounded in the target repository                                                    | Accepted |
