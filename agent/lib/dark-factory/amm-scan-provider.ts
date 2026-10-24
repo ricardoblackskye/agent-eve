@@ -69,5 +69,7 @@ export function databaseAmmProvider(store: AmmScanStore): AmmReadinessProvider {
 export function ammProviderFromEnv(
   env: AmmScanStoreEnv = process.env as AmmScanStoreEnv,
 ): AmmReadinessProvider {
-  throw new Error(`ammProviderFromEnv is not implemented for driver ${env.DF_AMM_SCAN_DRIVER ?? "unset"}`);
+  const store = createAmmScanStore(env);
+  const provider = databaseAmmProvider(store);
+  return { scan: (repo) => provider.scan(repo), close: () => store.close() };
 }

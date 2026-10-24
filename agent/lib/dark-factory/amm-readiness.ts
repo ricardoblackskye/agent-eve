@@ -51,6 +51,12 @@ export interface AmmScan {
 /** Where a scan comes from. Two adapters satisfy it: fixture (now) and database (when the scanner exists). */
 export interface AmmReadinessProvider {
   scan(repo: string): Promise<AmmScan | undefined>;
+  /**
+   * #465 - release any resource the provider OWNS. A provider built around a store the CALLER supplied does not
+   * own it and omits this; one that creates its own store must offer the release, or the handle outlives every
+   * caller (and on Windows an open `node:sqlite` handle blocks the file from being removed).
+   */
+  close?(): void;
 }
 
 /** The level bands. Points scale exponentially, and L3 is the production-grade floor. */

@@ -155,8 +155,12 @@ describe("#465 the page-facing selector reads the measure, or refuses", () => {
       DF_AMM_SCAN_DRIVER: "sqlite",
       DF_AMM_SCAN_DB_PATH: dbPath,
     });
+    // It created the store, so it must offer the release: without this the handle outlives the test and
+    // Windows refuses to remove the directory.
+    closable.push({ close: () => provider.close?.() });
     const found = await provider.scan("a/one");
 
+    expect(typeof provider.close).toBe("function");
     expect(found?.repo).toBe("a/one");
     expect(found?.overall.level).toBe(expected.overall.level);
     expect(found?.pillars).toHaveLength(expected.pillars.length);
