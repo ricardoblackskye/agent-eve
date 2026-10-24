@@ -99,6 +99,12 @@ export function createCostGovernor(
   const resolved = createCostGovernanceEnv(env);
   const configuredPeriod = resolved.period;
 
+  /**
+   * Epoch ms of the last reap THIS process ran; `0` means never, so the first admission in
+   * every process reaps. Per governor instance, so two governors never share the throttle.
+   */
+  let lastReapMs = 0;
+
   const resolvePeriod = (now: Date = new Date()): string =>
     CONCRETE_PERIOD.test(configuredPeriod) ? configuredPeriod : utcMonth(now);
 
@@ -161,6 +167,21 @@ export function createCostGovernor(
             period,
             error: ensured.error ?? "Cost budget store is unavailable.",
           };
+        }
+      }
+
+      // #457 - schedules the reaper that ADR 0054 Slice B shipped but nothing called. The
+      // leak is created only by processes that admit, so the release belongs here too; reaping
+      // BEFORE the reservation means the freed budget is available to this very call. It is
+      // throttled per process so a turn does not pay a store round trip, and best-effort so a
+      // store that cannot reap still reports its own admission refusal.
+      const nowMs = Date.now();
+      if (nowMs - lastReapMs >= REAP_INTERVAL_MS) {
+        lastReapMs = nowMs;
+        try {
+          await store.reapStaleReservations(RESERVATION_TTL_MS);
+        } catch {
+          // Swallowed on purpose: the backstop must never veto the call it protects.
         }
       }
 
