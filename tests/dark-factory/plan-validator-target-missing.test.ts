@@ -85,3 +85,63 @@ describe("#381 R2 Task 8 - target files must exist in the repository", () => {
     expect(result.valid).toBe(true);
   });
 });
+
+describe("issue #454 - a create target is allowed not to exist", () => {
+  function planWithActions(
+    targets: Array<{ path: string; action: "create" | "modify" | "replace" }>,
+  ): ExecutionPlan {
+    return {
+      storyId: 169,
+      title: "Dark Factory Test Issue 7 (sandbox)",
+      summary: "Add a sub-heading to the main page",
+      targetFiles: targets.map((t) => ({
+        ...t,
+        rationale: "the surface the story means",
+      })),
+      acceptanceCriteriaMap: [
+        {
+          acId: "AC1",
+          description: "the sub-heading reads Welcome to the site",
+          testFile: "tests/homepage.test.tsx",
+          testCaseName: "renders Welcome to the site",
+        },
+      ],
+    };
+  }
+
+  it("accepts a create target that is absent from the file list", () => {
+    const result = validateExecutionPlan(
+      planWithActions([{ path: "src/pages/HomePage.test.jsx", action: "create" }]),
+      "add a sub-heading on the main page",
+      { files: FILES },
+    );
+
+    expect(result.valid).toBe(true);
+    expect(result.codes ?? []).not.toContain("target-missing");
+  });
+
+  it("accepts a mixed plan: existing modify + absent create", () => {
+    const result = validateExecutionPlan(
+      planWithActions([
+        { path: "src/pages/HomePage.jsx", action: "modify" },
+        { path: "src/pages/HomePage.test.jsx", action: "create" },
+      ]),
+      "add a sub-heading on the main page",
+      { files: FILES },
+    );
+
+    expect(result.valid).toBe(true);
+    expect(result.codes ?? []).not.toContain("target-missing");
+  });
+
+  it("still rejects a modify target that is absent", () => {
+    const result = validateExecutionPlan(
+      planWithActions([{ path: "src/pages/HomePage.test.jsx", action: "modify" }]),
+      "add a sub-heading on the main page",
+      { files: FILES },
+    );
+
+    expect(result.valid).toBe(false);
+    expect(result.codes).toContain("target-missing");
+  });
+});
