@@ -545,4 +545,143 @@ describe("Architect Agent amendment (#378)", () => {
     expect(result.ok).toBe(true);
     expect(result.retries).toBe(1);
   });
+
+  it("keeps the target repository in an amendment repair prompt (#451)", async () => {
+    const prompts: string[] = [];
+    const deps: ArchitectDeps = {
+      listFiles: vi.fn().mockResolvedValue(["src/pages/HomePage.jsx", "src/App.jsx"]),
+      generateText: vi.fn().mockImplementation(async (prompt: string) => {
+        prompts.push(prompt);
+        return prompts.length === 1 ? "not json at all" : JSON.stringify(revisedPlan);
+      }),
+      maxPlanRetries: 1,
+      backoffBaseMs: 0,
+    };
+    const agent = new ArchitectAgent(deps);
+    const result = await agent.amendPlan({
+      story: revisionStory,
+      currentPlan,
+      feedback: "change the target file",
+    });
+    expect(result.ok).toBe(true);
+    expect(prompts).toHaveLength(2);
+    expect(prompts[1]).toContain("- src/pages/HomePage.jsx");
+  });
+});
+
+/**
+ * #451 — the repair loop must stay grounded in the TARGET repository. The initial prompt carries the
+ * story narrative, the repository structure and the discovery evidence; the repair prompt used to carry
+ * only the story NUMBER, so a rejected plan lost the target and the model planned against a different
+ * repository. These tests pin both halves: the repair prompt keeps the target, and a repair that leaves
+ * the discovered set is reported as a refused target rather than another invalid plan.
+ */
+describe("Architect Agent repair grounding (#451)", () => {
+  const targetRepoFiles = ["web/feed-page.tsx", "web/feed-api.ts", "package.json"];
+
+  /** A UI story whose plan legitimately targets app/, so the first attempt can be made valid. */
+  const groundedStory = {
+    number: 451,
+    title: "Add Google Authentication to the Eve Chat",
+    body: `
+**Intent**
+A user must authenticate via Google OAuth before accessing the Eve Chat UI.
+
+**Acceptance Criteria**
+- AC1: given an unauthenticated user navigates to the Eve Chat UI, when the page loads, then the user is redirected to a Google sign-in prompt
+`,
+  };
+
+  const groundedPlan: ExecutionPlan = {
+    storyId: 451,
+    title: "Add Google Authentication to the Eve Chat",
+    summary: "Integrate Google OAuth into Eve Chat UI",
+    targetFiles: [
+      { path: "app/chat.tsx", action: "modify", rationale: "Add auth guard" },
+      { path: "app/google-auth.ts", action: "create", rationale: "OAuth token validator" },
+    ],
+    acceptanceCriteriaMap: [
+      {
+        acId: "AC1",
+        description: "Redirect unauthenticated user",
+        testFile: "tests/chat-auth.test.ts",
+        testCaseName: "redirects to Google sign-in",
+      },
+    ],
+  };
+
+  /** A UI story that does NOT name a page surface, so discovery cannot gate it as page-scoped. */
+  const feedStory = {
+    number: 451,
+    title: "Add Google Authentication to the Eve Chat",
+    body: `
+**Intent**
+A user navigates to the Eve Chat UI and must authenticate via Google OAuth before access is granted.
+
+**Acceptance Criteria**
+- AC1: given an unauthenticated user navigates to the Eve Chat UI, when authentication finishes, then access is granted
+`,
+  };
+
+  it("keeps the target repository and story in the repair prompt", async () => {
+    const prompts: string[] = [];
+    const invalidPlan: ExecutionPlan = { ...groundedPlan, targetFiles: [] };
+    const deps: ArchitectDeps = {
+      listFiles: vi.fn().mockResolvedValue(targetRepoFiles),
+      readFile: vi.fn().mockResolvedValue(""),
+      generateText: vi.fn().mockImplementation(async (prompt: string) => {
+        prompts.push(prompt);
+        return prompts.length === 1 ? JSON.stringify(invalidPlan) : JSON.stringify(groundedPlan);
+      }),
+      maxPlanRetries: 1,
+      backoffBaseMs: 0,
+    };
+
+    const agent = new ArchitectAgent(deps);
+    const result = await agent.planStory(groundedStory);
+
+    expect(result.ok).toBe(true);
+    expect(prompts).toHaveLength(2);
+    const repair = prompts[1];
+    // The discovered structure — not just the story number — anchors the retry to the target repo.
+    expect(repair).toContain("- web/feed-page.tsx");
+    expect(repair).toContain("- web/feed-api.ts");
+    expect(repair).toContain("<story_title>");
+    expect(repair).toContain(groundedStory.title);
+    expect(repair).toMatch(/same repository/i);
+  });
+
+  it("classifies a modify outside the discovered repository as refused-target", async () => {
+    const wrongRepoPlan: ExecutionPlan = {
+      storyId: 451,
+      title: "Fix ArchitectAgent LLM interaction timeout",
+      summary: "Plan against a different repository",
+      targetFiles: [
+        { path: "agent-eve/lib/other.ts", action: "modify", rationale: "wrong repository" },
+        { path: "app/chat.tsx", action: "modify", rationale: "keeps the UI rule satisfied" },
+      ],
+      acceptanceCriteriaMap: [
+        {
+          acId: "AC1",
+          description: "authentication is granted",
+          testFile: "tests/chat-auth.test.ts",
+          testCaseName: "grants access",
+        },
+      ],
+    };
+    const deps: ArchitectDeps = {
+      listFiles: vi.fn().mockResolvedValue(["app/chat.tsx", ...targetRepoFiles]),
+      readFile: vi.fn().mockResolvedValue("export const x = 1;\n"),
+      generateText: vi.fn().mockResolvedValue(JSON.stringify(wrongRepoPlan)),
+      maxPlanRetries: 1,
+      backoffBaseMs: 0,
+    };
+
+    const agent = new ArchitectAgent(deps);
+    const result = await agent.planStory(feedStory);
+
+    expect(result.ok).toBe(false);
+    // The plan left the target repository, so retrying it cannot help: report the refusal.
+    expect(result.reason).toBe("refused-target");
+  });
 });
