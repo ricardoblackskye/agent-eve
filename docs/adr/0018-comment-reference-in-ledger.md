@@ -5,7 +5,7 @@
 
 ## Context
 
-#260 asks that an agent's blocker question be visible on the corresponding
+**#260** asks that an agent's blocker question be visible on the corresponding
 GitHub issue without duplicating the content twice — once in the Dark Factory
 ledger and again on GitHub — and without the ledger ever holding free-form
 worker text that has to be manually reconciled.
