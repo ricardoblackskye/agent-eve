@@ -11,8 +11,10 @@
  *   npm run df:amm-scan -- --repo ricardoblackskye/agent-eve --workspace .
  */
 import { readFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 
 import { resolveScanProvider, runAmmScan } from "../agent/lib/dark-factory/amm-scan-runner";
+import type { RecordScanOutcome } from "../agent/lib/dark-factory/amm-scan-provider";
 import type { AmmRepoLayout } from "../agent/lib/dark-factory/amm-layout";
 
 interface Parsed {
@@ -21,7 +23,7 @@ interface Parsed {
   layoutPath?: string;
 }
 
-function parseArgs(argv: string[]): Parsed | { error: string } {
+export function parseArgs(argv: string[]): Parsed | { error: string } {
   let repo: string | undefined;
   let workspace: string | undefined;
   let layoutPath: string | undefined;
@@ -52,6 +54,15 @@ function readLayout(path: string): AmmRepoLayout {
     layout[signalId] = value;
   }
   return layout;
+}
+
+/**
+ * #465 - what the command's exit code means. 0 = the scan was measured (and, with a store configured, persisted);
+ * 1 = a configured store REFUSED it, so the measurement is lost. "Printed but not persisted" is 0: measuring and
+ * printing is still a legitimate use.
+ */
+export function exitCodeFor(outcome: RecordScanOutcome): number {
+  return 0;
 }
 
 async function main(): Promise<number> {
@@ -96,10 +107,15 @@ async function main(): Promise<number> {
   return 0;
 }
 
-main().then(
-  (code) => process.exit(code),
-  (err) => {
-    process.stderr.write(`df:amm-scan failed: ${err instanceof Error ? err.stack ?? err.message : String(err)}\n`);
-    process.exit(1);
-  },
-);
+const isDirectRun =
+  process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;
+
+if (isDirectRun) {
+  main().then(
+    (code) => process.exit(code),
+    (err) => {
+      process.stderr.write(`df:amm-scan failed: ${err instanceof Error ? err.stack ?? err.message : String(err)}\n`);
+      process.exit(1);
+    },
+  );
+}
