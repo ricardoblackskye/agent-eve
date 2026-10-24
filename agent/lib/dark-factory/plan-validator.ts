@@ -222,6 +222,9 @@ export function validateExecutionPlan(
     for (const file of plan.targetFiles) {
       const targetPath = file?.path;
       if (typeof targetPath !== "string" || targetPath === "") continue;
+      // A `create` target is DEFINED as a file that does not exist yet, so its absence is not an error.
+      // Only `modify` and `replace` target an existing file and therefore require presence (#454).
+      if (file.action === "create") continue;
       if (!context.files.includes(targetPath)) {
         errors.push(
           `Target file '${targetPath}' does not exist in the repository: it is not in the file list, so it ` +
