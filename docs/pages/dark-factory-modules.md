@@ -243,13 +243,13 @@ Dark Factory — canonical cost budget types, price table, and estimation. One p
 
 ## cost-gate
 
-Dark Factory — category-parameterized cost gate (#270, generalizing #217). The pre-call gate that a dynamic model resolver runs before returning a model; a refusal THROWS so the turn fails before the provider call. OPT-IN: returns `null` when cost governance is not configured.
+Dark Factory — category-parameterized cost gate (#270, generalizing #217). The pre-call gate that a dynamic model resolver runs before returning a model; a refusal THROWS so the turn fails before the provider call. The throw is a typed `CostRefusedError` carrying the governor's decision, and the refusal emits one structured `[dark-factory]` log line (#458). OPT-IN: returns `null` when cost governance is not configured.
 
 **Source:** [`agent/lib/dark-factory/cost-gate.ts`](../../agent/lib/dark-factory/cost-gate.ts)
 
 **Exports:** `CostGate`, `CostGateInput`, `DEFAULT_MAX_OUTPUT_TOKENS`, `createCostGate`
 
-**Decisions:** [ADR 0020](../../docs/adr/0020-cost-governance-is-live-on-every-llm-call.md)
+**Decisions:** [ADR 0020](../../docs/adr/0020-cost-governance-is-live-on-every-llm-call.md), [ADR 0058](../../docs/adr/0058-a-refusal-names-itself-where-an-operator-looks.md)
 
 ## cost-governor
 
@@ -257,7 +257,7 @@ Dark Factory — LLM cost governor. Sits between an LLM call site and the budget
 
 **Source:** [`agent/lib/dark-factory/cost-governor.ts`](../../agent/lib/dark-factory/cost-governor.ts)
 
-**Exports:** `CostGovernor`, `CostGovernorAdmitInput`, `CostGovernorDecision`, `CostGovernorRefusal`, `CostGovernorSettleResult`, `costBudgetId`, `createCostGovernor`, `utcMonth`
+**Exports:** `CostGovernor`, `CostGovernorAdmitInput`, `CostGovernorDecision`, `CostGovernorRefusal`, `CostGovernorSettleResult`, `CostRefusedError`, `costBudgetId`, `createCostGovernor`, `utcMonth`
 
 **Decisions:** [ADR 0006](../../docs/adr/0006-provider-neutral-seams.md)
 
