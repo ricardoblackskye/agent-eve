@@ -131,7 +131,7 @@ Add to `tests/dark-factory/architect-agent.test.ts` (or a sibling
 
 ## Gates (all before the PR)
 
-cspell@9.1.1 (`.cspell.json`), markdownlint (MD040/MD026/MD047), markdown-table-formatter,
+`cspell@9.1.1` (`.cspell.json`), markdownlint (MD040/MD026/MD047), markdown-table-formatter,
 `npm run test`, `npx tsc --noEmit --incremental false`,
 `DF_PLATFORM_PROVIDER=generic npm run build`, and the doc-drift / adr-integrity
 guards.
