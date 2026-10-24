@@ -30,6 +30,50 @@ export type CostGovernorRefusal =
   | "budget_unavailable"
   | "tenant_unconfigured";
 
+/**
+ * A refused admission, with the governor's decision attached (#458).
+ *
+ * The gate used to throw a bare `Error` whose only record of the reason lived inside its
+ * message, and which dropped the store's own error entirely. On the deployed agent path
+ * nothing logged it either, so a refusal reached the operator as Eve's
+ * `MODEL_SELECTION_FAILED` - indistinguishable from a provider failure. Carrying the
+ * decision as FIELDS is what makes a refusal machine-attributable.
+ */
+export class CostRefusedError extends Error {
+  readonly reason: CostGovernorRefusal;
+  readonly period?: string;
+  readonly category?: CostCategory;
+  readonly tenantId?: string;
+  /** The store's own words, when it supplied any. */
+  readonly storeError?: string;
+
+  constructor(input: {
+    reason: CostGovernorRefusal;
+    period?: string;
+    category?: CostCategory;
+    tenantId?: string;
+    storeError?: string;
+  }) {
+    const forTenant = input.tenantId ? ` for tenant '${input.tenantId}'` : "";
+    const where = input.category
+      ? `${input.category} cost gate refused the call${forTenant}`
+      : "the cost gate refused this call";
+    // The operator-readable form must stand on its own: reason, period, and the store's
+    // own words. Without the last two, a refusal reads as a bare code (#458).
+    super(
+      `${where}: ${input.reason}` +
+        (input.period ? ` (period ${input.period})` : "") +
+        (input.storeError ? ` - ${input.storeError}` : ""),
+    );
+    this.name = "CostRefusedError";
+    this.reason = input.reason;
+    this.period = input.period;
+    this.category = input.category;
+    this.tenantId = input.tenantId;
+    this.storeError = input.storeError;
+  }
+}
+
 export interface CostGovernorDecision {
   admitted: boolean;
   /** Present only when admitted. */

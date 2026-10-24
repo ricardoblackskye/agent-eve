@@ -10,20 +10,19 @@
  * behaves exactly as before.
  */
 import { runGovernedLlmCall } from "./governed-llm-call";
+import { CostRefusedError } from "./cost-governor";
 import { recordCostRefusal } from "./cost-refusal-recorder";
 import type { CostCategory } from "./cost-budget";
-import type { CostGovernor, CostGovernorRefusal } from "./cost-governor";
+import type { CostGovernor } from "./cost-governor";
 import type { RunHistoryStore } from "./run-history-store";
 
-/** Thrown when the governor refuses the call, so the call site fails closed. */
-export class CostRefusedError extends Error {
-  readonly reason: CostGovernorRefusal;
-  constructor(reason: CostGovernorRefusal) {
-    super(`the cost gate refused this call: ${reason}`);
-    this.name = "CostRefusedError";
-    this.reason = reason;
-  }
-}
+/**
+ * Thrown when the governor refuses the call, so the call site fails closed.
+ *
+ * ONE refusal class now lives in `cost-governor.ts` (#458), carrying the whole decision.
+ * It is re-exported here so existing importers of this module keep working.
+ */
+export { CostRefusedError };
 
 export interface GovernedAgentCallDeps {
   /** Absent/null => governance is OFF and the call runs unchanged (opt-in). */
@@ -78,5 +77,5 @@ export async function runGovernedAgentCall<T>(
       () => undefined,
     );
   }
-  throw new CostRefusedError(outcome.reason);
+  throw new CostRefusedError({ reason: outcome.reason, category: options.category });
 }

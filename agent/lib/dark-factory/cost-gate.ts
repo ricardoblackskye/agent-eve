@@ -13,6 +13,7 @@ import {
   isCostGovernanceConfigured,
 } from "./cost-budget-store";
 import {
+  CostRefusedError,
   createCostGovernor,
   type CostGovernor,
 } from "./cost-governor";
@@ -67,6 +68,11 @@ export interface CostGateInput {
    */
   tenantId?: string;
   /**
+   * Where a refusal is narrated. Defaults to `console.warn`, which lands in the deployed
+   * function's runtime log. Injectable so a caller can route it to a structured logger.
+   */
+  log?: (message: string) => void;
+  /**
    * Injectable governor, for tests. Omit to build one from the environment;
    * pass `null` explicitly to disable gating regardless of configuration.
    */
@@ -75,6 +81,7 @@ export interface CostGateInput {
 
 export function createCostGate(input: CostGateInput): CostGate | null {
   const { env, model, inputTokens, category } = input;
+  const log = input.log ?? ((message: string) => console.warn(message));
   const outputTokens = input.outputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS;
 
   const governor =
@@ -96,12 +103,26 @@ export function createCostGate(input: CostGateInput): CostGate | null {
         ...(input.tenantId ? { tenantId: input.tenantId } : {}),
       });
       if (!decision.admitted) {
-        const forTenant = input.tenantId
-          ? ` for tenant '${input.tenantId}'`
-          : "";
-        throw new Error(
-          `${category} cost gate refused the call${forTenant}: ${decision.reason ?? "budget_unavailable"}`,
+        const forTenant = input.tenantId ? ` tenant=${input.tenantId}` : "";
+        // #458 - one grep-able line in the [dark-factory] convention. Eve owns the failure
+        // code the eval prints, so THIS is the surface that makes the next incident a log
+        // grep instead of a database query. Warning level: a refusal is the control doing
+        // its job, and the error channel should stay meaningful.
+        log(
+          `[dark-factory] cost gate refused the call category=${category}${forTenant}` +
+            `${decision.period ? ` period=${decision.period}` : ""}` +
+            ` reason=${decision.reason ?? "budget_unavailable"}` +
+            `${decision.error ? ` store="${decision.error}"` : ""}`,
         );
+        // #458: a typed refusal, so the reason is a FIELD a caller can branch on rather
+        // than a word inside a string, and the store's own message survives with it.
+        throw new CostRefusedError({
+          reason: decision.reason ?? "budget_unavailable",
+          category,
+          ...(decision.period ? { period: decision.period } : {}),
+          ...(input.tenantId ? { tenantId: input.tenantId } : {}),
+          ...(decision.error ? { storeError: decision.error } : {}),
+        });
       }
 
       // #443: hand the reservation back to the caller. It used to be discarded here,
