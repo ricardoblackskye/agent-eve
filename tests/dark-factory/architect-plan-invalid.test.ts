@@ -66,15 +66,29 @@ function alwaysReplying(body: string) {
 }
 
 describe("#381 R2 Task 8 - a plan that never validates is answerable, so it is reported as such", () => {
-  it("reports plan-invalid when every attempt fails on a target that does not exist", async () => {
-    // The exact live failure: a path the repository does not contain, every time.
+  it("reports refused-target when every attempt targets a file outside the repository (#451)", async () => {
+    // The exact live failure: a path the repository does not contain, every time. #451 classifies this
+    // as a refused target rather than an invalid plan, because the plan has left the discovered repo and
+    // another repair round cannot bring it back.
     const { agent: arch } = alwaysReplying(JSON.stringify(plan("src/components/Header.js")));
 
     const result = await arch.planStory(STORY);
 
     expect(result.ok).toBe(false);
-    expect(result.reason).toBe("plan-invalid");
+    expect(result.reason).toBe("refused-target");
     expect(String(result.error)).toContain("src/components/Header.js");
+  });
+
+  it("still reports plan-invalid when the failure is NOT about the target (#451 control)", async () => {
+    // An empty target list fails presence without naming a wrong repository, so the refusal
+    // classification must not swallow it: this stays an answerable plan-invalid.
+    const invalidPlan: ExecutionPlan = { ...plan("src/pages/HomePage.jsx"), targetFiles: [] };
+    const { agent: arch } = alwaysReplying(JSON.stringify(invalidPlan));
+
+    const result = await arch.planStory(STORY);
+
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe("plan-invalid");
   });
 
   it("still reports refused-target when the TARGET RULE is what kept failing", async () => {
