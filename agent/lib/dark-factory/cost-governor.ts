@@ -54,7 +54,17 @@ export class CostRefusedError extends Error {
     tenantId?: string;
     storeError?: string;
   }) {
-    super(input.reason);
+    const forTenant = input.tenantId ? ` for tenant '${input.tenantId}'` : "";
+    const where = input.category
+      ? `${input.category} cost gate refused the call${forTenant}`
+      : "the cost gate refused this call";
+    // The operator-readable form must stand on its own: reason, period, and the store's
+    // own words. Without the last two, a refusal reads as a bare code (#458).
+    super(
+      `${where}: ${input.reason}` +
+        (input.period ? ` (period ${input.period})` : "") +
+        (input.storeError ? ` - ${input.storeError}` : ""),
+    );
     this.name = "CostRefusedError";
     this.reason = input.reason;
     this.period = input.period;

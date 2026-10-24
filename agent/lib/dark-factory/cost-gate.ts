@@ -13,6 +13,7 @@ import {
   isCostGovernanceConfigured,
 } from "./cost-budget-store";
 import {
+  CostRefusedError,
   createCostGovernor,
   type CostGovernor,
 } from "./cost-governor";
@@ -96,12 +97,15 @@ export function createCostGate(input: CostGateInput): CostGate | null {
         ...(input.tenantId ? { tenantId: input.tenantId } : {}),
       });
       if (!decision.admitted) {
-        const forTenant = input.tenantId
-          ? ` for tenant '${input.tenantId}'`
-          : "";
-        throw new Error(
-          `${category} cost gate refused the call${forTenant}: ${decision.reason ?? "budget_unavailable"}`,
-        );
+        // #458: a typed refusal, so the reason is a FIELD a caller can branch on rather
+        // than a word inside a string, and the store's own message survives with it.
+        throw new CostRefusedError({
+          reason: decision.reason ?? "budget_unavailable",
+          category,
+          ...(decision.period ? { period: decision.period } : {}),
+          ...(input.tenantId ? { tenantId: input.tenantId } : {}),
+          ...(decision.error ? { storeError: decision.error } : {}),
+        });
       }
 
       // #443: hand the reservation back to the caller. It used to be discarded here,
