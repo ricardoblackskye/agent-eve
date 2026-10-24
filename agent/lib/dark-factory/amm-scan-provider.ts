@@ -6,6 +6,7 @@
  * `run-history-provider.ts`: unset keeps nothing running, an unknown value throws.
  */
 import type { AmmReadinessProvider } from "./amm-readiness";
+import type { AmmScanResult } from "./amm-scan-runner";
 import { SqliteAmmScanStore, type AmmScanStore } from "./amm-scan-store";
 import { PostgresAmmScanStore } from "./amm-scan-postgres";
 
@@ -72,4 +73,34 @@ export function ammProviderFromEnv(
   const store = createAmmScanStore(env);
   const provider = databaseAmmProvider(store);
   return { scan: (repo) => provider.scan(repo), close: () => store.close() };
+}
+
+/** What happened to a measured scan on its way to the store. */
+export interface RecordScanOutcome {
+  /** True when the scan is now in the store. */
+  recorded: boolean;
+  /**
+   * True when a store was configured at all. This is the difference between "there was nothing to write to" and
+   * "the write failed", which a caller cannot tell from `recorded` alone.
+   */
+  configured: boolean;
+  storeId?: string;
+  rowId?: string;
+  reason?: string;
+}
+
+/**
+ * #465 - persist a scan that has just been measured. `df:amm-scan` printed the scan and discarded it, so a
+ * measurement existed only in whatever terminal ran it. This is the write link.
+ */
+export async function recordAmmScan(
+  scan: AmmScanResult,
+  env: AmmScanStoreEnv = process.env as AmmScanStoreEnv,
+  tenantId?: string,
+): Promise<RecordScanOutcome> {
+  return {
+    recorded: false,
+    configured: false,
+    reason: `recordAmmScan is not implemented for ${scan.repo}/${tenantId ?? "-"}`,
+  };
 }
