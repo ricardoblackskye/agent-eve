@@ -14,19 +14,26 @@ import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 import { resolveScanProvider, runAmmScan } from "../agent/lib/dark-factory/amm-scan-runner";
-import type { RecordScanOutcome } from "../agent/lib/dark-factory/amm-scan-provider";
+import {
+  recordAmmScan,
+  type AmmScanStoreEnv,
+  type RecordScanOutcome,
+} from "../agent/lib/dark-factory/amm-scan-provider";
 import type { AmmRepoLayout } from "../agent/lib/dark-factory/amm-layout";
 
 interface Parsed {
   repo: string;
   workspace: string;
   layoutPath?: string;
+  /** Optional attribution. Absent means UNASSIGNED, which the store treats as a legitimate state. */
+  tenant?: string;
 }
 
 export function parseArgs(argv: string[]): Parsed | { error: string } {
   let repo: string | undefined;
   let workspace: string | undefined;
   let layoutPath: string | undefined;
+  let tenant: string | undefined;
 
   const args = argv.slice(2);
   for (let i = 0; i < args.length; i += 1) {
@@ -34,12 +41,13 @@ export function parseArgs(argv: string[]): Parsed | { error: string } {
     if (arg === "--repo") repo = args[++i];
     else if (arg === "--workspace") workspace = args[++i];
     else if (arg === "--layout") layoutPath = args[++i];
+    else if (arg === "--tenant") tenant = args[++i];
     else return { error: `unknown argument: ${arg}` };
   }
 
   if (!repo || !/^[\w.-]+\/[\w.-]+$/.test(repo)) return { error: "--repo owner/repo is required" };
   if (!workspace) return { error: "--workspace <dir> is required" };
-  return { repo, workspace, layoutPath };
+  return { repo, workspace, layoutPath, tenant };
 }
 
 /** A layout supplied as JSON, so a repository we have no built-in layout for can still be measured. */
@@ -62,7 +70,8 @@ function readLayout(path: string): AmmRepoLayout {
  * printing is still a legitimate use.
  */
 export function exitCodeFor(outcome: RecordScanOutcome): number {
-  return 0;
+  if (outcome.recorded) return 0;
+  return outcome.configured ? 1 : 0;
 }
 
 async function main(): Promise<number> {
@@ -104,7 +113,16 @@ async function main(): Promise<number> {
  : "") +
       `catalogue ${scan.catalogueVersion}\n`,
   );
-  return 0;
+
+  // #465 - the write link. A measurement that is never persisted exists only in this terminal, which is how the
+  // scanner came to be invisible to the pages.
+  const record = await recordAmmScan(scan, process.env as AmmScanStoreEnv, parsed.tenant);
+  process.stderr.write(
+    record.recorded
+      ? `persisted to ${record.storeId} as row ${record.rowId}\n`
+      : `NOT persisted: ${record.reason ?? "no reason given"}\n`,
+  );
+  return exitCodeFor(record);
 }
 
 const isDirectRun =
