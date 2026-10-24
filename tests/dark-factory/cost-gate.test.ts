@@ -165,4 +165,44 @@ describe("createCostGate (#270)", () => {
     expect(refusal.storeError).toBe("Reservation would exceed the configured budget cap.");
     expect(refusal.message).toContain("Reservation would exceed the configured budget cap.");
   });
+
+  it("logs ONE structured line at the refusal, naming reason, category and the store's words (#458)", async () => {
+    const log = vi.fn();
+    const gate = createCostGate({
+      ...BASE,
+      category: "orchestrator",
+      log,
+      governor: {
+        admit: async () => ({
+          admitted: false,
+          reason: "budget_exceeded",
+          period: "2026-10",
+          error: "Reservation would exceed the configured budget cap.",
+        }),
+      } as never,
+    });
+
+    await expect(gate?.admit()).rejects.toBeInstanceOf(CostRefusedError);
+
+    // Exactly once: a refusal must not narrate itself twice.
+    expect(log).toHaveBeenCalledTimes(1);
+    const line = String(log.mock.calls[0][0]);
+    expect(line).toContain("[dark-factory]");
+    expect(line).toContain("reason=budget_exceeded");
+    expect(line).toContain("category=orchestrator");
+    expect(line).toContain("period=2026-10");
+    expect(line).toContain("Reservation would exceed the configured budget cap.");
+  });
+
+  it("does not log when the call is admitted (#458)", async () => {
+    const log = vi.fn();
+    const gate = createCostGate({
+      ...BASE,
+      log,
+      governor: { admit: async () => ({ admitted: true, reservationId: "res-1" }) } as never,
+    });
+
+    await expect(gate?.admit()).resolves.toBeDefined();
+    expect(log).not.toHaveBeenCalled();
+  });
 });
