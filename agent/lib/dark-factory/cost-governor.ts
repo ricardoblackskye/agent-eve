@@ -78,6 +78,18 @@ export function utcMonth(now: Date = new Date()): string {
   return now.toISOString().slice(0, 7);
 }
 
+/**
+ * #457 - the reaper's schedule. A reservation covers ONE model call, so 30 minutes is far
+ * beyond any legitimate call (Vercel's maximum function duration is 900 s) and far inside the
+ * 11 days a stranded reservation survived in production. ADR 0054 states plainly that this
+ * TTL is a guess: too short reaps a live call and lets a slow turn overspend; too long
+ * strands budget.
+ */
+export const RESERVATION_TTL_MS = 30 * 60 * 1000;
+
+/** At most one reap per process per interval: one extra store round trip, not one per turn. */
+export const REAP_INTERVAL_MS = 10 * 60 * 1000;
+
 const CONCRETE_PERIOD = /^\d{4}-\d{2}$/;
 
 export function createCostGovernor(
