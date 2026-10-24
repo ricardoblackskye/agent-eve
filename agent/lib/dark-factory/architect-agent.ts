@@ -82,7 +82,7 @@ export class ProcessTimerRegistry {
 export interface ArchitectDeps {
   generateText: (
     prompt: string,
-    options?: { signal?: AbortSignal },
+    options?: { signal?: AbortSignal; attempt?: number },
   ) => Promise<string>;
   listFiles: (dir: string) => Promise<string[]>;
   readFile?: (path: string) => Promise<string>;
@@ -136,6 +136,20 @@ interface PlanContext {
   surface?: { route?: string; page?: string };
 }
 
+/** Where one plan attempt stopped. `accepted` means it validated and was returned. */
+export type PlanAttemptStage = "accepted" | "generate-error" | "parse" | "validate";
+
+/** One attempt to produce a plan, and why it did or did not succeed (#450). */
+export interface PlanAttemptRecord {
+  /** 1-based, in the order the model was called. */
+  attempt: number;
+  stage: PlanAttemptStage;
+  /** Validation rule codes when the attempt reached validation; empty otherwise. */
+  codes: string[];
+  /** The reason(s) this attempt produced no plan; empty when accepted. */
+  errors: string[];
+}
+
 export interface ArchitectResult {
   ok: boolean;
   plan?: ExecutionPlan;
@@ -145,6 +159,8 @@ export interface ArchitectResult {
   lastError?: Error | unknown;
   /** Why there is no plan, when the caller can act on the reason (#381 R2 AC4). */
   reason?: ArchitectOutcomeReason;
+  /** Every attempt made, with its stage and reason (#450). Present when the loop ran. */
+  attempts?: PlanAttemptRecord[];
   /** The role discovery assigned to each file it inspected, so the caller can judge the plan's targets. */
   roles?: Record<string, PlanFileRole>;
   /** The surface the story names, when discovery resolved one. */
@@ -392,7 +408,7 @@ export class ArchitectAgent {
    * Guarantees no race condition between timer callback and generation resolution.
    * Uses ProcessTimerRegistry for process-level safety.
    */
-  private async executeGenerate(prompt: string): Promise<string> {
+  private async executeGenerate(prompt: string, attempt?: number): Promise<string> {
     let settled = false;
     let timer: NodeJS.Timeout | undefined;
     const controller =
@@ -425,7 +441,10 @@ export class ArchitectAgent {
       }, this.timeoutMs);
 
       this.deps
-        .generateText(prompt, { signal: controller?.signal })
+        .generateText(prompt, {
+          signal: controller?.signal,
+          ...(attempt !== undefined ? { attempt } : {}),
+        })
         .then((result) => {
           if (tryAcquireSettlement()) {
             cleanupTimer();
@@ -702,22 +721,30 @@ export class ArchitectAgent {
     context?: PlanValidationContext,
   ): Promise<ArchitectResult> {
     let retries = 0;
-    /** True when the target-role rule fired, so exhaustion can be reported as an actionable reason. */
+    /** True when the target-role rule fired in ANY attempt, so exhaustion reports an actionable reason. */
     let refusedTarget = false;
     let lastOutput = "";
     let lastErrors: string[] = [];
     let lastError: Error | unknown;
     let currentPrompt = initialPrompt;
+    const attempts: PlanAttemptRecord[] = [];
+    let attemptNumber = 0;
 
     while (true) {
+      attemptNumber += 1;
+      let stage: PlanAttemptStage = "generate-error";
+      let codes: string[] = [];
+
       try {
-        lastOutput = await this.executeGenerate(currentPrompt);
+        lastOutput = await this.executeGenerate(currentPrompt, attemptNumber);
+        stage = "parse";
       } catch (err: unknown) {
         lastError = err;
         const errMsg =
           err instanceof Error
             ? err.stack
-              ? `${err.name}: ${err.message}\n${err.stack}`
+              ? `${err.name}: ${err.message}
+${err.stack}`
               : `${err.name}: ${err.message}`
             : String(err);
         lastErrors = [errMsg];
@@ -731,24 +758,32 @@ export class ArchitectAgent {
             parseResult.error ?? "Failed to parse valid JSON from LLM response.",
           ];
         } else {
+          stage = "validate";
           // Title AND body: the surface a story names is often only in the title ("the main page"), and
           // validating on the body alone meant the target rule never fired on the stories that failed.
           const validation = validateExecutionPlan(
             parseResult.plan,
-            `${story.title}\n${story.body}`,
+            `${story.title}
+${story.body}`,
             context,
           );
+          codes = validation.codes ?? [];
           if (validation.valid) {
+            attempts.push({ attempt: attemptNumber, stage: "accepted", codes, errors: [] });
             return {
               ok: true,
               plan: parseResult.plan,
               retries,
+              attempts,
             };
           }
-          refusedTarget = (validation.codes ?? []).includes("target-role");
+          if (codes.includes("target-role")) refusedTarget = true;
           lastErrors = validation.errors;
         }
       }
+
+      // The reason for THIS attempt survives alongside every earlier one (#450).
+      attempts.push({ attempt: attemptNumber, stage, codes, errors: lastErrors });
 
       // Allow up to maxPlanRetries self-correction loops (< condition)
       if (retries < this.maxPlanRetries) {
@@ -769,17 +804,26 @@ export class ArchitectAgent {
     return {
       ok: false,
       retries,
-      error: `ArchitectAgent max retries exceeded (${this.maxPlanRetries}). Errors: ${lastErrors.join("; ")}`,
+      error: this.formatPlanFailure(attempts),
       cause: lastError,
-      // Spent every repair round still aiming at the shell or a shared component: the caller parks for a human
-      // rather than letting a refused target through (#381 R2 AC4). Any OTHER persistent validation failure is
-      // reported as `plan-invalid` for the same reason - it is answerable, and the errors travel with it
-      // (#381 R2 Task 8). The two stay distinct because they ask a human different questions.
+      // ANY attempt that hit the target rule makes the exhaustion actionable as a refused target.
+      // Every other persistent validation failure is reported as `plan-invalid` (#381 R2 AC4, Task 8).
       ...(refusedTarget
         ? { reason: "refused-target" as const }
         : { reason: "plan-invalid" as const }),
+      attempts,
       lastError,
     };
+  }
+
+  /** Render every attempt so the failure text names each reason and rule, not only the last (#450). */
+  private formatPlanFailure(attempts: PlanAttemptRecord[]): string {
+    const rendered = attempts.map((a) => {
+      const codes = a.codes.length > 0 ? ` codes=[${a.codes.join(", ")}]` : "";
+      const errors = a.errors.length > 0 ? a.errors.join("; ") : "no error text";
+      return `attempt ${a.attempt} [${a.stage}]${codes}: ${errors}`;
+    });
+    return `ArchitectAgent max retries exceeded (${this.maxPlanRetries}). Errors: ${rendered.join(" | ")}`;
   }
 
   /**

@@ -433,7 +433,9 @@ async function main(): Promise<void> {
     // many files are read and how much of each. The reader also refuses a path outside the root.
     listFiles: planReader.listFiles,
     readFile: planReader.readFile,
-    generateText: async (prompt) => {
+    generateText: async (prompt, options) => {
+      // #450: name the attempt in the streamed output, so raw text can be attributed to an attempt.
+      const planAttempt = options?.attempt;
       await checkpoint();
       // Governed (#270): an over-budget call is refused at THIS call site, and the
       // refusal code is recorded on the run.
@@ -447,6 +449,11 @@ async function main(): Promise<void> {
           run: async () => {
             const stream = streamText({ model, prompt });
             let output = "";
+            if (planAttempt !== undefined) {
+              process.stdout.write(`
+[PLAN attempt ${planAttempt}]
+`);
+            }
             for await (const chunk of stream.textStream) {
               output += chunk;
               process.stdout.write(chunk);
