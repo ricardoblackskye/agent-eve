@@ -6,6 +6,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { createCostGate } from "../../agent/lib/dark-factory/cost-gate";
+import { CostRefusedError } from "../../agent/lib/dark-factory/cost-governor";
 
 const BASE = {
   category: "orchestrator" as const,
@@ -130,5 +131,38 @@ describe("createCostGate (#270)", () => {
     });
 
     await expect(gate?.admit()).rejects.toThrow(/budget_unavailable/);
+  });
+
+  it("refuses with a TYPED error carrying the decision, not a bare message (#458)", async () => {
+    const gate = createCostGate({
+      ...BASE,
+      category: "developer",
+      governor: {
+        admit: async () => ({
+          admitted: false,
+          reason: "budget_exceeded",
+          period: "2026-10",
+          error: "Reservation would exceed the configured budget cap.",
+        }),
+      } as never,
+    });
+
+    let thrown: unknown;
+    try {
+      await gate?.admit();
+    } catch (error) {
+      thrown = error;
+    }
+
+    // Fields, not only a message: a bare Error carrying the reason inside a string is
+    // exactly the defect #458 exists to remove. The message is asserted too, because the
+    // operator-facing form has to name the reason and the store's own words on its own.
+    expect(thrown).toBeInstanceOf(CostRefusedError);
+    const refusal = thrown as CostRefusedError;
+    expect(refusal.reason).toBe("budget_exceeded");
+    expect(refusal.period).toBe("2026-10");
+    expect(refusal.category).toBe("developer");
+    expect(refusal.storeError).toBe("Reservation would exceed the configured budget cap.");
+    expect(refusal.message).toContain("Reservation would exceed the configured budget cap.");
   });
 });
