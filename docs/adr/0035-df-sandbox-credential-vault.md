@@ -5,7 +5,7 @@
 
 ## Context
 
-#279 (R3) makes the Dark Factory sandbox secret-free. Today two raw secrets can reach
+**#279** (R3) makes the Dark Factory sandbox secret-free. Today two raw secrets can reach
 argv, shell strings, sandbox env, logs, or errors:
 
 - the model-provider key, read by the LLM gateway from `process.env` per request; and

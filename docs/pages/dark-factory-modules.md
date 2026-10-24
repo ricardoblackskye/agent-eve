@@ -1032,7 +1032,7 @@ Dark Factory — retiring a stale claim (#404 R2). The operator's "let go" for a
 
 Scores a repository against the whitepaper's Autonomy Maturity Model: the eight technical pillars, the level of
 each, and the binary signals behind it. Supplies the fixture scan that the web repository list renders (epic
-#403 R1) and the seam the AMM scanner will fill later, so the mocked phase and the real phase share one contract.
+**#403** R1) and the seam the AMM scanner will fill later, so the mocked phase and the real phase share one contract.
 
 **Source:** [`agent/lib/dark-factory/amm-readiness.ts`](../../agent/lib/dark-factory/amm-readiness.ts)
 
@@ -1061,14 +1061,14 @@ disagree about the same fleet (#382).
 
 ## AMM scan store
 
-#424 - the storage seam for AMM scans, plus the local driver. A scan is APPEND-ONLY: a repeat scan is a new row, because the
+**#424** - the storage seam for AMM scans, plus the local driver. A scan is APPEND-ONLY: a repeat scan is a new row, because the
 series is the value and "current vs target" is just the newest one. Per-signal detail is stored as JSON while the
 queryable fields (repo, tenant, scanned_at, catalogue_version, points, level) are real columns, so the list queries stay
 indexed without growing the table sideways.
 
 The signal TRIAD is the load-bearing invariant. The model distinguishes "nobody looked" from "looked, and it is
 missing" - so `present` / `absent` / `unmeasured` is carried verbatim and never reduced to a boolean on the way to disk.
-#426's runner is what decides those states; storing a two-state shape here would mean the schema had to be migrated the
+**#426's** runner is what decides those states; storing a two-state shape here would mean the schema had to be migrated the
 moment the runner landed. `assertTriad` is exported and called by BOTH drivers, because enforcing it in one write path
 only would leave the other accepting rows this one refuses. `comparable()` refuses a set of scans that spans two
 catalogue versions, since a trend drawn across a weight change is an artifact wearing a trend's clothes (#424).
@@ -1082,7 +1082,7 @@ catalogue versions, since a trend drawn across a weight change is an artifact we
 
 ## AMM scan postgres
 
-#424 - the deployed driver for AMM scans. Same interface as the SQLite store, so the pages cannot tell them apart. It
+**#424** - the deployed driver for AMM scans. Same interface as the SQLite store, so the pages cannot tell them apart. It
 creates its own schema with `CREATE TABLE IF NOT EXISTS` on first use, as every other Dark Factory Postgres adapter does;
 RLS is enabled by migration 009 rather than by the DDL.
 
@@ -1094,7 +1094,7 @@ RLS is enabled by migration 009 rather than by the DDL.
 
 ## AMM scan provider
 
-#424 - chooses the AMM scan store and exposes it through the seam the pages already read. FAIL-CLOSED: an unconfigured
+**#424** - chooses the AMM scan store and exposes it through the seam the pages already read. FAIL-CLOSED: an unconfigured
 driver throws rather than falling back to the fixture or to an empty table, because an empty table renders as "no
 repositories are ready" - which looks like a measurement and is not one. A read that FAILS throws too: a broken database
 must not be indistinguishable from a repository nobody has scanned.
@@ -1107,7 +1107,7 @@ must not be indistinguishable from a repository nobody has scanned.
 
 ## AMM repository layout
 
-#426 - where each signal's check lives in a SPECIFIC repository. The catalogue declares WHAT to look for; this
+**#426** - where each signal's check lives in a SPECIFIC repository. The catalogue declares WHAT to look for; this
 declares WHERE. The split exists because a scan runs against repositories other than the one the catalogue was
 written for: ten rows name locations that exist only here, and left in the catalogue they reported ABSENT against
 every other repository - a false negative wearing the costume of a measurement.
@@ -1123,7 +1123,7 @@ under `agent/lib/dark-factory/`, so even a scan of this repository reported them
 
 ## AMM scan runner
 
-#426 - the scanner. It evaluates every catalogue row against a real workspace and hands the readings to `scoreRepo`,
+**#426** - the scanner. It evaluates every catalogue row against a real workspace and hands the readings to `scoreRepo`,
 so an AMM figure becomes a measurement of a repository rather than a fixture. `file` checks are READ-ONLY, so they
 read the workspace confined to its root; `command` checks EXECUTE code, so they run only through a `SandboxProvider`
 whose default REFUSES. With no sandbox configured the command rows come back `unmeasured` - never executed on the
