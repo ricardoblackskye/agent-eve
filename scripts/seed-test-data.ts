@@ -37,6 +37,16 @@ import type { ControlStore } from "../agent/lib/dark-factory/control";
 import { createControlStore } from "../agent/lib/dark-factory/control";
 import type { MembershipStore } from "../agent/lib/dark-factory/membership-store";
 import { createMembershipStore } from "../agent/lib/dark-factory/membership-store";
+import {
+  toStoredScan,
+  type AmmScanStore,
+} from "../agent/lib/dark-factory/amm-scan-store";
+import { createAmmScanStore } from "../agent/lib/dark-factory/amm-scan-provider";
+import {
+  scoreRepo,
+  type AmmMeasurements,
+} from "../agent/lib/dark-factory/amm-scoring";
+import { AMM_SIGNAL_CATALOGUE } from "../agent/lib/dark-factory/amm-signals";
 import type { MembershipInput } from "../agent/lib/dark-factory/membership";
 import { loadLocalEnv } from "./load-env";
 
@@ -48,6 +58,7 @@ export const SCENARIOS = [
   "over-budget",
   "mixed-status",
   "control",
+  "amm-scan",
   "empty",
 ] as const;
 
@@ -60,6 +71,7 @@ export interface SeedStores {
   runHistory: RunHistoryStore;
   control: ControlStore;
   membership: MembershipStore;
+  amm: AmmScanStore;
 }
 
 export interface SeedOptions {
@@ -162,6 +174,7 @@ export function buildStores(
     runHistory: createRunHistoryStore(env),
     control: createControlStore(env),
     membership: createMembershipStore(env),
+    amm: createAmmScanStore(env),
   };
 }
 
@@ -542,6 +555,45 @@ async function scenarioControl(s: SeedStores): Promise<boolean> {
   return false;
 }
 
+/** A fully mature repository: every catalogue signal measured PRESENT. */
+const SEED_AMM_REPO = "seed-org/amm-ready";
+
+/**
+ * #465 - seed a readiness scan, so the board has a row to render.
+ *
+ * The board lists a configured repository only when a scan EXISTS for it, and the fixture that used to supply one
+ * is no longer reachable from `app/`. With no seeded scan the E2E journey reads an empty list and has nothing to
+ * open, which is how the removal of that fixture surfaces as a broken journey rather than a broken page.
+ */
+async function scenarioAmmScan(s: SeedStores): Promise<boolean> {
+  const existing = await s.amm.latestScans({ repo: SEED_AMM_REPO, limit: 1 });
+  if (!existing.ok) {
+    throw new Error(
+      `latestScans(${SEED_AMM_REPO}) failed: ${existing.error ?? "unknown"}`,
+    );
+  }
+  // The row id is (tenant, repo, scannedAt), so re-seeding the same instant is deduped rather than appended.
+  // That is what makes this idempotent without a read-modify-write.
+  const found = existing.value ?? [];
+  if (found.some((scan) => scan.scannedAt === SEED_TS)) return false;
+
+  // `AmmMeasurements` is read-only by design, so it is built in one expression rather than filled in place.
+  const measurements: AmmMeasurements = Object.fromEntries(
+    AMM_SIGNAL_CATALOGUE.map(
+      (definition) => [definition.id, "present"] as const,
+    ),
+  );
+  const written = await s.amm.recordScan(
+    toStoredScan(scoreRepo({ repo: SEED_AMM_REPO, measurements, scannedAt: SEED_TS })),
+  );
+  if (!written.ok) {
+    throw new Error(
+      `recordScan(${SEED_AMM_REPO}) failed: ${written.error ?? "unknown"}`,
+    );
+  }
+  return true;
+}
+
 async function scenarioEmpty(): Promise<boolean> {
   // Intentionally writes nothing — the empty-state fixture.
   return false;
@@ -556,6 +608,7 @@ const SCENARIO_FNS: Record<ScenarioName, (s: SeedStores) => Promise<boolean>> =
     "over-budget": scenarioOverBudget,
     "mixed-status": scenarioMixedStatus,
     control: scenarioControl,
+    "amm-scan": scenarioAmmScan,
     empty: scenarioEmpty,
   };
 
@@ -607,6 +660,7 @@ const STORE_TABLES: Record<keyof SeedStores, string[]> = {
   ],
   control: ["df_control_events", "df_run_control", "df_factory_control"],
   membership: ["df_tenant_members"],
+  amm: ["df_amm_scans"],
 };
 
 interface ResetTarget {
@@ -652,6 +706,12 @@ function resetTargets(
       sqlitePath: (env.DF_MEMBERSHIP_DATABASE_PATH ?? "").trim() || undefined,
       connectionString:
         (env.DF_MEMBERSHIP_DATABASE_URL ?? "").trim() || fallback || undefined,
+    },
+    amm: {
+      driver: (env.DF_AMM_SCAN_DRIVER ?? "").trim().toLowerCase(),
+      sqlitePath: (env.DF_AMM_SCAN_DB_PATH ?? "").trim() || undefined,
+      connectionString:
+        (env.DF_AMM_SCAN_DATABASE_URL ?? "").trim() || fallback || undefined,
     },
   };
 }
@@ -790,6 +850,7 @@ async function main(): Promise<number> {
     await stores.runHistory.close();
     await stores.control.close?.();
     await stores.membership.close?.();
+    stores.amm.close();
   }
 }
 

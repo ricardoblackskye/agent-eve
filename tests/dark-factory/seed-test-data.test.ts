@@ -16,6 +16,7 @@ import { InMemoryCostBudgetProvider } from "../../agent/lib/dark-factory/cost-bu
 import { SqliteRunHistoryStore } from "../../agent/lib/dark-factory/run-history-store";
 import { createControlStore } from "../../agent/lib/dark-factory/control";
 import { InMemoryMembershipProvider } from "../../agent/lib/dark-factory/membership-store";
+import { createAmmScanStore } from "../../agent/lib/dark-factory/amm-scan-provider";
 import {
   SCENARIOS,
   parseArgs,
@@ -35,6 +36,7 @@ function closeStores(s: SeedStores): void {
   s.runHistory.close();
   s.control.close?.();
   s.membership.close?.();
+  s.amm.close();
 }
 
 beforeEach(() => {
@@ -49,6 +51,12 @@ beforeEach(() => {
       DF_CONTROL_DB_PATH: join(dir, "control.sqlite"),
     }),
     membership: new InMemoryMembershipProvider(),
+    // #465 - the readiness board lists a configured repository only when a scan EXISTS for it, and the fixture that
+    // used to supply one is no longer reachable from `app/`. The E2E journey reads this board, so it needs the store.
+    amm: createAmmScanStore({
+      DF_AMM_SCAN_DRIVER: "sqlite",
+      DF_AMM_SCAN_DB_PATH: join(dir, "amm.sqlite"),
+    }),
   };
 });
 
@@ -63,14 +71,52 @@ async function snapshot(): Promise<Record<string, number>> {
   const runs = await stores.runHistory.listRuns({ limit: 100 });
   const usage = await stores.usage.aggregate({});
   const budgets = await stores.cost.listBudgets();
+  const scans = await stores.amm.latestScans({ limit: 100 });
   return {
     tenants: tenants.ok ? tenants.value.length : -1,
     assignments: assignments.ok ? assignments.value.length : -1,
     runs: runs.ok ? (runs.value?.items.length ?? -1) : -1,
     calls: usage.ok ? (usage.value?.totals.calls ?? -1) : -1,
     budgets: budgets.ok ? budgets.value.length : -1,
+    scans: scans.ok ? (scans.value?.length ?? -1) : -1,
   };
 }
+
+/**
+ * #465 - the readiness board renders a row only for a configured repository that HAS a scan, and the fixture that
+ * used to supply one is no longer reachable from `app/`. The E2E journey reads this board, so it needs this seed.
+ */
+describe("#465 the amm-scan scenario", () => {
+  const REPO = "seed-org/amm-ready";
+
+  it("records a scan the readiness board can render", async () => {
+    const result = await runSeed(stores, { scenarios: ["amm-scan"] });
+    expect(result.ok).toBe(true);
+
+    const latest = await stores.amm.latestScans({ repo: REPO, limit: 1 });
+    expect(latest.ok).toBe(true);
+    const scans = latest.value ?? [];
+    expect(scans).toHaveLength(1);
+    // Every catalogue signal is measured PRESENT, so the seeded repository is a fully mature one (Level 5, 100).
+    expect(scans[0]?.overall.level).toBe(5);
+    expect(scans[0]?.overall.points).toBe(100);
+  });
+
+  it("is idempotent: a re-run writes nothing new and reports it as already present", async () => {
+    await runSeed(stores, { scenarios: ["amm-scan"] });
+    const again = await runSeed(stores, { scenarios: ["amm-scan"] });
+    expect(again.ok).toBe(true);
+    if (again.ok) {
+      expect(again.report.outcomes[0]).toEqual({
+        name: "amm-scan",
+        applied: false,
+        skipped: true,
+      });
+    }
+    const latest = await stores.amm.latestScans({ repo: REPO, limit: 5 });
+    expect(latest.value ?? []).toHaveLength(1);
+  });
+});
 
 describe("parseArgs", () => {
   it("requires at least one --scenario or --all", () => {
@@ -222,11 +268,17 @@ describe("resetTestData", () => {
       DF_RUN_HISTORY_DB_PATH: join(d, "runs.sqlite"),
       DF_CONTROL_DRIVER: "sqlite",
       DF_CONTROL_DB_PATH: join(d, "control.sqlite"),
+      DF_AMM_SCAN_DRIVER: "sqlite",
+      DF_AMM_SCAN_DB_PATH: join(d, "amm.sqlite"),
     };
     const first = buildStores(env);
-    await runSeed(first, { scenarios: ["happy-path"] });
+    // #465 - every store is seeded AND every store is cleared: a store left out of either half would let a stale
+    // readiness scan outlive a reset.
+    await runSeed(first, { scenarios: ["happy-path", "amm-scan"] });
     const before = await first.tenant.listTenants();
     expect(before.ok && before.value.length).toBeGreaterThan(0);
+    const seededScans = await first.amm.latestScans({ limit: 10 });
+    expect(seededScans.ok && (seededScans.value?.length ?? 0)).toBeGreaterThan(0);
     closeStores(first);
 
     const res = await resetTestData(env);
@@ -237,6 +289,8 @@ describe("resetTestData", () => {
     expect(after.ok && after.value).toEqual([]);
     const runs = await second.runHistory.listRuns({ limit: 50 });
     expect(runs.ok && (runs.value?.items.length ?? -1)).toBe(0);
+    const scans = await second.amm.latestScans({ limit: 10 });
+    expect(scans.ok && (scans.value?.length ?? -1)).toBe(0);
     closeStores(second);
     rmSync(d, { recursive: true, force: true });
   });
