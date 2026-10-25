@@ -307,7 +307,7 @@ describe("#163 cycle 12-14: abort, resume and the lifecycle labels", () => {
     });
 
     const res = await runDarkFactoryDispatch(
-      triggerDecision({ action: "unlabeled", label: { name: "needs-answer" } }),
+      triggerDecision({ action: "created", comment: { body: "go ahead" } }),
       d,
     );
     expect(res.status).toBe("resumed");
@@ -342,8 +342,8 @@ describe("#163 cycle 12-14: abort, resume and the lifecycle labels", () => {
       return { ok, status: ok ? 200 : 503, json: async () => ({ ok }) };
     }) as unknown as typeof fetch;
     const resumeDecision = triggerDecision({
-      action: "unlabeled",
-      label: { name: "needs-answer" },
+      action: "created",
+      comment: { body: "go ahead" },
     });
     const options = {
       ...d,
@@ -402,8 +402,8 @@ describe("#163 cycle 12-14: abort, resume and the lifecycle labels", () => {
       return { ok: true, status: 200, json: async () => ({ ok: true }) };
     }) as unknown as typeof fetch;
     const resumeDecision = triggerDecision({
-      action: "unlabeled",
-      label: { name: "needs-answer" },
+      action: "created",
+      comment: { body: "go ahead" },
     });
     const options = {
       ...d,
@@ -542,8 +542,8 @@ describe("#163 cycle 12-14: abort, resume and the lifecycle labels", () => {
       status: "blocked",
     });
     const resumeDecision = triggerDecision({
-      action: "unlabeled",
-      label: { name: "needs-answer" },
+      action: "created",
+      comment: { body: "go ahead" },
     });
     const { writer: failingLabels } = recordingLabels({ failOn: "remove" });
     const firstResume = await runDarkFactoryDispatch(resumeDecision, {
@@ -613,8 +613,8 @@ describe("#163 cycle 12-14: abort, resume and the lifecycle labels", () => {
       status: "blocked",
     });
     const resumeDecision = triggerDecision({
-      action: "unlabeled",
-      label: { name: "needs-answer" },
+      action: "created",
+      comment: { body: "go ahead" },
     });
     const firstResume = await runDarkFactoryDispatch(resumeDecision, {
       ...d,
@@ -938,7 +938,6 @@ describe("#306: the answered question reaches the factory as DATA", () => {
   });
 });
 
-
 describe("#378: a revision reply is not an approval", () => {
   async function parkedRun(runHistory: RunHistoryStore, deliveryId: string) {
     const accepted = await runHistory.acceptDelivery({
@@ -986,7 +985,9 @@ describe("#378: a revision reply is not an approval", () => {
     expect(calls).toHaveLength(0);
     expect(ops).not.toContain("-needs-answer");
     const events = await runHistory.listRunEvents(runId);
-    expect(events.value?.items.map((item) => item.event.type)).not.toContain("run.resumed");
+    expect(events.value?.items.map((item) => item.event.type)).not.toContain(
+      "run.resumed",
+    );
   });
 
   it("still resumes on an explicit approval reply", async () => {

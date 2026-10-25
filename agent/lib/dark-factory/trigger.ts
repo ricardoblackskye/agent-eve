@@ -267,7 +267,10 @@ export function decideDarkFactoryTrigger(
     return decide(
       "resume",
       `a comment answer on ${clamp(repo)}#${issue} resumes the parked run`,
-      { ...where, commentBody: (comment.body ?? "").slice(0, MAX_ANSWER_CHARS) },
+      {
+        ...where,
+        commentBody: (comment.body ?? "").slice(0, MAX_ANSWER_CHARS),
+      },
     );
   }
   if (action === "labeled") {
@@ -278,10 +281,13 @@ export function decideDarkFactoryTrigger(
     );
   }
   if (labelName === questionLabel) {
+    // #309 — the label-clear resume path is RETIRED. The comment reply is now the only
+    // resume path (see ADR 0064, which supersedes ADR 0022). Clearing the label is a
+    // no-op, not a resume, so an operator who removes it cannot accidentally restart a
+    // run through an undocumented action.
     return decide(
-      "resume",
-      `the question label was cleared on ${clamp(repo)}#${issue}; resuming the parked run`,
-      where,
+      "not-a-trigger",
+      `the '${clamp(questionLabel)}' label was cleared on ${clamp(repo)}#${issue}, but the label-clear resume path is retired (#309); reply on the issue to resume a parked run`,
     );
   }
   return decide(
