@@ -1033,10 +1033,13 @@ Dark Factory — retiring a stale claim (#404 R2). The operator's "let go" for a
 ## AMM readiness
 
 Scores a repository against the whitepaper's Autonomy Maturity Model: the eight technical pillars, the level of
-each, and the binary signals behind it. Supplies the fixture scan that the web repository list renders (epic
-**#403** R1) and the seam the AMM scanner will fill later, so the mocked phase and the real phase share one contract.
+each, and the binary signals behind it, plus the seam a page reads a scan through (epic **#403** R1). It exposes NO
+default provider: the fixture it once returned is reachable only from tests, because a page wired to a fixture
+renders a hard-coded measurement (#465, ADR 0060).
 
 **Source:** [`agent/lib/dark-factory/amm-readiness.ts`](../../agent/lib/dark-factory/amm-readiness.ts)
+
+**Decisions:** [ADR 0060](../../docs/adr/0060-a-readiness-page-shows-a-measurement-or-refuses.md)
 
 ## AMM signal catalogue
 
@@ -1077,10 +1080,14 @@ catalogue versions, since a trend drawn across a weight change is an artifact we
 
 **Source:** [`agent/lib/dark-factory/amm-scan-store.ts`](../../agent/lib/dark-factory/amm-scan-store.ts)
 
+**#465** - a scan's repo is stored NORMALIZED, as the run ledger stores it, so a reader that normalizes its lookup (the
+pages do) finds the row whatever case the scanner was called with. The row id is derived from the normalized repo, so
+the same measurement cannot land twice under two casings.
+
 **Exports:** `SqliteAmmScanStore`, `AmmScanStore`, `StoredAmmScan`, `AmmScanState`, `AMM_SCAN_STATES`, `toStoredScan`,
 `catalogueVersion`, `scanCatalogueVersion`, `comparable`, `assertTriad`, `ammScanRowId`
 
-**Decisions:** [ADR 0006](../../docs/adr/0006-provider-neutral-seams.md)
+**Decisions:** [ADR 0006](../../docs/adr/0006-provider-neutral-seams.md), [ADR 0060](../../docs/adr/0060-a-readiness-page-shows-a-measurement-or-refuses.md)
 
 ## AMM scan postgres
 
@@ -1101,11 +1108,16 @@ driver throws rather than falling back to the fixture or to an empty table, beca
 repositories are ready" - which looks like a measurement and is not one. A read that FAILS throws too: a broken database
 must not be indistinguishable from a repository nobody has scanned.
 
+**#465** - this module is now BOTH ends of the link: `ammProviderFromEnv` is the page-facing selector, and `recordAmmScan`
+is what the scan command writes through. Both release the store they create, so a page or a command cannot leak a handle,
+and both report a refusal rather than substituting one.
+
 **Source:** [`agent/lib/dark-factory/amm-scan-provider.ts`](../../agent/lib/dark-factory/amm-scan-provider.ts)
 
-**Exports:** `createAmmScanStore`, `databaseAmmProvider`, `AmmScanStoreEnv`
+**Exports:** `createAmmScanStore`, `databaseAmmProvider`, `ammProviderFromEnv`, `recordAmmScan`, `RecordScanOutcome`,
+`AmmScanStoreEnv`
 
-**Decisions:** [ADR 0006](../../docs/adr/0006-provider-neutral-seams.md)
+**Decisions:** [ADR 0006](../../docs/adr/0006-provider-neutral-seams.md), [ADR 0060](../../docs/adr/0060-a-readiness-page-shows-a-measurement-or-refuses.md)
 
 ## AMM repository layout
 
