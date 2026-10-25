@@ -12,7 +12,7 @@ the remaining open-alert count after merge.
 
 ## Source of truth
 
-Live `dependabot/alerts?state=open` (20 open). Alert #29 (katex) is already covered by the open
+Live `dependabot/alerts?state=open` (20 open). Alert #29 (a math-rendering library) is already covered by the open
 dependabot PR #346 and is out of scope. The six in scope: `vite`, `undici`, `dompurify`,
 `@vitest/mocker`, `zod`, `postcss-selector-parser`.
 
@@ -27,17 +27,17 @@ dependabot PR #346 and is out of scope. The six in scope: `vite`, `undici`, `dom
 
 ## Per-package lever (narrowest first)
 
-| Package | Current | Target | Lever |
-| --- | --- | --- | --- |
-| `vite` | 8.2.2 | 8.2.4+ (npm update → latest 8.x 8.3.5) | `npm update vite` (vitest range admits) |
-| `undici` 7.x | 7.30.0 | 7.30.1+ | `npm update undici` |
-| `undici` 8.x (jsdom) | 8.11.2 | 8.12.2+ | `npm update undici` (jsdom `^8.10.2` admits) |
-| `undici` 8.x (eve) | 8.11.2 | 8.12.2+ | override `eve → undici ^8.12.2` (eve pins exact 8.9.0) |
-| `dompurify` | 3.4.16 | 3.4.17 | `npm update dompurify` (mermaid `^3.3.3` admits) |
-| `@vitest/mocker` | 4.1.11 | 4.1.12 | override `vitest → @vitest/mocker ^4.1.12` (vitest pins exact 4.1.11) |
-| `zod` (root) | 4.4.3 | 4.6.6+ | raise root `zod` floor to `^4.6.6`, then `npm install` |
-| `zod` (@vercel/cli-config) | 4.1.11 | 4.6.6+ | override `@vercel/cli-config → zod ^4.6.6` (exact pin) |
-| `postcss-selector-parser` | 6.0.10 | 7.1.6+ | override `@tailwindcss/typography → postcss-selector-parser ^7.1.6` (exact pin; MAJOR jump — verify tailwind build) |
+| Package                    | Current | Target                                 | Lever                                                                                                               |
+| -------------------------- | ------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `vite`                     | 8.2.2   | 8.2.4+ (npm update → latest 8.x 8.3.5) | `npm update vite` (vitest range admits)                                                                             |
+| `undici` 7.x               | 7.30.0  | 7.30.1+                                | `npm update undici`                                                                                                 |
+| `undici` 8.x (jsdom)       | 8.11.2  | 8.12.2+                                | `npm update undici` (jsdom `^8.10.2` admits)                                                                        |
+| `undici` 8.x (eve)         | 8.11.2  | 8.12.2+                                | override `eve → undici ^8.12.2` (eve pins exact 8.9.0)                                                              |
+| `dompurify`                | 3.4.16  | 3.4.17                                 | `npm update dompurify` (mermaid `^3.3.3` admits)                                                                    |
+| `@vitest/mocker`           | 4.1.11  | 4.1.12                                 | override `vitest → @vitest/mocker ^4.1.12` (vitest pins exact 4.1.11)                                               |
+| `zod` (root)               | 4.4.3   | 4.6.6+                                 | raise root `zod` floor to `^4.6.6`, then `npm install`                                                              |
+| `zod` (@vercel/cli-config) | 4.1.11  | 4.6.6+                                 | override `@vercel/cli-config → zod ^4.6.6` (exact pin)                                                              |
+| `postcss-selector-parser`  | 6.0.10  | 7.1.6+                                 | override `@tailwindcss/typography → postcss-selector-parser ^7.1.6` (exact pin; MAJOR jump — verify tailwind build) |
 
 ## Overrides to add (package.json)
 

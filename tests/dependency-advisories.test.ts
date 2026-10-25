@@ -25,6 +25,30 @@ export interface Advisory {
 export const GUARDED_ADVISORIES: readonly Advisory[] = [
   // #459 - three advisories against next 16.4.0 (2 critical, 1 high), cleared by moving to 16.4.3.
   { package: "next", from: "16.0.0", to: "16.4.0", firstPatched: "16.4.1" },
+  // #468 - vite < 8.2.4 (high + 5 medium + 1 low).
+  { package: "vite", from: "8.2.0", to: "8.2.3", firstPatched: "8.2.4" },
+  // #468 - undici 7.x line < 7.30.1 (2 high + 4 medium); second vulnerable line below.
+  { package: "undici", from: "7.18.0", to: "7.30.0", firstPatched: "7.30.1" },
+  // #468 - undici 8.x line < 8.12.2 (same advisories, the other vulnerable range).
+  { package: "undici", from: "8.0.0", to: "8.12.1", firstPatched: "8.12.2" },
+  // #468 - dompurify <= 3.4.16 (1 critical + 1 high + 1 low).
+  { package: "dompurify", from: "3.0.0", to: "3.4.16", firstPatched: "3.4.17" },
+  // #468 - @vitest/mocker >= 4.1.11, < 4.1.12 (2 medium, build/test-only).
+  {
+    package: "@vitest/mocker",
+    from: "4.1.11",
+    to: "4.1.11",
+    firstPatched: "4.1.12",
+  },
+  // #468 - zod < 4.6.6 (1 high, DIRECT dependency).
+  { package: "zod", from: "4.0.0", to: "4.6.5", firstPatched: "4.6.6" },
+  // #468 - postcss-selector-parser < 7.1.6 (1 medium, transitive via @tailwindcss/typography).
+  {
+    package: "postcss-selector-parser",
+    from: "6.0.0",
+    to: "7.1.5",
+    firstPatched: "7.1.6",
+  },
 ];
 
 /**
@@ -105,7 +129,9 @@ describe("#459 the advisory guard", () => {
 
     expect(offendingVersions([advisory.firstPatched], advisory)).toEqual([]);
     expect(offendingVersions([advisory.to], advisory)).toEqual([advisory.to]);
-    expect(offendingVersions([advisory.from], advisory)).toEqual([advisory.from]);
+    expect(offendingVersions([advisory.from], advisory)).toEqual([
+      advisory.from,
+    ]);
     expect(offendingVersions(["15.99.99"], advisory)).toEqual([]);
     expect(offendingVersions(["17.0.0"], advisory)).toEqual([]);
   });
@@ -118,7 +144,9 @@ describe("#459 the advisory guard", () => {
     const advisory = GUARDED_ADVISORIES[0] as Advisory;
 
     expect(resolvedVersions(nested, "next")).toEqual(["16.4.3", "16.4.0"]);
-    expect(offendingVersions(resolvedVersions(nested, "next"), advisory)).toEqual(["16.4.0"]);
+    expect(
+      offendingVersions(resolvedVersions(nested, "next"), advisory),
+    ).toEqual(["16.4.0"]);
   });
 
   it("orders versions numerically, not as strings", () => {
