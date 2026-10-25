@@ -117,3 +117,4 @@ changes, write a new one that supersedes it.
 | [0061](0061-an-advisory-is-cleared-at-the-lock-one-package-at-a-time.md) | An advisory is cleared at the lock, one package at a time                                           | Accepted |
 | [0062](0062-a-redirect-names-the-host-the-client-used.md)                | A redirect names the host the client used                                                           | Accepted |
 | [0063](0063-outbound-eve-api-urls-resolve-fail-closed.md)                | Outbound Eve API URLs resolve fail-closed from configuration                                        | Accepted |
+| [0064](0064-the-comment-reply-is-the-only-resume-path.md)                | The comment reply is the only Dark Factory resume path (label-clear retired)                        | Accepted |

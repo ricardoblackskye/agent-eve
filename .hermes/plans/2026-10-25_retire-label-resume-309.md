@@ -46,7 +46,7 @@ documented, only-supported path now.
 1. `agent/lib/dark-factory/trigger.ts` — replace the `labelName === questionLabel` `resume`
    block with a `not-a-trigger` decision whose reason names the retirement (e.g.
    `... the needs-answer label was cleared ... the label-clear resume path is retired (#309);
-   reply on the issue to resume a parked run`). The `isQuestionLabel` guard (line 193) stays
+reply on the issue to resume a parked run`). The `isQuestionLabel` guard (line 193) stays
    so a cleared question label still falls through to this branch (not the abort branch).
 2. `agent/lib/dark-factory/plan-approval.ts` — update the doc comment (line 10, "or a cleared
    `needs-answer` label") and `PLAN_APPROVAL_QUESTION` (line 24, "or remove the

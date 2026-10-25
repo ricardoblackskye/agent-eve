@@ -167,7 +167,7 @@ describe("#163 cycle 12: the two label removals mean different things", () => {
     expect(d.kind).toBe("abort");
   });
 
-  it("clearing the QUESTION label RESUMES the parked run", () => {
+  it("clearing the QUESTION label no longer resumes (the label path is retired, #309)", () => {
     const d = decideDarkFactoryTrigger(
       payload({
         action: "unlabeled",
@@ -175,7 +175,8 @@ describe("#163 cycle 12: the two label removals mean different things", () => {
       }),
       ENV,
     );
-    expect(d.kind).toBe("resume");
+    expect(d.kind).toBe("not-a-trigger");
+    expect(d.reason).toMatch(/retired/i);
   });
 
   it("an unlabeled event for some other label changes nothing", () => {

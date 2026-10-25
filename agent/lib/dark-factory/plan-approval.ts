@@ -7,8 +7,9 @@
  * The machinery already existed on both sides and was never joined up:
  * - the park side: `worker-reporter.ts` renders "blocked on a human decision", and `run-history.ts` derives
  *   the run's status from a `worker.question` event, requiring it to be `blocked`;
- * - the resume side: `trigger.ts` decodes a comment answer, or a cleared `needs-answer` label, as a resume,
- *   and `entry.ts` refuses to resume unless an active run is `blocked`.
+ * - the resume side: `trigger.ts` decodes a comment answer as a resume — the ONLY resume
+ *   path now (the cleared-`needs-answer` label path was retired; see ADR 0064) — and
+ *   `entry.ts` refuses to resume unless an active run is `blocked`.
  *
  * This module is the park half's entry point.
  */
@@ -21,7 +22,7 @@ import {
 
 /** What the human is asked. One place, so the ticket and the tests agree on the wording. */
 export const PLAN_APPROVAL_QUESTION =
-  "Approve this plan and I will start coding. Reply on this issue, or remove the `needs-answer` label, to " +
+  "Approve this plan and I will start coding. Reply on this issue to " +
   "begin. The run will not consume further iterations while it waits.";
 
 /**
@@ -77,7 +78,11 @@ export interface PlanApprovalReporter {
 
 /** The label writer, structurally. */
 export interface PlanApprovalLabels {
-  add(repo: string, issue: number, label: string): Promise<{ ok: boolean; error?: string }>;
+  add(
+    repo: string,
+    issue: number,
+    label: string,
+  ): Promise<{ ok: boolean; error?: string }>;
 }
 
 export interface PlanApprovalDeps {
@@ -105,7 +110,13 @@ export interface ParkForApprovalOptions {
 }
 
 export type ParkResult =
-  | { ok: true; mode: string; commentUrl?: string; labelApplied: boolean; warning?: string }
+  | {
+      ok: true;
+      mode: string;
+      commentUrl?: string;
+      labelApplied: boolean;
+      warning?: string;
+    }
   | { ok: false; error: string };
 
 /**
@@ -179,7 +190,8 @@ export function explainPlanFailure(
 ): string {
   return options.resuming
     ? "This resumed run could not read back the plan it was approved against, so it stopped rather than " +
-        "plan again: a fresh plan would not be the one that was approved.\n\n" + error
+        "plan again: a fresh plan would not be the one that was approved.\n\n" +
+        error
     : `Planning failed, so this run stopped before writing any code.\n\n${error}`;
 }
 
@@ -193,8 +205,7 @@ export interface ApprovedPlanDeps {
 }
 
 export type ApprovedPlanResult =
-  | { ok: true; plan: unknown }
-  | { ok: false; error: string };
+  { ok: true; plan: unknown } | { ok: false; error: string };
 
 /**
  * Read the plan a human approved back off the ticket.
@@ -206,7 +217,11 @@ export async function loadApprovedPlan(
   deps: ApprovedPlanDeps,
   options: { owner: string; repo: string; issue: number },
 ): Promise<ApprovedPlanResult> {
-  const listed = await deps.listComments(options.owner, options.repo, options.issue);
+  const listed = await deps.listComments(
+    options.owner,
+    options.repo,
+    options.issue,
+  );
   if (!listed.ok) {
     return {
       ok: false,
@@ -216,12 +231,18 @@ export async function loadApprovedPlan(
 
   const comment = findPlanComment(listed.comments ?? []);
   if (!comment || typeof comment.body !== "string" || comment.body === "") {
-    return { ok: false, error: "there is no approved plan on this ticket to resume from" };
+    return {
+      ok: false,
+      error: "there is no approved plan on this ticket to resume from",
+    };
   }
 
   const parsed = parsePlanFromComment(comment.body);
   if (!parsed.ok) {
-    return { ok: false, error: `the approved plan could not be read: ${parsed.error}` };
+    return {
+      ok: false,
+      error: `the approved plan could not be read: ${parsed.error}`,
+    };
   }
   return { ok: true, plan: parsed.plan };
 }
