@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE_NAME } from "../../../auth-session";
+import { resolveRequestOrigin } from "../../../request-origin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -7,7 +8,7 @@ export const dynamic = "force-dynamic";
 /** Sign out (#99): drop the session cookie and return to the gate. */
 function signOut(request: NextRequest): NextResponse {
   const response = NextResponse.redirect(
-    new URL("/", request.nextUrl.origin),
+    new URL("/", resolveRequestOrigin(request)),
     303,
   );
   response.cookies.delete(SESSION_COOKIE_NAME);

@@ -12,6 +12,7 @@ import {
 } from "../../../auth-session";
 import { decideCallback } from "../../../auth-callback";
 import { safeNextPath } from "../../../auth-gate";
+import { resolveRequestOrigin } from "../../../request-origin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -43,7 +44,7 @@ export async function GET(request: NextRequest) {
 
   if (!decision.allowed) {
     return NextResponse.redirect(
-      new URL("/unauthorized", request.nextUrl.origin),
+      new URL("/unauthorized", resolveRequestOrigin(request)),
       302,
     );
   }
@@ -61,7 +62,7 @@ export async function GET(request: NextRequest) {
     secret,
   });
   const response = NextResponse.redirect(
-    new URL(decision.redirectTo, request.nextUrl.origin),
+    new URL(decision.redirectTo, resolveRequestOrigin(request)),
     302,
   );
   response.cookies.set(
