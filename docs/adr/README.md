@@ -53,7 +53,7 @@ changes, write a new one that supersedes it.
 ## Index
 
 | #                                                                        | Decision                                                                                            | Status   |
-|--------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------|----------|
+| ------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- | -------- |
 | [0001](0001-tenant-attribution-is-write-once.md)                         | Tenant attribution is write-once                                                                    | Accepted |
 | [0002](0002-r1-records-r2-refuses.md)                                    | R1 records and reports; R2 refuses                                                                  | Accepted |
 | [0003](0003-unmeasured-is-never-zero.md)                                 | An unmeasured value is never zero                                                                   | Accepted |
@@ -115,4 +115,5 @@ changes, write a new one that supersedes it.
 | [0059](0059-repair-stays-grounded-in-the-target-repository.md)           | A repair stays grounded in the target repository                                                    | Accepted |
 | [0060](0060-a-readiness-page-shows-a-measurement-or-refuses.md)          | A readiness page shows a measurement or refuses                                                     | Accepted |
 | [0061](0061-an-advisory-is-cleared-at-the-lock-one-package-at-a-time.md) | An advisory is cleared at the lock, one package at a time                                           | Accepted |
-| [0062](0062-a-redirect-names-the-host-the-client-used.md)             | A redirect names the host the client used                                                           | Accepted |
+| [0062](0062-a-redirect-names-the-host-the-client-used.md)                | A redirect names the host the client used                                                           | Accepted |
+| [0063](0063-outbound-eve-api-urls-resolve-fail-closed.md)                | Outbound Eve API URLs resolve fail-closed from configuration                                        | Accepted |

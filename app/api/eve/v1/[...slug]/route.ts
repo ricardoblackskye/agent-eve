@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { createPlatformAdapter } from "../../../../../agent/lib/dark-factory/platform";
+import { resolveApiOrigin } from "../../../../../agent/lib/dark-factory/entry";
 
 const API_KEY = process.env.EVE_API_KEY;
 const platform = createPlatformAdapter();
@@ -25,7 +26,22 @@ async function handler(request: NextRequest) {
 
   // Rewrite /api/eve/v1/* → /eve/v1/* (same-origin via withEve)
   const slug = request.nextUrl.pathname.replace("/api/eve", "/eve");
-  const targetUrl = new URL(slug, request.nextUrl.origin);
+
+  // SECURITY (SSRF, #304): never build the proxy target from the client-controlled
+  // Host header. The origin is resolved fail-closed: a spoofed non-loopback Host must
+  // not redirect this server-side fetch (which carries the Bearer token). When no
+  // trusted origin can be resolved we fail closed with 502.
+  const resolved = resolveApiOrigin(process.env, request.nextUrl.origin);
+  if (!resolved.origin || !slug.startsWith("/eve/v1/")) {
+    return NextResponse.json(
+      {
+        error:
+          "Eve API origin could not be resolved from configuration; refusing the proxy.",
+      },
+      { status: 502 },
+    );
+  }
+  const targetUrl = new URL(slug, resolved.origin);
   targetUrl.search = request.nextUrl.search;
 
   const headers: Record<string, string> = {};

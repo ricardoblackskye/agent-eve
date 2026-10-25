@@ -6,16 +6,16 @@
 
 ## Goal
 
-Close the one *genuine* SSRF gap (alert #1) and clear the four *already-mitigated* alerts
+Close the one _genuine_ SSRF gap (alert #1) and clear the four _already-mitigated_ alerts
 (#2, #3, #4, #7) so `js/request-forgery` goes to zero on this code, without weakening any control.
 
 ## Root cause (verified by reading the code)
 
 - **#1 — genuine gap.** `app/api/eve/v1/[...slug]/route.ts:27-28` builds the proxy target as
   `new URL(slug, request.nextUrl.origin)`. `request.nextUrl.origin` is derived from the client's
-  `Host` header, which is attacker-controlled. A spoofed `Host` retargets this server-side `fetch`
+  `Host` header, which is attacker-controlled. A spoofed `Host` redirects the fetch toward this server-side `fetch`
   (carrying the `Bearer` token) at an attacker host — real SSRF. No origin validation exists there.
-- **#2 / #3 / #4 / #7 — mitigated, unmodelled (false positives).** All four resolve the handoff
+- **#2 / #3 / #4 / #7 — mitigated, un-modeled (false positives).** All four resolve the handoff
   origin through `resolveApiOrigin(env, request.nextUrl.origin)` (`agent/lib/dark-factory/entry.ts:293`),
   which (1) prefers a configured origin (`DF_API_BASE_URL` / `VERCEL_URL` / generic platform config),
   (2) trusts the request origin **only when it is loopback** (`isLoopbackOrigin`, entry.ts:265),
@@ -30,10 +30,10 @@ Close the one *genuine* SSRF gap (alert #1) and clear the four *already-mitigate
      proxy");
    - assert the rewritten `slug` starts with `/eve/v1/` (defensive fail-closed);
    - `new URL(slug, resolvedOrigin)` — never `request.nextUrl.origin`.
-   This preserves local-dev behaviour (loopback Host is trusted) and production behaviour (configured
-   origin is used), while a spoofed non-loopback Host now fails closed instead of proxying.
+     This preserves local-dev behaviour (loopback Host is trusted) and production behaviour (configured
+     origin is used), while a spoofed non-loopback Host now fails closed instead of proxying.
 2. **Clear #2 / #3 / #4 / #7 (recorded decision, not a control change).** At each of the four fetch
-   sites, add an inline `// codeql[js/request-forgery]` suppression *with a written justification*
+   sites, add an inline `// codeql[js/request-forgery]` suppression _with a written justification_
    quoting the `resolveApiOrigin` sanitiser. This is the "dismiss with a written justification" option
    from the issue — a recorded decision, never a silent suppression. The control is left exactly as is.
 
@@ -59,7 +59,7 @@ Close the one *genuine* SSRF gap (alert #1) and clear the four *already-mitigate
 
 - **ADR 0063 — Outbound Eve API URLs resolve fail-closed from configuration.** Records the origin
   precedence (configured origin → loopback request origin → fail closed) and that the four
-  `js/request-forgery` alerts are accepted false positives with documented sanitisers.
+  `js/request-forgery` alerts are accepted false positives with documented sanitizers.
 
 ## Validation
 
