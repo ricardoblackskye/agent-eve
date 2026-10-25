@@ -3,10 +3,7 @@
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
-import {
-  defaultAmmProvider,
-  type AmmScan,
-} from "../../../../../agent/lib/dark-factory/amm-readiness";
+import { type AmmScan } from "../../../../../agent/lib/dark-factory/amm-readiness";
 import type { RunSummary } from "../../../../../agent/lib/dark-factory/run-history";
 import { AmmScale } from "../../../ui/amm-scale";
 import { PanelHead, RunTable, StatePanel } from "../../../ui/components";
@@ -50,10 +47,13 @@ export default function RepoDetailPage() {
 
   useEffect(() => {
     let cancelled = false;
-    void defaultAmmProvider()
-      .scan(repo)
-      .then((found) => {
-        if (!cancelled) setScan(found);
+    // #465 - the scan arrives across the server boundary, like the runs table: a client component cannot open the
+    // store, and a fabricated fallback would look like a measurement that never happened. The route reads the
+    // configured store, so this request returns whatever was actually scanned (or nothing).
+    void fetch(`/api/dark-factory/amm-scans?repo=${encodeURIComponent(repo)}`)
+      .then((response) => (response.ok ? response.json() : undefined))
+      .then((data) => {
+        if (!cancelled) setScan(data?.scan ?? undefined);
       })
       .catch(() => {
         if (!cancelled) setScan(undefined);
