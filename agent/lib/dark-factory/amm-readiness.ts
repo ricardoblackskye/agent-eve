@@ -51,6 +51,12 @@ export interface AmmScan {
 /** Where a scan comes from. Two adapters satisfy it: fixture (now) and database (when the scanner exists). */
 export interface AmmReadinessProvider {
   scan(repo: string): Promise<AmmScan | undefined>;
+  /**
+   * #465 - release any resource the provider OWNS. A provider built around a store the CALLER supplied does not
+   * own it and omits this; one that creates its own store must offer the release, or the handle outlives every
+   * caller (and on Windows an open `node:sqlite` handle blocks the file from being removed).
+   */
+  close?(): void;
 }
 
 /** The level bands. Points scale exponentially, and L3 is the production-grade floor. */
@@ -290,7 +296,10 @@ export function agentEveScan(): AmmScan {
   };
 }
 
-/** The default source until the scanner lands. */
-export function defaultAmmProvider(): AmmReadinessProvider {
-  return fixtureAmmProvider([agentEveScan()]);
-}
+/**
+ * #465 - this module deliberately exposes NO default provider.
+ *
+ * It once had a `defaultAmmProvider()` that returned the fixture, and both readiness pages were wired to it, so the
+ * board rendered a hard-coded scan of one repository as though it were a measurement. The fixture stays exported for
+ * tests, and production sources arrive through `amm-scan-provider.ts`, which refuses when no store is configured.
+ */

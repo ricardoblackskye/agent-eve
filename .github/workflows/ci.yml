@@ -202,6 +202,10 @@ jobs:
           DF_CONTROL_DB_PATH: .eve/e2e-control.sqlite
           DF_MEMBERSHIP_DRIVER: sqlite
           DF_MEMBERSHIP_DATABASE_PATH: .eve/e2e-membership.sqlite
+          # #465 - the readiness board needs a SCAN, not just a configured
+          # repository, so this store has to be seeded too.
+          DF_AMM_SCAN_DRIVER: sqlite
+          DF_AMM_SCAN_DB_PATH: .eve/e2e-amm.sqlite
         run: |
           mkdir -p .eve
           npm run seed:test-data -- --all
@@ -215,8 +219,10 @@ jobs:
           # Dev-mode sign-in so the gated pages can be tested (fail-closed in production)
           AUTH_DEV_MODE: "1"
           # The repos page reads the same resolver as the worker, so the browser job must configure a repository,
-          # or the list is empty and the journey has nothing to open.
-          DF_WORKER_ALLOWED_REPOS: ricardoblackskye/agent-eve
+          # or the list is empty and the journey has nothing to open. #465: it must ALSO have a scan, which is why
+          # `seed-org/amm-ready` is configured here and seeded by the step above. `agent-eve` stays in the list to
+          # prove the other half - a configured repository with no scan is not offered.
+          DF_WORKER_ALLOWED_REPOS: ricardoblackskye/agent-eve,seed-org/amm-ready
           # The same fixture the seed step wrote, so the dev server reads the
           # same rows and the dev-mode operator resolves (#215, #258).
           #
@@ -233,6 +239,10 @@ jobs:
           DF_RUN_HISTORY_DB_PATH: .eve/e2e-runs.sqlite
           DF_MEMBERSHIP_DRIVER: sqlite
           DF_MEMBERSHIP_DATABASE_PATH: .eve/e2e-membership.sqlite
+          # #465 - the repos page reads the readiness scan from the configured store and REFUSES when there is
+          # none, rather than rendering a fixture. Without this the page errors and the journey never sees its panel.
+          DF_AMM_SCAN_DRIVER: sqlite
+          DF_AMM_SCAN_DB_PATH: .eve/e2e-amm.sqlite
         run: npm run test:e2e
       - name: Upload Playwright artifacts
         if: always()

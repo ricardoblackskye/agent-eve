@@ -11,20 +11,29 @@
  *   npm run df:amm-scan -- --repo ricardoblackskye/agent-eve --workspace .
  */
 import { readFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 
 import { resolveScanProvider, runAmmScan } from "../agent/lib/dark-factory/amm-scan-runner";
+import {
+  recordAmmScan,
+  type AmmScanStoreEnv,
+  type RecordScanOutcome,
+} from "../agent/lib/dark-factory/amm-scan-provider";
 import type { AmmRepoLayout } from "../agent/lib/dark-factory/amm-layout";
 
 interface Parsed {
   repo: string;
   workspace: string;
   layoutPath?: string;
+  /** Optional attribution. Absent means UNASSIGNED, which the store treats as a legitimate state. */
+  tenant?: string;
 }
 
-function parseArgs(argv: string[]): Parsed | { error: string } {
+export function parseArgs(argv: string[]): Parsed | { error: string } {
   let repo: string | undefined;
   let workspace: string | undefined;
   let layoutPath: string | undefined;
+  let tenant: string | undefined;
 
   const args = argv.slice(2);
   for (let i = 0; i < args.length; i += 1) {
@@ -32,12 +41,13 @@ function parseArgs(argv: string[]): Parsed | { error: string } {
     if (arg === "--repo") repo = args[++i];
     else if (arg === "--workspace") workspace = args[++i];
     else if (arg === "--layout") layoutPath = args[++i];
+    else if (arg === "--tenant") tenant = args[++i];
     else return { error: `unknown argument: ${arg}` };
   }
 
   if (!repo || !/^[\w.-]+\/[\w.-]+$/.test(repo)) return { error: "--repo owner/repo is required" };
   if (!workspace) return { error: "--workspace <dir> is required" };
-  return { repo, workspace, layoutPath };
+  return { repo, workspace, layoutPath, tenant };
 }
 
 /** A layout supplied as JSON, so a repository we have no built-in layout for can still be measured. */
@@ -52,6 +62,16 @@ function readLayout(path: string): AmmRepoLayout {
     layout[signalId] = value;
   }
   return layout;
+}
+
+/**
+ * #465 - what the command's exit code means. 0 = the scan was measured (and, with a store configured, persisted);
+ * 1 = a configured store REFUSED it, so the measurement is lost. "Printed but not persisted" is 0: measuring and
+ * printing is still a legitimate use.
+ */
+export function exitCodeFor(outcome: RecordScanOutcome): number {
+  if (outcome.recorded) return 0;
+  return outcome.configured ? 1 : 0;
 }
 
 async function main(): Promise<number> {
@@ -93,13 +113,27 @@ async function main(): Promise<number> {
  : "") +
       `catalogue ${scan.catalogueVersion}\n`,
   );
-  return 0;
+
+  // #465 - the write link. A measurement that is never persisted exists only in this terminal, which is how the
+  // scanner came to be invisible to the pages.
+  const record = await recordAmmScan(scan, process.env as AmmScanStoreEnv, parsed.tenant);
+  process.stderr.write(
+    record.recorded
+      ? `persisted to ${record.storeId} as row ${record.rowId}\n`
+      : `NOT persisted: ${record.reason ?? "no reason given"}\n`,
+  );
+  return exitCodeFor(record);
 }
 
-main().then(
-  (code) => process.exit(code),
-  (err) => {
-    process.stderr.write(`df:amm-scan failed: ${err instanceof Error ? err.stack ?? err.message : String(err)}\n`);
-    process.exit(1);
-  },
-);
+const isDirectRun =
+  process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;
+
+if (isDirectRun) {
+  main().then(
+    (code) => process.exit(code),
+    (err) => {
+      process.stderr.write(`df:amm-scan failed: ${err instanceof Error ? err.stack ?? err.message : String(err)}\n`);
+      process.exit(1);
+    },
+  );
+}

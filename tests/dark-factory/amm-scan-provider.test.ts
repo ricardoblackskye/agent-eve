@@ -17,8 +17,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { PostgresAmmScanStore } from "../../agent/lib/dark-factory/amm-scan-postgres";
 import {
+  ammProviderFromEnv,
   createAmmScanStore,
   databaseAmmProvider,
+  recordAmmScan,
 } from "../../agent/lib/dark-factory/amm-scan-provider";
 import {
   SqliteAmmScanStore,
@@ -132,5 +134,99 @@ describe("#424 the read seam keeps 'no scan' and 'broken' apart", () => {
     const provider = databaseAmmProvider(storeReturning({ ok: false }));
 
     await expect(provider.scan("a/one")).rejects.toThrow(/unknown error/);
+  });
+});
+
+describe("#465 the page-facing selector reads the measure, or refuses", () => {
+  it("reads back the scan the store holds", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "df-amm-select-"));
+    directories.push(directory);
+    const dbPath = join(directory, "scans.sqlite");
+
+    const recorder = createAmmScanStore({
+      DF_AMM_SCAN_DRIVER: "sqlite",
+      DF_AMM_SCAN_DB_PATH: dbPath,
+    });
+    const expected = scan();
+    const written = await recorder.recordScan(expected);
+    expect(written.ok).toBe(true);
+    await recorder.close();
+
+    const provider = ammProviderFromEnv({
+      DF_AMM_SCAN_DRIVER: "sqlite",
+      DF_AMM_SCAN_DB_PATH: dbPath,
+    });
+    // It created the store, so it must offer the release: without this the handle outlives the test and
+    // Windows refuses to remove the directory.
+    closable.push({ close: () => provider.close?.() });
+    const found = await provider.scan("a/one");
+
+    expect(typeof provider.close).toBe("function");
+    expect(found?.repo).toBe("a/one");
+    expect(found?.overall.level).toBe(expected.overall.level);
+    expect(found?.pillars).toHaveLength(expected.pillars.length);
+  });
+
+  it("REFUSES to build a provider with nothing configured, rather than inventing one", () => {
+    expect(() => ammProviderFromEnv({})).toThrow(/DF_AMM_SCAN_DRIVER is not set/);
+  });
+});
+
+describe("#465 recording a measured scan closes the write link", () => {
+  function sqliteEnv(dbPath: string) {
+    return { DF_AMM_SCAN_DRIVER: "sqlite", DF_AMM_SCAN_DB_PATH: dbPath };
+  }
+
+  /** A later measurement of the same repository: a new `scannedAt`, so it is a new row. */
+  function laterScan(): StoredAmmScan {
+    return toStoredScan(
+      scoreRepo({ repo: "a/one", measurements: {}, scannedAt: "2026-10-22T00:00:00.000Z" }),
+      undefined,
+    );
+  }
+
+  it("writes the scan through the configured store and reports where it went", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "df-amm-record-"));
+    directories.push(directory);
+    const env = sqliteEnv(join(directory, "scans.sqlite"));
+
+    const outcome = await recordAmmScan(laterScan(), env);
+
+    expect(outcome.recorded).toBe(true);
+    expect(outcome.configured).toBe(true);
+    expect(outcome.storeId).toBe("sqlite");
+    expect(outcome.rowId).toBeTruthy();
+
+    const reader = createAmmScanStore(env);
+    closable.push(reader);
+    const rows = await reader.history("a/one");
+
+    expect(rows.ok).toBe(true);
+    expect(rows.value).toHaveLength(1);
+  });
+
+  it("says nothing was persisted when no store is configured, without throwing", async () => {
+    const outcome = await recordAmmScan(scan(), {});
+
+    expect(outcome.recorded).toBe(false);
+    expect(outcome.configured).toBe(false);
+    expect(outcome.reason).toMatch(/DF_AMM_SCAN_DRIVER/);
+  });
+
+  it("keeps a later measurement as a new row, and does not duplicate an identical one", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "df-amm-record-"));
+    directories.push(directory);
+    const env = sqliteEnv(join(directory, "scans.sqlite"));
+
+    await recordAmmScan(laterScan(), env);
+    await recordAmmScan(laterScan(), env);
+    await recordAmmScan(scan(), env);
+
+    const reader = createAmmScanStore(env);
+    closable.push(reader);
+    const rows = await reader.history("a/one");
+
+    expect(rows.ok).toBe(true);
+    expect(rows.value).toHaveLength(2);
   });
 });

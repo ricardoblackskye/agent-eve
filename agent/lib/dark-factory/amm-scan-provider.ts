@@ -5,8 +5,14 @@
  * empty table renders as "no repositories are ready", which looks like a measurement and is not one. This mirrors
  * `run-history-provider.ts`: unset keeps nothing running, an unknown value throws.
  */
-import type { AmmReadinessProvider } from "./amm-readiness";
-import { SqliteAmmScanStore, type AmmScanStore } from "./amm-scan-store";
+import { normalizeRepo, type AmmReadinessProvider } from "./amm-readiness";
+import type { AmmScanResult } from "./amm-scan-runner";
+import {
+  SqliteAmmScanStore,
+  ammScanRowId,
+  toStoredScan,
+  type AmmScanStore,
+} from "./amm-scan-store";
 import { PostgresAmmScanStore } from "./amm-scan-postgres";
 
 export interface AmmScanStoreEnv {
@@ -52,11 +58,76 @@ export function createAmmScanStore(env: AmmScanStoreEnv = process.env as AmmScan
 export function databaseAmmProvider(store: AmmScanStore): AmmReadinessProvider {
   return {
     async scan(repo: string) {
-      const result = await store.latestScans({ repo, limit: 1 });
+      // #465 - normalize the lookup, so the adapter answers for `Owner/Repo` exactly as the fixture adapter does.
+      const result = await store.latestScans({ repo: normalizeRepo(repo), limit: 1 });
       if (!result.ok) {
         throw new Error(`reading the AMM scan for ${repo} failed: ${result.error ?? "unknown error"}`);
       }
       return result.value?.[0];
     },
   };
+}
+
+/**
+ * #465 - the source the PAGES read. A configured driver gives the store; with no driver this refuses, so a page
+ * that cannot measure will not render a figure nobody took. This is #424's fail-closed decision applied to the
+ * pages, which until now read the fixture instead.
+ */
+export function ammProviderFromEnv(
+  env: AmmScanStoreEnv = process.env as AmmScanStoreEnv,
+): AmmReadinessProvider {
+  const store = createAmmScanStore(env);
+  const provider = databaseAmmProvider(store);
+  return { scan: (repo) => provider.scan(repo), close: () => store.close() };
+}
+
+/** What happened to a measured scan on its way to the store. */
+export interface RecordScanOutcome {
+  /** True when the scan is now in the store. */
+  recorded: boolean;
+  /**
+   * True when a store was configured at all. This is the difference between "there was nothing to write to" and
+   * "the write failed", which a caller cannot tell from `recorded` alone.
+   */
+  configured: boolean;
+  storeId?: string;
+  rowId?: string;
+  reason?: string;
+}
+
+/**
+ * #465 - persist a scan that has just been measured. `df:amm-scan` printed the scan and discarded it, so a
+ * measurement existed only in whatever terminal ran it. This is the write link.
+ */
+export async function recordAmmScan(
+  scan: AmmScanResult,
+  env: AmmScanStoreEnv = process.env as AmmScanStoreEnv,
+  tenantId?: string,
+): Promise<RecordScanOutcome> {
+  if (!env.DF_AMM_SCAN_DRIVER) {
+    return {
+      recorded: false,
+      configured: false,
+      reason:
+        "DF_AMM_SCAN_DRIVER is not set, so the scan was measured and printed but NOT persisted",
+    };
+  }
+
+  const store = createAmmScanStore(env);
+  try {
+    const stored = toStoredScan(scan, tenantId);
+    const written = await store.recordScan(stored);
+    if (!written.ok) {
+      return {
+        recorded: false,
+        configured: true,
+        storeId: store.id,
+        reason: written.error ?? "the store refused the scan without saying why",
+      };
+    }
+    return { recorded: true, configured: true, storeId: store.id, rowId: ammScanRowId(stored) };
+  } finally {
+    // The command creates this store, so it releases it; otherwise the handle outlives the process's useful work.
+    store.close();
+  }
 }

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { InMemoryCostBudgetProvider } from "../../agent/lib/dark-factory/cost-budget-store";
 import { createControlStore } from "../../agent/lib/dark-factory/control";
 import { InMemoryMembershipProvider } from "../../agent/lib/dark-factory/membership-store";
+import { createAmmScanStore } from "../../agent/lib/dark-factory/amm-scan-provider";
 import { SqliteRunHistoryStore } from "../../agent/lib/dark-factory/run-history-store";
 import { InMemoryTenantStore } from "../../agent/lib/dark-factory/tenant-store";
 import { InMemoryUsageStore } from "../../agent/lib/dark-factory/usage-store";
@@ -25,6 +26,11 @@ beforeEach(() => {
       DF_CONTROL_DB_PATH: join(dir, "control.sqlite"),
     }),
     membership: new InMemoryMembershipProvider(),
+    // #465 - `SeedStores` covers EVERY store, so a harness that builds one by hand must build this too.
+    amm: createAmmScanStore({
+      DF_AMM_SCAN_DRIVER: "sqlite",
+      DF_AMM_SCAN_DB_PATH: join(dir, "amm.sqlite"),
+    }),
   };
 });
 
@@ -35,6 +41,7 @@ afterEach(() => {
   stores.runHistory.close();
   stores.control.close?.();
   stores.membership.close?.();
+  stores.amm.close();
   rmSync(dir, { recursive: true, force: true });
 });
 

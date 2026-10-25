@@ -13,7 +13,7 @@
 import { createHash } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 
-import type { AmmScan } from "./amm-readiness";
+import { normalizeRepo, type AmmScan } from "./amm-readiness";
 import { catalogueVersion } from "./amm-signals";
 
 /** The three things a check can find. A boolean cannot express the third, which is why the schema does not use one. */
@@ -63,7 +63,14 @@ export interface AmmScanStore {
  * caller cannot stamp a scan with a version that did not produce it.
  */
 export function toStoredScan(scan: AmmScan, tenantId?: string): StoredAmmScan {
-  return { ...scan, ...(tenantId ? { tenantId } : {}), catalogueVersion: catalogueVersion() };
+  return {
+    ...scan,
+    // #465 - the repo is stored normalized, exactly as the run ledger stores it, so a reader that normalizes its
+    // lookup (the pages do, through `parseConfiguredRepos`) finds the row whatever case the scanner was called with.
+    repo: normalizeRepo(scan.repo),
+    ...(tenantId ? { tenantId } : {}),
+    catalogueVersion: catalogueVersion(),
+  };
 }
 
 /** The version digest of the scan's own stamp, exposed so a driver can refuse a mixed set at write time too. */
