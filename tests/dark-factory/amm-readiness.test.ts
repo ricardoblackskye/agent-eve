@@ -13,7 +13,8 @@ import {
   agentEveScan,
   defaultAmmProvider,
   fixtureAmmProvider,
-  listedRepos,
+  listedRepos,
+
   type AmmScan,
 } from "../../agent/lib/dark-factory/amm-readiness";
 
@@ -113,9 +114,16 @@ describe("#413 the fixture scan", () => {
   });
 
   it("serves that scan for this repo and nothing for a repo with no scan", async () => {
-    const provider = defaultAmmProvider();
+    const provider = fixtureAmmProvider([agentEveScan()]);
     expect((await provider.scan("ricardoblackskye/agent-eve"))?.overall.points).toBe(74);
     expect(await provider.scan("someone/else")).toBeUndefined();
+  });
+
+  it("exposes NO default provider, so no caller can quietly fall back to the fixture (#465)", async () => {
+    // The fixture stays reachable for tests, but there must be no zero-argument factory that returns it: a page
+    // wired to one renders a hard-coded measurement, which is the whole defect #465 was filed for.
+    const surface = await import("../../agent/lib/dark-factory/amm-readiness");
+    expect("defaultAmmProvider" in surface).toBe(false);
   });
 });
 
