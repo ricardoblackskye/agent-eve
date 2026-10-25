@@ -115,3 +115,4 @@ changes, write a new one that supersedes it.
 | [0059](0059-repair-stays-grounded-in-the-target-repository.md)           | A repair stays grounded in the target repository                                                    | Accepted |
 | [0060](0060-a-readiness-page-shows-a-measurement-or-refuses.md)          | A readiness page shows a measurement or refuses                                                     | Accepted |
 | [0061](0061-an-advisory-is-cleared-at-the-lock-one-package-at-a-time.md) | An advisory is cleared at the lock, one package at a time                                           | Accepted |
+| [0062](0062-a-redirect-names-the-host-the-client-used.md)             | A redirect names the host the client used                                                           | Accepted |

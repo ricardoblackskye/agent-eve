@@ -8,6 +8,7 @@ import {
 import { validateState } from "../../../../auth-oauth";
 import { decideCallback } from "../../../../auth-callback";
 import { verifyGoogleChatAccess } from "../../../../google-auth";
+import { resolveRequestOrigin } from "../../../../request-origin";
 import {
   SESSION_COOKIE_NAME,
   createSessionToken,
@@ -38,7 +39,7 @@ export async function GET(request: NextRequest) {
   const denied = () =>
     clearTransient(
       NextResponse.redirect(
-        new URL("/unauthorized", request.nextUrl.origin),
+        new URL("/unauthorized", resolveRequestOrigin(request)),
         302,
       ),
     );
@@ -66,7 +67,7 @@ export async function GET(request: NextRequest) {
     const client = new OAuth2Client({
       clientId,
       clientSecret,
-      redirectUri: buildRedirectUri(env, request.nextUrl.origin),
+      redirectUri: buildRedirectUri(env, resolveRequestOrigin(request)),
     });
     const codeVerifier = request.cookies.get(VERIFIER_COOKIE)?.value;
     const { tokens } = await client.getToken({ code, codeVerifier });
@@ -94,7 +95,7 @@ export async function GET(request: NextRequest) {
       secret,
     });
     const response = NextResponse.redirect(
-      new URL(decision.redirectTo, request.nextUrl.origin),
+      new URL(decision.redirectTo, resolveRequestOrigin(request)),
       302,
     );
     response.cookies.set(

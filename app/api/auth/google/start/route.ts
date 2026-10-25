@@ -11,6 +11,7 @@ import {
   createState,
 } from "../../../../auth-oauth";
 import { safeNextPath } from "../../../../auth-gate";
+import { resolveRequestOrigin } from "../../../../request-origin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -33,7 +34,7 @@ export async function GET(request: NextRequest) {
     // Local/e2e: no real Google credentials — fall back to the dev sign-in
     // helper (itself fail-closed; it refuses in production).
     if (isDevAuthEnabled(env)) {
-      const dev = new URL("/api/auth/dev", request.nextUrl.origin);
+      const dev = new URL("/api/auth/dev", resolveRequestOrigin(request));
       dev.searchParams.set(
         "email",
         env.ALLOWED_GOOGLE_EMAIL || DEFAULT_ALLOWED_EMAIL,
@@ -52,7 +53,7 @@ export async function GET(request: NextRequest) {
 
   const state = createState();
   const { verifier, challenge } = await createPkcePair();
-  const redirectUri = buildRedirectUri(env, request.nextUrl.origin);
+  const redirectUri = buildRedirectUri(env, resolveRequestOrigin(request));
 
   const response = NextResponse.redirect(
     buildGoogleAuthUrl({
