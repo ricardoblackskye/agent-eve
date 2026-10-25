@@ -54,7 +54,9 @@ test.describe("Documentation", () => {
     }
   });
 
-  test("renders Mermaid diagrams and leaves no raw syntax", async ({ page }) => {
+  test("renders Mermaid diagrams and leaves no raw syntax", async ({
+    page,
+  }) => {
     for (const slug of PAGES_WITH_DIAGRAMS) {
       await page.goto(`/documentation/${slug}`);
 
@@ -87,11 +89,21 @@ test.describe("Documentation", () => {
     }
   });
 
-  test("content previously on /architecture is still served", async ({ page }) => {
+  test("content previously on /architecture is still served", async ({
+    page,
+  }) => {
     await page.goto("/documentation/overview");
 
+    // Scope to the rendered article and require visibility. A bare
+    // getByText(/Eve/i).first() can match a hidden Mermaid <style> tag, which
+    // is not visible, so the assertion fails even though the prose rendered.
+    const article = page.locator(".architecture-container");
+
     for (const text of [/Vercel/i, /Next\.js/i, /Eve/i]) {
-      await expect(page.getByText(text).first()).toBeVisible();
+      await expect(
+        article.getByText(text).filter({ visible: true }).first(),
+        `${text} should appear in the rendered documentation`,
+      ).toBeVisible();
     }
   });
 });
