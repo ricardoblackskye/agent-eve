@@ -296,7 +296,10 @@ export function agentEveScan(): AmmScan {
   };
 }
 
-/** The default source until the scanner lands. */
-export function defaultAmmProvider(): AmmReadinessProvider {
-  return fixtureAmmProvider([agentEveScan()]);
-}
+/**
+ * #465 - this module deliberately exposes NO default provider.
+ *
+ * It once had a `defaultAmmProvider()` that returned the fixture, and both readiness pages were wired to it, so the
+ * board rendered a hard-coded scan of one repository as though it were a measurement. The fixture stays exported for
+ * tests, and production sources arrive through `amm-scan-provider.ts`, which refuses when no store is configured.
+ */

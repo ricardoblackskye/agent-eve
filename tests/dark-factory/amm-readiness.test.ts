@@ -11,7 +11,6 @@ import { readinessOf } from "../../agent/lib/dark-factory/amm-scoring";
 import {
   AMM_FLOOR_LEVEL,
   agentEveScan,
-  defaultAmmProvider,
   fixtureAmmProvider,
   listedRepos,
 
