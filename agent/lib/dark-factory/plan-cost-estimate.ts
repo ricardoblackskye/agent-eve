@@ -115,6 +115,28 @@ function ceilingPrice(): ModelPrice {
   };
 }
 
+/**
+ * How much to scale a structural estimate by, given what prior runs actually needed.
+ *
+ * Uses the revision counters already recorded on every `RunSummary`, so this needs no new
+ * instrumentation. Never below 1: a history of unusually cheap runs must not shrink the band,
+ * because understating cost is the failure that matters.
+ */
+function revisionFactorFor(history: RunSummary[]): number {
+  if (history.length === 0) return 1;
+  const total = history.reduce(
+    (sum, run) => sum + run.iterationCount + run.fixCycleCount + 1,
+    0,
+  );
+  return Math.max(1, total / history.length);
+}
+
+/** Coarse on purpose: dispersion-aware confidence needs the estimate/actual pairs #490 builds. */
+function confidenceFor(history: RunSummary[]): CostConfidence {
+  if (history.length === 0) return "low";
+  return history.length < MIN_CALIBRATION_SAMPLES ? "medium" : "high";
+}
+
 /** Estimate what a plan is likely to cost, as a band. Never blocks anything. */
 export function estimatePlanCost(input: EstimatePlanCostInput): PlanCostEstimate {
   const plan = input.plan;
@@ -137,16 +159,19 @@ export function estimatePlanCost(input: EstimatePlanCostInput): PlanCostEstimate
   const resolved = priceOf(input.model);
   const price = resolved ?? ceilingPrice();
   const priceSource = resolved ? "known-model" : "unknown-model-ceiling";
-  const expectedUsd =
+  const history = input.history ?? [];
+  const baseUsd =
     (inputTokens / 1000) * price.inputUsdPer1k +
     (outputTokens / 1000) * price.outputUsdPer1k;
+  const revisionFactor = revisionFactorFor(history);
+  const expectedUsd = baseUsd * revisionFactor;
 
   return {
     lowUsd: expectedUsd * BAND_LOW_MULTIPLIER,
     expectedUsd,
     highUsd: expectedUsd * BAND_HIGH_MULTIPLIER,
     costClass: classifyCost(expectedUsd),
-    confidence: "low",
+    confidence: confidenceFor(history),
     features: {
       targetFileCount,
       taskCount,
@@ -155,6 +180,8 @@ export function estimatePlanCost(input: EstimatePlanCostInput): PlanCostEstimate
       priceInputUsdPer1k: price.inputUsdPer1k,
       priceOutputUsdPer1k: price.outputUsdPer1k,
       priceSource,
+      revisionFactor,
+      historySampleCount: history.length,
     },
   };
 }
