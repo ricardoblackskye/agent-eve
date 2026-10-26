@@ -5,6 +5,7 @@ import {
   classifyCost,
   estimatePlanCost,
 } from "../../agent/lib/dark-factory/plan-cost-estimate";
+import { modelPriceTable, resolvePrice } from "../../agent/lib/dark-factory/cost-budget";
 import type { ExecutionPlan, PlanTargetFile } from "../../agent/lib/dark-factory/plan-validator";
 
 const MODEL = "deepseek/deepseek-v4.1-flash";
@@ -91,6 +92,58 @@ describe("plan-cost-estimate (#485)", () => {
     it("classifies the returned estimate the same way", () => {
       const estimate = estimatePlanCost({ plan: plan(), model: MODEL, history: [] });
       expect(estimate.costClass).toBe(classifyCost(estimate.expectedUsd));
+    });
+  });
+  describe("price source — one source of truth", () => {
+    it("prices a known model from the governor's own table", () => {
+      const estimate = estimatePlanCost({ plan: plan(), model: MODEL, history: [] });
+      const price = resolvePrice(MODEL)!;
+      const inputTokens = estimate.features.inputTokens as number;
+      const outputTokens = estimate.features.outputTokens as number;
+
+      expect(estimate.expectedUsd).toBeCloseTo(
+        (inputTokens / 1000) * price.inputUsdPer1k + (outputTokens / 1000) * price.outputUsdPer1k,
+        10,
+      );
+      expect(estimate.features.priceSource).toBe("known-model");
+    });
+
+    it("moves the band when the injected price changes", () => {
+      const cheap = estimatePlanCost({
+        plan: plan(),
+        model: MODEL,
+        history: [],
+        resolvePrice: () => ({ inputUsdPer1k: 1, outputUsdPer1k: 1 }),
+      });
+      const dear = estimatePlanCost({
+        plan: plan(),
+        model: MODEL,
+        history: [],
+        resolvePrice: () => ({ inputUsdPer1k: 10, outputUsdPer1k: 10 }),
+      });
+
+      // Ten times the rate is ten times the estimate — proves the seam is the price source.
+      expect(dear.expectedUsd).toBeCloseTo(cheap.expectedUsd * 10, 10);
+    });
+
+    it("falls back to the dearest table rate for an unknown model, never zero", () => {
+      const unknown = estimatePlanCost({ plan: plan(), model: "unknown/model", history: [] });
+      const rates = Object.values(modelPriceTable);
+      const dearestInput = Math.max(...rates.map((r) => r.inputUsdPer1k));
+      const dearestOutput = Math.max(...rates.map((r) => r.outputUsdPer1k));
+
+      // Zero would understate cost, which is the failure that matters.
+      expect(unknown.expectedUsd).toBeGreaterThan(0);
+      expect(unknown.features.priceInputUsdPer1k).toBe(dearestInput);
+      expect(unknown.features.priceOutputUsdPer1k).toBe(dearestOutput);
+      expect(unknown.features.priceSource).toBe("unknown-model-ceiling");
+      expect(unknown.confidence).toBe("low");
+    });
+
+    it("costs an unknown model at least as much as the cheapest known one", () => {
+      const unknown = estimatePlanCost({ plan: plan(), model: "unknown/model", history: [] });
+      const cheapest = estimatePlanCost({ plan: plan(), model: "deepseek/deepseek-chat", history: [] });
+      expect(unknown.expectedUsd).toBeGreaterThan(cheapest.expectedUsd);
     });
   });
 });
