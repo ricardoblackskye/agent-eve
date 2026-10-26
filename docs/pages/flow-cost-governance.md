@@ -66,6 +66,27 @@ cost stays absent; an explicitly measured zero is preserved. The UI renders `—
 rather than `0` so an operator never mistakes "we didn't measure it" for "it cost
 nothing".
 
+## Advisory plan estimates
+
+[`plan-cost-estimate.ts`](../../agent/lib/dark-factory/plan-cost-estimate.ts)
+answers a different question from the gate above: not "may this call proceed",
+but "what is this plan likely to cost". It returns a **band with a cost class
+and a confidence label**, never a single number, because run-to-run variance for
+the same task is large enough that a point estimate would imply precision we do
+not have ([ADR 0069](../../docs/adr/0069-plan-cost-estimates-are-advisory-bands.md)).
+
+It is **advisory only**: it never blocks, refuses or gates anything, and the hard
+ceilings above are unaffected. Prices come from the same `resolvePrice` the
+governor reserves against, so a plan estimate cannot disagree with a reservation,
+and an unknown model is costed at the dearest known rate rather than at zero —
+understating would make an expensive run look free.
+
+The model is input-token-centric: it counts the files a run must read, bounded
+exactly as the Architect's bounded reader bounds them, and reuses the runner's
+`chars/4` token convention so estimator and governor count the same way. A cold
+start — no prior runs — still produces a band, marked low confidence. Calibrating
+the band against measured actual cost is tracked separately (#490).
+
 ## Status relative to #214
 
 The customer-use tracking epic (#214) — tenant usage aggregation (R2) and the
