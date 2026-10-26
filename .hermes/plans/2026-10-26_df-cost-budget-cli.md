@@ -82,7 +82,7 @@ npm run df:cost-budget -- add  --category orchestrator --amount 50 [--period 202
 ## Validation
 
 - `npx vitest run tests/dark-factory/cost-budget-set-cap.test.ts` red then green.
-- Full suite + `tsc --noEmit` + cspell@9.1.1 + prettier clean.
+- Full suite + `tsc --noEmit` + `cspell@9.1.1` + prettier clean.
 - Local demo (proves it on the machine): run `show` then `add` against a SQLite
   budget (`DF_COST_BUDGET_DRIVER=sqlite DF_COST_BUDGET_DB_PATH=...`) and show the
   cap rise while `spent_usd` is unchanged. CI/the operator run it against the
