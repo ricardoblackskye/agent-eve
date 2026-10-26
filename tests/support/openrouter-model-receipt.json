@@ -1,0 +1,8 @@
+{
+  "verifiedAt": "2026-10-26",
+  "source": "https://openrouter.ai/api/v1/models",
+  "models": [
+    "deepseek/deepseek-v4.1-flash",
+    "deepseek/deepseek-v4-pro"
+  ]
+}
