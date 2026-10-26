@@ -16,9 +16,9 @@ out because the provider API is closed.
 At the same time, architect planning spend was being recorded under the
 `developer` cost category (`scripts/dark-factory-runner.ts` passed
 `category: "developer"` for the Architect's governed call). `COST_CATEGORIES`
-did not contain `architect` at all. So planning spend was both misattributed and
-charged against the developer's ceiling — a planning-heavy, implementation-light
-run looked like an expensive developer run.
+did not contain `architect` at all. So planning spend was both filed under the
+wrong category and charged against the developer's ceiling — a planning-heavy,
+implementation-light run looked like an expensive developer run.
 
 ## Decision
 
