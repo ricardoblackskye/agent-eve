@@ -20,6 +20,7 @@ import {
   type CostBudgetStoreEnsureResult,
   type CostBudgetStoreReadResult,
   type CostBudgetStoreReserveResult,
+  type CostBudgetStoreSetCapResult,
   type CostBudgetStoreSettleResult,
   costBudgetId,
 } from "./cost-budget-store";
@@ -188,6 +189,38 @@ export class SqliteCostBudgetAdapter implements CostBudgetStore {
       return { ok: true, mode: "live", providerId: this.id };
     } catch (error) {
       return { ok: false, mode: "blocked", providerId: this.id, error: `Cost budget store ensure failed: ${this.detail(error)}` };
+    }
+  }
+
+  async setBudgetCap(
+    period: string,
+    category: CostCategory,
+    capUsd: number,
+    tenantId?: string,
+  ): Promise<CostBudgetStoreSetCapResult> {
+    if (!isCostCategory(category)) {
+      return { ok: false, mode: "blocked", providerId: this.id, error: "Unknown cost category." };
+    }
+    if (!Number.isFinite(capUsd) || capUsd < 0) {
+      return { ok: false, mode: "blocked", providerId: this.id, error: "Cost budget cap must be a non-negative finite number." };
+    }
+    const db = this.handle();
+    if (!db) {
+      return { ok: false, mode: "blocked", providerId: this.id, error: `Cost budget store unreachable: ${this.openError}` };
+    }
+    const id = costBudgetId(period, category, tenantId);
+    try {
+      db.prepare(
+        `INSERT INTO df_cost_budgets (budget_id, period, category, tenant_id, cap_usd, spent_usd, reserved_usd, call_count, updated_at)
+         VALUES (?, ?, ?, ?, ?, 0, 0, 0, ?)
+         ON CONFLICT (budget_id) DO UPDATE SET cap_usd = excluded.cap_usd, updated_at = excluded.updated_at`,
+      ).run(id, period, category, tenantId ?? null, capUsd, new Date().toISOString());
+      const row = db
+        .prepare(`SELECT ${COLUMNS} FROM df_cost_budgets WHERE budget_id = ?`)
+        .get(id) as BudgetRow | undefined;
+      return { ok: true, mode: "live", providerId: this.id, ...(row ? { value: rowToBudget(row) } : {}) };
+    } catch (error) {
+      return { ok: false, mode: "blocked", providerId: this.id, error: `Cost budget store set-cap failed: ${this.detail(error)}` };
     }
   }
 

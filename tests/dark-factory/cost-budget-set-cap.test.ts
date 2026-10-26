@@ -18,6 +18,7 @@ import { join } from "node:path";
 import {
   ConsoleCostBudgetProvider,
   InMemoryCostBudgetProvider,
+  type CostBudgetStore,
 } from "../../agent/lib/dark-factory/cost-budget-store";
 import { SqliteCostBudgetAdapter } from "../../agent/lib/dark-factory/cost-budget-store-sqlite";
 
@@ -110,16 +111,22 @@ describe("setBudgetCap (in-memory)", () => {
     const store = new InMemoryCostBudgetProvider();
     await store.setBudgetCap(PERIOD, "orchestrator", 30);
 
-    const scoped = await store.setBudgetCap(PERIOD, "orchestrator", 5, "tenant-1");
+    const scoped = await store.setBudgetCap(
+      PERIOD,
+      "orchestrator",
+      5,
+      "tenant-1",
+    );
 
     expect(scoped.ok).toBe(true);
     expect((await store.listBudgets(PERIOD)).value[0]!.capUsd).toBe(30);
-    const [tenantRow] = (await store.listTenantBudgets("tenant-1", PERIOD)).value;
+    const [tenantRow] = (await store.listTenantBudgets("tenant-1", PERIOD))
+      .value;
     expect(tenantRow!.capUsd).toBe(5);
   });
 
   it("is fail-closed on the console provider", async () => {
-    const store = new ConsoleCostBudgetProvider();
+    const store: CostBudgetStore = new ConsoleCostBudgetProvider();
 
     const result = await store.setBudgetCap(PERIOD, "orchestrator", 100);
 
@@ -131,16 +138,20 @@ describe("setBudgetCap (in-memory)", () => {
 
 describe("setBudgetCap (sqlite)", () => {
   it("creates, then tops up, preserving spend across a reopen", async () => {
-    const directory = mkdtempSync(join(tmpdir(), "df-cost-setcap-"));
+    const directory = mkdtempSync(join(tmpdir(), "df-cost-set-cap-"));
     directories.push(directory);
     const path = join(directory, "cost.sqlite");
 
     const store = new SqliteCostBudgetAdapter(path);
-    expect((await store.setBudgetCap(PERIOD, "orchestrator", 30)).ok).toBe(true);
+    expect((await store.setBudgetCap(PERIOD, "orchestrator", 30)).ok).toBe(
+      true,
+    );
     const { reservationId } = await store.reserve(PERIOD, "orchestrator", 5);
     await store.settle(reservationId!, 29.6);
 
-    expect((await store.setBudgetCap(PERIOD, "orchestrator", 100)).ok).toBe(true);
+    expect((await store.setBudgetCap(PERIOD, "orchestrator", 100)).ok).toBe(
+      true,
+    );
     store.close();
 
     const reopened = new SqliteCostBudgetAdapter(path);
@@ -151,7 +162,7 @@ describe("setBudgetCap (sqlite)", () => {
   });
 
   it("rejects a negative cap without writing", async () => {
-    const directory = mkdtempSync(join(tmpdir(), "df-cost-setcap-"));
+    const directory = mkdtempSync(join(tmpdir(), "df-cost-set-cap-"));
     directories.push(directory);
     const store = new SqliteCostBudgetAdapter(join(directory, "cost.sqlite"));
 

@@ -15,6 +15,7 @@ import {
   type CostBudget,
   type CostCategory,
   CostBudgetConfigurationError,
+  isCostCategory,
 } from "./cost-budget";
 import { PostgresCostBudgetAdapter } from "./cost-budget-store-postgres";
 import { SqliteCostBudgetAdapter } from "./cost-budget-store-sqlite";
@@ -52,6 +53,15 @@ export interface CostBudgetStoreSettleResult {
   error?: string;
 }
 
+export interface CostBudgetStoreSetCapResult {
+  ok: boolean;
+  mode: CostBudgetStoreMode;
+  providerId: string;
+  /** The row as written, when `ok`. */
+  value?: CostBudget;
+  error?: string;
+}
+
 export interface CostBudgetStore {
   readonly id: string;
   /**
@@ -75,6 +85,22 @@ export interface CostBudgetStore {
     capUsd: number,
     tenantId?: string,
   ): Promise<CostBudgetStoreEnsureResult>;
+  /**
+   * Set the hard cap for a period/category, creating the row when it is absent.
+   *
+   * Unlike `ensureBudget`, this CHANGES an existing row's `cap_usd` - it is the
+   * operator's top-up path. The spend record (`spent_usd` / `reserved_usd` /
+   * `call_count`) is deliberately preserved: zeroing spend would erase the
+   * period's accounting and let it exceed the ceiling the operator intends. A
+   * negative or non-finite cap, or an unknown category, is refused rather than
+   * written. An absent `tenantId` targets the global budget.
+   */
+  setBudgetCap(
+    period: string,
+    category: CostCategory,
+    capUsd: number,
+    tenantId?: string,
+  ): Promise<CostBudgetStoreSetCapResult>;
   /**
    * Atomically admit a call against `capUsd` or refuse it. On success the
    * estimate is added to the reserved accumulator. An absent `tenantId`
@@ -121,6 +147,10 @@ export class ConsoleCostBudgetProvider implements CostBudgetStore {
   }
 
   async ensureBudget(): Promise<CostBudgetStoreEnsureResult> {
+    return { ok: false, mode: "blocked", providerId: this.id, error: NOT_CONFIGURED };
+  }
+
+  async setBudgetCap(): Promise<CostBudgetStoreSetCapResult> {
     return { ok: false, mode: "blocked", providerId: this.id, error: NOT_CONFIGURED };
   }
 
@@ -213,6 +243,27 @@ export class InMemoryCostBudgetProvider implements CostBudgetStore {
       });
     }
     return { ok: true, mode: "live", providerId: this.id };
+  }
+
+  async setBudgetCap(
+    period: string,
+    category: CostCategory,
+    capUsd: number,
+    tenantId?: string,
+  ): Promise<CostBudgetStoreSetCapResult> {
+    if (!isCostCategory(category)) {
+      return { ok: false, mode: "blocked", providerId: this.id, error: "Unknown cost category." };
+    }
+    if (!Number.isFinite(capUsd) || capUsd < 0) {
+      return { ok: false, mode: "blocked", providerId: this.id, error: "Cost budget cap must be a non-negative finite number." };
+    }
+    const id = costBudgetId(period, category, tenantId);
+    const existing = this.budgets.get(id);
+    const value: CostBudget = existing
+      ? { ...existing, capUsd }
+      : { category, period, capUsd, spentUsd: 0, reservedUsd: 0, callCount: 0, ...(tenantId ? { tenantId } : {}) };
+    this.budgets.set(id, value);
+    return { ok: true, mode: "live", providerId: this.id, value: { ...value } };
   }
 
   async reserve(

@@ -35,6 +35,29 @@ Reserve/settle semantics live behind the provider seam
 ([ADR 0006](../../docs/adr/0006-provider-neutral-seams.md)); the storage driver is
 chosen by `DF_*` env, never hardcoded to a vendor.
 
+## Managing a spent cap
+
+The ceiling the gate enforces is the budget **row** (`df_cost_budgets.cap_usd`), not the
+`DF_COST_BUDGET_*_USD` env var: the env only **seeds** a row when it is first created, so
+changing it on a running deployment does not move an existing ceiling. When a period is spent
+— the gate refuses with `budget_exceeded` — raise the ceiling at the row:
+
+```bash
+npm run df:cost-budget -- show                                   # the global rows for the period
+npm run df:cost-budget -- add --category orchestrator --amount 50 # top up by $50
+npm run df:cost-budget -- set --category orchestrator --cap 100   # or set an absolute ceiling
+```
+
+The driver comes from `DF_COST_BUDGET_DRIVER`, so the same command drives local SQLite or the
+deployed Postgres (`DF_COST_BUDGET_DATABASE_URL`). A top-up changes `cap_usd` only and
+**preserves** `spent_usd` / `reserved_usd` / `call_count`, so the period's accounting survives
+([ADR 0065](../../docs/adr/0065-a-spent-cap-is-topped-up-at-the-row-the-gate-reads.md)).
+
+The command is [`df-cost-budget.ts`](../../scripts/df-cost-budget.ts); the decisions it makes
+live in [`cost-budget-admin.ts`](../../agent/lib/dark-factory/cost-budget-admin.ts), and the
+write itself is `setBudgetCap` on
+[`cost-budget-store.ts`](../../agent/lib/dark-factory/cost-budget-store.ts).
+
 ## Honest measurement
 
 An unmeasured value is **never** reported as zero

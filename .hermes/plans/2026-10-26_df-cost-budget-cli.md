@@ -28,7 +28,7 @@ LLM cost budgets — in particular to **top up a spent cap** (the #478 stopgap)
 ## Approach
 
 1. **Add a store primitive, not ad-hoc SQL.** `setBudgetCap(period, category,
-   capUsd, tenantId?)` on `CostBudgetStore`, implemented by all four providers:
+capUsd, tenantId?)` on `CostBudgetStore`, implemented by all four providers:
    - upsert: create the row if absent (`spent/reserved/callCount = 0`), else
      update **`cap_usd` only**, preserving the spend record;
    - validate category (`isCostCategory`) and cap (finite, `>= 0`) — a bad

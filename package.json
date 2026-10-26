@@ -24,7 +24,8 @@
     "df:local-run": "tsx scripts/dark-factory-local-run.ts",
     "df:retire-claim": "tsx scripts/df-retire-claim.ts",
     "df:sandbox-up": "bash scripts/sandbox-server-up.sh",
-    "df:sandbox-smoke": "tsx scripts/sandbox-smoke.ts"
+    "df:sandbox-smoke": "tsx scripts/sandbox-smoke.ts",
+    "df:cost-budget": "tsx scripts/df-cost-budget.ts"
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.45",
