@@ -243,6 +243,14 @@ Dark Factory — canonical cost budget types, price table, and estimation. One p
 
 **Exports:** `COST_CATEGORIES`, `CostBudget`, `CostBudgetConfigurationError`, `CostBudgetEnvError`, `CostCategory`, `DEFAULT_COST_BUDGET_PERIOD`, `ModelPrice`, `ResolvedCostBudgetEnv`, `createCostBudget`, `createCostGovernanceEnv`, `estimateCost`, `isCostBudget`, `isCostCategory`, `modelPriceTable`, `resolvePrice`, `validateCostBudgetEnv`
 
+## plan-cost-estimate
+
+Dark Factory — plan-level cost estimate (#485, epic #453). Turns a validated `ExecutionPlan` plus prior run history into an advisory cost BAND, a cost class and a confidence label: never a single number, and never a gate. Input-token-centric, and priced from the same table the governor reserves against, so a plan estimate cannot disagree with a reservation. Emits numeric and structural features only — no prompts, file contents or issue text.
+
+**Source:** [`agent/lib/dark-factory/plan-cost-estimate.ts`](../../agent/lib/dark-factory/plan-cost-estimate.ts)
+
+**Exports:** `BAND_HIGH_MULTIPLIER`, `BAND_LOW_MULTIPLIER`, `CHARS_PER_TOKEN`, `CONTEXT_READS_PER_RUN`, `CostClass`, `CostConfidence`, `EstimatePlanCostInput`, `MAX_CHARS_PER_FILE`, `MAX_CONTEXT_FILES_READ`, `MIN_CALIBRATION_SAMPLES`, `OUTPUT_TOKENS_PER_TASK`, `PlanCostEstimate`, `ARCHITECT_OUTPUT_TOKENS`, `classifyCost`, `clampTokenCount`, `estimatePlanCost`
+
 ## cost-gate
 
 Dark Factory — category-parameterized cost gate (#270, generalizing #217). The pre-call gate that a dynamic model resolver runs before returning a model; a refusal THROWS so the turn fails before the provider call. The throw is a typed `CostRefusedError` carrying the governor's decision, and the refusal emits one structured `[dark-factory]` log line (#458). OPT-IN: returns `null` when cost governance is not configured.
