@@ -22,10 +22,14 @@ const asFetch = (impl: unknown) => impl as typeof fetch;
 describe("#472 catalog lookup — cannot verify vs verified absent", () => {
   it("reports unverifiable, and never touches the network, when offline", async () => {
     const fetchImpl = vi.fn();
-    const result = await fetchCatalogIds({ offline: true, fetchImpl: asFetch(fetchImpl) });
+    const result = await fetchCatalogIds({
+      offline: true,
+      fetchImpl: asFetch(fetchImpl),
+    });
 
     expect(result.kind).toBe("unverifiable");
-    if (result.kind === "unverifiable") expect(result.reason).toMatch(/offline/i);
+    if (result.kind === "unverifiable")
+      expect(result.reason).toMatch(/offline/i);
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
@@ -38,11 +42,14 @@ describe("#472 catalog lookup — cannot verify vs verified absent", () => {
   });
 
   it("reports unverifiable when a 200 carries no catalog array (auth wall, error envelope)", async () => {
-    const fetchImpl = vi.fn(async () => jsonResponse({ message: "please sign in" }));
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({ message: "please sign in" }),
+    );
     const result = await fetchCatalogIds({ fetchImpl: asFetch(fetchImpl) });
 
     expect(result.kind).toBe("unverifiable");
-    if (result.kind === "unverifiable") expect(result.reason).toMatch(/catalog/i);
+    if (result.kind === "unverifiable")
+      expect(result.reason).toMatch(/catalog/i);
   });
 
   it("reports unverifiable when an empty catalog arrives, rather than an empty verified set", async () => {
@@ -64,7 +71,9 @@ describe("#472 catalog lookup — cannot verify vs verified absent", () => {
   });
 
   it("reports verified with a real id set when an actual catalog arrives", async () => {
-    const fetchImpl = vi.fn(async () => jsonResponse(catalogBody(["a/b", "c/d"])));
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse(catalogBody(["a/b", "c/d"])),
+    );
     const result = await fetchCatalogIds({ fetchImpl: asFetch(fetchImpl) });
 
     expect(result.kind).toBe("verified");
@@ -93,7 +102,8 @@ describe("#472 catalog lookup — cannot verify vs verified absent", () => {
     const elapsed = Date.now() - started;
 
     expect(result.kind).toBe("unverifiable");
-    if (result.kind === "unverifiable") expect(result.reason).toMatch(/timeout|abort/i);
+    if (result.kind === "unverifiable")
+      expect(result.reason).toMatch(/timeout|abort/i);
     // The whole point: the deadline fires long before the runner's own timeout.
     expect(elapsed).toBeLessThan(2000);
   }, 15_000);

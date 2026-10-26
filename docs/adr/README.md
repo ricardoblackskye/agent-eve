@@ -119,3 +119,4 @@ changes, write a new one that supersedes it.
 | [0063](0063-outbound-eve-api-urls-resolve-fail-closed.md)                | Outbound Eve API URLs resolve fail-closed from configuration                                        | Accepted |
 | [0064](0064-the-comment-reply-is-the-only-resume-path.md)                | The comment reply is the only Dark Factory resume path (label-clear retired)                        | Accepted |
 | [0065](0065-a-spent-cap-is-topped-up-at-the-row-the-gate-reads.md)       | A spent cap is topped up at the row the gate reads                                                  | Accepted |
+| [0066](0066-a-live-contract-test-skips-when-it-cannot-verify.md)         | A live contract test that cannot verify reports skipped, never passed                               | Accepted |
