@@ -21,7 +21,7 @@
  * agentic coding cost, and that output-line counts are a weak predictor.
  */
 
-import { resolvePrice, type ModelPrice } from "./cost-budget";
+import { modelPriceTable, resolvePrice, type ModelPrice } from "./cost-budget";
 import type { ExecutionPlan } from "./plan-validator";
 import type { RunSummary } from "./run-history";
 
@@ -101,6 +101,20 @@ export function clampTokenCount(count: number): number {
   return Math.floor(count);
 }
 
+/**
+ * The dearest rate in the table, used when a model has no known price.
+ *
+ * The alternative — costing an unknown model at zero — understates the run, and understating is
+ * the failure that matters: it makes an expensive run look free. Overstating is merely visible.
+ */
+function ceilingPrice(): ModelPrice {
+  const rates = Object.values(modelPriceTable);
+  return {
+    inputUsdPer1k: Math.max(...rates.map((rate) => rate.inputUsdPer1k)),
+    outputUsdPer1k: Math.max(...rates.map((rate) => rate.outputUsdPer1k)),
+  };
+}
+
 /** Estimate what a plan is likely to cost, as a band. Never blocks anything. */
 export function estimatePlanCost(input: EstimatePlanCostInput): PlanCostEstimate {
   const plan = input.plan;
@@ -117,7 +131,12 @@ export function estimatePlanCost(input: EstimatePlanCostInput): PlanCostEstimate
     ARCHITECT_OUTPUT_TOKENS + taskCount * OUTPUT_TOKENS_PER_TASK,
   );
 
-  const price = resolvePrice(input.model) ?? { inputUsdPer1k: 0, outputUsdPer1k: 0 };
+  // ONE PRICE SOURCE: default to the governor's own resolver so a plan estimate can never
+  // disagree with a reservation. The seam is injectable purely so a test can move a price.
+  const priceOf = input.resolvePrice ?? resolvePrice;
+  const resolved = priceOf(input.model);
+  const price = resolved ?? ceilingPrice();
+  const priceSource = resolved ? "known-model" : "unknown-model-ceiling";
   const expectedUsd =
     (inputTokens / 1000) * price.inputUsdPer1k +
     (outputTokens / 1000) * price.outputUsdPer1k;
@@ -133,6 +152,9 @@ export function estimatePlanCost(input: EstimatePlanCostInput): PlanCostEstimate
       taskCount,
       inputTokens,
       outputTokens,
+      priceInputUsdPer1k: price.inputUsdPer1k,
+      priceOutputUsdPer1k: price.outputUsdPer1k,
+      priceSource,
     },
   };
 }
