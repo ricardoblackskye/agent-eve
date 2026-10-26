@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { InMemoryCostBudgetProvider } from "../../agent/lib/dark-factory/cost-budget-store";
 import { ConsoleCostBudgetProvider } from "../../agent/lib/dark-factory/cost-budget-store";
 import { queryCostBudgets } from "../../agent/lib/dark-factory/cost-budget-query";
+import { COST_CATEGORIES } from "../../agent/lib/dark-factory/cost-budget";
 
 const PERIOD = "2026-02";
 
@@ -28,7 +29,9 @@ describe("queryCostBudgets", () => {
     expect(outcome.ok).toBe(true);
     if (!outcome.ok) return;
 
-    expect(outcome.report.budgets).toHaveLength(4);
+    // One slot per canonical category, in COST_CATEGORIES order (#484 added architect).
+    expect(outcome.report.budgets).toHaveLength(COST_CATEGORIES.length);
+    expect(outcome.report.budgets).toHaveLength(5);
     const byCategory = new Map(
       outcome.report.budgets.map((view, index) => [index, view]),
     );
@@ -38,6 +41,7 @@ describe("queryCostBudgets", () => {
     expect(byCategory.get(1)).toBeNull();
     expect(byCategory.get(2)).toBeNull();
     expect(byCategory.get(3)).toBeNull();
+    expect(byCategory.get(4)).toBeNull();
   });
 
   it("computes remaining and totals across categories", async () => {

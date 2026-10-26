@@ -277,4 +277,49 @@ describe("scheduling the reaper (#457)", () => {
     expect(reap).toHaveBeenCalledTimes(1);
     expect(decision.admitted).toBe(true);
   });
+
+  it("charges architect spend to its own row, never the developer ceiling (#484)", async () => {
+    const store = new InMemoryCostBudgetProvider();
+    const governor = createCostGovernor(store, ENV);
+
+    const arch = await governor.admit({
+      category: "architect",
+      model: MODEL,
+      inputTokens: 1_000,
+      outputTokens: 1_000,
+    });
+    expect(arch.admitted).toBe(true);
+    const settled = await governor.settle(arch.reservationId!, 1);
+    expect(settled.ok).toBe(true);
+
+    const budgets = await governor.status();
+    const architectRow = budgets.find((b) => b.category === "architect");
+    const developerRow = budgets.find((b) => b.category === "developer");
+
+    // The architect's dollar landed on its own row...
+    expect(architectRow?.spentUsd).toBeCloseTo(1, 10);
+    // ...and the developer ceiling is untouched, which is the whole point of #484.
+    expect(developerRow?.spentUsd ?? 0).toBe(0);
+  });
+
+  it("defaults the architect cap to the orchestrator cap so an unconfigured deploy still admits (#484)", async () => {
+    const governor = createCostGovernor(new InMemoryCostBudgetProvider(), {
+      DF_COST_BUDGET_ORCHESTRATOR_USD: "10",
+      DF_COST_BUDGET_DEVELOPER_USD: "5",
+      DF_COST_BUDGET_TESTER_USD: "5",
+      DF_COST_BUDGET_PR_REVIEW_USD: "5",
+      // DF_COST_BUDGET_ARCHITECT_USD deliberately absent.
+    });
+
+    const decision = await governor.admit({
+      category: "architect",
+      model: MODEL,
+      inputTokens: 1_000,
+      outputTokens: 1_000,
+    });
+
+    // Not "not_configured": the default keeps planning possible without a new required env var.
+    expect(decision.admitted).toBe(true);
+    expect(decision.reason).not.toBe("not_configured");
+  });
 });

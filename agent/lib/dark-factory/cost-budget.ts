@@ -12,12 +12,13 @@ export const COST_CATEGORIES = [
   "developer",
   "tester",
   "pr-review",
+  "architect",
 ] as const;
 
 export type CostCategory = (typeof COST_CATEGORIES)[number];
 
 /**
- * Returns true for the four canonical categories; rejects empty, typos, and
+ * Returns true for the five canonical categories; rejects empty, typos, and
  * casing variants. Used by callers to validate category at the seam.
  */
 export function isCostCategory(value: unknown): value is CostCategory {
@@ -215,13 +216,27 @@ export function createCostGovernanceEnv(
       ? env.DF_COST_BUDGET_PERIOD.trim()
       : DEFAULT_COST_BUDGET_PERIOD;
 
+  const orchestratorCap = parseCap(
+    "DF_COST_BUDGET_ORCHESTRATOR_USD",
+    env.DF_COST_BUDGET_ORCHESTRATOR_USD,
+  );
+
+  // #484: the architect plans before code exists, so its spend is its own category and must
+  // NOT be charged against the developer ceiling. It defaults to the orchestrator cap when
+  // DF_COST_BUDGET_ARCHITECT_USD is unset, so existing deployments keep starting: making a new
+  // env var REQUIRED here would fail closed at validateCostBudgetEnv and stop every deployment.
+  // UNSET defaults to the orchestrator cap; INVALID (negative, non-numeric) must still fail closed,
+  // because silently substituting a valid cap would hide a misconfigured deployment.
+  const architectEnv = env.DF_COST_BUDGET_ARCHITECT_USD;
+  const architectUnset = architectEnv === undefined || architectEnv.trim() === "";
+  const architectCap = architectUnset
+    ? orchestratorCap
+    : parseCap("DF_COST_BUDGET_ARCHITECT_USD", architectEnv);
+
   return {
     period,
     categories: {
-      orchestrator: parseCap(
-        "DF_COST_BUDGET_ORCHESTRATOR_USD",
-        env.DF_COST_BUDGET_ORCHESTRATOR_USD,
-      ),
+      orchestrator: orchestratorCap,
       developer: parseCap(
         "DF_COST_BUDGET_DEVELOPER_USD",
         env.DF_COST_BUDGET_DEVELOPER_USD,
@@ -234,6 +249,7 @@ export function createCostGovernanceEnv(
         "DF_COST_BUDGET_PR_REVIEW_USD",
         env.DF_COST_BUDGET_PR_REVIEW_USD,
       ),
+      architect: architectCap,
     },
   };
 }
@@ -256,6 +272,9 @@ export function validateCostBudgetEnv(
     missing.push("DF_COST_BUDGET_TESTER_USD");
   if (Number.isNaN(resolved.categories["pr-review"]))
     missing.push("DF_COST_BUDGET_PR_REVIEW_USD");
+  // architect falls back to the orchestrator cap, so it is only invalid when BOTH are unset.
+  if (Number.isNaN(resolved.categories.architect))
+    missing.push("DF_COST_BUDGET_ARCHITECT_USD");
   if (missing.length > 0) {
     throw new CostBudgetEnvError(
       `DF cost-budget requires non-negative numeric caps for: ${missing.join(", ")}.`,

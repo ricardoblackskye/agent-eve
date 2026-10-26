@@ -931,7 +931,10 @@ Configuration (see `.env.example`): `DF_COST_BUDGET_DRIVER`,
 `DF_COST_BUDGET_DB_PATH`, `DF_COST_BUDGET_PERIOD` (default monthly UTC
 `YYYY-MM`), and the per-category caps `DF_COST_BUDGET_ORCHESTRATOR_USD`,
 `DF_COST_BUDGET_DEVELOPER_USD`, `DF_COST_BUDGET_TESTER_USD`,
-`DF_COST_BUDGET_PR_REVIEW_USD`. Only cost/count/category/timestamp are stored —
+`DF_COST_BUDGET_PR_REVIEW_USD`, and `DF_COST_BUDGET_ARCHITECT_USD` (unset it and the
+architect cap defaults to the orchestrator cap, so an existing deployment starts without a
+new required variable; set a negative or non-numeric value and resolution still fails closed).
+Only cost/count/category/timestamp are stored —
 never prompts or completions.
 
 ## Dark Factory (R7.3) — LLM usage ledger (#209)

@@ -14,11 +14,14 @@ import {
 
 describe("cost-budget canonical types and price table", () => {
   describe("CostCategory enum + isCostCategory", () => {
-    it("accepts the four defined categories", () => {
+    it("accepts the five defined categories", () => {
       expect(isCostCategory("orchestrator")).toBe(true);
       expect(isCostCategory("developer")).toBe(true);
       expect(isCostCategory("tester")).toBe(true);
       expect(isCostCategory("pr-review")).toBe(true);
+      // #484: architect planning is its own category, so its spend stops
+      // being charged against the developer ceiling.
+      expect(isCostCategory("architect")).toBe(true);
     });
 
     it("rejects unknown strings", () => {
@@ -271,6 +274,45 @@ describe("cost-budget canonical types and price table", () => {
       });
       expect(env.period).toBe("2026-02");
       expect(env.categories["orchestrator"]).toBe(50);
+    });
+
+    // #484: the architect category must be resolvable WITHOUT a new required env var,
+    // or every existing deployment fails to start (validateCostBudgetEnv is fail-closed).
+    describe("architect category (#484)", () => {
+      const base = {
+        DF_COST_BUDGET_PERIOD: "2026-02",
+        DF_COST_BUDGET_DATABASE_URL: undefined,
+        DF_COST_BUDGET_DRIVER: undefined,
+        DF_COST_BUDGET_DB_PATH: undefined,
+        DF_COST_BUDGET_ORCHESTRATOR_USD: "50",
+        DF_COST_BUDGET_DEVELOPER_USD: "100",
+        DF_COST_BUDGET_TESTER_USD: "50",
+        DF_COST_BUDGET_PR_REVIEW_USD: "25",
+      };
+
+      it("uses DF_COST_BUDGET_ARCHITECT_USD when it is set", () => {
+        const env = createCostGovernanceEnv({
+          ...base,
+          DF_COST_BUDGET_ARCHITECT_USD: "30",
+        });
+        expect(env.categories["architect"]).toBe(30);
+      });
+
+      it("defaults the architect cap to the orchestrator cap when unset", () => {
+        const env = createCostGovernanceEnv({ ...base });
+        expect(env.categories["architect"]).toBe(50);
+        expect(env.categories["architect"]).toBe(env.categories["orchestrator"]);
+      });
+
+      it("does not throw when the architect cap is unset", () => {
+        expect(() => validateCostBudgetEnv({ ...base })).not.toThrow();
+      });
+
+      it("still rejects a negative architect cap", () => {
+        expect(() =>
+          validateCostBudgetEnv({ ...base, DF_COST_BUDGET_ARCHITECT_USD: "-5" }),
+        ).toThrow(CostBudgetEnvError);
+      });
     });
   });
 

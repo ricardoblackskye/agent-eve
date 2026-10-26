@@ -442,7 +442,9 @@ async function main(): Promise<void> {
       return runGovernedAgentCall(
         { governor, runHistory, runId },
         {
-          category: "developer",
+          // #484: architect planning is its own category, so plan spend stops consuming the
+          // developer ceiling and becomes separately attributable.
+          category: "architect",
           model: modelId,
           inputTokens: Math.ceil(prompt.length / 4),
           outputTokens: 8_000,
