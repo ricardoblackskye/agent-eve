@@ -23,6 +23,7 @@ import {
   type CostBudgetStoreEnsureResult,
   type CostBudgetStoreReadResult,
   type CostBudgetStoreReserveResult,
+  type CostBudgetStoreSetCapResult,
   type CostBudgetStoreSettleResult,
   costBudgetId,
 } from "./cost-budget-store";
@@ -214,6 +215,36 @@ export class PostgresCostBudgetAdapter implements CostBudgetStore {
       return { ok: true, mode: "live", providerId: this.id };
     } catch (error) {
       return { ok: false, mode: "blocked", providerId: this.id, error: this.failed(error, "ensure") };
+    }
+  }
+
+  async setBudgetCap(
+    period: string,
+    category: CostCategory,
+    capUsd: number,
+    tenantId?: string,
+  ): Promise<CostBudgetStoreSetCapResult> {
+    if (!isCostCategory(category)) {
+      return { ok: false, mode: "blocked", providerId: this.id, error: "Unknown cost category." };
+    }
+    if (!Number.isFinite(capUsd) || capUsd < 0) {
+      return { ok: false, mode: "blocked", providerId: this.id, error: "Cost budget cap must be a non-negative finite number." };
+    }
+    const id = costBudgetId(period, category, tenantId);
+    try {
+      await this.ensureSchema();
+      const pool = await this.pool();
+      const { rows } = await pool.query<BudgetRow>(
+        `INSERT INTO df_cost_budgets (budget_id, period, category, tenant_id, cap_usd, spent_usd, reserved_usd, call_count, updated_at)
+         VALUES ($1, $2, $3, $4, $5, 0, 0, 0, $6)
+         ON CONFLICT (budget_id) DO UPDATE SET cap_usd = EXCLUDED.cap_usd, updated_at = EXCLUDED.updated_at
+         RETURNING ${COLUMNS}`,
+        [id, period, category, tenantId ?? null, capUsd, new Date().toISOString()],
+      );
+      const row = rows[0];
+      return { ok: true, mode: "live", providerId: this.id, ...(row ? { value: rowToBudget(row) } : {}) };
+    } catch (error) {
+      return { ok: false, mode: "blocked", providerId: this.id, error: this.failed(error, "set-cap") };
     }
   }
 
