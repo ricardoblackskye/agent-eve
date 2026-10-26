@@ -21,6 +21,14 @@ export default defineConfig({
   },
   projects: [
     {
+      // #473: warm the dev-mode routes ONCE, before any assertion runs. `next dev` compiles a
+      // route on first touch and that takes longer than the 15s expect timeout on a cold tree,
+      // which made four specs report product regressions that were only a compiler. Removing
+      // this dependency reintroduces those failures on a cold tree -- it is load-bearing.
+      name: "setup",
+      testMatch: /warmup\.setup\.ts/,
+    },
+    {
       name: "chromium",
       use: {
         ...devices["Desktop Chrome"],
@@ -28,6 +36,7 @@ export default defineConfig({
           ? { launchOptions: { executablePath: browserPath } }
           : {}),
       },
+      dependencies: ["setup"],
     },
   ],
   webServer: {
