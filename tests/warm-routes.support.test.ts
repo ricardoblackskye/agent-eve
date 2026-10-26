@@ -19,7 +19,9 @@ function opts(extra: WarmOptions = {}): WarmOptions {
 
 describe("#473 warm-up attempts", () => {
   it("requests each target once, de-duplicated and in order", async () => {
-    const request = vi.fn(async () => 200);
+    // Typed explicitly: `vi.fn(async () => 200)` infers a zero-argument mock, so `call[0]`
+    // would not type-check even though the module calls it with a path.
+    const request = vi.fn<(path: string) => Promise<number>>(async () => 200);
 
     await warmRoutes(["/a", "/b", "/a"], request, opts());
 
@@ -33,7 +35,9 @@ describe("#473 warm-up attempts", () => {
   it("honours a custom attempt budget", async () => {
     const request = vi.fn(async () => 500);
 
-    await expect(warmRoutes(["/a"], request, opts({ attempts: 2 }))).rejects.toThrow();
+    await expect(
+      warmRoutes(["/a"], request, opts({ attempts: 2 })),
+    ).rejects.toThrow();
     expect(request).toHaveBeenCalledTimes(2);
   });
 });
@@ -53,14 +57,20 @@ describe("#473 what counts as warmed", () => {
     );
 
     expect(report.warmed).toEqual([
-      { path: "/dark-factory/runs/does-not-exist-999", status: 404, attempts: 1 },
+      {
+        path: "/dark-factory/runs/does-not-exist-999",
+        status: 404,
+        attempts: 1,
+      },
     ]);
   });
 
   it("retries a 5xx and then throws, naming the route", async () => {
     const request = vi.fn(async () => 503);
 
-    await expect(warmRoutes(["/boom"], request, opts())).rejects.toThrow(/\/boom/);
+    await expect(warmRoutes(["/boom"], request, opts())).rejects.toThrow(
+      /\/boom/,
+    );
     expect(request).toHaveBeenCalledTimes(DEFAULT_WARM_ATTEMPTS);
   });
 
@@ -90,7 +100,11 @@ describe("#473 what counts as warmed", () => {
     const request = vi.fn(async () => 500);
 
     await expect(
-      warmRoutes(["/a"], request, opts({ sleep, attempts: 3, retryDelayMs: 10 })),
+      warmRoutes(
+        ["/a"],
+        request,
+        opts({ sleep, attempts: 3, retryDelayMs: 10 }),
+      ),
     ).rejects.toThrow();
 
     // Two gaps for three attempts — never a sleep after the final failure.

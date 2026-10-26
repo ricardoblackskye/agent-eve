@@ -121,3 +121,4 @@ changes, write a new one that supersedes it.
 | [0065](0065-a-spent-cap-is-topped-up-at-the-row-the-gate-reads.md)       | A spent cap is topped up at the row the gate reads                                                  | Accepted |
 | [0066](0066-a-live-contract-test-skips-when-it-cannot-verify.md)         | A live contract test that cannot verify reports skipped, never passed                               | Accepted |
 | [0067](0067-a-hermetic-suite-records-verification.md)                    | The default suite is hermetic, and a receipt records verification                                   | Accepted |
+| [0068](0068-e2e-compile-cost-is-paid-in-setup.md)                        | E2E compile cost is paid in setup, never inside an assertion                                        | Accepted |
