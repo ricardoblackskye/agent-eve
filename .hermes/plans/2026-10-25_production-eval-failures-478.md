@@ -1,4 +1,4 @@
-# Plan — #478: Fix production eval failures (smoke + auth-valid MODEL_SELECTION_FAILED)
+# Plan — #478: Fix production eval failures (orchestrator budget_exceeded)
 
 - **Date:** 2026-10-25
 - **Issue:** #478
@@ -6,86 +6,86 @@
 
 ## Symptom
 
-Evals run against `https://agent-eve-gold.vercel.app` (production, via Vercel
-protection bypass). 7 of 9 pass; `smoke` and `auth-valid` fail with
-`run failed (code: MODEL_SELECTION_FAILED)`. Both failing evals drive a full
-gated chat session through `t.send("Hello! ...")`; the other seven hit direct
-HTTP or `/eve/v1/info` endpoints (no session/model call).
-
-## Diagnosis (framework-eval-debugging skill, pitfalls 16 / 19 / 21)
-
-The 7-pass / 2-fail signature (exactly `smoke` + `auth-valid`) is the
-**documented KNOWN-CONFIGURATION failure**, not a code regression.
-`MODEL_SELECTION_FAILED` is eve's own code raised when the dynamic model
-resolver's `step.started` hook THROWS. That hook is where the cost gate runs,
-but it also throws on a rejected session (bad bearer token) or an unreachable
-store. It is a catch-all, so the string alone names no cause.
-
-Two confirmed CONFIG causes (both are env/secret values, not repo code):
-
-- **(A) Bearer-token mismatch** — the GitHub Actions secret `EVE_EVAL_AUTH_TOKEN`
-  does not equal the deployment's `EVE_API_KEY`, so the session the eval opens
-  is rejected. Discriminator: `auth-invalid` PASSES (sends a bad token and
-  asserts status >= 400, which proves auth IS enforced) while `auth-valid`
-  FAILS (the "valid" token is the wrong one). This matches the observed output
-  exactly.
-- **(B) Armed cost gate without caps** — `DF_COST_BUDGET_DRIVER` is set but
-  `DF_COST_BUDGET_ORCHESTRATOR_USD` (and/or the other caps) are unset, so
-  `governor.admit()` returns `not_configured` and the refusal surfaces as
-  `MODEL_SELECTION_FAILED`. Also consistent with the 7/9 signature.
-
-## What rules a code regression in or out
-
-The user tied this to "the previous merge". Tracing the two recent security
-merges:
-
-- **#476 (SSRF, #304)** hardened `resolveApiOrigin` to fail-closed 502 when no
-  trusted origin is configured. On Vercel the `VercelPlatformAdapter`
-  (`platform.ts:99-102`) populates `context.apiOrigin` from `VERCEL_URL`, so the
-  proxy resolves to the deployment URL and does NOT 502. #476 therefore does
-  not break production session creation. Confirmed by reading `route.ts` +
-  `platform.ts`.
-- **#475 (#471 auth)** added origin-aware redirects but did not change the
-  session/proxy path.
-
-So a code regression from those merges is NOT supported by the code. The
-decisive check is the production log line below.
-
-## Confirmation (one grep in the Vercel function logs)
-
-Grep the production function logs for the structured refusal ADR 0058 added:
+Production evals (`https://agent-eve-gold.vercel.app`) fail with
+`code: MODEL_SELECTION_FAILED`. Only `smoke` and `auth-valid` fail; the other 7 pass.
+The Vercel production log shows the precise cause:
 
 ```
-[dark-factory] cost gate refused category=... reason=<X> ...
+DynamicModelSelectionError: orchestrator cost gate refused the call:
+  budget_exceeded (period 2026-10) - Reservation would exceed the configured budget cap.
+  [cause]: CostRefusedError ... reason: 'budget_exceeded', category: 'orchestrator'
 ```
 
-- If present with `reason=not_configured` / `budget_exceeded` -> cause (B); read
-  the `df_cost_budgets` row (spend vs cap vs reserved) to pick the lever.
-- If ABSENT -> the throw is not the cost gate -> cause (A) (session rejected on
-  the bearer token). Confirm `EVE_EVAL_AUTH_TOKEN` equals the production
-  `EVE_API_KEY`.
+## Root cause (FINAL — confirmed by production budget row)
 
-## Fix (configuration — applied by the operator, out of code scope)
+The production `df_cost_budgets` row for `period=2026-10, category=orchestrator`:
 
-- **(A):** Set the GitHub Actions secret `EVE_EVAL_AUTH_TOKEN` to the exact
-  value of the production `EVE_API_KEY` (Vercel -> Project Settings ->
-  Environment Variables, Production). NOTE: Preview and Production carry
-  different `EVE_API_KEY`s; if the failing eval targets Production, use the
-  Production value. A secret change needs no redeploy.
-- **(B):** In Vercel prod env, provision the per-call-site caps
-  `DF_COST_BUDGET_ORCHESTRATOR_USD` (and `DEVELOPER` / `TESTER` / `PR_REVIEW`)
-  to non-negative numerics — OR, if cost governance is not meant to be armed in
-  prod, set `DF_COST_BUDGET_DRIVER` to `console` / leave it unset. A cap change
-  needs a redeploy to take effect.
+```
+cap_usd: 30, spent_usd: 29.6045824, reserved_usd: 0, call_count: 49
+```
 
-## Code change (only if the log reveals a genuine code fault)
+- **Not a config error.** `budget_exceeded` (NOT `not_configured`) proves the cost gate is
+  armed AND the cap is provisioned. The gate is working as designed.
+- **No reservation leak.** `reserved_usd: 0` rules out the ADR 0054/0057 stranded-reservation
+  story — the leak fix in #443/#457/#458 is holding; reservations settle correctly.
+- **Genuine overspend.** `spent_usd = $29.60 of $30.00 cap` across 49 calls. The remaining
+  `$0.40` is below the conservative reserve estimate, so `admit()` returns `budget_exceeded`.
+  The budget is simply exhausted by real traffic (production + evals sharing one monthly cap).
 
-If the log shows a resolver throw that is neither the gate nor auth (for
-example an unreachable store or a model-resolution bug introduced by a merge),
-that is the real regression and will be fixed in-repo with a RED test. No code
-change is warranted for causes (A) / (B).
+### Why "worked before the last merge" is timing, not a regression
+
+`git log` on `agent/agent.ts`, `chat-model.ts`, `orchestrator-gate.ts`, `entry.ts`,
+`platform.ts`, and `app/api/eve/v1/[...slug]/route.ts` shows the recent merges
+(#475/#476/#477) did **not** touch the model / gate / admission code. Cost per call is
+identical to before. So the merge cannot have raised spend.
+
+The evals passed at commit N-1 because the shared monthly budget still had headroom (run
+early in the month / before production traffic spent it); they fail at commit N because
+production traffic has since driven `spent_usd` to ~$29.60. The merge is coincidental —
+this is a **capacity / budget-isolation** problem, not a code regression.
+
+## Why only `smoke` / `auth-valid` fail
+
+Those two evals drive a full gated orchestrator session via `t.send(...)` →
+`/eve/v1/session`, which hits the cost gate. The other seven hit direct paths
+(`/eve/v1/info`, `/api/*`, `/`) that never reach the gate, so they pass regardless of the
+budget state. The gated calls fail the moment the shared budget is spent.
+
+## Fix options
+
+### (A) Quick unblock — raise the cap (config adjustment, not new config)
+Raise `DF_COST_BUDGET_ORCHESTRATOR_USD` (e.g. `$30` → `$100`) in the Vercel prod env so the
+shared budget has headroom for both production and eval traffic. One-line env change; needs
+a redeploy to take effect. This unblocks the eval gate immediately but does not stop evals
+from competing with production traffic (they can still fail later in a busy month).
+
+### (B) Proper fix — isolate eval traffic from the production budget (code)
+The evals are CI tests and should not consume (or compete for) the production cost budget.
+Make the eval harness run against a **separate budget** so functionality, not budget, is what
+the gate verifies:
+- Give eval requests a distinct tenant / call-site category (e.g. a header the gate maps to a
+  `TESTER` budget with its own cap), or
+- Have the eval CI reset/refill the orchestrator budget (or use a per-run period) before the
+  suite runs, or
+- Point the eval target at a deployment where `DF_COST_BUDGET_DRIVER` is `console`/unset.
+
+This is the durable fix and respects "no new config" (it is a code change to the eval harness /
+gate tenant mapping, not a new secret).
+
+## Recommendation
+
+Do **(A)** now to unblock the gate, and schedule **(B)** as the proper follow-up so the eval
+suite stops being flaky at month-end. No code change is required for (A); (B) is a small,
+well-scoped change to the eval harness + gate tenant resolution.
 
 ## Verification
 
-Re-run the production eval suite; `smoke` must reach 2/2 and `auth-valid` 1/1,
-with the other seven evals still green.
+- (A): after raising the cap + redeploy, re-run the eval suite; `smoke` and `auth-valid` must
+  reach green with the other seven still green.
+- (B): after isolating the eval budget, confirm `df_cost_budgets` for the production tenant no
+  longer moves when the eval suite runs, and evals pass regardless of production spend.
+
+## ADR
+
+If (B) is implemented, add `docs/adr/0065-<slug>.md` recording the decision to isolate eval
+traffic from the production cost budget.
