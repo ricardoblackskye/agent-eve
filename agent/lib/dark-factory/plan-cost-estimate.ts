@@ -84,7 +84,12 @@ export interface PlanCostEstimate {
  * Absolute cost class for an estimate. A value exactly on an edge lands in the UPPER class.
  */
 export function classifyCost(usd: number): CostClass {
-  throw new Error("not implemented");
+  // A non-finite value is not a cost; treat it as the smallest class rather than propagating NaN.
+  if (!Number.isFinite(usd) || usd < 0.25) return "XS";
+  if (usd < 1) return "S";
+  if (usd < 5) return "M";
+  if (usd < 20) return "L";
+  return "XL";
 }
 
 /**
@@ -92,10 +97,42 @@ export function classifyCost(usd: number): CostClass {
  * rather than propagating a negative cost into the band.
  */
 export function clampTokenCount(count: number): number {
-  throw new Error("not implemented");
+  if (typeof count !== "number" || !Number.isFinite(count) || count <= 0) return 0;
+  return Math.floor(count);
 }
 
 /** Estimate what a plan is likely to cost, as a band. Never blocks anything. */
 export function estimatePlanCost(input: EstimatePlanCostInput): PlanCostEstimate {
-  throw new Error("not implemented");
+  const plan = input.plan;
+  const targetFiles = plan.targetFiles ?? [];
+  const targetFileCount = clampTokenCount(targetFiles.length);
+  const taskCount = clampTokenCount((plan.tasks ?? []).length);
+
+  // Context ingestion dominates agentic coding cost, so the structural model is built from the
+  // files a run must read — bounded exactly as the Architect's reader bounds them.
+  const contextFiles = Math.min(targetFileCount, MAX_CONTEXT_FILES_READ);
+  const contextTokens = clampTokenCount(contextFiles * (MAX_CHARS_PER_FILE / CHARS_PER_TOKEN));
+  const inputTokens = clampTokenCount(contextTokens * CONTEXT_READS_PER_RUN);
+  const outputTokens = clampTokenCount(
+    ARCHITECT_OUTPUT_TOKENS + taskCount * OUTPUT_TOKENS_PER_TASK,
+  );
+
+  const price = resolvePrice(input.model) ?? { inputUsdPer1k: 0, outputUsdPer1k: 0 };
+  const expectedUsd =
+    (inputTokens / 1000) * price.inputUsdPer1k +
+    (outputTokens / 1000) * price.outputUsdPer1k;
+
+  return {
+    lowUsd: expectedUsd * BAND_LOW_MULTIPLIER,
+    expectedUsd,
+    highUsd: expectedUsd * BAND_HIGH_MULTIPLIER,
+    costClass: classifyCost(expectedUsd),
+    confidence: "low",
+    features: {
+      targetFileCount,
+      taskCount,
+      inputTokens,
+      outputTokens,
+    },
+  };
 }
