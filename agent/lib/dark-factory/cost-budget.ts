@@ -1,3 +1,4 @@
+import type { DearestObservation } from "./model-price-floor";
 /**
  * Dark Factory — canonical cost budget types, price table, and estimation.
  *
@@ -129,6 +130,24 @@ export const modelPriceTable: Record<string, ModelPrice> = {
     outputUsdPer1k: 0.0003,
   },
 };
+
+/**
+ * Raise a table entry to the observed-dearest FLOOR (#498), axis by axis.
+ *
+ * The floor is the dearest provider rate actually verified for the model; the table is the
+ * hand-maintained ceiling. `admit()` reserves against the result, so the higher of the two is the
+ * only safe answer: taking the table alone under-reserves the moment the table falls behind the
+ * catalog, which is exactly what happened for the default model.
+ *
+ * The axes are independent on purpose - a dearest INPUT rate says nothing about the output rate.
+ * A missing floor returns the table unchanged; the floor can only ever raise.
+ */
+export function applyPriceFloor(
+  table: ModelPrice,
+  floor: DearestObservation | undefined,
+): ModelPrice {
+  throw new Error("not implemented");
+}
 
 /**
  * Normalize and look up a model id. Strips surrounding whitespace; unknown
