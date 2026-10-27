@@ -41,9 +41,24 @@ export interface PlanFileInput {
   dependencies?: string[];
 }
 
+/**
+ * A field the renderer was not given renders as a visible marker, never as a thrown TypeError.
+ *
+ * #503: the architect's returned plan used a different vocabulary for `targetFiles` (`changeType`/
+ * `reason`) than the renderer reads (`action`/`rationale`), so the missing fields were `undefined` and
+ * the original `text.replace(...)` threw "Cannot read properties of undefined (reading 'replace')" at
+ * STEP 5 — before the plan comment or the park. The plan validator is allowed to accept these shapes, so
+ * the display layer must tolerate them rather than aborting the run.
+ */
+const MISSING_VALUE = "—";
+
+function toText(value: unknown): string {
+  return typeof value === "string" ? value : MISSING_VALUE;
+}
+
 /** Heading text must not end in punctuation (MD026), and must be a single line. */
-function headingText(text: string): string {
-  return text
+function headingText(text: unknown): string {
+  return toText(text)
     .replace(/\s+/g, " ")
     .trim()
     .replace(/[.,;:!?]+$/, "")
@@ -58,8 +73,8 @@ function headingText(text: string): string {
  * the row stops being the table it claims to be. CodeQL flags the reverse order as
  * js/incomplete-sanitization, and it is right to.
  */
-function cell(text: string): string {
-  return text
+function cell(text: unknown): string {
+  return toText(text)
     .replace(/\s+/g, " ")
     .replace(/\\/g, "\\\\")
     .replace(/\|/g, "\\|")
