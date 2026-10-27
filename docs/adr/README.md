@@ -122,4 +122,5 @@ changes, write a new one that supersedes it.
 | [0066](0066-a-live-contract-test-skips-when-it-cannot-verify.md)         | A live contract test that cannot verify reports skipped, never passed                               | Accepted |
 | [0067](0067-a-hermetic-suite-records-verification.md)                    | The default suite is hermetic, and a receipt records verification                                   | Accepted |
 | [0068](0068-e2e-compile-cost-is-paid-in-setup.md)                        | E2E compile cost is paid in setup, never inside an assertion                                        | Accepted |
-| [0069](0069-plan-cost-estimates-are-advisory-bands.md)                          | Plan cost estimates are advisory bands, not point forecasts                                               | Accepted |
+| [0069](0069-plan-cost-estimates-are-advisory-bands.md)                   | Plan cost estimates are advisory bands, not point forecasts                                         | Accepted |
+| [0070](0070-price-ceilings-are-checked-on-a-schedule.md)                 | A price ceiling is checked on a schedule, not asserted in the unit suite                            | Accepted |

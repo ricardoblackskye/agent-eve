@@ -1,0 +1,84 @@
+name: Price Drift
+
+# #494 - a live price assertion does not belong in the unit suite.
+#
+# The shipped ceilings are OUR constants; the dearest provider rate is somebody else's.
+# Asserting one against the other inside `npm test` made every provider price rise a red
+# build on PRs that do not touch pricing. The dearest output rate for the default model
+# moved 0.004177242 -> 0.005559908 -> 0.006115898 inside a single day, and that red blocked
+# the plan-ledger PR (#495), whose diff has nothing to do with pricing.
+#
+# So the live comparison runs HERE, on a schedule, and drift opens an issue rather than
+# blocking a merge. The unit suite asserts the hermetic half instead - that the shipped
+# ceiling still covers the recorded receipt. See tests/model-price-ceiling.test.ts.
+#
+# NOTE: this job is deliberately NOT named "Unit Tests". The branch ruleset gates on that
+# check name, and this check must never gate a merge. Do not add it to that ruleset.
+#
+# A scheduled workflow only runs from the default branch, so this file must be on `main`
+# for the daily run to fire.
+
+on:
+  schedule:
+    # 06:15 UTC daily.
+    - cron: "15 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "24"
+
+jobs:
+  drift:
+    name: Price Drift Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Setup Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - name: Compare the shipped ceilings with the live provider catalog
+        id: check
+        run: npm run prices:check
+      - name: Open or update the drift issue
+        if: failure() && steps.check.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+
+          TITLE="Price drift: a shipped ceiling no longer covers the dearest provider rate"
+
+          BODY="The daily Price Drift check found at least one shipped reservation ceiling below the dearest published provider rate.
+
+          The gate reserves against that ceiling before a call and only trues up at settle, so an under-priced ceiling lets spent + reserved + estimate pass the cap with the money already spent (ADR 0027).
+
+          To fix:
+            1. raise the ceiling in agent/lib/dark-factory/cost-budget.ts
+            2. run: npm run prices:check -- --write
+               that refreshes tests/support/openrouter-price-receipt.json
+
+          The unit suite only asserts that the ceiling covers the receipt, so the receipt must be refreshed in the same commit as the ceiling.
+
+          Detected by: ${RUN_URL}"
+
+          EXISTING=$(gh issue list --state open --search "${TITLE} in:title" --json number --jq '.[0].number // empty')
+
+          if [ -n "${EXISTING}" ]; then
+            echo "Commenting on existing issue #${EXISTING}"
+            gh issue comment "${EXISTING}" --body "${BODY}"
+          else
+            echo "Opening a new drift issue"
+            gh issue create --title "${TITLE}" --body "${BODY}"
+          fi
