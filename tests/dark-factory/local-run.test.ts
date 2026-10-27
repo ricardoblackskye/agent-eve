@@ -1,9 +1,11 @@
-import { existsSync } from "node:fs";
-import { isAbsolute } from "node:path";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import {
   buildLaunchDecision,
+  defaultGitClone,
   renderProblems,
   runLocalRun,
   type LaunchSpawn,
@@ -171,5 +173,35 @@ describe("#404 R1 Task 4 - runLocalRun refuses before spawning", () => {
     const code = await runLocalRun(baseInput({ spawnRunner, gitClone: async () => 0 }) as never);
 
     expect(code).toBe(7);
+  });
+});
+
+/**
+ * #501 - a first local run must not fail with `spawn git ENOENT`.
+ *
+ * The launcher clones with `cwd = dirname(checkout.path)`, which IS the workspace root, and nothing ever
+ * created it. Node reports a MISSING CWD as ENOENT too, so a clean checkout failed with an error naming
+ * `git` - which sent three attempts down PATH dead ends before the real cause was found.
+ *
+ * This drives the REAL clone rather than the injected seam: the seam would prove nothing about the spawn.
+ */
+describe("#501 the real clone prepares its workspace root", () => {
+  it("does not reject with spawn ENOENT when the workspace root does not exist yet", async () => {
+    const parent = mkdtempSync(join(tmpdir(), "df-501-clone-"));
+    const checkoutPath = join(parent, "df-workspaces", "webfeedpoc-169");
+
+    try {
+      // `["clone"]` with no repository: git exits non-zero immediately by itself. That is the point -
+      // a non-zero exit PROVES git ran, which a failed spawn could never do. It also needs no network.
+      const code = await defaultGitClone(
+        { path: checkoutPath, mustClone: true, cloneArgs: ["clone"], summary: "" } as never,
+        {},
+      );
+
+      expect(existsSync(dirname(checkoutPath))).toBe(true);
+      expect(code).not.toBe(0);
+    } finally {
+      rmSync(parent, { recursive: true, force: true });
+    }
   });
 });
