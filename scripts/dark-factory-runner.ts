@@ -155,7 +155,26 @@ export function planSummaryLines(plan: {
   targetFiles?: ReadonlyArray<{ path?: string | undefined }> | null | undefined;
   acceptanceCriteriaMap?: ReadonlyArray<unknown> | null | undefined;
 }): PlanSummaryLine[] {
-  throw new Error("not implemented");
+  const summary =
+    typeof plan?.summary === "string" && plan.summary.trim() !== "" ? plan.summary : "(none)";
+
+  const targetFiles = Array.isArray(plan?.targetFiles)
+    ? plan.targetFiles.map((entry) =>
+        typeof entry?.path === "string" && entry.path !== "" ? entry.path : "(unknown path)",
+      )
+    : [];
+
+  // An absent mapping list and an empty one are DIFFERENT facts: "none supplied" means the plan never
+  // said how its acceptance criteria would be verified, "0" means it said there are none. Neither is
+  // refused here - refusing a plan that maps nothing is validateExecutionPlan's job (#502).
+  const mappings = plan?.acceptanceCriteriaMap;
+  const mappingCount = Array.isArray(mappings) ? String(mappings.length) : "none supplied";
+
+  return [
+    { label: "Plan Summary", value: summary },
+    { label: "Target Files", value: targetFiles.length > 0 ? targetFiles.join(", ") : "(none)" },
+    { label: "AC Mappings Count", value: mappingCount },
+  ];
 }
 
 /**
@@ -581,9 +600,13 @@ async function main(): Promise<void> {
 
   let executionPlan = planResult.plan;
   console.log("\n  -> Architect Planning Succeeded!");
-  line("Plan Summary", executionPlan.summary);
-  line("Target Files", executionPlan.targetFiles.map((f) => f.path).join(", "));
-  line("AC Mappings Count", executionPlan.acceptanceCriteriaMap.length);
+  // #501: display never asserts on plan shape. A real run died here because the architect's
+  // self-correction loop returned a plan without acceptanceCriteriaMap and the mapping-count line
+  // dereferenced it. A run is aborted by validateExecutionPlan, never by its own progress output;
+  // refusing a plan that maps no acceptance criteria is #502.
+  for (const { label, value } of planSummaryLines(executionPlan)) {
+    line(label, value);
+  }
 
   // #378: a resume whose reply is NOT an explicit approval is plan FEEDBACK, not approval. Amend the plan
   // from the frozen one plus the reply, so a reply such as "the target file is wrong, please update the
