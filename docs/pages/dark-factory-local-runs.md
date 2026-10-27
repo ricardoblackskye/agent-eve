@@ -20,24 +20,25 @@ is expected: the run posts a plan and waits for approval ([ADR 0041](../../docs/
 npm run df:local-run -- --repo ricardoblackskye/WebFeedPOC --issue 169
 ```
 
-Optional flags: `--workspace-root <dir>` (default `$HOME/df-workspaces`),
-`--allow-remote-store` (accept a hosted store — see ADR 0050, never disables CA verification).
+Optional flags: `--workspace-root <dir>` (default `<cwd>/df-workspaces`, documented under
+[The workspace root](#the-workspace-root-501)), `--allow-remote-store` (accept a hosted store — see ADR 0050,
+never disables CA verification).
 
 ## Prerequisites, and the exact refusal each produces
 
 The runner fails closed on any of these. The launcher names them **all at once** before running anything:
 
-| Prerequisite | Variable | A missing one produces |
-|---|---|---|
-| GitHub token (clone + push) | `GITHUB_TOKEN` | `missing-github-token` |
-| Provider key (runtime, never `.env.local`) | `OPENROUTER_API_KEY` | `missing-provider-key` |
-| Target on the allow-list | `DF_WORKER_ALLOWED_REPOS` | `repo-not-allowed` |
-| Run-history store configured | `DF_RUN_HISTORY_DRIVER` / `…_DATABASE_URL` | `run-history-not-configured` |
-| Control store configured | `DF_CONTROL_DRIVER` / `…_DATABASE_URL` | `control-store-not-configured` |
-| Store reached | (TCP probe) | `store-unreachable` |
-| Store is local, unless opted in | (host of the URL) | `remote-store-refused` |
+| Prerequisite                                           | Variable                                   | A missing one produces                           |
+|--------------------------------------------------------|--------------------------------------------|--------------------------------------------------|
+| GitHub token (clone + push)                            | `GITHUB_TOKEN`                             | `missing-github-token`                           |
+| Provider key (runtime, never `.env.local`)             | `OPENROUTER_API_KEY`                       | `missing-provider-key`                           |
+| Target on the allow-list                               | `DF_WORKER_ALLOWED_REPOS`                  | `repo-not-allowed`                               |
+| Run-history store configured                           | `DF_RUN_HISTORY_DRIVER` / `…_DATABASE_URL` | `run-history-not-configured`                     |
+| Control store configured                               | `DF_CONTROL_DRIVER` / `…_DATABASE_URL`     | `control-store-not-configured`                   |
+| Store reached                                          | (TCP probe)                                | `store-unreachable`                              |
+| Store is local, unless opted in                        | (host of the URL)                          | `remote-store-refused`                           |
 | Sandbox seam up (when `DF_SANDBOX_DRIVER=opensandbox`) | `DF_SANDBOX_ENDPOINT` / `DF_SANDBOX_IMAGE` | `sandbox-not-configured` / `sandbox-unreachable` |
-| No other run holds the issue's claim | (run-history) | `claim-held` *(R2 names the fix)* |
+| No other run holds the issue's claim                   | (run-history)                              | `claim-held` *(R2 names the fix)*                |
 
 ### Store + sandbox checklist (the part that was discovered by refusal)
 
@@ -87,6 +88,18 @@ The launcher never prints a secret value. The runner still fails closed on a mis
 - **Names a parked claim.** If a prior run still holds the issue's claim, the refusal names the holder. Retiring
   it is #404 R2.
 
+## The workspace root (#501)
+
+The launcher clones the target into `<workspace-root>/<repo>-<issue>`. The root comes from `DF_WORKSPACE_ROOT`, or
+`--workspace-root <dir>`, and otherwise defaults to **`<cwd>/df-workspaces`** — inside whatever repository you ran
+the launcher from. That default is ignored by git, so a run does not leave the cloned target untracked in its own
+checkout.
+
+The root is **created when it is missing**, and that is load-bearing rather than tidy. The clone runs with `cwd`
+set to the root, and Node reports a missing `cwd` as `spawn git ENOENT` — an error that names `git`, which sends
+you to PATH for an answer that is not there. Three local attempts went that way before the real cause was found.
+Creating the directory means a clean checkout can no longer fail that way.
+
 ## Failure shapes
 
 - **Parked at the end?** Expected — the plan is on the issue awaiting approval (ADR 0041). Re-run after approving
@@ -108,11 +121,11 @@ npm run df:retire-claim -- --repo ricardoblackskye/WebFeedPOC --issue 169 --reas
 The launcher reports a held claim in the **same one block** as every other prerequisite, and names this command, so
 "wait, or retire it" is actionable rather than advice.
 
-| exit | meaning |
-|---|---|
-| `0` | the claim is gone **and** the ticket's factory labels were reconciled |
-| `2` | the ledger let go, but the ticket still lies (a partial outcome must not read as clean) |
-| `1` | refused — a live holder, no claim, or an unavailable ledger |
+| exit | meaning                                                                                 |
+|------|-----------------------------------------------------------------------------------------|
+| `0`  | the claim is gone **and** the ticket's factory labels were reconciled                   |
+| `2`  | the ledger let go, but the ticket still lies (a partial outcome must not read as clean) |
+| `1`  | refused — a live holder, no claim, or an unavailable ledger                             |
 
 **A live (`running`) holder is refused and nothing is touched**: work in flight is never cut out from under itself.
 A parked holder **is** retired — a park is a wait, and the retirement is what stops it resuming. Retirement applies

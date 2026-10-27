@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
@@ -129,6 +129,12 @@ export function renderProblems(result: PreflightResult): string {
 /** The real clone: a single git invocation authenticated through the environment, with a clean URL. */
 export const defaultGitClone: GitClone = (plan, authEnv) =>
   new Promise<number>((resolve, reject) => {
+    // #501: create the clone's parent BEFORE spawning. `cwd` below IS the workspace root, and Node
+    // reports a MISSING CWD as `spawn git ENOENT` - an error that names git and cost three local
+    // attempts chasing PATH before the real cause was found. `recursive: true` is a no-op when the
+    // root already exists, so this cannot fail a run that would otherwise have worked.
+    mkdirSync(dirname(plan.path), { recursive: true });
+
     const merged: Record<string, string> = {};
     for (const [key, value] of Object.entries({ ...process.env, ...authEnv })) {
       if (value !== undefined) merged[key] = value;

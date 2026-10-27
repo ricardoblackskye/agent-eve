@@ -17,6 +17,7 @@
     "crashloops",
     "DFLT",
     "EBUSY",
+    "ENOENT",
     "GHES",
     "GHSA",
     "HMAC",

@@ -135,6 +135,49 @@ const line = (label: string, value: unknown) =>
   );
 
 /**
+ * The plan summary lines, rendered from a plan that may be INCOMPLETE (#501).
+ *
+ * Display must never assert on plan shape. This ran as three inline `line(...)` calls until a real run
+ * died on one of them: the architect's self-correction loop replaced a plan that carried
+ * `acceptanceCriteriaMap` with one that did not, and `executionPlan.acceptanceCriteriaMap.length` aborted
+ * the run at STEP 3.5 - before the plan comment, before the ledger write, before the park.
+ *
+ * A cosmetic line is the wrong place to enforce completeness; `validateExecutionPlan` is. Refusing a plan
+ * that maps no acceptance criteria is issue #502.
+ */
+export interface PlanSummaryLine {
+  label: string;
+  value: string;
+}
+
+export function planSummaryLines(plan: {
+  summary?: string | null | undefined;
+  targetFiles?: ReadonlyArray<{ path?: string | undefined }> | null | undefined;
+  acceptanceCriteriaMap?: ReadonlyArray<unknown> | null | undefined;
+}): PlanSummaryLine[] {
+  const summary =
+    typeof plan?.summary === "string" && plan.summary.trim() !== "" ? plan.summary : "(none)";
+
+  const targetFiles = Array.isArray(plan?.targetFiles)
+    ? plan.targetFiles.map((entry) =>
+        typeof entry?.path === "string" && entry.path !== "" ? entry.path : "(unknown path)",
+      )
+    : [];
+
+  // An absent mapping list and an empty one are DIFFERENT facts: "none supplied" means the plan never
+  // said how its acceptance criteria would be verified, "0" means it said there are none. Neither is
+  // refused here - refusing a plan that maps nothing is validateExecutionPlan's job (#502).
+  const mappings = plan?.acceptanceCriteriaMap;
+  const mappingCount = Array.isArray(mappings) ? String(mappings.length) : "none supplied";
+
+  return [
+    { label: "Plan Summary", value: summary },
+    { label: "Target Files", value: targetFiles.length > 0 ? targetFiles.join(", ") : "(none)" },
+    { label: "AC Mappings Count", value: mappingCount },
+  ];
+}
+
+/**
  * The `origin` of a checkout, or null when the directory is not one (#405).
  *
  * `execFileSync` rather than a shell string: the path comes from the operator and must never be
@@ -557,9 +600,13 @@ async function main(): Promise<void> {
 
   let executionPlan = planResult.plan;
   console.log("\n  -> Architect Planning Succeeded!");
-  line("Plan Summary", executionPlan.summary);
-  line("Target Files", executionPlan.targetFiles.map((f) => f.path).join(", "));
-  line("AC Mappings Count", executionPlan.acceptanceCriteriaMap.length);
+  // #501: display never asserts on plan shape. A real run died here because the architect's
+  // self-correction loop returned a plan without acceptanceCriteriaMap and the mapping-count line
+  // dereferenced it. A run is aborted by validateExecutionPlan, never by its own progress output;
+  // refusing a plan that maps no acceptance criteria is #502.
+  for (const { label, value } of planSummaryLines(executionPlan)) {
+    line(label, value);
+  }
 
   // #378: a resume whose reply is NOT an explicit approval is plan FEEDBACK, not approval. Amend the plan
   // from the frozen one plus the reply, so a reply such as "the target file is wrong, please update the
