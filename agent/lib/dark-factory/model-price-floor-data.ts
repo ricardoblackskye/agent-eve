@@ -22,12 +22,12 @@ export const priceFloorRecord: PriceFloorRecord = {
   observedDearest: {
     "deepseek/deepseek-v4-pro": {
       inputUsdPer1k: 0.00191,
-      outputUsdPer1k: 0.00383,
+      outputUsdPer1k: 0.0038299999999999996,
       providers: 15,
     },
     "deepseek/deepseek-v4.1-flash": {
       inputUsdPer1k: 0.0006,
-      outputUsdPer1k: 0.006727487,
+      outputUsdPer1k: 0.015863057,
       providers: 41,
     },
   },

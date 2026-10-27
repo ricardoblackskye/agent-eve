@@ -110,14 +110,14 @@ export interface ModelPrice {
 export const modelPriceTable: Record<string, ModelPrice> = {
   // The project's current default and fallback (agent/model-config.ts).
   //
-  // #494: OUTPUT was 0.0024 while the dearest of the 41 providers fronting this model measured
+  // #494/#498: OUTPUT was 0.0024 while the dearest of the 41 providers fronting this model measured
   // 0.005559908 (2026-10-26) — 2.3x under, so every reservation under-stated the call and the breach
   // only appeared at settle. Both rates now sit above the dearest observed rate with headroom, on
   // purpose: this figure rose ~33% during a single session, and ADR 0027 is explicit that
   // over-reserving is transient while under-reserving is not.
   "deepseek/deepseek-v4.1-flash": {
     inputUsdPer1k: 0.0007,
-    outputUsdPer1k: 0.0084,
+    outputUsdPer1k: 0.02,
   },
   "deepseek/deepseek-v4-pro": {
     // #494: input sat EXACTLY on the dearest provider rate (0.00191), so any rise broke the ceiling.

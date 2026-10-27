@@ -4,7 +4,7 @@
  * `admit()` reserves against `modelPriceTable` before a call and only trues up at `settle()`, so the
  * reserved number must be an upper bound (ADR 0027). The table is a hand-maintained constant, and
  * that is exactly what failed: the entry for the default model sat at 0.0024 while the dearest
- * provider rate climbed to 0.006727487, so every reservation understated the call and the breach only
+ * provider rate climbed to 0.015863057 within a single day, so every reservation understated the call and the breach only
  * appeared after the money was spent.
  *
  * This module records the dearest rate we have actually VERIFIED per model, and `resolvePrice` returns

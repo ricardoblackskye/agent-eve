@@ -37,7 +37,7 @@ describe("#498 the observed-dearest floor", () => {
     const floor = floorFor("deepseek/deepseek-v4.1-flash");
     expect(floor).toBeDefined();
     expect(floor?.inputUsdPer1k).toBe(0.0006);
-    expect(floor?.outputUsdPer1k).toBe(0.006727487);
+    expect(floor?.outputUsdPer1k).toBe(0.015863057);
     expect(floor?.providers).toBeGreaterThanOrEqual(1);
   });
 

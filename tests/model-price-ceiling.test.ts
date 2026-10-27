@@ -31,7 +31,7 @@ const EXPECTED_CEILINGS: Record<
   // LIVE catalog is the contract test's job; this one only pins what we ship (see ADR 0027).
   "deepseek/deepseek-v4.1-flash": {
     inputUsdPer1k: 0.0007,
-    outputUsdPer1k: 0.0084,
+    outputUsdPer1k: 0.02,
   },
   "deepseek/deepseek-v4-pro": {
     inputUsdPer1k: 0.0021,
