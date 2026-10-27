@@ -55,6 +55,14 @@ export const BAND_HIGH_MULTIPLIER = 2;
 /** History size at which confidence stops being "medium". */
 export const MIN_CALIBRATION_SAMPLES = 10;
 
+/**
+ * Identity of the constant set that produced a band (#486).
+ *
+ * Stamped onto every persisted estimate so a later recalibration (#490) can never be averaged
+ * together with bands produced by a different model. Bump this whenever a constant below changes.
+ */
+export const PLAN_ESTIMATOR_VERSION = "v1";
+
 /** Absolute cost classes, anchored to the monthly orchestrator cap. */
 export type CostClass = "XS" | "S" | "M" | "L" | "XL";
 

@@ -17,6 +17,20 @@ import {
   type RunTrendPoint,
 } from "./run-history";
 import { formatTerminatedRuns } from "./run-history";
+import {
+  InvalidPlanRecordError,
+  toPlanEstimateRecord,
+  toPlanRecord,
+  type PersistedPlan,
+  type PersistedPlanEstimate,
+  type PlanCommentRef,
+  type PlanEstimateAccuracyRow,
+  type PlanEstimateRecordInput,
+  type PlanLedger,
+  type PlanRecordInput,
+  type PlanSource,
+} from "./plan-ledger";
+import type { CostClass, CostConfidence } from "./plan-cost-estimate";
 
 export interface AcceptRunDelivery {
   deliveryId: string;
@@ -431,6 +445,58 @@ const SQLITE_SCHEMA = `
   CREATE INDEX IF NOT EXISTS df_run_summaries_repo_idx
     ON df_run_summaries (repo, created_at DESC, run_id DESC);
   -- df_run_active_issue_uidx is created in ensureSchema AFTER the duplicate repair (#328).
+
+  -- #486: plans are versioned by revision, because amendPlan re-plans after review (#378).
+  CREATE TABLE IF NOT EXISTS df_plans (
+    plan_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL,
+    tenant_id TEXT,
+    plan_revision INTEGER NOT NULL,
+    story_id INTEGER NOT NULL,
+    source TEXT NOT NULL,
+    plan TEXT NOT NULL,
+    comment_ref TEXT,
+    created_at TEXT NOT NULL,
+    UNIQUE (run_id, plan_revision)
+  );
+  CREATE TABLE IF NOT EXISTS df_plan_estimates (
+    estimate_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    plan_id INTEGER NOT NULL REFERENCES df_plans(plan_id) ON DELETE CASCADE,
+    run_id TEXT NOT NULL,
+    tenant_id TEXT,
+    period TEXT NOT NULL,
+    estimator_version TEXT NOT NULL,
+    model TEXT NOT NULL,
+    low_usd REAL NOT NULL,
+    expected_usd REAL NOT NULL,
+    high_usd REAL NOT NULL,
+    cost_class TEXT NOT NULL,
+    confidence TEXT NOT NULL,
+    revision_factor REAL NOT NULL,
+    history_samples INTEGER NOT NULL,
+    target_file_count INTEGER NOT NULL,
+    task_count INTEGER NOT NULL,
+    input_tokens INTEGER NOT NULL,
+    output_tokens INTEGER NOT NULL,
+    price_source TEXT NOT NULL,
+    stage TEXT,
+    features TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS df_plan_estimates_rollup_idx
+    ON df_plan_estimates (period, cost_class);
+  CREATE INDEX IF NOT EXISTS df_plan_estimates_run_idx
+    ON df_plan_estimates (run_id);
+  CREATE INDEX IF NOT EXISTS df_plan_estimates_tenant_idx
+    ON df_plan_estimates (tenant_id, period);
+  CREATE VIEW IF NOT EXISTS df_plan_estimate_accuracy AS
+    SELECT e.period AS period, e.cost_class AS cost_class,
+           e.confidence AS confidence, e.estimator_version AS estimator_version,
+           e.expected_usd AS expected_usd, s.cost_usd AS actual_usd,
+           (e.expected_usd - s.cost_usd) AS signed_error_usd
+    FROM df_plan_estimates e
+    JOIN df_run_summaries s ON s.run_id = e.run_id
+    WHERE s.cost_usd IS NOT NULL;
 
   CREATE TABLE IF NOT EXISTS df_run_events (
     sequence INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -880,7 +946,105 @@ function readError(error: unknown): string {
 }
 
 /** File-backed run history for local development and contract testing. */
-export class SqliteRunHistoryStore implements RunHistoryStore {
+interface PlanRow {
+  plan_id: number;
+  run_id: string;
+  tenant_id: string | null;
+  plan_revision: number;
+  story_id: number;
+  source: PlanSource;
+  plan: string;
+  comment_ref: string | null;
+  created_at: string;
+}
+
+interface PlanEstimateRow {
+  estimate_id: number;
+  plan_id: number;
+  run_id: string;
+  tenant_id: string | null;
+  period: string;
+  estimator_version: string;
+  model: string;
+  low_usd: number;
+  expected_usd: number;
+  high_usd: number;
+  cost_class: CostClass;
+  confidence: CostConfidence;
+  revision_factor: number;
+  history_samples: number;
+  target_file_count: number;
+  task_count: number;
+  input_tokens: number;
+  output_tokens: number;
+  price_source: string;
+  stage: string | null;
+  features: string;
+  created_at: string;
+}
+
+/** Parse a persisted JSON column, treating anything unparseable as absent (#486). */
+function readJsonColumn(value: string | null): unknown {
+  if (value === null) return undefined;
+  try {
+    return JSON.parse(value);
+  } catch {
+    // Malformed persisted JSON: treat as absent rather than failing the read.
+  }
+  return undefined;
+}
+
+function rowToPlan(row: PlanRow): PersistedPlan | null {
+  const plan = readJsonColumn(row.plan);
+  if (typeof plan !== "object" || plan === null || Array.isArray(plan)) return null;
+  const comment = readJsonColumn(row.comment_ref);
+  return {
+    planId: row.plan_id,
+    runId: row.run_id,
+    ...(row.tenant_id !== null ? { tenantId: row.tenant_id } : {}),
+    planRevision: row.plan_revision,
+    storyId: row.story_id,
+    source: row.source,
+    plan: plan as PersistedPlan["plan"],
+    ...(typeof comment === "object" && comment !== null
+      ? { commentRef: comment as PlanCommentRef }
+      : {}),
+    createdAt: row.created_at,
+  };
+}
+
+function rowToPlanEstimate(row: PlanEstimateRow): PersistedPlanEstimate | null {
+  const features = readJsonColumn(row.features);
+  if (typeof features !== "object" || features === null || Array.isArray(features)) {
+    return null;
+  }
+  return {
+    estimateId: row.estimate_id,
+    planId: row.plan_id,
+    runId: row.run_id,
+    ...(row.tenant_id !== null ? { tenantId: row.tenant_id } : {}),
+    period: row.period,
+    estimatorVersion: row.estimator_version,
+    model: row.model,
+    lowUsd: row.low_usd,
+    expectedUsd: row.expected_usd,
+    highUsd: row.high_usd,
+    costClass: row.cost_class,
+    confidence: row.confidence,
+    revisionFactor: row.revision_factor,
+    historySamples: row.history_samples,
+    targetFileCount: row.target_file_count,
+    taskCount: row.task_count,
+    inputTokens: row.input_tokens,
+    outputTokens: row.output_tokens,
+    priceSource: row.price_source,
+    ...(row.stage !== null ? { stage: row.stage } : {}),
+    features: features as Record<string, number | string>,
+    createdAt: row.created_at,
+  };
+}
+
+export class SqliteRunHistoryStore implements RunHistoryStore, PlanLedger {
   id = "sqlite";
   private readonly path: string;
   private readonly idFactory: () => string;
@@ -1748,6 +1912,122 @@ export class SqliteRunHistoryStore implements RunHistoryStore {
         error: readError(error),
       };
     }
+  }
+
+  /**
+   * Persist one plan revision (#486). Write-once per revision, enforced by the UNIQUE constraint
+   * rather than an upsert, so a re-plan cannot silently overwrite an earlier estimate.
+   */
+  async recordPlan(input: PlanRecordInput): Promise<PersistedPlan> {
+    return this.transaction((db) => {
+      const plan = toPlanRecord(input);
+      const inserted = db
+        .prepare(
+          `INSERT INTO df_plans (
+             run_id, tenant_id, plan_revision, story_id, source, plan, comment_ref, created_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          plan.runId,
+          plan.tenantId ?? null,
+          plan.planRevision,
+          plan.storyId,
+          plan.source,
+          JSON.stringify(plan.plan),
+          plan.commentRef ? JSON.stringify(plan.commentRef) : null,
+          plan.createdAt,
+        );
+      return { ...plan, planId: Number(inserted.lastInsertRowid) };
+    });
+  }
+
+  async listPlans(runId: string): Promise<PersistedPlan[]> {
+    const db = this.handle();
+    if (!db) throw new Error(`SQLite run history is unavailable at '${this.path}'.`);
+    const rows = db
+      .prepare("SELECT * FROM df_plans WHERE run_id = ? ORDER BY plan_revision ASC")
+      .all(runId) as unknown as PlanRow[];
+    return rows
+      .map(rowToPlan)
+      .filter((plan): plan is PersistedPlan => plan !== null);
+  }
+
+  async recordPlanEstimate(input: PlanEstimateRecordInput): Promise<PersistedPlanEstimate> {
+    return this.transaction((db) => {
+      const estimate = toPlanEstimateRecord(input);
+      const inserted = db
+        .prepare(
+          `INSERT INTO df_plan_estimates (
+             plan_id, run_id, tenant_id, period, estimator_version, model,
+             low_usd, expected_usd, high_usd, cost_class, confidence,
+             revision_factor, history_samples, target_file_count, task_count,
+             input_tokens, output_tokens, price_source, stage, features, created_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          estimate.planId,
+          estimate.runId,
+          estimate.tenantId ?? null,
+          estimate.period,
+          estimate.estimatorVersion,
+          estimate.model,
+          estimate.lowUsd,
+          estimate.expectedUsd,
+          estimate.highUsd,
+          estimate.costClass,
+          estimate.confidence,
+          estimate.revisionFactor,
+          estimate.historySamples,
+          estimate.targetFileCount,
+          estimate.taskCount,
+          estimate.inputTokens,
+          estimate.outputTokens,
+          estimate.priceSource,
+          estimate.stage ?? null,
+          JSON.stringify(estimate.features),
+          estimate.createdAt,
+        );
+      return { ...estimate, estimateId: Number(inserted.lastInsertRowid) };
+    });
+  }
+
+  async listPlanEstimates(runId: string): Promise<PersistedPlanEstimate[]> {
+    const db = this.handle();
+    if (!db) throw new Error(`SQLite run history is unavailable at '${this.path}'.`);
+    const rows = db
+      .prepare("SELECT * FROM df_plan_estimates WHERE run_id = ? ORDER BY estimate_id ASC")
+      .all(runId) as unknown as PlanEstimateRow[];
+    return rows
+      .map(rowToPlanEstimate)
+      .filter((estimate): estimate is PersistedPlanEstimate => estimate !== null);
+  }
+
+  /** The calibration rollup #490 consumes: what was forecast against what it actually cost. */
+  async listEstimateAccuracy(period?: string): Promise<PlanEstimateAccuracyRow[]> {
+    const db = this.handle();
+    if (!db) throw new Error(`SQLite run history is unavailable at '${this.path}'.`);
+    const rows = (
+      period === undefined
+        ? db.prepare("SELECT * FROM df_plan_estimate_accuracy").all()
+        : db.prepare("SELECT * FROM df_plan_estimate_accuracy WHERE period = ?").all(period)
+    ) as Array<{
+      period: string;
+      cost_class: CostClass;
+      confidence: CostConfidence;
+      estimator_version: string;
+      expected_usd: number;
+      actual_usd: number;
+      signed_error_usd: number;
+    }>;
+    return rows.map((row) => ({
+      period: row.period,
+      costClass: row.cost_class,
+      confidence: row.confidence,
+      estimatorVersion: row.estimator_version,
+      expectedUsd: row.expected_usd,
+      actualUsd: row.actual_usd,
+      signedErrorUsd: row.signed_error_usd,
+    }));
   }
 
   close(): void {
