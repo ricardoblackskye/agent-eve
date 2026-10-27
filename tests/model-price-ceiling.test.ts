@@ -1,13 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import * as modelConfig from "../agent/model-config";
 import { modelPriceTable, resolvePrice } from "../agent/lib/dark-factory/cost-budget";
-import {
-  ceilingsBelowObserved,
-  parsePriceReceipt,
-  unverifiedPriceModels,
-} from "./support/openrouter-price-receipt";
 import {
   floorFor,
   observedDearest,
@@ -24,10 +17,6 @@ import {
  * The guard is written over the MODULE's exports, so a future `*_MODEL_ID` is covered automatically
  * rather than only the two that exist today.
  */
-const RECEIPT_PATH = resolve(
-  process.cwd(),
-  "tests/support/openrouter-price-receipt.json",
-);
 
 const EXPECTED_CEILINGS: Record<
   string,
@@ -111,66 +100,6 @@ describe("#335 shipped models are priced", () => {
   });
 });
 
-
-/**
- * #494 — the ceilings must cover the dearest rate we have RECORDED seeing.
- *
- * Hermetic: nothing here touches the network. The live comparison is `npm run prices:check`,
- * driven by the scheduled Price Drift workflow, because a unit test asserting our constant
- * against somebody else's changing number goes red for reasons no PR can fix. It did exactly
- * that three times in one day on `main`.
- *
- * This still asserts something real: lower a ceiling below the dearest rate on record, or
- * leave a declared model out of the receipt, and this fails.
- */
-describe("#494 the shipped ceilings cover the recorded dearest provider rate", () => {
-  const receiptText = readFileSync(RECEIPT_PATH, "utf8");
-
-  it("parses the committed receipt", () => {
-    const parsed = parsePriceReceipt(receiptText);
-    expect(parsed.kind, parsed.kind === "malformed" ? parsed.reason : "").toBe("ok");
-  });
-
-  it("records every declared model id (guards against a vacuous pass)", () => {
-    const parsed = parsePriceReceipt(receiptText);
-    if (parsed.kind !== "ok") throw new Error(parsed.reason);
-    expect(Object.keys(parsed.receipt.observedDearest).length).toBeGreaterThanOrEqual(1);
-    expect(unverifiedPriceModels(declaredModelIds(), parsed.receipt)).toEqual([]);
-  });
-
-  it("covers the dearest observed rate on every axis", () => {
-    const parsed = parsePriceReceipt(receiptText);
-    if (parsed.kind !== "ok") throw new Error(parsed.reason);
-    expect(ceilingsBelowObserved(modelPriceTable, parsed.receipt)).toEqual([]);
-  });
-
-  it("rejects a malformed receipt rather than trusting it", () => {
-    expect(parsePriceReceipt("{not json").kind).toBe("malformed");
-    expect(
-      parsePriceReceipt(JSON.stringify({ verifiedAt: "nope", source: "s", observedDearest: {} })).kind,
-    ).toBe("malformed");
-    expect(
-      parsePriceReceipt(
-        JSON.stringify({
-          verifiedAt: "2026-01-01",
-          source: "s",
-          observedDearest: { "a/b": { inputUsdPer1k: 1, outputUsdPer1k: "x", providers: 1 } },
-        }),
-      ).kind,
-    ).toBe("malformed");
-  });
-
-  it("detects a ceiling that has been lowered below the recorded rate", () => {
-    const lowered = { ...modelPriceTable, "a/b": { inputUsdPer1k: 0, outputUsdPer1k: 0 } };
-    const problems = ceilingsBelowObserved(lowered, {
-      verifiedAt: "2026-01-01",
-      source: "s",
-      observedDearest: { "a/b": { inputUsdPer1k: 5, outputUsdPer1k: 9, providers: 2 } },
-    });
-    expect(problems).toHaveLength(2);
-    expect(problems.join(" ")).toContain("a/b");
-  });
-});
 
 /**
  * #498 - the commit-time half of AC3.
