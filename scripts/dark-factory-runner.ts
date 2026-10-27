@@ -965,14 +965,10 @@ async function main(): Promise<void> {
             );
 
             if (testOutcome.passed) {
-              // Record passing test results for each mapped AC
-              for (const ac of ctx.plan.acceptanceCriteriaMap) {
-                capturedTestResults.push({
-                  testFile: ac.testFile,
-                  testCaseName: ac.testCaseName,
-                  passed: true,
-                });
-              }
+              // #503 AC4: record a passing result for each mapped AC. The map is typed as required but a
+              // deserialized plan may omit it (the architect returned one without it at STEP 3.5), so
+              // iterate the fallback, not the field directly.
+              recordPassingTestResults(ctx.plan, capturedTestResults);
             }
 
             return { passed: testOutcome.passed, output: testOutcome.output };
@@ -1527,6 +1523,31 @@ export function parksForHumanApproval(input: {
 }): boolean {
   if (input.revision) return true;
   return !input.resuming;
+}
+
+/**
+ * #503 AC4 — record a passing result for each acceptance criterion the plan mapped to a test.
+ *
+ * `ExecutionPlan.acceptanceCriteriaMap` is typed as required, but a deserialized plan may omit it (the
+ * architect returned one without it at STEP 3.5), and iterating the field directly threw "Cannot read
+ * properties of undefined" at the coding phase. This mirrors the renderer's tolerance from the same
+ * issue: a recording layer must not depend on another guard to avoid a TypeError. Exported so the
+ * "a plan without the map does not crash the coding phase" property is pinned by a test.
+ */
+export function recordPassingTestResults(
+  plan: {
+    acceptanceCriteriaMap?: ReadonlyArray<{ testFile: string; testCaseName: string }> | null;
+  },
+  capturedTestResults: { testFile: string; testCaseName: string; passed: boolean }[],
+): void {
+  const mappings = plan.acceptanceCriteriaMap ?? [];
+  for (const ac of mappings) {
+    capturedTestResults.push({
+      testFile: ac.testFile,
+      testCaseName: ac.testCaseName,
+      passed: true,
+    });
+  }
 }
 
 const isDirectRun =
