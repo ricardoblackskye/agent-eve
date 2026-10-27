@@ -135,6 +135,30 @@ const line = (label: string, value: unknown) =>
   );
 
 /**
+ * The plan summary lines, rendered from a plan that may be INCOMPLETE (#501).
+ *
+ * Display must never assert on plan shape. This ran as three inline `line(...)` calls until a real run
+ * died on one of them: the architect's self-correction loop replaced a plan that carried
+ * `acceptanceCriteriaMap` with one that did not, and `executionPlan.acceptanceCriteriaMap.length` aborted
+ * the run at STEP 3.5 - before the plan comment, before the ledger write, before the park.
+ *
+ * A cosmetic line is the wrong place to enforce completeness; `validateExecutionPlan` is. Refusing a plan
+ * that maps no acceptance criteria is issue #502.
+ */
+export interface PlanSummaryLine {
+  label: string;
+  value: string;
+}
+
+export function planSummaryLines(plan: {
+  summary?: string | null | undefined;
+  targetFiles?: ReadonlyArray<{ path?: string | undefined }> | null | undefined;
+  acceptanceCriteriaMap?: ReadonlyArray<unknown> | null | undefined;
+}): PlanSummaryLine[] {
+  throw new Error("not implemented");
+}
+
+/**
  * The `origin` of a checkout, or null when the directory is not one (#405).
  *
  * `execFileSync` rather than a shell string: the path comes from the operator and must never be
