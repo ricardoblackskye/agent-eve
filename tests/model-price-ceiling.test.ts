@@ -75,8 +75,12 @@ describe("#335 shipped models are priced", () => {
 
   it("prices them as the documented ceilings", () => {
     for (const [id, expected] of Object.entries(EXPECTED_CEILINGS)) {
-      const price = resolvePrice(id);
-      expect(price, `${id} has no price`).not.toBeNull();
+      // #498 - assert the TABLE, not resolvePrice(id). resolvePrice now returns the RESERVATION
+      // price: the higher of the table and the observed-dearest floor. It is therefore no longer
+      // the ceiling, and comparing it here would conflate "the number we ship" with "the number we
+      // reserve". This case exists to pin the shipped number, so a silent table edit still fails.
+      const price = modelPriceTable[id];
+      expect(price, `${id} has no price in modelPriceTable`).toBeDefined();
       expect(price?.inputUsdPer1k, `${id} input`).toBeCloseTo(
         expected.inputUsdPer1k,
         10,

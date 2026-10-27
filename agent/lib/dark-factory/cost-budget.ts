@@ -1,4 +1,4 @@
-import type { DearestObservation } from "./model-price-floor";
+import { floorFor, type DearestObservation } from "./model-price-floor";
 /**
  * Dark Factory — canonical cost budget types, price table, and estimation.
  *
@@ -146,7 +146,11 @@ export function applyPriceFloor(
   table: ModelPrice,
   floor: DearestObservation | undefined,
 ): ModelPrice {
-  throw new Error("not implemented");
+  if (!floor) return { ...table };
+  return {
+    inputUsdPer1k: Math.max(table.inputUsdPer1k, floor.inputUsdPer1k),
+    outputUsdPer1k: Math.max(table.outputUsdPer1k, floor.outputUsdPer1k),
+  };
 }
 
 /**
@@ -177,8 +181,11 @@ export function resolvePrice(
   }
   const known = modelPriceTable[normalized];
   if (!known) return null;
-  // Deep copy so callers never mutate the canonical table.
-  return { ...known };
+  // #498: reserve against the HIGHER of the table and the observed-dearest floor. The env
+  // override above still wins, because an operator who knows the provider in use is making a
+  // deliberate per-deployment choice (ADR 0027), while this guards the shared table.
+  // applyPriceFloor deep-copies, so callers never mutate the canonical table.
+  return applyPriceFloor(known, floorFor(normalized));
 }
 
 /**

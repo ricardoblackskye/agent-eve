@@ -241,7 +241,7 @@ Dark Factory — canonical cost budget types, price table, and estimation. One p
 
 **Source:** [`agent/lib/dark-factory/cost-budget.ts`](../../agent/lib/dark-factory/cost-budget.ts)
 
-**Exports:** `COST_CATEGORIES`, `CostBudget`, `CostBudgetConfigurationError`, `CostBudgetEnvError`, `CostCategory`, `DEFAULT_COST_BUDGET_PERIOD`, `ModelPrice`, `ResolvedCostBudgetEnv`, `createCostBudget`, `createCostGovernanceEnv`, `estimateCost`, `isCostBudget`, `isCostCategory`, `modelPriceTable`, `resolvePrice`, `validateCostBudgetEnv`
+**Exports:** `COST_CATEGORIES`, `CostBudget`, `CostBudgetConfigurationError`, `CostBudgetEnvError`, `CostCategory`, `DEFAULT_COST_BUDGET_PERIOD`, `ModelPrice`, `ResolvedCostBudgetEnv`, `applyPriceFloor`, `createCostBudget`, `createCostGovernanceEnv`, `estimateCost`, `isCostBudget`, `isCostCategory`, `modelPriceTable`, `resolvePrice`, `validateCostBudgetEnv`
 
 ## plan-cost-estimate
 
