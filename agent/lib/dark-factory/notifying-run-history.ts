@@ -217,6 +217,27 @@ export class NotifyingRunHistoryStore implements RunHistoryStore {
     return this.inner.getRunMetrics(...args);
   }
 
+  // #486 — the plan ledger is part of the store contract, so a decorated store must not lose it.
+  recordPlan(...args: Parameters<RunHistoryStore["recordPlan"]>) {
+    return this.inner.recordPlan(...args);
+  }
+
+  listPlans(...args: Parameters<RunHistoryStore["listPlans"]>) {
+    return this.inner.listPlans(...args);
+  }
+
+  recordPlanEstimate(...args: Parameters<RunHistoryStore["recordPlanEstimate"]>) {
+    return this.inner.recordPlanEstimate(...args);
+  }
+
+  listPlanEstimates(...args: Parameters<RunHistoryStore["listPlanEstimates"]>) {
+    return this.inner.listPlanEstimates(...args);
+  }
+
+  listEstimateAccuracy(...args: Parameters<RunHistoryStore["listEstimateAccuracy"]>) {
+    return this.inner.listEstimateAccuracy(...args);
+  }
+
   close() {
     return this.inner.close();
   }

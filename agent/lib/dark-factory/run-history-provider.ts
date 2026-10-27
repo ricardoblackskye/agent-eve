@@ -23,6 +23,13 @@ import type {
   RunMetricsQuery,
   RunSummary,
 } from "./run-history";
+import type {
+  PersistedPlan,
+  PersistedPlanEstimate,
+  PlanEstimateAccuracyRow,
+  PlanEstimateRecordInput,
+  PlanRecordInput,
+} from "./plan-ledger";
 
 export class RunHistoryConfigurationError extends Error {
   constructor(message: string) {
@@ -128,6 +135,30 @@ export class ConsoleRunHistoryStore implements RunHistoryStore {
       value: null,
       error: RUN_HISTORY_NOT_CONFIGURED,
     };
+  }
+
+  // #486 — an unconfigured store cannot persist a plan. Writes throw so a missing driver is loud
+  // rather than looking like a successful no-op; reads answer empty.
+  async recordPlan(_input: PlanRecordInput): Promise<PersistedPlan> {
+    throw new RunHistoryConfigurationError(RUN_HISTORY_NOT_CONFIGURED);
+  }
+
+  async listPlans(_runId: string): Promise<PersistedPlan[]> {
+    return [];
+  }
+
+  async recordPlanEstimate(
+    _input: PlanEstimateRecordInput,
+  ): Promise<PersistedPlanEstimate> {
+    throw new RunHistoryConfigurationError(RUN_HISTORY_NOT_CONFIGURED);
+  }
+
+  async listPlanEstimates(_runId: string): Promise<PersistedPlanEstimate[]> {
+    return [];
+  }
+
+  async listEstimateAccuracy(_period?: string): Promise<PlanEstimateAccuracyRow[]> {
+    return [];
   }
   async listRuns(
     _options: RunListOptions = {},

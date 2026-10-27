@@ -18,6 +18,15 @@ import {
 } from "./run-history";
 import { formatTerminatedRuns } from "./run-history";
 import {
+  toPlanEstimateRecord,
+  toPlanRecord,
+  type PersistedPlan,
+  type PersistedPlanEstimate,
+  type PlanEstimateAccuracyRow,
+  type PlanEstimateRecordInput,
+  type PlanRecordInput,
+} from "./plan-ledger";
+import {
   runCursorAfter,
   validateRunCursor,
   validateRunSort,
@@ -152,6 +161,58 @@ const POSTGRES_SCHEMA = `
   ALTER TABLE df_run_events ADD COLUMN IF NOT EXISTS test_results TEXT;
   ALTER TABLE df_run_events ADD COLUMN IF NOT EXISTS trace TEXT;
   ALTER TABLE df_run_events ADD COLUMN IF NOT EXISTS breaker_trip TEXT;
+
+  -- #486: a plan row per revision, because an amendment re-plans after review (#378).
+  CREATE TABLE IF NOT EXISTS df_plans (
+    plan_id BIGSERIAL PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    tenant_id TEXT,
+    plan_revision INTEGER NOT NULL,
+    story_id INTEGER NOT NULL,
+    source TEXT NOT NULL,
+    plan JSONB NOT NULL,
+    comment_ref JSONB,
+    created_at TEXT NOT NULL,
+    UNIQUE (run_id, plan_revision)
+  );
+  CREATE TABLE IF NOT EXISTS df_plan_estimates (
+    estimate_id BIGSERIAL PRIMARY KEY,
+    plan_id BIGINT NOT NULL REFERENCES df_plans(plan_id) ON DELETE CASCADE,
+    run_id TEXT NOT NULL,
+    tenant_id TEXT,
+    period TEXT NOT NULL,
+    estimator_version TEXT NOT NULL,
+    model TEXT NOT NULL,
+    low_usd DOUBLE PRECISION NOT NULL,
+    expected_usd DOUBLE PRECISION NOT NULL,
+    high_usd DOUBLE PRECISION NOT NULL,
+    cost_class TEXT NOT NULL,
+    confidence TEXT NOT NULL,
+    revision_factor DOUBLE PRECISION NOT NULL,
+    history_samples INTEGER NOT NULL,
+    target_file_count INTEGER NOT NULL,
+    task_count INTEGER NOT NULL,
+    input_tokens BIGINT NOT NULL,
+    output_tokens BIGINT NOT NULL,
+    price_source TEXT NOT NULL,
+    stage TEXT,
+    features JSONB NOT NULL,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS df_plan_estimates_rollup_idx
+    ON df_plan_estimates (period, cost_class);
+  CREATE INDEX IF NOT EXISTS df_plan_estimates_run_idx
+    ON df_plan_estimates (run_id);
+  CREATE INDEX IF NOT EXISTS df_plan_estimates_tenant_idx
+    ON df_plan_estimates (tenant_id, period);
+  CREATE OR REPLACE VIEW df_plan_estimate_accuracy AS
+    SELECT e.period AS period, e.cost_class AS cost_class,
+           e.confidence AS confidence, e.estimator_version AS estimator_version,
+           e.expected_usd AS expected_usd, s.cost_usd AS actual_usd,
+           (e.expected_usd - s.cost_usd) AS signed_error_usd
+    FROM df_plan_estimates e
+    JOIN df_run_summaries s ON s.run_id = e.run_id
+    WHERE s.cost_usd IS NOT NULL;
   CREATE INDEX IF NOT EXISTS df_run_events_page_idx
     ON df_run_events (run_id, sequence);
 
@@ -635,6 +696,92 @@ function insertEvent(client: PoolClient, event: RunEvent): Promise<unknown> {
       event.breakerTrip ? JSON.stringify(event.breakerTrip) : null,
     ],
   );
+}
+
+interface PlanRow {
+  plan_id: string | number;
+  run_id: string;
+  tenant_id: string | null;
+  plan_revision: string | number;
+  story_id: string | number;
+  source: string;
+  plan: unknown;
+  comment_ref: unknown;
+  created_at: string;
+}
+
+interface PlanEstimateRow {
+  estimate_id: string | number;
+  plan_id: string | number;
+  run_id: string;
+  tenant_id: string | null;
+  period: string;
+  estimator_version: string;
+  model: string;
+  low_usd: string | number;
+  expected_usd: string | number;
+  high_usd: string | number;
+  cost_class: string;
+  confidence: string;
+  revision_factor: string | number;
+  history_samples: string | number;
+  target_file_count: string | number;
+  task_count: string | number;
+  input_tokens: string | number;
+  output_tokens: string | number;
+  price_source: string;
+  stage: string | null;
+  features: unknown;
+  created_at: string;
+}
+
+/** JSONB arrives already parsed; a value that is not an object means an unreadable row. */
+function pgRowToPlan(row: PlanRow): PersistedPlan | null {
+  const plan = row.plan;
+  if (typeof plan !== "object" || plan === null || Array.isArray(plan)) return null;
+  const comment = row.comment_ref;
+  return {
+    planId: Number(row.plan_id),
+    runId: row.run_id,
+    ...(row.tenant_id !== null ? { tenantId: row.tenant_id } : {}),
+    planRevision: Number(row.plan_revision),
+    storyId: Number(row.story_id),
+    source: row.source as PersistedPlan["source"],
+    plan: plan as PersistedPlan["plan"],
+    ...(typeof comment === "object" && comment !== null
+      ? { commentRef: comment as PersistedPlan["commentRef"] }
+      : {}),
+    createdAt: row.created_at,
+  };
+}
+
+function pgRowToPlanEstimate(row: PlanEstimateRow): PersistedPlanEstimate | null {
+  const features = row.features;
+  if (typeof features !== "object" || features === null || Array.isArray(features)) { return null; }
+  return {
+    estimateId: Number(row.estimate_id),
+    planId: Number(row.plan_id),
+    runId: row.run_id,
+    ...(row.tenant_id !== null ? { tenantId: row.tenant_id } : {}),
+    period: row.period,
+    estimatorVersion: row.estimator_version,
+    model: row.model,
+    lowUsd: Number(row.low_usd),
+    expectedUsd: Number(row.expected_usd),
+    highUsd: Number(row.high_usd),
+    costClass: row.cost_class as PersistedPlanEstimate["costClass"],
+    confidence: row.confidence as PersistedPlanEstimate["confidence"],
+    revisionFactor: Number(row.revision_factor),
+    historySamples: Number(row.history_samples),
+    targetFileCount: Number(row.target_file_count),
+    taskCount: Number(row.task_count),
+    inputTokens: Number(row.input_tokens),
+    outputTokens: Number(row.output_tokens),
+    priceSource: row.price_source,
+    ...(row.stage !== null ? { stage: row.stage } : {}),
+    features: features as Record<string, number | string>,
+    createdAt: row.created_at,
+  };
 }
 
 export class PostgresRunHistoryStore implements RunHistoryStore {
@@ -1274,6 +1421,116 @@ export class PostgresRunHistoryStore implements RunHistoryStore {
   ): Promise<void> {
     const client = await this.pool();
     await updateCommentReference(client, runId, eventId, reference);
+  }
+
+  /** Persist one plan revision (#486). UNIQUE(run_id, plan_revision) makes a re-plan explicit. */
+  async recordPlan(input: PlanRecordInput): Promise<PersistedPlan> {
+    await this.ensureSchema();
+    const plan = toPlanRecord(input);
+    const result = await (await this.pool()).query<{ plan_id: string | number }>(
+      `INSERT INTO df_plans (
+         run_id, tenant_id, plan_revision, story_id, source, plan, comment_ref, created_at
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING plan_id`,
+      [
+        plan.runId,
+        plan.tenantId ?? null,
+        plan.planRevision,
+        plan.storyId,
+        plan.source,
+        JSON.stringify(plan.plan),
+        plan.commentRef ? JSON.stringify(plan.commentRef) : null,
+        plan.createdAt,
+      ],
+    );
+    return { ...plan, planId: Number(result.rows[0].plan_id) };
+  }
+
+  async listPlans(runId: string): Promise<PersistedPlan[]> {
+    await this.ensureSchema();
+    const result = await (await this.pool()).query<PlanRow>(
+      "SELECT * FROM df_plans WHERE run_id = $1 ORDER BY plan_revision ASC",
+      [runId],
+    );
+    return result.rows
+      .map(pgRowToPlan)
+      .filter((plan): plan is PersistedPlan => plan !== null);
+  }
+
+  async recordPlanEstimate(input: PlanEstimateRecordInput): Promise<PersistedPlanEstimate> {
+    await this.ensureSchema();
+    const estimate = toPlanEstimateRecord(input);
+    const result = await (await this.pool()).query<{ estimate_id: string | number }>(
+      `INSERT INTO df_plan_estimates (
+         plan_id, run_id, tenant_id, period, estimator_version, model,
+         low_usd, expected_usd, high_usd, cost_class, confidence,
+         revision_factor, history_samples, target_file_count, task_count,
+         input_tokens, output_tokens, price_source, stage, features, created_at
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+         $16, $17, $18, $19, $20, $21) RETURNING estimate_id`,
+      [
+        estimate.planId,
+        estimate.runId,
+        estimate.tenantId ?? null,
+        estimate.period,
+        estimate.estimatorVersion,
+        estimate.model,
+        estimate.lowUsd,
+        estimate.expectedUsd,
+        estimate.highUsd,
+        estimate.costClass,
+        estimate.confidence,
+        estimate.revisionFactor,
+        estimate.historySamples,
+        estimate.targetFileCount,
+        estimate.taskCount,
+        estimate.inputTokens,
+        estimate.outputTokens,
+        estimate.priceSource,
+        estimate.stage ?? null,
+        JSON.stringify(estimate.features),
+        estimate.createdAt,
+      ],
+    );
+    return { ...estimate, estimateId: Number(result.rows[0].estimate_id) };
+  }
+
+  async listPlanEstimates(runId: string): Promise<PersistedPlanEstimate[]> {
+    await this.ensureSchema();
+    const result = await (await this.pool()).query<PlanEstimateRow>(
+      "SELECT * FROM df_plan_estimates WHERE run_id = $1 ORDER BY estimate_id ASC",
+      [runId],
+    );
+    return result.rows
+      .map(pgRowToPlanEstimate)
+      .filter((estimate): estimate is PersistedPlanEstimate => estimate !== null);
+  }
+
+  /** The calibration rollup #490 consumes: forecast against actual, with the signed error. */
+  async listEstimateAccuracy(period?: string): Promise<PlanEstimateAccuracyRow[]> {
+    await this.ensureSchema();
+    const result = await (await this.pool()).query<{
+      period: string;
+      cost_class: string;
+      confidence: string;
+      estimator_version: string;
+      expected_usd: string | number;
+      actual_usd: string | number;
+      signed_error_usd: string | number;
+    }>(
+      period === undefined
+        ? "SELECT * FROM df_plan_estimate_accuracy"
+        : "SELECT * FROM df_plan_estimate_accuracy WHERE period = $1",
+      period === undefined ? [] : [period],
+    );
+    return result.rows.map((row) => ({
+      period: row.period,
+      costClass: row.cost_class as PlanEstimateAccuracyRow["costClass"],
+      confidence: row.confidence as PlanEstimateAccuracyRow["confidence"],
+      estimatorVersion: row.estimator_version,
+      expectedUsd: Number(row.expected_usd),
+      actualUsd: Number(row.actual_usd),
+      signedErrorUsd: Number(row.signed_error_usd),
+    }));
   }
 
   async getRun(runId: string): Promise<RunHistoryReadResult<RunSummary>> {

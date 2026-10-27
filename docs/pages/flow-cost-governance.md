@@ -110,6 +110,49 @@ number goes red for reasons no pull request can fix. Staleness is reported as a 
 halting runs, and a commit-time guard fails the build if a shipped ceiling drops below the recorded
 rate. See ADR 0071.
 
+## Persisted plans and estimates
+
+An advisory estimate is only useful if it can be compared with what the run actually cost, and that
+comparison has to be answerable in SQL rather than by parsing application output. The plan ledger
+([`plan-ledger.ts`](../../agent/lib/dark-factory/plan-ledger.ts)) stores two things, deliberately
+apart:
+
+- **`df_plans`** — one row per plan *revision*. A run can produce several: an amendment re-plans from
+  human review feedback, so `UNIQUE (run_id, plan_revision)` makes a re-plan explicit instead of
+  silently overwriting the earlier band.
+- **`df_plan_estimates`** — one row per priced plan. The band, cost class, confidence, revision
+  factor, token counts and file counts are **typed columns**, so grouping by cost class or period is
+  a plain aggregate. The open-ended feature vector stays JSON, so the estimator can grow it without a
+  migration.
+
+Three details are load-bearing:
+
+1. **`estimator_version`** is stamped on every row. When the band multipliers are tuned, older rows
+   were produced by a different model; without the stamp a bias analysis would average the two
+   together and the resulting correction would be meaningless.
+2. **Absent is not zero.** A plan that was never priced has no estimate row at all — never a
+   zero-filled one, which would read as "priced at nothing" and poison the variance maths.
+3. **No prose is stored.** The plan is the structured `ExecutionPlan`; `comment_ref` points at the
+   GitHub comment that holds the human-readable text. Issue bodies and prompts are never persisted
+   here, the same rule the run ledger enforces.
+
+The rollup itself is a view:
+
+```sql
+SELECT period, cost_class, estimator_version,
+       expected_usd, actual_usd, signed_error_usd
+FROM   df_plan_estimate_accuracy;
+```
+
+The error is **signed** on purpose: a forecast that came in under the actual cost is the bias worth
+correcting, and an absolute error would hide its direction.
+
+Both tables are created by the adapters' runtime DDL on first use, so no manual step is needed to
+bring them into existence. Row-level security is **not** runtime DDL, however: it is applied by
+[`010_df_plan_ledger_rls.sql`](../../db/migrations/010_df_plan_ledger_rls.sql), which must be run
+against the database. An estimate row carries per-run and per-tenant cost figures, so an
+anon-readable row would leak commercial pricing about a customer's work.
+
 ## Status relative to #214
 
 The customer-use tracking epic (#214) — tenant usage aggregation (R2) and the
