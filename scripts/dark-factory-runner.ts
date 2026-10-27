@@ -198,6 +198,24 @@ function readOriginRemote(dir: string): string | null {
 let activeControlStore: ControlStore | null = null;
 
 /**
+ * #503 AC5 — the run this process currently owns, so an abort that escapes `main` can release its claim.
+ *
+ * `main` has no outer try: the entry-point catch only logged and closed the control store, so a throw
+ * after the run was accepted (the STEP 5 render crash included) left the issue on `df:running` and the
+ * ledger holding a claim no later attempt could adopt — which is why two runs in a row needed manual
+ * retirement. Set once the run record is adopted; the label writer is attached when it exists.
+ */
+type ActiveRun = {
+  repo: string;
+  issue: number;
+  runId: string;
+  runHistory: Parameters<typeof applyTerminalLifecycle>[0]["runHistory"];
+  labelWriter?: Parameters<typeof applyTerminalLifecycle>[0]["labelWriter"];
+};
+
+let activeRun: ActiveRun | null = null;
+
+/**
  * Build the cooperative control checkpoint used by a runner execution.
  * Returns the backing store (for operator actions) and the checkpoint callable
  * that the Architect and Developer loops must invoke before each LLM call.
@@ -360,6 +378,9 @@ async function main(): Promise<void> {
   }
 
   const runId = startDecision.runId;
+  // #503 AC5: from here the run owns the issue's claim, so an abort that escapes `main` must release it.
+  // Set BEFORE the control store and label writer exist, and filled in as they do.
+  activeRun = { repo: targetRepo, issue: issueNum, runId, runHistory };
 
   const { store: runControlStore, checkpoint } = buildRunControl(env, runId);
   activeControlStore = runControlStore;
@@ -384,6 +405,8 @@ async function main(): Promise<void> {
 
   const issueWriter = new GitHubIssueWriter({ token });
   const labelWriter = createGitHubLabelWriter(issueWriter);
+  // #503 AC5: attach the label writer so the abort path can apply the terminal lifecycle.
+  if (activeRun) activeRun.labelWriter = labelWriter;
   const prWriter = new GitHubPrWriter({ token, env });
   const metrics = createMetricsStore();
   const developerAgent = new DeveloperAgent({ metrics });
@@ -1185,6 +1208,8 @@ async function main(): Promise<void> {
   );
   await activeControlStore?.close?.();
   activeControlStore = null;
+  // #503 AC5: the run ended through its own terminal lifecycle; there is nothing left to release.
+  activeRun = null;
 }
 
 /**
@@ -1550,6 +1575,47 @@ export function recordPassingTestResults(
   }
 }
 
+/**
+ * #503 AC5 — release the active run's claim when `main` aborts after the run was accepted.
+ *
+ * `applyTerminalLifecycle` is what releases the claim: its terminal event is the release, and it is
+ * idempotent (a run already finalised by a phase-level catch returns `{applied:false, skipped:true}`
+ * rather than double-labelling). Extracted from the entry-point catch so `main`'s abort path is reachable
+ * from a test — `main` itself cannot be called.
+ *
+ * A failure inside the release is REPORTED BUT NEVER THROWN: the abort that caused it is the failure the
+ * operator needs to see, and masking it would hide the original cause. The report always names how to
+ * retire the claim by hand, so even a broken release leaves the operator a way out.
+ */
+export async function releaseAbandonedRunClaim(active: ActiveRun | null): Promise<void> {
+  // No run, or a run that aborted before its label writer existed: nothing can be released.
+  if (!active || !active.labelWriter) return;
+
+  try {
+    await applyTerminalLifecycle(
+      { labelWriter: active.labelWriter, runHistory: active.runHistory },
+      {
+        repo: active.repo,
+        issue: active.issue,
+        runId: active.runId,
+        terminalStatus: "failed",
+      },
+    );
+  } catch (releaseError) {
+    console.error(
+      `[ERROR] Failed to release the claim for run ${active.runId}: ` +
+        `${releaseError instanceof Error ? releaseError.message : String(releaseError)}. ` +
+        `Retire it with: npm run df:retire-claim -- --repo ${active.repo} --issue ${active.issue}`,
+    );
+    return;
+  }
+
+  console.error(
+    `[ERROR] The run aborted after acceptance; released the claim on ` +
+      `${active.repo}#${active.issue} (run ${active.runId}).`,
+  );
+}
+
 const isDirectRun =
   process.argv[1] !== undefined &&
   import.meta.url === pathToFileURL(process.argv[1]).href;
@@ -1559,6 +1625,10 @@ if (isDirectRun) {
     console.error(
       `[ERROR] Runner aborted: ${error instanceof Error ? error.message : String(error)}`,
     );
+    // #503 AC5: an abort that escaped `main` must still END the run, or the issue keeps the claim (and
+    // the `df:running` label) with nothing left to release it. Done BEFORE the control store closes, and
+    // it never throws, so the original abort stays the visible cause.
+    await releaseAbandonedRunClaim(activeRun);
     try {
       await activeControlStore?.close?.();
     } catch (closeError) {
@@ -1567,6 +1637,7 @@ if (isDirectRun) {
       );
     } finally {
       activeControlStore = null;
+      activeRun = null;
       process.exitCode = 1;
     }
   });
