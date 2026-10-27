@@ -56,7 +56,7 @@ describe("cost governor", () => {
 
   it("#498 still refuses a model that only RESEMBLES a shipped one", async () => {
     // The floor must not become a looser price resolver: a near-miss id has no observation and no
-    // ceiling, so it must refuse exactly as before, not be priced off a neighbouring entry.
+    // ceiling, so it must refuse exactly as before, not be priced off a nearby entry that happens to share a prefix.
     const governor = createCostGovernor(new InMemoryCostBudgetProvider(), ENV);
     for (const model of [
       "deepseek/deepseek-v4.1-flash-2",

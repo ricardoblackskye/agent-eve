@@ -32,6 +32,7 @@ import {
   buildPriceFloorRecord,
   ceilingsBelowObserved,
   renderPriceFloorModule,
+  stalenessNotice,
   type DearestObservation,
 } from "../agent/lib/dark-factory/model-price-floor";
 import { loadLocalEnv } from "./load-env";
@@ -93,6 +94,11 @@ async function fetchDearestRate(
 
 async function main(): Promise<void> {
   loadLocalEnv();
+
+  // Surfaced before anything else: staleness needs no network and must be visible even when the
+  // drift check below fails the run.
+  const staleness = stalenessNotice(new Date());
+  if (staleness) console.warn(staleness);
 
   const write = process.argv.includes("--write");
   const declared = declaredModelIds();

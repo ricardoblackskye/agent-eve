@@ -96,24 +96,28 @@ const DAY_MS = 24 * 60 * 60 * 1000;
  * Midnight UTC on the verification date. Parsed on every call rather than captured at module load,
  * so a mis-typed date fails loudly instead of silently ageing from an epoch.
  */
-function verifiedAtMs(): number {
-  const parsed = Date.parse(`${PRICE_FLOOR_VERIFIED_AT}T00:00:00.000Z`);
+function ageDaysFrom(verifiedAt: string, now: Date): number {
+  const parsed = Date.parse(`${verifiedAt}T00:00:00.000Z`);
   if (!Number.isFinite(parsed)) {
-    throw new Error(
-      `PRICE_FLOOR_VERIFIED_AT is not an ISO date: ${PRICE_FLOOR_VERIFIED_AT}`,
-    );
+    throw new Error(`price floor verifiedAt is not an ISO date: ${verifiedAt}`);
   }
-  return parsed;
+  return Math.floor((now.getTime() - parsed) / DAY_MS);
 }
 
 /** Whole days between the verification date and `now`. */
-export function floorAgeDays(now: Date): number {
-  return Math.floor((now.getTime() - verifiedAtMs()) / DAY_MS);
+export function floorAgeDays(
+  now: Date,
+  record: PriceFloorRecord = priceFloorRecord,
+): number {
+  return ageDaysFrom(record.verifiedAt, now);
 }
 
 /** True once the verification is older than `PRICE_FLOOR_TTL_DAYS`. */
-export function isFloorStale(now: Date): boolean {
-  return floorAgeDays(now) > PRICE_FLOOR_TTL_DAYS;
+export function isFloorStale(
+  now: Date,
+  record: PriceFloorRecord = priceFloorRecord,
+): boolean {
+  return floorAgeDays(now, record) > PRICE_FLOOR_TTL_DAYS;
 }
 
 /**
@@ -203,7 +207,13 @@ export function stalenessNotice(
   now: Date,
   record: PriceFloorRecord = priceFloorRecord,
 ): string | null {
-  throw new Error("not implemented");
+  const age = floorAgeDays(now, record);
+  if (age <= PRICE_FLOOR_TTL_DAYS) return null;
+  return (
+    `STALE: the price observation was last verified on ${record.verifiedAt} ` +
+    `(${age} days ago; TTL ${PRICE_FLOOR_TTL_DAYS} days). ` +
+    "Re-verify with: npm run prices:check -- --write"
+  );
 }
 
 /** Declared models with no recorded observation. A missing entry fails rather than skips. */
