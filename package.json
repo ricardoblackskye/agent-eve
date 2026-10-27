@@ -26,7 +26,8 @@
     "df:sandbox-up": "bash scripts/sandbox-server-up.sh",
     "df:sandbox-smoke": "tsx scripts/sandbox-smoke.ts",
     "df:cost-budget": "tsx scripts/df-cost-budget.ts",
-    "models:verify": "tsx scripts/openrouter-verify-models.ts"
+    "models:verify": "tsx scripts/openrouter-verify-models.ts",
+    "prices:check": "tsx scripts/openrouter-check-prices.ts"
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.45",

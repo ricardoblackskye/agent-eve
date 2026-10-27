@@ -1,0 +1,16 @@
+{
+  "verifiedAt": "2026-10-27",
+  "source": "https://openrouter.ai/api/v1/models/<id>/endpoints",
+  "observedDearest": {
+    "deepseek/deepseek-v4.1-flash": {
+      "inputUsdPer1k": 0.0006,
+      "outputUsdPer1k": 0.006727487,
+      "providers": 41
+    },
+    "deepseek/deepseek-v4-pro": {
+      "inputUsdPer1k": 0.00191,
+      "outputUsdPer1k": 0.0038299999999999996,
+      "providers": 15
+    }
+  }
+}
