@@ -87,6 +87,29 @@ exactly as the Architect's bounded reader bounds them, and reuses the runner's
 start — no prior runs — still produces a band, marked low confidence. Calibrating
 the band against measured actual cost is tracked separately (#490).
 
+## The reservation price has a floor
+
+The reserved price is the higher of the shipped ceiling and a floor of the dearest rate we have
+actually verified ([`model-price-floor.ts`](../../agent/lib/dark-factory/model-price-floor.ts)). The
+ceiling is hand-maintained and fell behind reality — the dearest output rate for the default model
+climbed by a factor of 3.8 in a single day while the table held its old value — so a constant that
+nobody re-derived could under-reserve every call, and the breach only surfaced at settle.
+
+The floor can only ever raise the reserved number. It is inert while the table carries headroom, and
+protective the moment the table falls behind, which is the direction that costs money. An operator
+who knows the provider in use can still override it exactly, because pinning a cheaper provider is a
+legitimate deliberate act; the floor guards the shared table, not that.
+
+The observation has one home, the generated
+[`model-price-floor-data.ts`](../../agent/lib/dark-factory/model-price-floor-data.ts), which the
+reservation reads and the guard checks. `npm run prices:check -- --write` refreshes it and
+**refuses** while any ceiling sits below the observed rate, so correcting the number and recording
+the reading are one act rather than two that can drift apart. The live comparison itself runs on a
+schedule, not in the unit suite: a unit test asserting our constant against the provider's changing
+number goes red for reasons no pull request can fix. Staleness is reported as a warning rather than
+halting runs, and a commit-time guard fails the build if a shipped ceiling drops below the recorded
+rate. See ADR 0071.
+
 ## Status relative to #214
 
 The customer-use tracking epic (#214) — tenant usage aggregation (R2) and the
