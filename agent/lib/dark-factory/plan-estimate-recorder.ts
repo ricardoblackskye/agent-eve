@@ -211,7 +211,39 @@ export async function recordPlanWithEstimateSafely(
   ledger: PlanLedger,
   input: RecordPlanWithEstimateInput,
 ): Promise<RecordPlanWithEstimateResult> {
-  throw new Error("not implemented");
+  const { planRevision, storyId, source, commentRef, estimate, ...shared } = input;
+  const createdAt = (input.now ?? new Date()).toISOString();
+
+  let plan: PersistedPlan;
+  try {
+    plan = await ledger.recordPlan({
+      runId: input.runId,
+      planRevision,
+      storyId,
+      source,
+      plan: input.plan,
+      createdAt,
+      // Supplied only when present: an explicit `undefined` is not an absent optional.
+      ...(input.tenantId !== undefined ? { tenantId: input.tenantId } : {}),
+      ...(commentRef !== undefined ? { commentRef } : {}),
+    });
+  } catch (error) {
+    const message = errorMessage(error);
+    console.warn(`[WARN] The plan could not be recorded: ${message}`);
+    return { ok: false, error: message };
+  }
+
+  // The plan row landed, so an estimate is now possible. Its failure is reported SEPARATELY: the
+  // plan is the primary record of what the run intends, and a pricing problem must not cost it.
+  const estimated = await recordPlanEstimateSafely(ledger, {
+    ...shared,
+    planId: plan.planId,
+    ...(estimate !== undefined ? { estimate } : {}),
+  });
+
+  return estimated.ok
+    ? { ok: true, plan, estimate: estimated.estimate }
+    : { ok: true, plan, estimateError: estimated.error };
 }
 
 /** Exported for the record-shape tests; the ledger's input type is the contract. */

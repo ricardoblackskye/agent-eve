@@ -3,8 +3,8 @@
  *
  * The ordering is asserted against the SOURCE, following the precedent in plan-approval.test.ts:
  * neither the relative order of the comment, the estimate and the park is observable from a unit test
- * of any module, and the ordering IS the requirement. The composition and the predicate are tested
- * behaviourally; only the placement is structural.
+ * of any module, and the ordering IS the requirement. The composition and the predicate are exercised
+ * directly; only the placement is structural.
  */
 import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
