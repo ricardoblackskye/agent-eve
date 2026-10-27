@@ -29,9 +29,12 @@ import {
   type PlanCostEstimate,
 } from "./plan-cost-estimate";
 import type {
+  PersistedPlan,
   PersistedPlanEstimate,
+  PlanCommentRef,
   PlanEstimateRecordInput,
   PlanLedger,
+  PlanSource,
 } from "./plan-ledger";
 
 export interface RecordPlanEstimateInput {
@@ -171,6 +174,44 @@ export async function recordPlanEstimateSafely(
     console.warn(`[WARN] The plan estimate could not be recorded: ${message}`);
     return { ok: false, error: message };
   }
+}
+
+/** A plan plus its estimate, as the runner supplies them: no plan identity yet. */
+export interface RecordPlanWithEstimateInput
+  extends Omit<RecordPlanEstimateInput, "planId"> {
+  /** Which revision this plan is. A run can legitimately produce several (#378). */
+  planRevision: number;
+  storyId: number;
+  /** `architect` for the first plan, `amendment` for a re-plan after feedback. */
+  source: PlanSource;
+  /** The comment the plan text lives in. Omitted when the post did not report an id. */
+  commentRef?: PlanCommentRef;
+}
+
+export type RecordPlanWithEstimateResult =
+  | {
+      ok: true;
+      plan: PersistedPlan;
+      estimate?: PersistedPlanEstimate;
+      /** Set when the plan landed but its estimate did not. The estimate is the secondary record. */
+      estimateError?: string;
+    }
+  | { ok: false; error: string };
+
+/**
+ * Persist the plan row, then its estimate. Best-effort in the same sense as the recorder: a ledger
+ * that rejects is reported and logged, never thrown.
+ *
+ * The two are not treated as equally important. The PLAN is the primary record of what the run
+ * intends, so a plan that fails to persist is a failure and no estimate is attempted (an estimate is
+ * a child of a plan row). An ESTIMATE that fails leaves the plan intact and reports separately, so a
+ * pricing problem cannot cost the run its plan.
+ */
+export async function recordPlanWithEstimateSafely(
+  ledger: PlanLedger,
+  input: RecordPlanWithEstimateInput,
+): Promise<RecordPlanWithEstimateResult> {
+  throw new Error("not implemented");
 }
 
 /** Exported for the record-shape tests; the ledger's input type is the contract. */

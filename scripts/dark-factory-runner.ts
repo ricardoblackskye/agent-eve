@@ -1639,6 +1639,25 @@ export async function releaseAbandonedRunClaim(active: ActiveRun | null): Promis
   );
 }
 
+/**
+ * Should this dispatch record a plan row and its estimate (#487)?
+ *
+ * The plan is NEW when the run is a fresh dispatch or a revision round. A plain RESUME reuses the
+ * approved plan, which was already recorded when it was first posted, so recomputing and
+ * re-persisting there would write a second estimate for a plan nobody re-planned - the thing AC5
+ * forbids.
+ *
+ * The truth table happens to match `parksForHumanApproval` today, because a new plan is exactly what
+ * gets parked for review. The two are kept SEPARATE on purpose: they answer different questions, and
+ * a future change to who parks must not silently change what gets recorded.
+ */
+export function shouldRecordPlanEstimate(input: {
+  resuming: boolean;
+  revision: boolean;
+}): boolean {
+  throw new Error("not implemented");
+}
+
 const isDirectRun =
   process.argv[1] !== undefined &&
   import.meta.url === pathToFileURL(process.argv[1]).href;
