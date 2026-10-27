@@ -25,8 +25,14 @@ describe("#501 the launcher's default workspace root is ignored", () => {
   });
 
   it("is actually ignored by git", () => {
+    // Assert on a path INSIDE the root: that is what a clone actually leaves behind, and it is also the
+    // only shape a `dir/` pattern can match. A trailing slash means "directory", so a BARE non-existent
+    // path is treated as a file and reported as not ignored - verified directly:
+    //   git check-ignore df-workspaces              -> exit 1, no match
+    //   git check-ignore df-workspaces/             -> match
+    //   git check-ignore df-workspaces/<entry>      -> match
     // Exits 1 and throws when the path is NOT ignored, which is the failure this guards against.
-    const output = execFileSync("git", ["check-ignore", "-v", WORKSPACE_ROOT], {
+    const output = execFileSync("git", ["check-ignore", "-v", `${WORKSPACE_ROOT}/webfeedpoc-169`], {
       cwd: process.cwd(),
       encoding: "utf8",
     });
