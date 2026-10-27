@@ -82,6 +82,39 @@ function cell(text: unknown): string {
 }
 
 /**
+ * Coerce a prose field to trimmed text, or "" when it is not a string.
+ *
+ * #503 Task 4 — the third instance of the same class as the STEP 5 crash. Making `cell`/`headingText`
+ * total fixed only the first throw; the very next real run died at `risk.trim is not a function`,
+ * because the architect's RETURNED plan does not match the declared types: `risks` arrives as
+ * `{risk, mitigation}` pairs while `PlanFileInput` says `string[]`. Every other emitted field
+ * (`summary`, `approach`, `objective`, `steps`, `verification`, `dependencies`) is the same latent
+ * crash one line later. Rendering a missing field as "" omits its section instead of aborting the run
+ * before the plan comment and the park.
+ */
+function text(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+/**
+ * A risk may arrive as a string or as a `{risk, mitigation}` pair.
+ *
+ * The mitigation is rendered WITH the risk rather than dropped: a reviewer needs both halves to judge
+ * whether the risk is acceptable. An unrecognised shape renders as "" and is skipped.
+ */
+function riskText(value: unknown): string {
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "object" && value !== null) {
+    const { risk, mitigation } = value as { risk?: unknown; mitigation?: unknown };
+    const head = typeof risk === "string" ? risk.trim() : "";
+    const tail = typeof mitigation === "string" ? mitigation.trim() : "";
+    if (head && tail) return `${head} (Mitigation: ${tail})`;
+    return head || tail;
+  }
+  return "";
+}
+
+/**
  * Give every fenced block an info string, so markdownlint MD040 (fenced-code-language) passes.
  *
  * A model-authored approach or summary can carry a fence with no info string, and a generated file
@@ -127,10 +160,11 @@ export function renderPlanFile(
   }
   lines.push("");
 
-  lines.push("## Goal", "", plan.summary.trim(), "");
+  lines.push("## Goal", "", text(plan.summary), "");
 
-  if (plan.approach && plan.approach.trim() !== "") {
-    lines.push("## Approach", "", plan.approach.trim(), "");
+  const approach = text(plan.approach);
+  if (approach !== "") {
+    lines.push("## Approach", "", approach, "");
   }
 
   const tasks = plan.tasks ?? [];
@@ -139,17 +173,23 @@ export function renderPlanFile(
     tasks.forEach((task, index) => {
       // The number keeps each heading unique even when two tasks share a title (MD024).
       lines.push(`### ${index + 1}. ${headingText(task.title)}`, "");
-      lines.push(`**Objective:** ${task.objective.trim()}`, "");
+      const objective = text(task.objective);
+      if (objective !== "") {
+        lines.push(`**Objective:** ${objective}`, "");
+      }
       if (task.files && task.files.length > 0) {
         lines.push(`**Files:** ${task.files.map((f) => `\`${f}\``).join(", ")}`, "");
       }
       if (task.steps && task.steps.length > 0) {
         lines.push("**Steps:**", "");
-        task.steps.forEach((step, i) => lines.push(`${i + 1}. ${step.trim()}`));
+        // Coerce before numbering so a non-string step cannot crash the renderer (#503 Task 4).
+        const steps = task.steps.map(text).filter((step) => step !== "");
+        steps.forEach((step, i) => lines.push(`${i + 1}. ${step}`));
         lines.push("");
       }
-      if (task.verification) {
-        lines.push(`**Verification:** ${task.verification.trim()}`, "");
+      const verification = text(task.verification);
+      if (verification !== "") {
+        lines.push(`**Verification:** ${verification}`, "");
       }
     });
   }
@@ -175,20 +215,22 @@ export function renderPlanFile(
     lines.push("");
   }
 
-  const risks = plan.risks ?? [];
+  // Coerce first: `risks` arrives as {risk, mitigation} pairs from the model while the type says
+  // string[], and the raw `risk.trim()` here is what killed the real run (#503 Task 4).
+  const risks = (plan.risks ?? []).map(riskText).filter((risk) => risk !== "");
   if (risks.length > 0) {
     lines.push("## Risks", "");
     for (const risk of risks) {
-      lines.push(`- ${risk.trim()}`);
+      lines.push(`- ${risk}`);
     }
     lines.push("");
   }
 
-  const dependencies = plan.dependencies ?? [];
+  const dependencies = (plan.dependencies ?? []).map(text).filter((dependency) => dependency !== "");
   if (dependencies.length > 0) {
     lines.push("## Dependencies", "");
     for (const dependency of dependencies) {
-      lines.push(`- ${dependency.trim()}`);
+      lines.push(`- ${dependency}`);
     }
     lines.push("");
   }
