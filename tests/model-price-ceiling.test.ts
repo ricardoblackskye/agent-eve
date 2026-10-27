@@ -8,6 +8,10 @@ import {
   parsePriceReceipt,
   unverifiedPriceModels,
 } from "./support/openrouter-price-receipt";
+import {
+  floorFor,
+  observedDearest,
+} from "../agent/lib/dark-factory/model-price-floor";
 
 /**
  * #335 — the shipped models must be PRICED, and priced as reservation CEILINGS.
@@ -165,5 +169,45 @@ describe("#494 the shipped ceilings cover the recorded dearest provider rate", (
     });
     expect(problems).toHaveLength(2);
     expect(problems.join(" ")).toContain("a/b");
+  });
+});
+
+/**
+ * #498 - the commit-time half of AC3.
+ *
+ * The runtime floor SUBSTITUTES for a stale ceiling, which keeps the reservation safe but
+ * leaves the shipped number wrong: the table would keep claiming a rate the catalog left
+ * behind, and the operator reading it would have no idea. This guard is what stops the table
+ * silently rotting, by failing the build the moment a shipped ceiling sits below the dearest
+ * rate we have actually verified.
+ *
+ * Hermetic: no network. The live half is `npm run prices:check`, driven by the scheduled
+ * Price Drift workflow.
+ */
+describe("#498 the shipped ceilings keep pace with the recorded floor", () => {
+  it("records every declared model id, so a new model cannot skip the guard", () => {
+    const missing = declaredModelIds().filter((id) => floorFor(id) === undefined);
+    expect(
+      missing,
+      `declared but unrecorded in the price floor: ${missing.join(", ")}`,
+    ).toEqual([]);
+  });
+
+  it("holds every shipped ceiling at or above the recorded dearest rate", () => {
+    const recorded = Object.keys(observedDearest);
+    expect(recorded.length).toBeGreaterThanOrEqual(1);
+    for (const id of recorded) {
+      const observed = observedDearest[id];
+      const entry = modelPriceTable[id];
+      expect(entry, `${id}: no ceiling in modelPriceTable`).toBeDefined();
+      expect(
+        entry?.inputUsdPer1k,
+        `${id} input: shipped ceiling ${entry?.inputUsdPer1k} is below the recorded dearest ${observed.inputUsdPer1k}`,
+      ).toBeGreaterThanOrEqual(observed.inputUsdPer1k);
+      expect(
+        entry?.outputUsdPer1k,
+        `${id} output: shipped ceiling ${entry?.outputUsdPer1k} is below the recorded dearest ${observed.outputUsdPer1k}`,
+      ).toBeGreaterThanOrEqual(observed.outputUsdPer1k);
+    }
   });
 });
