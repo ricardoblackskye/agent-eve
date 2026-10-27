@@ -252,7 +252,7 @@ Dark Factory — plan-level cost estimate (#485, epic #453). Turns a validated `
 **Exports:** `BAND_HIGH_MULTIPLIER`, `BAND_LOW_MULTIPLIER`, `CHARS_PER_TOKEN`, `CONTEXT_READS_PER_RUN`, `CostClass`, `CostConfidence`, `EstimatePlanCostInput`, `MAX_CHARS_PER_FILE`, `MAX_CONTEXT_FILES_READ`, `MIN_CALIBRATION_SAMPLES`, `OUTPUT_TOKENS_PER_TASK`, `PlanCostEstimate`, `ARCHITECT_OUTPUT_TOKENS`, `classifyCost`, `clampTokenCount`, `estimatePlanCost`
 ## plan-estimate-recorder
 
-#487 — the wiring half of the estimator. Computes a band from the VALIDATED plan and persists it
+The wiring half of the estimator (#487, epic #453). Computes a band from the VALIDATED plan and persists it
 against the plan row, joining #485's estimator to #486's ledger. Best-effort by design: a ledger
 outage is reported and logged, never thrown, because an estimate is an observation about a run
 rather than a control over it — the opposite posture to the plan revision cap, which fails closed.
