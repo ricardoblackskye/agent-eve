@@ -17,13 +17,19 @@ const EXPECTED_CEILINGS: Record<
   string,
   { inputUsdPer1k: number; outputUsdPer1k: number }
 > = {
-  // Maximum published OpenRouter provider price per axis, measured 2026-10-13 (see ADR 0027).
+  // The ceilings we SHIP, pinned so a silent table edit fails here.
+  //
+  // These are deliberately ABOVE the dearest published provider rate rather than equal to it. The
+  // dearest measured on 2026-10-26 was 0.0006 input / 0.005559908 output for v4.1-flash, and the
+  // catalog moves — that output figure rose ~33% within one session. A ceiling pinned exactly to the
+  // live maximum goes stale and then under-reserves, which is #494. Comparing the table against the
+  // LIVE catalog is the contract test's job; this one only pins what we ship (see ADR 0027).
   "deepseek/deepseek-v4.1-flash": {
-    inputUsdPer1k: 0.0006,
-    outputUsdPer1k: 0.0024,
+    inputUsdPer1k: 0.0007,
+    outputUsdPer1k: 0.0084,
   },
   "deepseek/deepseek-v4-pro": {
-    inputUsdPer1k: 0.00191,
+    inputUsdPer1k: 0.0021,
     outputUsdPer1k: 0.0105,
   },
 };
