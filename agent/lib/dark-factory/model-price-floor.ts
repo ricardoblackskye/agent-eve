@@ -49,7 +49,21 @@ export const PRICE_FLOOR_VERIFIED_AT = "2026-10-27";
 export const PRICE_FLOOR_TTL_DAYS = 90;
 
 /** The dearest rate seen per model id. Observation record, not a catalog mirror. */
-export const observedDearest: Record<string, DearestObservation> = {};
+export const observedDearest: Record<string, DearestObservation> = {
+  // Measured 2026-10-27. The dearest of the 41 providers fronting the default model, up from
+  // 0.004177242 at the first read that same day; the table sat at 0.0024 throughout, which is
+  // the under-reservation this module exists to prevent.
+  "deepseek/deepseek-v4.1-flash": {
+    inputUsdPer1k: 0.0006,
+    outputUsdPer1k: 0.006727487,
+    providers: 41,
+  },
+  "deepseek/deepseek-v4-pro": {
+    inputUsdPer1k: 0.00191,
+    outputUsdPer1k: 0.00383,
+    providers: 15,
+  },
+};
 
 /**
  * The floor for a model, normalised the same way `resolvePrice` normalises. Unknown returns
@@ -58,15 +72,36 @@ export const observedDearest: Record<string, DearestObservation> = {};
 export function floorFor(
   model: string | null | undefined,
 ): DearestObservation | undefined {
-  throw new Error("not implemented");
+  if (typeof model !== "string" || model.trim() === "") return undefined;
+  const normalized = model.trim().toLowerCase();
+  const observed = observedDearest[normalized];
+  if (!observed) return undefined;
+  // Deep copy, matching resolvePrice: callers must never mutate the canonical record.
+  return { ...observed };
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Midnight UTC on the verification date. Parsed on every call rather than captured at module load,
+ * so a mis-typed date fails loudly instead of silently ageing from an epoch.
+ */
+function verifiedAtMs(): number {
+  const parsed = Date.parse(`${PRICE_FLOOR_VERIFIED_AT}T00:00:00.000Z`);
+  if (!Number.isFinite(parsed)) {
+    throw new Error(
+      `PRICE_FLOOR_VERIFIED_AT is not an ISO date: ${PRICE_FLOOR_VERIFIED_AT}`,
+    );
+  }
+  return parsed;
 }
 
 /** Whole days between the verification date and `now`. */
 export function floorAgeDays(now: Date): number {
-  throw new Error("not implemented");
+  return Math.floor((now.getTime() - verifiedAtMs()) / DAY_MS);
 }
 
 /** True once the verification is older than `PRICE_FLOOR_TTL_DAYS`. */
 export function isFloorStale(now: Date): boolean {
-  throw new Error("not implemented");
+  return floorAgeDays(now) > PRICE_FLOOR_TTL_DAYS;
 }
