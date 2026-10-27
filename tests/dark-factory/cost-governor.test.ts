@@ -54,6 +54,26 @@ describe("cost governor", () => {
     expect(decision.reason).toBe("unpriced_model");
   });
 
+  it("#498 still refuses a model that only RESEMBLES a shipped one", async () => {
+    // The floor must not become a looser price resolver: a near-miss id has no observation and no
+    // ceiling, so it must refuse exactly as before, not be priced off a neighbouring entry.
+    const governor = createCostGovernor(new InMemoryCostBudgetProvider(), ENV);
+    for (const model of [
+      "deepseek/deepseek-v4.1-flash-2",
+      "deepseek/deepseek-v4.1",
+      "deepseek/deepseek-v4.1-flash-mini",
+    ]) {
+      const decision = await governor.admit({
+        category: "orchestrator",
+        model,
+        inputTokens: 1_000,
+        outputTokens: 1_000,
+      });
+      expect(decision.admitted, model).toBe(false);
+      expect(decision.reason, model).toBe("unpriced_model");
+    }
+  });
+
   it("refuses a category with no configured cap", async () => {
     const governor = createCostGovernor(new InMemoryCostBudgetProvider(), {
       DF_COST_BUDGET_ORCHESTRATOR_USD: "10",

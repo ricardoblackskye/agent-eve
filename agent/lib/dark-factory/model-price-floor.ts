@@ -192,6 +192,20 @@ export function renderPriceFloorModule(record: PriceFloorRecord): string {
   return `${header}export ${body.slice("export ".length)}`;
 }
 
+/**
+ * A one-line notice when the committed observation is past its TTL, else `null`.
+ *
+ * The refresh script prints it, so staleness is visible on the scheduled run rather than only in a
+ * test. Warning rather than fatal, following ADR 0067 - a fail-closed floor would turn a housekeeping
+ * lapse into an outage. ADR 0071 records that choice and the stricter alternative.
+ */
+export function stalenessNotice(
+  now: Date,
+  record: PriceFloorRecord = priceFloorRecord,
+): string | null {
+  throw new Error("not implemented");
+}
+
 /** Declared models with no recorded observation. A missing entry fails rather than skips. */
 export function unverifiedPriceModels(
   declared: readonly string[],

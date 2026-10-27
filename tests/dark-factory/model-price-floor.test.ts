@@ -20,6 +20,7 @@ import {
   PRICE_FLOOR_DATA_RELATIVE_PATH,
   priceFloorRecord,
   renderPriceFloorModule,
+  stalenessNotice,
   unverifiedPriceModels,
 } from "../../agent/lib/dark-factory/model-price-floor";
 import { modelPriceTable } from "../../agent/lib/dark-factory/cost-budget";
@@ -163,5 +164,35 @@ describe("#498 the shipped record helpers", () => {
     );
     const normalize = (text: string) => text.replace(/\r\n/g, "\n");
     expect(normalize(renderPriceFloorModule(priceFloorRecord))).toBe(normalize(onDisk));
+  });
+});
+
+describe("#498 staleness is surfaced, not hidden", () => {
+  const DAY = 24 * 60 * 60 * 1000;
+
+  it("stays quiet while the observation is inside its TTL", () => {
+    expect(stalenessNotice(verifiedAt)).toBeNull();
+    const justInside = new Date(verifiedAt.getTime() + PRICE_FLOOR_TTL_DAYS * DAY);
+    expect(stalenessNotice(justInside)).toBeNull();
+  });
+
+  it("names the verification date, the age and the refresh command once past the TTL", () => {
+    const past = new Date(verifiedAt.getTime() + (PRICE_FLOOR_TTL_DAYS + 3) * DAY);
+    const notice = stalenessNotice(past);
+    expect(notice).toBeTruthy();
+    expect(notice).toContain(PRICE_FLOOR_VERIFIED_AT);
+    expect(notice).toContain(String(PRICE_FLOOR_TTL_DAYS));
+    expect(notice).toContain("prices:check");
+    expect(notice).toMatch(/STALE/i);
+  });
+
+  it("measures the record it is given, not always the committed one", () => {
+    const old = {
+      verifiedAt: "2020-01-01",
+      source: "s",
+      observedDearest: { "a/b": { inputUsdPer1k: 1, outputUsdPer1k: 2, providers: 1 } },
+    };
+    expect(stalenessNotice(new Date("2026-01-01T00:00:00Z"), old)).toBeTruthy();
+    expect(stalenessNotice(new Date("2020-01-01T00:00:00Z"), old)).toBeNull();
   });
 });
