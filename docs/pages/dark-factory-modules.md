@@ -250,6 +250,17 @@ Dark Factory — plan-level cost estimate (#485, epic #453). Turns a validated `
 **Source:** [`agent/lib/dark-factory/plan-cost-estimate.ts`](../../agent/lib/dark-factory/plan-cost-estimate.ts)
 
 **Exports:** `BAND_HIGH_MULTIPLIER`, `BAND_LOW_MULTIPLIER`, `CHARS_PER_TOKEN`, `CONTEXT_READS_PER_RUN`, `CostClass`, `CostConfidence`, `EstimatePlanCostInput`, `MAX_CHARS_PER_FILE`, `MAX_CONTEXT_FILES_READ`, `MIN_CALIBRATION_SAMPLES`, `OUTPUT_TOKENS_PER_TASK`, `PlanCostEstimate`, `ARCHITECT_OUTPUT_TOKENS`, `classifyCost`, `clampTokenCount`, `estimatePlanCost`
+## model-price-floor
+
+The dearest published provider rate we have actually verified per model (#498). `resolvePrice`
+returns the higher of the shipped `modelPriceTable` entry and this floor, so a ceiling that falls
+behind the catalog raises the reserved number instead of silently under-reserving it. An
+observation record, not a mirror of the catalog: it carries the date and the provider count it was
+seen with, and the env override still wins over it.
+
+**Source:** [`agent/lib/dark-factory/model-price-floor.ts`](../../agent/lib/dark-factory/model-price-floor.ts)
+
+**Exports:** `DearestObservation`, `PRICE_FLOOR_SOURCE`, `PRICE_FLOOR_TTL_DAYS`, `PRICE_FLOOR_VERIFIED_AT`, `floorAgeDays`, `floorFor`, `isFloorStale`, `observedDearest`
 
 ## cost-gate
 
