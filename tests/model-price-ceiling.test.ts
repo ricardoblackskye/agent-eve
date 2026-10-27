@@ -1,13 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import * as modelConfig from "../agent/model-config";
 import { modelPriceTable, resolvePrice } from "../agent/lib/dark-factory/cost-budget";
 import {
-  ceilingsBelowObserved,
-  parsePriceReceipt,
-  unverifiedPriceModels,
-} from "./support/openrouter-price-receipt";
+  floorFor,
+  observedDearest,
+} from "../agent/lib/dark-factory/model-price-floor";
 
 /**
  * #335 — the shipped models must be PRICED, and priced as reservation CEILINGS.
@@ -20,10 +17,6 @@ import {
  * The guard is written over the MODULE's exports, so a future `*_MODEL_ID` is covered automatically
  * rather than only the two that exist today.
  */
-const RECEIPT_PATH = resolve(
-  process.cwd(),
-  "tests/support/openrouter-price-receipt.json",
-);
 
 const EXPECTED_CEILINGS: Record<
   string,
@@ -38,7 +31,7 @@ const EXPECTED_CEILINGS: Record<
   // LIVE catalog is the contract test's job; this one only pins what we ship (see ADR 0027).
   "deepseek/deepseek-v4.1-flash": {
     inputUsdPer1k: 0.0007,
-    outputUsdPer1k: 0.0084,
+    outputUsdPer1k: 0.02,
   },
   "deepseek/deepseek-v4-pro": {
     inputUsdPer1k: 0.0021,
@@ -75,8 +68,12 @@ describe("#335 shipped models are priced", () => {
 
   it("prices them as the documented ceilings", () => {
     for (const [id, expected] of Object.entries(EXPECTED_CEILINGS)) {
-      const price = resolvePrice(id);
-      expect(price, `${id} has no price`).not.toBeNull();
+      // #498 - assert the TABLE, not resolvePrice(id). resolvePrice now returns the RESERVATION
+      // price: the higher of the table and the observed-dearest floor. It is therefore no longer
+      // the ceiling, and comparing it here would conflate "the number we ship" with "the number we
+      // reserve". This case exists to pin the shipped number, so a silent table edit still fails.
+      const price = modelPriceTable[id];
+      expect(price, `${id} has no price in modelPriceTable`).toBeDefined();
       expect(price?.inputUsdPer1k, `${id} input`).toBeCloseTo(
         expected.inputUsdPer1k,
         10,
@@ -105,61 +102,41 @@ describe("#335 shipped models are priced", () => {
 
 
 /**
- * #494 — the ceilings must cover the dearest rate we have RECORDED seeing.
+ * #498 - the commit-time half of AC3.
  *
- * Hermetic: nothing here touches the network. The live comparison is `npm run prices:check`,
- * driven by the scheduled Price Drift workflow, because a unit test asserting our constant
- * against somebody else's changing number goes red for reasons no PR can fix. It did exactly
- * that three times in one day on `main`.
+ * The runtime floor SUBSTITUTES for a stale ceiling, which keeps the reservation safe but
+ * leaves the shipped number wrong: the table would keep claiming a rate the catalog left
+ * behind, and the operator reading it would have no idea. This guard is what stops the table
+ * silently rotting, by failing the build the moment a shipped ceiling sits below the dearest
+ * rate we have actually verified.
  *
- * This still asserts something real: lower a ceiling below the dearest rate on record, or
- * leave a declared model out of the receipt, and this fails.
+ * Hermetic: no network. The live half is `npm run prices:check`, driven by the scheduled
+ * Price Drift workflow.
  */
-describe("#494 the shipped ceilings cover the recorded dearest provider rate", () => {
-  const receiptText = readFileSync(RECEIPT_PATH, "utf8");
-
-  it("parses the committed receipt", () => {
-    const parsed = parsePriceReceipt(receiptText);
-    expect(parsed.kind, parsed.kind === "malformed" ? parsed.reason : "").toBe("ok");
-  });
-
-  it("records every declared model id (guards against a vacuous pass)", () => {
-    const parsed = parsePriceReceipt(receiptText);
-    if (parsed.kind !== "ok") throw new Error(parsed.reason);
-    expect(Object.keys(parsed.receipt.observedDearest).length).toBeGreaterThanOrEqual(1);
-    expect(unverifiedPriceModels(declaredModelIds(), parsed.receipt)).toEqual([]);
-  });
-
-  it("covers the dearest observed rate on every axis", () => {
-    const parsed = parsePriceReceipt(receiptText);
-    if (parsed.kind !== "ok") throw new Error(parsed.reason);
-    expect(ceilingsBelowObserved(modelPriceTable, parsed.receipt)).toEqual([]);
-  });
-
-  it("rejects a malformed receipt rather than trusting it", () => {
-    expect(parsePriceReceipt("{not json").kind).toBe("malformed");
+describe("#498 the shipped ceilings keep pace with the recorded floor", () => {
+  it("records every declared model id, so a new model cannot skip the guard", () => {
+    const missing = declaredModelIds().filter((id) => floorFor(id) === undefined);
     expect(
-      parsePriceReceipt(JSON.stringify({ verifiedAt: "nope", source: "s", observedDearest: {} })).kind,
-    ).toBe("malformed");
-    expect(
-      parsePriceReceipt(
-        JSON.stringify({
-          verifiedAt: "2026-01-01",
-          source: "s",
-          observedDearest: { "a/b": { inputUsdPer1k: 1, outputUsdPer1k: "x", providers: 1 } },
-        }),
-      ).kind,
-    ).toBe("malformed");
+      missing,
+      `declared but unrecorded in the price floor: ${missing.join(", ")}`,
+    ).toEqual([]);
   });
 
-  it("detects a ceiling that has been lowered below the recorded rate", () => {
-    const lowered = { ...modelPriceTable, "a/b": { inputUsdPer1k: 0, outputUsdPer1k: 0 } };
-    const problems = ceilingsBelowObserved(lowered, {
-      verifiedAt: "2026-01-01",
-      source: "s",
-      observedDearest: { "a/b": { inputUsdPer1k: 5, outputUsdPer1k: 9, providers: 2 } },
-    });
-    expect(problems).toHaveLength(2);
-    expect(problems.join(" ")).toContain("a/b");
+  it("holds every shipped ceiling at or above the recorded dearest rate", () => {
+    const recorded = Object.keys(observedDearest);
+    expect(recorded.length).toBeGreaterThanOrEqual(1);
+    for (const id of recorded) {
+      const observed = observedDearest[id];
+      const entry = modelPriceTable[id];
+      expect(entry, `${id}: no ceiling in modelPriceTable`).toBeDefined();
+      expect(
+        entry?.inputUsdPer1k,
+        `${id} input: shipped ceiling ${entry?.inputUsdPer1k} is below the recorded dearest ${observed.inputUsdPer1k}`,
+      ).toBeGreaterThanOrEqual(observed.inputUsdPer1k);
+      expect(
+        entry?.outputUsdPer1k,
+        `${id} output: shipped ceiling ${entry?.outputUsdPer1k} is below the recorded dearest ${observed.outputUsdPer1k}`,
+      ).toBeGreaterThanOrEqual(observed.outputUsdPer1k);
+    }
   });
 });

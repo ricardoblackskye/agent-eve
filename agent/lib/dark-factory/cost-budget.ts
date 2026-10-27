@@ -1,3 +1,4 @@
+import { floorFor, type DearestObservation } from "./model-price-floor";
 /**
  * Dark Factory — canonical cost budget types, price table, and estimation.
  *
@@ -109,14 +110,14 @@ export interface ModelPrice {
 export const modelPriceTable: Record<string, ModelPrice> = {
   // The project's current default and fallback (agent/model-config.ts).
   //
-  // #494: OUTPUT was 0.0024 while the dearest of the 41 providers fronting this model measured
+  // #494/#498: OUTPUT was 0.0024 while the dearest of the 41 providers fronting this model measured
   // 0.005559908 (2026-10-26) — 2.3x under, so every reservation under-stated the call and the breach
   // only appeared at settle. Both rates now sit above the dearest observed rate with headroom, on
   // purpose: this figure rose ~33% during a single session, and ADR 0027 is explicit that
   // over-reserving is transient while under-reserving is not.
   "deepseek/deepseek-v4.1-flash": {
     inputUsdPer1k: 0.0007,
-    outputUsdPer1k: 0.0084,
+    outputUsdPer1k: 0.02,
   },
   "deepseek/deepseek-v4-pro": {
     // #494: input sat EXACTLY on the dearest provider rate (0.00191), so any rise broke the ceiling.
@@ -129,6 +130,28 @@ export const modelPriceTable: Record<string, ModelPrice> = {
     outputUsdPer1k: 0.0003,
   },
 };
+
+/**
+ * Raise a table entry to the observed-dearest FLOOR (#498), axis by axis.
+ *
+ * The floor is the dearest provider rate actually verified for the model; the table is the
+ * hand-maintained ceiling. `admit()` reserves against the result, so the higher of the two is the
+ * only safe answer: taking the table alone under-reserves the moment the table falls behind the
+ * catalog, which is exactly what happened for the default model.
+ *
+ * The axes are independent on purpose - a dearest INPUT rate says nothing about the output rate.
+ * A missing floor returns the table unchanged; the floor can only ever raise.
+ */
+export function applyPriceFloor(
+  table: ModelPrice,
+  floor: DearestObservation | undefined,
+): ModelPrice {
+  if (!floor) return { ...table };
+  return {
+    inputUsdPer1k: Math.max(table.inputUsdPer1k, floor.inputUsdPer1k),
+    outputUsdPer1k: Math.max(table.outputUsdPer1k, floor.outputUsdPer1k),
+  };
+}
 
 /**
  * Normalize and look up a model id. Strips surrounding whitespace; unknown
@@ -158,8 +181,11 @@ export function resolvePrice(
   }
   const known = modelPriceTable[normalized];
   if (!known) return null;
-  // Deep copy so callers never mutate the canonical table.
-  return { ...known };
+  // #498: reserve against the HIGHER of the table and the observed-dearest floor. The env
+  // override above still wins, because an operator who knows the provider in use is making a
+  // deliberate per-deployment choice (ADR 0027), while this guards the shared table.
+  // applyPriceFloor deep-copies, so callers never mutate the canonical table.
+  return applyPriceFloor(known, floorFor(normalized));
 }
 
 /**

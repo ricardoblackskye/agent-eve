@@ -67,9 +67,10 @@ jobs:
           To fix:
             1. raise the ceiling in agent/lib/dark-factory/cost-budget.ts
             2. run: npm run prices:check -- --write
-               that refreshes tests/support/openrouter-price-receipt.json
+               that refreshes agent/lib/dark-factory/model-price-floor.json
 
-          The unit suite only asserts that the ceiling covers the receipt, so the receipt must be refreshed in the same commit as the ceiling.
+          The unit suite asserts the ceiling covers that same shipped file, so the observation must
+          be refreshed whenever the ceiling moves.
 
           Detected by: ${RUN_URL}"
 

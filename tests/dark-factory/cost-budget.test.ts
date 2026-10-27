@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   CostCategory,
   isCostCategory,
@@ -10,7 +10,12 @@ import {
   resolvePrice,
   estimateCost,
   modelPriceTable,
+  applyPriceFloor,
 } from "../../agent/lib/dark-factory/cost-budget";
+import {
+  floorFor,
+  observedDearest,
+} from "../../agent/lib/dark-factory/model-price-floor";
 
 describe("cost-budget canonical types and price table", () => {
   describe("CostCategory enum + isCostCategory", () => {
@@ -344,5 +349,97 @@ describe("cost-budget canonical types and price table", () => {
         estimateCost("unknown/model", 1000000, 500000),
       ).toBeGreaterThanOrEqual(0);
     });
+  });
+});
+
+describe("#498 the reserved price covers the observed dearest floor", () => {
+  const table = { inputUsdPer1k: 0.0006, outputUsdPer1k: 0.0024 };
+  const floor = { inputUsdPer1k: 0.0006, outputUsdPer1k: 0.006727487, providers: 41 };
+
+  it("raises a table entry that has fallen below the dearest observed rate", () => {
+    expect(applyPriceFloor(table, floor)).toEqual({
+      inputUsdPer1k: 0.0006,
+      outputUsdPer1k: 0.006727487,
+    });
+  });
+
+  it("keeps the axes independent - a high input floor must not drag output up", () => {
+    const raised = applyPriceFloor(
+      { inputUsdPer1k: 1, outputUsdPer1k: 1 },
+      { inputUsdPer1k: 5, outputUsdPer1k: 0.5, providers: 2 },
+    );
+    expect(raised).toEqual({ inputUsdPer1k: 5, outputUsdPer1k: 1 });
+  });
+
+  it("never returns less than the table - the floor only ever raises", () => {
+    expect(
+      applyPriceFloor(
+        { inputUsdPer1k: 9, outputUsdPer1k: 9 },
+        { inputUsdPer1k: 1, outputUsdPer1k: 1, providers: 1 },
+      ),
+    ).toEqual({ inputUsdPer1k: 9, outputUsdPer1k: 9 });
+  });
+
+  it("returns the table unchanged when the model has no recorded floor", () => {
+    expect(applyPriceFloor(table, undefined)).toEqual(table);
+  });
+
+  it("covers the floor for every recorded model through resolvePrice", () => {
+    const ids = Object.keys(observedDearest);
+    expect(ids.length).toBeGreaterThanOrEqual(1);
+    for (const id of ids) {
+      const observed = observedDearest[id];
+      const resolved = resolvePrice(id);
+      expect(resolved, `${id} has no price`).not.toBeNull();
+      expect(
+        resolved?.inputUsdPer1k,
+        `${id}: reserved input ${resolved?.inputUsdPer1k} is below the observed floor ${observed.inputUsdPer1k}`,
+      ).toBeGreaterThanOrEqual(observed.inputUsdPer1k);
+      expect(
+        resolved?.outputUsdPer1k,
+        `${id}: reserved output ${resolved?.outputUsdPer1k} is below the observed floor ${observed.outputUsdPer1k}`,
+      ).toBeGreaterThanOrEqual(observed.outputUsdPer1k);
+    }
+  });
+
+  it("reserves exactly max(table, floor) - not more than it must", () => {
+    for (const [id, observed] of Object.entries(observedDearest)) {
+      const entry = modelPriceTable[id];
+      if (!entry) continue;
+      expect(resolvePrice(id), `${id}`).toEqual({
+        inputUsdPer1k: Math.max(entry.inputUsdPer1k, observed.inputUsdPer1k),
+        outputUsdPer1k: Math.max(entry.outputUsdPer1k, observed.outputUsdPer1k),
+      });
+    }
+  });
+});
+
+describe("#498 the env override still beats the floor", () => {
+  const MODEL = "deepseek/deepseek-v4.1-flash";
+  const OVERRIDE_ENV = "DF_MODEL_PRICE_deepseek_deepseek_v4_1_flash";
+
+  it("returns the override unchanged, even when the floor is higher", () => {
+    // The override deliberately goes BELOW the floor. That is the documented escape hatch: an
+    // operator who knows the provider in use may pin a cheaper exact rate, and ADR 0027 says so.
+    // Set it above the floor and the case would pass whether or not the floor were consulted.
+    const floor = floorFor(MODEL);
+    expect(floor?.outputUsdPer1k).toBeGreaterThan(0.0002);
+
+    vi.stubEnv(OVERRIDE_ENV, "0.0001,0.0002");
+    try {
+      expect(resolvePrice(MODEL)).toEqual({
+        inputUsdPer1k: 0.0001,
+        outputUsdPer1k: 0.0002,
+      });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("falls back to at least the floor once the override is gone", () => {
+    const floor = floorFor(MODEL);
+    expect(resolvePrice(MODEL)?.outputUsdPer1k).toBeGreaterThanOrEqual(
+      floor?.outputUsdPer1k ?? 0,
+    );
   });
 });
