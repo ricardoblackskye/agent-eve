@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   CostCategory,
   isCostCategory,
@@ -12,7 +12,10 @@ import {
   modelPriceTable,
   applyPriceFloor,
 } from "../../agent/lib/dark-factory/cost-budget";
-import { observedDearest } from "../../agent/lib/dark-factory/model-price-floor";
+import {
+  floorFor,
+  observedDearest,
+} from "../../agent/lib/dark-factory/model-price-floor";
 
 describe("cost-budget canonical types and price table", () => {
   describe("CostCategory enum + isCostCategory", () => {
@@ -408,5 +411,35 @@ describe("#498 the reserved price covers the observed dearest floor", () => {
         outputUsdPer1k: Math.max(entry.outputUsdPer1k, observed.outputUsdPer1k),
       });
     }
+  });
+});
+
+describe("#498 the env override still beats the floor", () => {
+  const MODEL = "deepseek/deepseek-v4.1-flash";
+  const OVERRIDE_ENV = "DF_MODEL_PRICE_deepseek_deepseek_v4_1_flash";
+
+  it("returns the override unchanged, even when the floor is higher", () => {
+    // The override deliberately goes BELOW the floor. That is the documented escape hatch: an
+    // operator who knows the provider in use may pin a cheaper exact rate, and ADR 0027 says so.
+    // Set it above the floor and the case would pass whether or not the floor were consulted.
+    const floor = floorFor(MODEL);
+    expect(floor?.outputUsdPer1k).toBeGreaterThan(0.0002);
+
+    vi.stubEnv(OVERRIDE_ENV, "0.0001,0.0002");
+    try {
+      expect(resolvePrice(MODEL)).toEqual({
+        inputUsdPer1k: 0.0001,
+        outputUsdPer1k: 0.0002,
+      });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("falls back to at least the floor once the override is gone", () => {
+    const floor = floorFor(MODEL);
+    expect(resolvePrice(MODEL)?.outputUsdPer1k).toBeGreaterThanOrEqual(
+      floor?.outputUsdPer1k ?? 0,
+    );
   });
 });
