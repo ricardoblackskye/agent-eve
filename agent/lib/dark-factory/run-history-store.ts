@@ -197,7 +197,7 @@ export interface PersistedRunEvent {
   event: RunEvent;
 }
 
-export interface RunHistoryStore {
+export interface RunHistoryStore extends PlanLedger {
   id: string;
   acceptDelivery(
     input: AcceptRunDelivery,
@@ -1044,7 +1044,7 @@ function rowToPlanEstimate(row: PlanEstimateRow): PersistedPlanEstimate | null {
   };
 }
 
-export class SqliteRunHistoryStore implements RunHistoryStore, PlanLedger {
+export class SqliteRunHistoryStore implements RunHistoryStore {
   id = "sqlite";
   private readonly path: string;
   private readonly idFactory: () => string;

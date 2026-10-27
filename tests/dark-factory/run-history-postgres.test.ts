@@ -443,4 +443,57 @@ describeWithDatabase("PostgresRunHistoryStore integration", () => {
     expect(metrics.value?.measured.latencyMs).toEqual({ sum: 3500, count: 3 });
     expect(metrics.value?.measured.costUsd).toEqual({ sum: 1.75, count: 3 });
   });
+  it("round-trips a plan revision and its estimate, and reports empty for an unpriced run (#486)", async () => {
+    const runId = `pg-ledger-${namespace}`;
+    const recorded = await store.recordPlan({
+      runId,
+      planRevision: 1,
+      storyId: 486,
+      source: "architect",
+      plan: {
+        storyId: 486,
+        title: "persist the estimate",
+        summary: "a story",
+        targetFiles: [{ path: "a.ts", action: "modify", rationale: "r" }],
+        acceptanceCriteriaMap: [],
+      },
+      createdAt: at,
+    });
+    expect(recorded.planId).toBeGreaterThan(0);
+
+    await store.recordPlanEstimate({
+      planId: recorded.planId,
+      runId,
+      period: "2026-10",
+      model: "deepseek/deepseek-v4.1-flash",
+      lowUsd: 0.01,
+      expectedUsd: 0.02352,
+      highUsd: 0.04704,
+      costClass: "XS",
+      confidence: "low",
+      revisionFactor: 1,
+      historySamples: 0,
+      targetFileCount: 2,
+      taskCount: 0,
+      inputTokens: 12_000,
+      outputTokens: 8_000,
+      priceSource: "known-model",
+      features: { targetFileCount: 2, priceSource: "known-model" },
+      createdAt: at,
+    });
+
+    const plans = await store.listPlans(runId);
+    expect(plans).toHaveLength(1);
+    expect(plans[0].plan.targetFiles).toHaveLength(1);
+
+    const estimates = await store.listPlanEstimates(runId);
+    expect(estimates).toHaveLength(1);
+    expect(estimates[0].expectedUsd).toBeCloseTo(0.02352, 8);
+    expect(estimates[0].costClass).toBe("XS");
+    // Version stamp survives the JSONB round trip.
+    expect(estimates[0].estimatorVersion).toBe("v1");
+
+    // A plan that was never priced has NO estimate row, never a zero-filled one.
+    expect(await store.listPlanEstimates(`pg-ledger-none-${namespace}`)).toEqual([]);
+  });
 });
