@@ -153,6 +153,18 @@ bring them into existence. Row-level security is **not** runtime DDL, however: i
 against the database. An estimate row carries per-run and per-tenant cost figures, so an
 anon-readable row would leak commercial pricing about a customer's work.
 
+The estimate is written by the **architect flow**, and the order there is deliberate:
+[`plan-estimate-recorder.ts`](../../agent/lib/dark-factory/plan-estimate-recorder.ts) persists the plan
+row after the plan comment is posted and before the run parks for approval. The comment comes first
+because the plan row carries the comment's id and the ledger is write-once, so recording before the
+post would leave `comment_ref` permanently null; the persistence still lands before the park, so the
+numbers are durable before a human is told the plan is ready to review. Only a NEW plan is recorded — a
+fresh dispatch or a revision round. A plain resume reuses the plan recorded when it was first posted,
+so it records nothing, and the write-once constraint refuses a duplicate revision as the second line of
+defence. Recording is best-effort throughout: the estimate is an observation about a run rather than a
+control over it, so a ledger outage is logged and the run proceeds, which is the opposite posture to the
+plan revision cap that fails closed.
+
 ## Status relative to #214
 
 The customer-use tracking epic (#214) — tenant usage aggregation (R2) and the
