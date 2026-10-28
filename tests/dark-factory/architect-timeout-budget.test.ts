@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  ArchitectAgent,
   ARCHITECT_TIMEOUT_FLOOR_MS,
   ARCHITECT_TIMEOUT_MAX_MS,
   ARCHITECT_TIMEOUT_OVERHEAD_FREE_CHARS,
@@ -87,5 +88,60 @@ describe("#521 the Architect's planning budget", () => {
       expect(Number.isFinite(huge)).toBe(true);
       expect(huge).toBeLessThanOrEqual(ARCHITECT_TIMEOUT_MAX_MS);
     });
+  });
+});
+
+/**
+ * #521 Task 2 — the agent must actually USE the derivation, and an attempt that times out must say what it was
+ * up against. The failure text is what reaches the ticket, and the attempt record is what a reader can query.
+ */
+describe("#521 the agent uses the derived budget and reports what it hit", () => {
+  const story = { number: 521, title: "Create a new top banner", body: "Add a banner." };
+
+  const agentWith = (over: Record<string, unknown>) =>
+    new ArchitectAgent({
+      listFiles: async () => ["app/chat.tsx"],
+      maxPlanRetries: 0,
+      ...over,
+    } as never);
+
+  it("an answer past the floor completes when the prompt is big enough to buy the time", async () => {
+    // Scaled-down constants keep the test fast while proving the DERIVATION rather than the constants: floor
+    // 30 ms, 10 s per 10k chars, so any real prompt earns far more than the 45 ms this answer needs.
+    const agent = agentWith({
+      timeoutFloorMs: 30,
+      timeoutPer10kCharsMs: 10_000,
+      // Threshold pinned to 0 so the assertion cannot depend on whether this particular story's prompt happens
+      // to exceed the default threshold: the derivation is the only thing that can buy the extra time here.
+      timeoutOverheadFreeChars: 0,
+      generateText: () => new Promise((resolve) => setTimeout(() => resolve("{}"), 45)),
+    });
+    const result = await agent.planStory(story as never);
+    expect(result.error ?? "").not.toContain("timed out after");
+  });
+
+  it("CONTROL: with no increment the same answer times out at the floor", async () => {
+    // Without this control the case above would pass for the wrong reason — a generous default budget — rather
+    // than because the prompt size bought the extra time.
+    const agent = agentWith({
+      timeoutFloorMs: 30,
+      timeoutPer10kCharsMs: 0,
+      generateText: () => new Promise((resolve) => setTimeout(() => resolve("{}"), 45)),
+    });
+    const result = await agent.planStory(story as never);
+    expect(result.error ?? "").toContain("timed out after");
+  });
+
+  it("names the prompt size in the failure, and records size and duration on the attempt", async () => {
+    const agent = agentWith({
+      timeoutFloorMs: 30,
+      timeoutPer10kCharsMs: 0,
+      generateText: () => new Promise<string>(() => {}),
+    });
+    const result = await agent.planStory(story as never);
+    expect(result.error).toMatch(/prompt \d+ chars/);
+    const attempt = result.attempts?.[0];
+    expect(attempt?.promptChars).toBeGreaterThan(0);
+    expect(attempt?.elapsedMs).toBeGreaterThanOrEqual(30);
   });
 });
