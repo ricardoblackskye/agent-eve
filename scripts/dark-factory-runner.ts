@@ -79,7 +79,7 @@ import {
 } from "../agent/lib/dark-factory/preservation-guard";
 import { renderPlanFile } from "../agent/lib/dark-factory/plan-file";
 import { postPlanComment } from "../agent/lib/dark-factory/plan-comment";
-import { recordPlanEstimateSafely } from "../agent/lib/dark-factory/plan-estimate-recorder";
+import { recordPlanWithEstimateSafely } from "../agent/lib/dark-factory/plan-estimate-recorder";
 import {
   explainPlanFailure,
   loadApprovedPlan,
@@ -96,7 +96,6 @@ import {
   isPlanRevisionCapReached,
   readPlanRevisionCount,
   recordPlanRevision,
-  recordPostedPlan,
 } from "../agent/lib/dark-factory/plan-revision-recorder";
 import { resolveRunnerAnswer } from "../agent/lib/dark-factory/runner-config";
 import { createWorkerReporter } from "../agent/lib/dark-factory/worker-reporter";
@@ -873,17 +872,14 @@ async function main(): Promise<void> {
   console.log(`\n[PLAN] Posted the plan on #${issueNum} (${planComment.action}).`);
 
   // #505 + #487: PERSIST the plan (with the comment reference) and its cost estimate as ONE write.
-  // The ledger is write-once on (run_id, plan_revision) with no upsert, so a second insert for the same
-  // revision would be rejected - one seam, not two. `recordPostedPlan` owns the plan row and its
-  // discipline from #505: the refusing console/dry-run store is skipped LOUDLY, and any other error
-  // PROPAGATES, so a broken ledger still fails the run.
+  // One seam, not two: the ledger is write-once on (run_id, plan_revision) with no upsert, so a second
+  // insert for the same revision would be rejected. `recordPlanWithEstimateSafely` delegates the plan
+  // row to `recordPostedPlan` (#505), which owns its discipline: the refusing console/dry-run store is
+  // skipped LOUDLY, and any other error PROPAGATES, so a broken ledger still fails the run. The estimate
+  // (#487) is the OBSERVATION half: its failure is reported and never fails the run.
   //
-  // The estimate (#487) is the observation half. It is recorded only once the plan row has a planId, and
-  // it CANNOT fail the run: a pricing problem is reported and logged, because an estimate is an
-  // observation about a run, not a control over it.
-  //
-  // Guarded, because a plain resume reuses the plan and estimate recorded when they were first posted:
-  // re-recording would breach write-once and re-price a plan nobody re-planned (AC5).
+  // Guarded: a plain resume reuses the plan recorded when it was first posted, so re-recording would
+  // breach write-once and re-price a plan nobody re-planned (AC5).
   if (shouldRecordPlanEstimate({ resuming: isResume, revision: isRevision })) {
     const commentRef =
       planComment.id === undefined
@@ -893,39 +889,23 @@ async function main(): Promise<void> {
             id: planComment.id,
             url: `https://github.com/${targetRepo}/issues/${issueNum}#issuecomment-${planComment.id}`,
           };
-    const persistedPlan = await recordPostedPlan(runHistory, {
-      runId,
-      planRevision: revisionRound ?? 1,
+    const recorded = await recordPlanWithEstimateSafely(runHistory, {
       plan: executionPlan,
-      source: revisionRound === undefined ? "architect" : "amendment",
+      runId,
+      model: modelId,
+      period: utcMonth(),
+      planRevision: revisionRound ?? 1,
+      storyId: issueNum,
+      source: isRevision ? "amendment" : "architect",
       commentRef,
     });
-    if (persistedPlan.ok) {
+    if (recorded.ok) {
       console.log(
-        `[PLAN] Persisted plan revision ${revisionRound ?? 1} (plan #${persistedPlan.planId}).`,
+        `[PLAN] Persisted plan revision ${revisionRound ?? 1} with its cost estimate (plan #${recorded.planId}).`,
       );
-      // Best-effort: a plan that landed with no estimate is a warning, never a failed run.
-      if (persistedPlan.planId !== undefined) {
-        const estimated = await recordPlanEstimateSafely(runHistory, {
-          plan: executionPlan,
-          planId: persistedPlan.planId,
-          runId,
-          model: modelId,
-          period: utcMonth(),
-        });
-        if (estimated.ok) {
-          console.log(
-            `[PLAN] Recorded the cost estimate for revision ${revisionRound ?? 1}.`,
-          );
-        } else {
-          console.warn(
-            `[WARN] The plan was recorded but its estimate was not: ${estimated.error}`,
-          );
-        }
-      }
-    } else if (persistedPlan.skipped) {
+    } else if (recorded.skipped) {
       console.log(
-        `[PLAN] NOT persisted (${persistedPlan.error ?? "run history not configured"}) - dry-run.`,
+        `[PLAN] NOT persisted (${recorded.error ?? "run history not configured"}) - dry-run.`,
       );
     }
   }

@@ -96,15 +96,16 @@ describe("#487 AC4 the estimate reaches persistence", () => {
     expect(row.stage).toBeUndefined();
   });
 
-  it("refuses a second plan for the same revision, without throwing", async () => {
+  it("refuses a second plan for the same revision by throwing (write-once refusal is a real error, #505)", async () => {
     const store = createStore();
     const first = await recordPlanWithEstimateSafely(store, input());
     expect(first.ok).toBe(true);
 
-    // A resume that wrongly recorded again would land here. The write-once constraint refuses it,
-    // and best-effort turns that refusal into a reported result rather than a failed run.
-    const second = await recordPlanWithEstimateSafely(store, input());
-    expect(second.ok).toBe(false);
+    // A resume that wrongly recorded again would land here. The write-once constraint refuses it, and
+    // because the plan row is owned by recordPostedPlan (#505), that refusal PROPAGATES (fail-closed)
+    // rather than being swallowed as a best-effort observation. The resume predicate is the real guard;
+    // this proves a bypass still cannot sneak a duplicate past the ledger.
+    await expect(recordPlanWithEstimateSafely(store, input())).rejects.toThrow();
     expect(await store.listPlans("run-487")).toHaveLength(1);
     expect(await store.listPlanEstimates("run-487")).toHaveLength(1);
   });

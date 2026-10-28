@@ -65,8 +65,12 @@ function baseInput(over: Partial<RecordPlanWithEstimateInput> = {}): RecordPlanW
     source: "architect",
     now: new Date("2026-10-27T12:00:00.000Z"),
     estimate: () => ({
-      lowUsd: 0.1, expectedUsd: 0.2, highUsd: 0.4,
-      costClass: "XS", confidence: "low", features: FEATURES,
+      lowUsd: 0.1,
+      expectedUsd: 0.2,
+      highUsd: 0.4,
+      costClass: "XS",
+      confidence: "low",
+      features: FEATURES,
     }),
     ...over,
   };
@@ -91,26 +95,28 @@ describe("#487 recordPlanWithEstimateSafely", () => {
     const { ledger, plans, estimates } = recordingLedger();
     const result = await recordPlanWithEstimateSafely(
       ledger,
-      baseInput({ commentRef: { provider: "github", id: 4242, url: "https://example.invalid/4242" } }),
+      baseInput({
+        commentRef: { provider: "github", id: 4242, url: "https://example.invalid/4242" },
+      }),
     );
     expect(result.ok).toBe(true);
+    if (!result.ok) return;
     expect(plans).toHaveLength(1);
     expect(plans[0].commentRef?.id).toBe(4242);
     expect(plans[0].source).toBe("architect");
     expect(plans[0].planRevision).toBe(1);
-    expect(plans[0].createdAt).toBe("2026-10-27T12:00:00.000Z");
+    expect(result.planId).toBe(99);
     // the estimate is a CHILD of the plan row, so it carries the id the plan insert returned
     expect(estimates).toHaveLength(1);
     expect(estimates[0].planId).toBe(99);
     expect(estimates[0].runId).toBe("run-487");
   });
 
-  it("reports a failed plan without inventing an estimate for it", async () => {
+  it("propagates a failed plan write (fail-closed, per #505) and invents no estimate for it", async () => {
     const { ledger, estimates } = recordingLedger(true, false);
-    const result = await recordPlanWithEstimateSafely(ledger, baseInput());
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.error).toContain("plan insert refused");
+    await expect(recordPlanWithEstimateSafely(ledger, baseInput())).rejects.toThrow(
+      /plan insert refused/,
+    );
     expect(estimates).toHaveLength(0);
   });
 
@@ -119,19 +125,22 @@ describe("#487 recordPlanWithEstimateSafely", () => {
     const result = await recordPlanWithEstimateSafely(ledger, baseInput());
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.plan.planId).toBe(99);
+    expect(result.planId).toBe(99);
     expect(result.estimate).toBeUndefined();
     expect(result.estimateError).toContain("estimate insert refused");
   });
 
-  it("never throws, whatever the ledger does", async () => {
+  it("never throws when only the estimate is rejected", async () => {
     const ledger = {
-      recordPlan: vi.fn(async () => {
+      recordPlan: vi.fn(async (row: PlanRecordInput) => ({ ...row, planId: 99 } as PersistedPlan)),
+      recordPlanEstimate: vi.fn(async () => {
         throw "a string rejection";
       }),
+      listPlans: vi.fn(),
+      listPlanEstimates: vi.fn(),
     } as unknown as PlanLedger;
     await expect(recordPlanWithEstimateSafely(ledger, baseInput())).resolves.toMatchObject({
-      ok: false,
+      ok: true,
     });
   });
 });
@@ -156,6 +165,7 @@ describe("#487 the estimate is persisted after the comment and before the park",
     const guardAt = runner.indexOf("shouldRecordPlanEstimate({");
     const recordAt = runner.indexOf("await recordPlanWithEstimateSafely(");
     expect(guardAt).toBeGreaterThan(-1);
+    expect(recordAt).toBeGreaterThan(-1);
     expect(guardAt).toBeLessThan(recordAt);
   });
 });

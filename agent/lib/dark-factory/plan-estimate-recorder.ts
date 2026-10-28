@@ -1,35 +1,40 @@
 /**
- * Dark Factory - record a plan's cost estimate, best-effort (#487, epic #453).
+ * Dark Factory - record a plan's COST ESTIMATE, best-effort (#487, epic #453).
  *
- * The WIRING half of the estimator. `estimatePlanCost` (#485) computes a band from a validated plan;
- * `PlanLedger` (#486) persists rows. This module joins them without letting a persistence problem
- * reach the run.
+ * `estimatePlanCost` (#485) computes a band from a VALIDATED plan; `PlanLedger` (#486) persists the
+ * rows. This module records the estimate against the plan row that #505 already wrote.
  *
- * WHY BEST-EFFORT, AND WHY THAT CONTRASTS WITH `readPlanRevisionCount`
+ * THE PLAN ROW IS NOT THIS MODULE'S TO WRITE. `recordPlanWithEstimateSafely` delegates the plan insert
+ * to `recordPostedPlan` (#505), so the plan write keeps that function's discipline: the refusing
+ * console/dry-run store is SKIPPED LOUDLY, and any other error PROPAGATES (fail-closed - a broken
+ * ledger fails the run). This module owns only the estimate half, and estimates are best-effort.
  *
- * The plan revision cap FAILS CLOSED on an unreadable ledger, deliberately: a cap that silently
- * reads zero lets a run through a limit the operator believes is enforced. An ESTIMATE is the
- * opposite kind of thing. It is an OBSERVATION about a run, not a control over it, so failing a run
- * because we could not record a forecast would trade real work for bookkeeping. Every suppressed
- * failure is returned AND logged, so best-effort never means silently broken.
+ * WHY THE ESTIMATE IS BEST-EFFORT, AND WHY THAT CONTRASTS WITH THE PLAN ROW
+ *
+ * The plan row is a primary record of what the run intends, so a failure to write it is a defect
+ * worth failing the run over (fail-closed, per #505). The ESTIMATE is an OBSERVATION about the run,
+ * not a control over it: failing a run because we could not record a forecast would trade real work
+ * for bookkeeping. Every suppressed failure is returned AND logged, so best-effort never means
+ * silently broken.
  *
  * A mapping failure is treated the same way as a store failure, and deliberately does NOT write a
- * row. The typed columns are derived from the estimator's `features`; if a feature key is absent
- * (a future estimator renaming one), writing a zero-filled row would invent numbers and put them in
- * the calibration rollup. Refusing to record is the honest outcome - the band is simply absent, which
- * the ledger already models as "not priced".
+ * row. The typed columns are derived from the estimator's `features`; if a feature key is absent (a
+ * future estimator renaming one), writing a zero-filled row would invent numbers and put them in the
+ * calibration rollup. Refusing to record is the honest outcome - the band is simply absent, which the
+ * ledger already models as "not priced".
  */
 
 import type { ExecutionPlan } from "./plan-validator";
 import type { ModelPrice } from "./cost-budget";
 import type { RunSummary } from "./run-history";
+import type { RunHistoryStore } from "./run-history-store";
 import {
   PLAN_ESTIMATOR_VERSION,
   estimatePlanCost,
   type PlanCostEstimate,
 } from "./plan-cost-estimate";
+import { recordPostedPlan } from "./plan-revision-recorder";
 import type {
-  PersistedPlan,
   PersistedPlanEstimate,
   PlanCommentRef,
   PlanEstimateRecordInput,
@@ -62,10 +67,6 @@ export type PlanEstimateRecordResult =
   | { ok: true; estimate: PersistedPlanEstimate; computed: PlanCostEstimate }
   | { ok: false; error: string };
 
-/**
- * Compute and persist one estimate. Never throws: a store that rejects, or a feature the typed
- * columns cannot be derived from, both come back as `{ ok: false, error }`.
- */
 /** The numeric typed columns, every one derived from a feature the estimator emits. */
 const NUMERIC_FEATURE_KEYS = [
   "targetFileCount",
@@ -92,6 +93,10 @@ function featureNumber(
   return value;
 }
 
+/**
+ * Compute and persist one estimate. Never throws: a store that rejects, or a feature the typed
+ * columns cannot be derived from, both come back as `{ ok: false, error }`.
+ */
 export async function recordPlanEstimateSafely(
   ledger: PlanLedger,
   input: RecordPlanEstimateInput,
@@ -176,7 +181,7 @@ export async function recordPlanEstimateSafely(
   }
 }
 
-/** A plan plus its estimate, as the runner supplies them: no plan identity yet. */
+/** A plan plus its estimate, as the runner supplies them. */
 export interface RecordPlanWithEstimateInput
   extends Omit<RecordPlanEstimateInput, "planId"> {
   /** Which revision this plan is. A run can legitimately produce several (#378). */
@@ -189,61 +194,60 @@ export interface RecordPlanWithEstimateInput
 }
 
 export type RecordPlanWithEstimateResult =
-  | {
-      ok: true;
-      plan: PersistedPlan;
-      estimate?: PersistedPlanEstimate;
-      /** Set when the plan landed but its estimate did not. The estimate is the secondary record. */
-      estimateError?: string;
-    }
-  | { ok: false; error: string };
+  | { ok: true; planId: number; estimate?: PersistedPlanEstimate; estimateError?: string }
+  | { ok: false; skipped?: boolean; error: string };
 
 /**
- * Persist the plan row, then its estimate. Best-effort in the same sense as the recorder: a ledger
- * that rejects is reported and logged, never thrown.
+ * Persist the plan and its estimate as ONE seam.
  *
- * The two are not treated as equally important. The PLAN is the primary record of what the run
- * intends, so a plan that fails to persist is a failure and no estimate is attempted (an estimate is
- * a child of a plan row). An ESTIMATE that fails leaves the plan intact and reports separately, so a
- * pricing problem cannot cost the run its plan.
+ * The plan row is delegated to `recordPostedPlan` (#505), so it inherits that function's discipline:
+ * the refusing console/dry-run store is SKIPPED (never fatal), and any other error PROPAGATES (a
+ * broken ledger fails the run - fail-closed, because an unrecorded plan is a defect). The estimate is
+ * then recorded by `recordPlanEstimateSafely`, which is best-effort: an estimate failure is reported
+ * separately and never fails the run.
  */
 export async function recordPlanWithEstimateSafely(
   ledger: PlanLedger,
   input: RecordPlanWithEstimateInput,
 ): Promise<RecordPlanWithEstimateResult> {
-  const { planRevision, storyId, source, commentRef, estimate, ...shared } = input;
-  const createdAt = (input.now ?? new Date()).toISOString();
-
-  let plan: PersistedPlan;
-  try {
-    plan = await ledger.recordPlan({
-      runId: input.runId,
-      planRevision,
-      storyId,
-      source,
-      plan: input.plan,
-      createdAt,
-      // Supplied only when present: an explicit `undefined` is not an absent optional.
-      ...(input.tenantId !== undefined ? { tenantId: input.tenantId } : {}),
-      ...(commentRef !== undefined ? { commentRef } : {}),
-    });
-  } catch (error) {
-    const message = errorMessage(error);
-    console.warn(`[WARN] The plan could not be recorded: ${message}`);
-    return { ok: false, error: message };
-  }
-
-  // The plan row landed, so an estimate is now possible. Its failure is reported SEPARATELY: the
-  // plan is the primary record of what the run intends, and a pricing problem must not cost it.
-  const estimated = await recordPlanEstimateSafely(ledger, {
-    ...shared,
-    planId: plan.planId,
-    ...(estimate !== undefined ? { estimate } : {}),
+  const written = await recordPostedPlan(ledger as RunHistoryStore, {
+    runId: input.runId,
+    planRevision: input.planRevision,
+    source: input.source,
+    plan: input.plan,
+    ...(input.commentRef ? { commentRef: input.commentRef } : {}),
+    ...(input.tenantId !== undefined ? { tenantId: input.tenantId } : {}),
   });
-
+  if (!written.ok) {
+    return {
+      ok: false,
+      skipped: written.skipped,
+      error: written.error ?? "the plan could not be persisted",
+    };
+  }
+  // ok:true always carries a planId (recordPostedPlan returns the row it just wrote). The type lets it
+  // be optional, so narrow it rather than threading `| undefined` through the estimate and result.
+  const planId = written.planId;
+  if (planId === undefined) {
+    return { ok: false, error: "the plan was recorded without a planId" };
+  }
+  // The plan row landed, so the estimate is now possible. Its failure is reported SEPARATELY: an
+  // estimate is an observation, not a control, and a pricing problem must not cost the run its plan.
+  const estimated = await recordPlanEstimateSafely(ledger, {
+    plan: input.plan,
+    planId,
+    runId: input.runId,
+    model: input.model,
+    period: input.period,
+    ...(input.stage !== undefined ? { stage: input.stage } : {}),
+    ...(input.now !== undefined ? { now: input.now } : {}),
+    ...(input.history !== undefined ? { history: input.history } : {}),
+    ...(input.resolvePrice !== undefined ? { resolvePrice: input.resolvePrice } : {}),
+    ...(input.estimate !== undefined ? { estimate: input.estimate } : {}),
+  });
   return estimated.ok
-    ? { ok: true, plan, estimate: estimated.estimate }
-    : { ok: true, plan, estimateError: estimated.error };
+    ? { ok: true, planId, estimate: estimated.estimate }
+    : { ok: true, planId, estimateError: estimated.error };
 }
 
 /** Exported for the record-shape tests; the ledger's input type is the contract. */
