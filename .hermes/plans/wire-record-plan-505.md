@@ -9,7 +9,7 @@ The runner's post-plan step (`postPlanComment`, `scripts/dark-factory-runner.ts:
 ## Change
 1. **New helper** `recordPostedPlan(runHistory, { runId, plan, planRevision, source })` in `agent/lib/dark-factory/plan-revision-recorder.ts`:
    - calls `runHistory.recordPlan({ runId, planRevision, storyId: plan.storyId, source, plan, createdAt: new Date().toISOString() })`.
-   - **Guard:** catches the specific *"run history provider is not configured"* error, logs `[PLAN] not persisted (run-history provider not configured — dry-run)`, and **continues**; any *other* error propagates (fail-closed for real DB/misconfig failure). This keeps dry-run usable but loud (no silent no-op).
+   - **Guard:** catches the specific *"run history provider is not configured"* error, logs `[PLAN] not persisted (run-history provider not configured — dry-run)`, and **continues**; any *other* error propagates (fail-closed for real DB/misconfiguration failure). This keeps dry-run usable but loud (no silent no-op).
 2. **Call site 1 (first post):** in `scripts/dark-factory-runner.ts` immediately after the plan post succeeds (after line 870), with `planRevision = 1`, `source = "architect"`.
 3. **Call site 2 (amendment):** on the resume/revision plan post, call the same helper with `planRevision = readPlanRevisionCount(runHistory, runId).count + 1` and `source = "amendment"` (mirrors the existing `recordPlanRevision` revision logic at line 741; `UNIQUE(run_id, plan_revision)` de-dupes re-plans).
 
@@ -44,4 +44,4 @@ The runner's post-plan step (`postPlanComment`, `scripts/dark-factory-runner.ts:
 Dry-run store behavior: I propose **log-and-continue** for the *"not configured"* error (loud, non-aborting) and **fail-closed** for any other error. Confirm or adjust.
 
 ## Branch
-`fix/wire-recordplan-505` (off `origin/main`). PR will target `main` and set **Closes #505**.
+`fix/wire-record-plan-505` (off `origin/main`). PR will target `main` and set **Closes #505**.

@@ -7,7 +7,7 @@
  *
  * `recordPostedPlan` is the coerced, single-call seam: it records the plan AND honours the store's
  * contract — the refusing console/dry-run store is skipped LOUDLY (never a silent no-op), while any
- * other failure (a real DB/misconfig error) still surfaces.
+ * other failure (a real DB/misconfiguration error) still surfaces.
  */
 import { describe, expect, it } from "vitest";
 import { recordPostedPlan } from "../../agent/lib/dark-factory/plan-revision-recorder";
