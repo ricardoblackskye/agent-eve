@@ -18,6 +18,7 @@ import {
   type PlanParser,
 } from "./plan-validator";
 import { planningGuidanceForPrompt } from "./planning-guidance";
+import { ValidationError } from "./tester-agent";
 import { discoverArchitecture } from "./architect-discovery";
 import { buildTargetContract } from "./architect-prompt";
 
@@ -89,7 +90,14 @@ export interface ArchitectDeps {
   planParser?: PlanParser;
   timerRegistry?: ProcessTimerRegistry;
   maxPlanRetries?: number;
+  /** An EXPLICIT budget: used as-is, whatever the prompt size (the operator override and the test seam). */
   timeoutMs?: number;
+  /** Test seam: overrides the floor, so a test can prove the derivation without waiting a minute. */
+  timeoutFloorMs?: number;
+  /** Test seam: overrides the per-10k-char increment, same reason. */
+  timeoutPer10kCharsMs?: number;
+  /** Test seam: overrides the size below which the budget stays exactly at the floor. */
+  timeoutOverheadFreeChars?: number;
   backoffBaseMs?: number;
   sleepFn?: (ms: number) => Promise<void>;
   maxContextFiles?: number;
@@ -148,6 +156,10 @@ export interface PlanAttemptRecord {
   codes: string[];
   /** The reason(s) this attempt produced no plan; empty when accepted. */
   errors: string[];
+  /** Characters this attempt sent (#521): what the wall-clock budget was derived from. */
+  promptChars?: number;
+  /** How long the attempt took in milliseconds (#521). Measured for EVERY attempt, not only timeouts. */
+  elapsedMs?: number;
 }
 
 export interface ArchitectResult {
@@ -382,11 +394,103 @@ export interface PlanAmendmentInput {
   feedback: string;
 }
 
+/**
+ * The floor of an attempt's wall-clock budget (#521). A small prompt keeps exactly this.
+ *
+ * MEASURED, not inherited: generating the Architect's maximum output (`ARCHITECT_OUTPUT_TOKENS` = 8,000 tokens)
+ * took ~29-33s across two probes of the configured model (2,000 tokens in 8.3s, 4,000 in 14.3s), and input
+ * processing adds ~1.0-1.5s even at the 288,000-char evidence ceiling. The worst case is therefore ~35s, so the
+ * 60s floor carries roughly 1.7x headroom over it — which is why the observed 165s failure was an outlier
+ * window rather than a budget shortfall.
+ */
+export const ARCHITECT_TIMEOUT_FLOOR_MS = 60_000;
+
+/**
+ * The increment per 10,000 prompt characters (#521), set from measurement.
+ *
+ * Four probes of the configured model spanning 12,000 to 288,000 input chars (a 24x range) took 1,055ms to
+ * 1,391ms — about 12ms per 10,000 chars. Input size is nearly free on this model, which is why this increment
+ * is small: the budget's real work is done by the floor, and this term keeps the budget honest if a future
+ * model prices input differently. It is deliberately NOT a guess.
+ */
+export const ARCHITECT_TIMEOUT_MS_PER_10K_CHARS = 12;
+
+/** A ceiling on the derived budget, so a stuck attempt cannot hold a run open indefinitely (and so the retry product stays bounded). */
+export const ARCHITECT_TIMEOUT_MAX_MS = 600_000;
+
+/**
+ * Prompts at or below this size keep the floor EXACTLY (#521), so a small story's budget is unchanged.
+ *
+ * Deliberately tied to an existing bound rather than a new number: one full evidence file is the amount of
+ * context the floor was already written against, so the derivation starts when a prompt exceeds that.
+ */
+export const ARCHITECT_TIMEOUT_OVERHEAD_FREE_CHARS = MAX_CHARS_PER_FILE;
+
+/**
+ * The operator's budget override (#521).
+ *
+ * Mirrors DF_TESTER_TIMEOUT_MS: absent means "derive it from the prompt", and a value that is not a positive
+ * integer is a misconfiguration that fails closed at startup rather than a run that hangs later.
+ */
+export function resolveArchitectTimeoutMs(
+  env: Record<string, string | undefined> = process.env,
+): number | undefined {
+  const raw = env.DF_ARCHITECT_TIMEOUT_MS;
+  if (raw === undefined) {
+    return undefined;
+  }
+  // `Number` rather than the sibling tester's `parseInt`: parseInt("12.5") yields 12, so a fractional value
+  // would be accepted as valid while the message reported a number the run never used.
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new ValidationError(
+      `DF_ARCHITECT_TIMEOUT_MS must be a positive integer (received ${JSON.stringify(raw)}).`,
+    );
+  }
+  return parsed;
+}
+
+/**
+ * The wall-clock budget for one attempt (#521): an explicit budget when one was given, otherwise the floor
+ * plus an increment proportional to the prompt, capped.
+ */
+/** Overrides for the derivation's constants. Production uses the module defaults; tests shrink them. */
+export interface ArchitectTimeoutScale {
+  floorMs?: number;
+  per10kCharsMs?: number;
+  maxMs?: number;
+  overheadFreeChars?: number;
+}
+
+export function architectTimeoutBudgetMs(
+  promptChars: number,
+  fixedMs?: number,
+  scale: ArchitectTimeoutScale = {},
+): number {
+  if (fixedMs !== undefined) {
+    return fixedMs;
+  }
+  const floorMs = scale.floorMs ?? ARCHITECT_TIMEOUT_FLOOR_MS;
+  const per10kCharsMs = scale.per10kCharsMs ?? ARCHITECT_TIMEOUT_MS_PER_10K_CHARS;
+  const maxMs = scale.maxMs ?? ARCHITECT_TIMEOUT_MAX_MS;
+  const overheadFreeChars = scale.overheadFreeChars ?? ARCHITECT_TIMEOUT_OVERHEAD_FREE_CHARS;
+  // A NaN would make setTimeout fire at once and an Infinity would never fire, so a nonsense size is treated
+  // as no evidence, never as permission to run unbounded.
+  if (!Number.isFinite(promptChars) || promptChars <= overheadFreeChars) {
+    return floorMs;
+  }
+  const extraChars = promptChars - overheadFreeChars;
+  return Math.min(Math.ceil(floorMs + (extraChars / 10_000) * per10kCharsMs), maxMs);
+}
+
 export class ArchitectAgent {
   private parser: PlanParser;
   private timerRegistry: ProcessTimerRegistry;
   private maxPlanRetries: number;
-  private timeoutMs: number;
+  /** An explicit budget, used as-is whatever the prompt size; undefined means derive it (#521). */
+  private fixedTimeoutMs?: number;
+  /** The derivation's constants, injectable so a test can prove the behaviour without waiting a minute. */
+  private timeoutScale: ArchitectTimeoutScale;
   private backoffBaseMs: number;
   private maxContextFiles: number;
   private sleepFn: (ms: number) => Promise<void>;
@@ -395,7 +499,16 @@ export class ArchitectAgent {
     this.maxPlanRetries = deps.maxPlanRetries ?? 2;
     this.parser = deps.planParser ?? new DefaultPlanParser();
     this.timerRegistry = deps.timerRegistry ?? ProcessTimerRegistry.getInstance();
-    this.timeoutMs = deps.timeoutMs ?? 60000;
+    // #521: no fixed default. An explicit budget (operator override or test) is used as-is; otherwise the
+    // budget is derived per attempt from the prompt, because prompt size is what actually drives latency.
+    this.fixedTimeoutMs = deps.timeoutMs;
+    this.timeoutScale = {
+      floorMs: deps.timeoutFloorMs ?? ARCHITECT_TIMEOUT_FLOOR_MS,
+      per10kCharsMs: deps.timeoutPer10kCharsMs ?? ARCHITECT_TIMEOUT_MS_PER_10K_CHARS,
+      ...(deps.timeoutOverheadFreeChars !== undefined
+        ? { overheadFreeChars: deps.timeoutOverheadFreeChars }
+        : {}),
+    };
     this.backoffBaseMs = deps.backoffBaseMs ?? (process.env.NODE_ENV === "test" ? 0 : 500);
     this.maxContextFiles = deps.maxContextFiles ?? DEFAULT_MAX_CONTEXT_FILES;
     this.sleepFn =
@@ -409,6 +522,9 @@ export class ArchitectAgent {
    * Uses ProcessTimerRegistry for process-level safety.
    */
   private async executeGenerate(prompt: string, attempt?: number): Promise<string> {
+    // #521: derived per attempt. This is the seam the budget actually reaches the timer through.
+    const promptChars = typeof prompt === "string" ? prompt.length : 0;
+    const budgetMs = this.timeoutBudgetMs(promptChars);
     let settled = false;
     let timer: NodeJS.Timeout | undefined;
     const controller =
@@ -434,11 +550,11 @@ export class ArchitectAgent {
           cleanupTimer();
           reject(
             new Error(
-              `ArchitectAgent LLM interaction timed out after ${this.timeoutMs}ms.`,
+              `ArchitectAgent LLM interaction timed out after ${budgetMs}ms (prompt ${promptChars} chars).`,
             ),
           );
         }
-      }, this.timeoutMs);
+      }, budgetMs);
 
       this.deps
         .generateText(prompt, {
@@ -458,6 +574,11 @@ export class ArchitectAgent {
           }
         });
     });
+  }
+
+  /** The wall-clock budget for one attempt (#521). An explicit budget wins; otherwise it is derived. */
+  private timeoutBudgetMs(promptChars: number): number {
+    return architectTimeoutBudgetMs(promptChars, this.fixedTimeoutMs, this.timeoutScale);
   }
 
   /** The largest prompt the Architect may send. */
@@ -783,6 +904,10 @@ export class ArchitectAgent {
       let stage: PlanAttemptStage = "generate-error";
       let codes: string[] = [];
 
+      // #521: measured for EVERY attempt, because the duration of a SUCCESSFUL large attempt is what the
+      // budget is calibrated from (a timeout only ever reports the budget it already knew).
+      const attemptStartedAt = Date.now();
+      const promptChars = currentPrompt.length;
       try {
         lastOutput = await this.executeGenerate(currentPrompt, attemptNumber);
         stage = "parse";
@@ -817,7 +942,14 @@ ${story.body}`,
           );
           codes = validation.codes ?? [];
           if (validation.valid) {
-            attempts.push({ attempt: attemptNumber, stage: "accepted", codes, errors: [] });
+            attempts.push({
+              attempt: attemptNumber,
+              stage: "accepted",
+              codes,
+              errors: [],
+              promptChars,
+              elapsedMs: Date.now() - attemptStartedAt,
+            });
             return {
               ok: true,
               plan: parseResult.plan,
@@ -839,7 +971,14 @@ ${story.body}`,
       }
 
       // The reason for THIS attempt survives alongside every earlier one (#450).
-      attempts.push({ attempt: attemptNumber, stage, codes, errors: lastErrors });
+      attempts.push({
+        attempt: attemptNumber,
+        stage,
+        codes,
+        errors: lastErrors,
+        promptChars,
+        elapsedMs: Date.now() - attemptStartedAt,
+      });
 
       // Allow up to maxPlanRetries self-correction loops (< condition)
       if (retries < this.maxPlanRetries) {
@@ -877,7 +1016,13 @@ ${story.body}`,
     const rendered = attempts.map((a) => {
       const codes = a.codes.length > 0 ? ` codes=[${a.codes.join(", ")}]` : "";
       const errors = a.errors.length > 0 ? a.errors.join("; ") : "no error text";
-      return `attempt ${a.attempt} [${a.stage}]${codes}: ${errors}`;
+      // #521: name what the attempt was up against, so a timeout is diagnosable from the failure text that
+      // reaches the ticket. Appended rather than prefixed, so the existing prefixes still match.
+      const scale =
+        a.promptChars === undefined
+          ? ""
+          : ` (prompt ${a.promptChars} chars, took ${a.elapsedMs ?? 0}ms)`;
+      return `attempt ${a.attempt} [${a.stage}]${codes}: ${errors}${scale}`;
     });
     return `ArchitectAgent max retries exceeded (${this.maxPlanRetries}). Errors: ${rendered.join(" | ")}`;
   }

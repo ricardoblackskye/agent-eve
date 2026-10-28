@@ -106,7 +106,10 @@ import type { CodeAuthorProvider } from "../agent/lib/dark-factory/code-author";
 import { createCodingLoopBreaker } from "../agent/lib/dark-factory/breaker-wiring";
 import { recordBreakerTrip } from "../agent/lib/dark-factory/breaker-trip-recorder";
 import { createMetricsStore } from "../agent/lib/dark-factory/metrics";
-import { ArchitectAgent } from "../agent/lib/dark-factory/architect-agent";
+import {
+  ArchitectAgent,
+  resolveArchitectTimeoutMs,
+} from "../agent/lib/dark-factory/architect-agent";
 import {
   validateExecutionPlan,
   type ExecutionPlan,
@@ -495,7 +498,14 @@ async function main(): Promise<void> {
       : `\n[STEP 3] Architect Agent discovering repository structure and planning story...`,
   );
   const planReader = createWorkspaceReader(planWorkspace);
+  // #521: the planning budget is resolved HERE, at the composition root, mirroring createTesterAgent. An
+  // operator override is used as-is; when it is unset the agent derives a budget per attempt from the prompt
+  // size, because that is what drives latency (a fixed 60s against a 400k-char prompt budget failed larger
+  // stories outright: run df572110).
+  const architectTimeoutMs = resolveArchitectTimeoutMs();
   const architectAgent = new ArchitectAgent({
+    // #521: an explicit budget wins over the derivation.
+    ...(architectTimeoutMs !== undefined ? { timeoutMs: architectTimeoutMs } : {}),
     // #405: both readers are rooted at the verified plan workspace, so `dir` is honored instead of
     // being replaced by process.cwd(). #381 R1: the Architect plans from file CONTENTS, not just a
     // file list; the agent's own bounded reader still applies sanitizeRelativePath and bounds how
