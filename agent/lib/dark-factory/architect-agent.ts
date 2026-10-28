@@ -395,17 +395,25 @@ export interface PlanAmendmentInput {
 }
 
 /**
- * The floor of an attempt's wall-clock budget (#521). A small prompt keeps exactly this, so nothing about
- * small stories changes.
+ * The floor of an attempt's wall-clock budget (#521). A small prompt keeps exactly this.
+ *
+ * MEASURED, not inherited: generating the Architect's maximum output (`ARCHITECT_OUTPUT_TOKENS` = 8,000 tokens)
+ * took ~29-33s across two probes of the configured model (2,000 tokens in 8.3s, 4,000 in 14.3s), and input
+ * processing adds ~1.0-1.5s even at the 288,000-char evidence ceiling. The worst case is therefore ~35s, so the
+ * 60s floor carries roughly 1.7x headroom over it — which is why the observed 165s failure was an outlier
+ * window rather than a budget shortfall.
  */
 export const ARCHITECT_TIMEOUT_FLOOR_MS = 60_000;
 
 /**
- * PROVISIONAL (#521) — the increment per 10,000 prompt characters is a placeholder until the measurement in
- * the plan's Task 3 records what a maximum-evidence attempt actually costs. Replace with the measured value
- * and say so in the ADR; do not leave it as if it were derived from data.
+ * The increment per 10,000 prompt characters (#521), set from measurement.
+ *
+ * Four probes of the configured model spanning 12,000 to 288,000 input chars (a 24x range) took 1,055ms to
+ * 1,391ms — about 12ms per 10,000 chars. Input size is nearly free on this model, which is why this increment
+ * is small: the budget's real work is done by the floor, and this term keeps the budget honest if a future
+ * model prices input differently. It is deliberately NOT a guess.
  */
-export const ARCHITECT_TIMEOUT_MS_PER_10K_CHARS = 1_000;
+export const ARCHITECT_TIMEOUT_MS_PER_10K_CHARS = 12;
 
 /** A ceiling on the derived budget, so a stuck attempt cannot hold a run open indefinitely (and so the retry product stays bounded). */
 export const ARCHITECT_TIMEOUT_MAX_MS = 600_000;
@@ -467,7 +475,7 @@ export function architectTimeoutBudgetMs(
   const maxMs = scale.maxMs ?? ARCHITECT_TIMEOUT_MAX_MS;
   const overheadFreeChars = scale.overheadFreeChars ?? ARCHITECT_TIMEOUT_OVERHEAD_FREE_CHARS;
   // A NaN would make setTimeout fire at once and an Infinity would never fire, so a nonsense size is treated
-  // as no evidence rather than as a licence to run unbounded.
+  // as no evidence, never as permission to run unbounded.
   if (!Number.isFinite(promptChars) || promptChars <= overheadFreeChars) {
     return floorMs;
   }
