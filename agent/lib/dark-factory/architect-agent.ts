@@ -89,7 +89,12 @@ export interface ArchitectDeps {
   planParser?: PlanParser;
   timerRegistry?: ProcessTimerRegistry;
   maxPlanRetries?: number;
+  /** An EXPLICIT budget: used as-is, whatever the prompt size (the operator override and the test seam). */
   timeoutMs?: number;
+  /** Test seam: overrides the floor, so a test can prove the derivation without waiting a minute. */
+  timeoutFloorMs?: number;
+  /** Test seam: overrides the per-10k-char increment, same reason. */
+  timeoutPer10kCharsMs?: number;
   backoffBaseMs?: number;
   sleepFn?: (ms: number) => Promise<void>;
   maxContextFiles?: number;
@@ -380,6 +385,53 @@ export interface PlanAmendmentInput {
   currentPlan: unknown;
   /** The human's reply to the parked plan. Free text: passed as DATA, never as instructions. */
   feedback: string;
+}
+
+/**
+ * The floor of an attempt's wall-clock budget (#521). A small prompt keeps exactly this, so nothing about
+ * small stories changes.
+ */
+export const ARCHITECT_TIMEOUT_FLOOR_MS = 60_000;
+
+/**
+ * PROVISIONAL (#521) — the increment per 10,000 prompt characters is a placeholder until the measurement in
+ * the plan's Task 3 records what a maximum-evidence attempt actually costs. Replace with the measured value
+ * and say so in the ADR; do not leave it as if it were derived from data.
+ */
+export const ARCHITECT_TIMEOUT_MS_PER_10K_CHARS = 1_000;
+
+/** A ceiling on the derived budget, so a stuck attempt cannot hold a run open indefinitely (and so the retry product stays bounded). */
+export const ARCHITECT_TIMEOUT_MAX_MS = 600_000;
+
+/**
+ * Prompts at or below this size keep the floor EXACTLY (#521), so a small story's budget is unchanged.
+ *
+ * Deliberately tied to an existing bound rather than a new number: one full evidence file is the amount of
+ * context the floor was already written against, so the derivation starts when a prompt exceeds that.
+ */
+export const ARCHITECT_TIMEOUT_OVERHEAD_FREE_CHARS = MAX_CHARS_PER_FILE;
+
+/**
+ * The operator's budget override (#521).
+ *
+ * Mirrors DF_TESTER_TIMEOUT_MS: absent means "derive it from the prompt", and a value that is not a positive
+ * integer is a misconfiguration that fails closed at startup rather than a run that hangs later.
+ */
+export function resolveArchitectTimeoutMs(
+  env: Record<string, string | undefined> = process.env,
+): number | undefined {
+  throw new Error("not implemented");
+}
+
+/**
+ * The wall-clock budget for one attempt (#521): an explicit budget when one was given, otherwise the floor
+ * plus an increment proportional to the prompt, capped.
+ */
+export function architectTimeoutBudgetMs(
+  promptChars: number,
+  fixedMs?: number,
+): number {
+  throw new Error("not implemented");
 }
 
 export class ArchitectAgent {
