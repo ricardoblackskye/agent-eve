@@ -125,3 +125,4 @@ changes, write a new one that supersedes it.
 | [0069](0069-plan-cost-estimates-are-advisory-bands.md)                   | Plan cost estimates are advisory bands, not point forecasts                                         | Accepted |
 | [0070](0070-price-ceilings-are-checked-on-a-schedule.md)                 | A price ceiling is checked on a schedule, not asserted in the unit suite                            | Accepted |
 | [0071](0071-the-reservation-price-has-a-floor.md)                        | A stale price ceiling cannot under-reserve, because the reservation has a floor                     | Accepted |
+| [0072](0072-planning-budget-is-measured.md)                              | The Architect's planning budget is measured, and raisable                                           | Accepted |
