@@ -87,6 +87,17 @@ exactly as the Architect's bounded reader bounds them, and reuses the runner's
 start — no prior runs — still produces a band, marked low confidence. Calibrating
 the band against measured actual cost is tracked separately (#490).
 
+The band is surfaced where the decision actually happens: the plan comment posted on the ticket before
+approval ([`plan-comment.ts`](../../agent/lib/dark-factory/plan-comment.ts)) renders it directly under the
+comment's marker as a `$low – $high` band with its cost class and confidence, and says in as many words that
+the figure is advisory and does not block approval. The middle figure is deliberately NOT rendered — a single
+number reads as a quote, and this is a forecast. A plan that was never priced renders **no section at all**:
+the absence of a band is the only honest rendering of an absence, because a placeholder ("unknown", `$0`) reads
+as a measurement and a reader cannot tell a placeholder from a real zero. The section's own cost is fixed — it
+renders three short facts and never the plan — so it does not grow with the plan. The comment's TOTAL size is a
+separate, pre-existing limit for a plan at the Architect's output budget, where the body carries the plan twice
+(the rendering plus the machine-readable block); that is tracked in #518 rather than fixed here.
+
 ## The reservation price has a floor
 
 The reserved price is the higher of the shipped ceiling and a floor of the dearest rate we have
