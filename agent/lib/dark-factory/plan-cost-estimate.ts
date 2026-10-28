@@ -193,3 +193,29 @@ export function estimatePlanCost(input: EstimatePlanCostInput): PlanCostEstimate
     },
   };
 }
+
+
+/**
+ * The plan's estimate, or undefined when it cannot be computed (#488, epic #453).
+ *
+ * The band is an OBSERVATION about a run, not a control over it: a plan that cannot be priced must still
+ * post a readable comment, so a failure here is reported and yields no estimate rather than stopping the
+ * dispatch. This is the compute-side twin of `recordPlanEstimateSafely` (#487) on the persistence side.
+ *
+ * The price source is injectable, so the failure path is REACHABLE in a test (a resolver that throws)
+ * instead of theoretical — the guard is exercised, not merely written.
+ */
+export function estimatePlanCostSafely(
+  input: EstimatePlanCostInput,
+): PlanCostEstimate | undefined {
+  try {
+    return estimatePlanCost(input);
+  } catch (error) {
+    console.warn(
+      `[WARN] The plan estimate could not be computed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    return undefined;
+  }
+}
