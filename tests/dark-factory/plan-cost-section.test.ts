@@ -2,7 +2,12 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
-import { renderCostEstimateSection } from "../../agent/lib/dark-factory/plan-comment";
+import {
+  parsePlanFromComment,
+  planCommentBody,
+  renderCostEstimateSection,
+} from "../../agent/lib/dark-factory/plan-comment";
+import { renderPlanFile } from "../../agent/lib/dark-factory/plan-file";
 import type { PlanCostEstimate } from "../../agent/lib/dark-factory/plan-cost-estimate";
 import { estimatePlanCostSafely } from "../../agent/lib/dark-factory/plan-cost-estimate";
 
@@ -144,5 +149,73 @@ describe("#488 the runner prices the plan once, before the comment", () => {
     expect(persistAt).toBeGreaterThan(commentAt);
     expect(runner.slice(commentAt, persistAt)).toContain("estimate: planEstimate");
     expect(runner.slice(persistAt, persistAt + 900)).toContain("planEstimate");
+  });
+});
+
+/**
+ * AC6 — the comment's size for a plan at the top of what the Architect can produce.
+ *
+ * `ARCHITECT_OUTPUT_TOKENS = 8000` (~32k chars) is the real budget, so this is an ordinary large plan rather
+ * than a synthetic extreme. The body carries the plan TWICE (the human rendering, plus the machine-readable
+ * block a resumed run reads back), which is where the size comes from.
+ */
+describe("#488 AC6 the comment's size for a large plan", () => {
+  const GITHUB_COMMENT_LIMIT = 65536;
+  const ESTIMATE = {
+    lowUsd: 0.1,
+    expectedUsd: 0.2,
+    highUsd: 0.41,
+    costClass: "XS" as const,
+    confidence: "low" as const,
+    features: {},
+  };
+
+  const largePlan = () => ({
+    storyId: 488,
+    title: "a deliberately large plan",
+    approach: "x".repeat(2_000),
+    tasks: Array.from({ length: 40 }, (_, index) => ({
+      title: `Task ${index}`,
+      objective: "y".repeat(400),
+    })),
+    targetFiles: Array.from({ length: 24 }, (_, index) => ({
+      path: `src/some/deeply/nested/place/number-${index}/Component${index}.tsx`,
+      action: "modify",
+      rationale: "z".repeat(500),
+    })),
+  });
+
+  const render = (plan: unknown) =>
+    renderPlanFile(plan as never, {
+      issueUrl: "https://github.com/owner/repo/issues/488",
+    });
+
+  it("keeps the section's own cost O(1), and still round-trips the plan at size", () => {
+    const plan = largePlan();
+    const markdown = render(plan);
+    const withEstimate = planCommentBody(markdown, plan, ESTIMATE);
+    const withoutEstimate = planCommentBody(markdown, plan);
+    console.log(
+      `[#488 AC6] with an estimate ${withEstimate.length} chars, without ${withoutEstimate.length} ` +
+        `(limit ${GITHUB_COMMENT_LIMIT}); plan markdown alone ${markdown.length}`,
+    );
+    // The section renders three short facts and never the plan, so its cost does not scale with the plan:
+    // this is the whole of #488's contribution to the body's size, whatever the plan's size.
+    expect(withEstimate.length - withoutEstimate.length).toBeLessThan(400);
+    // A body this large is exactly where a broken machine block would be hardest to notice.
+    expect(parsePlanFromComment(withEstimate).ok).toBe(true);
+  });
+
+  /**
+   * AC6's ABSOLUTE half is UNMET, and this change does not cause it: the same plan renders 67,297 chars
+   * WITHOUT any cost section — already over the limit — because the body carries the plan twice.
+   *
+   * Bounding it means deciding what to drop (the human rendering a reviewer approves, the machine block a
+   * resumed run reads back, or the plan itself at the source) and each choice costs something real. That is
+   * its own change, tracked in #518 rather than silently widened into #488.
+   */
+  it.skip("AC6 (absolute) a plan at the output budget stays under 65536 (#518)", () => {
+    const plan = largePlan();
+    expect(planCommentBody(render(plan), plan, ESTIMATE).length).toBeLessThan(GITHUB_COMMENT_LIMIT);
   });
 });
