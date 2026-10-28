@@ -1,7 +1,10 @@
+import { readFileSync } from "node:fs";
+
 import { describe, expect, it } from "vitest";
 
 import { renderCostEstimateSection } from "../../agent/lib/dark-factory/plan-comment";
 import type { PlanCostEstimate } from "../../agent/lib/dark-factory/plan-cost-estimate";
+import { estimatePlanCostSafely } from "../../agent/lib/dark-factory/plan-cost-estimate";
 
 /**
  * #488 — the estimate section of the plan comment (epic #453).
@@ -81,5 +84,65 @@ describe("#488 the estimate section of the plan comment", () => {
     expect(section).toContain("$0.13");
     expect(section).toContain("$1234.50");
     expect(section).not.toMatch(/[0-9]e[+-]?[0-9]/i);
+  });
+});
+
+/**
+ * #488 — a plan that cannot be priced must still post a comment, and the numbers a human approves must be
+ * the numbers the ledger keeps.
+ */
+describe("#488 a plan that cannot be priced still posts a comment", () => {
+  const PLAN = {
+    targetFiles: [{ path: "a.ts", action: "modify", rationale: "add a line" }],
+    tasks: [{ title: "t" }],
+  } as never;
+
+  it("returns the computed estimate", () => {
+    const result = estimatePlanCostSafely({
+      plan: PLAN,
+      model: "deepseek/deepseek-v4.1-flash",
+    });
+    expect(result).toBeDefined();
+    expect(result === undefined ? 0 : result.highUsd).toBeGreaterThan(
+      result === undefined ? 0 : result.lowUsd,
+    );
+  });
+
+  it("never throws when the price source fails", () => {
+    // The band is an OBSERVATION about a run, not a control over it: an unpriced plan must still post a
+    // readable comment rather than stopping the dispatch. Mirrors recordPlanEstimateSafely (#487).
+    const result = estimatePlanCostSafely({
+      plan: PLAN,
+      model: "some-model",
+      resolvePrice: () => {
+        throw new Error("price source down");
+      },
+    });
+    expect(result).toBeUndefined();
+  });
+});
+
+/**
+ * The ordering and the single-value guarantee are asserted against the SOURCE, following the precedent in
+ * plan-approval.test.ts: neither is observable from a unit test of any module, and both ARE the requirement.
+ */
+describe("#488 the runner prices the plan once, before the comment", () => {
+  const runner = readFileSync("scripts/dark-factory-runner.ts", "utf8");
+
+  it("computes the estimate BEFORE posting the comment", () => {
+    const computeAt = runner.indexOf("estimatePlanCostSafely(");
+    const commentAt = runner.indexOf("await postPlanComment(");
+    expect(computeAt).toBeGreaterThan(-1);
+    expect(commentAt).toBeGreaterThan(-1);
+    expect(computeAt).toBeLessThan(commentAt);
+  });
+
+  it("hands the ONE computed value to the comment and to the ledger", () => {
+    const commentAt = runner.indexOf("await postPlanComment(");
+    const persistAt = runner.indexOf("await recordPlanWithEstimateSafely(");
+    expect(commentAt).toBeGreaterThan(-1);
+    expect(persistAt).toBeGreaterThan(commentAt);
+    expect(runner.slice(commentAt, persistAt)).toContain("estimate: planEstimate");
+    expect(runner.slice(persistAt, persistAt + 900)).toContain("planEstimate");
   });
 });

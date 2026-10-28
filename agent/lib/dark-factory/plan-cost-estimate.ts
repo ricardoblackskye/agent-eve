@@ -193,3 +193,15 @@ export function estimatePlanCost(input: EstimatePlanCostInput): PlanCostEstimate
     },
   };
 }
+
+
+/**
+ * The plan's estimate, or undefined when it cannot be computed (#488, epic #453).
+ *
+ * Signature only — the behaviour is not implemented yet (RED).
+ */
+export function estimatePlanCostSafely(
+  input: EstimatePlanCostInput,
+): PlanCostEstimate | undefined {
+  throw new Error("not implemented");
+}
