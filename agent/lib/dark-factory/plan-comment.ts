@@ -112,14 +112,40 @@ export function planCommentBody(markdown: string, plan?: unknown): string {
 }
 
 /**
+ * Money as a human reads it: two decimals, never exponent notation (#488).
+ *
+ * A non-finite value becomes 0 rather than "NaN": this section is cosmetic, and a broken number must
+ * not render as nonsense in the one place a human is deciding whether to approve a run.
+ */
+function formatUsd(usd: number): string {
+  const value = Number.isFinite(usd) ? usd : 0;
+  return `$${value.toFixed(2)}`;
+}
+
+/**
  * The estimate section of the plan comment (#488, epic #453).
  *
- * Signature only — the behaviour is not implemented yet (RED).
+ * Returns an empty string when there is no estimate. The ABSENCE of a section is the only honest
+ * rendering of an absence: a placeholder ("unknown", "$0") reads as a measurement, and a reader
+ * cannot tell a placeholder from a real zero. A COMPUTED estimate is always rendered, including a
+ * zero band — suppressing one would make "computed, and zero" indistinguishable from "no estimate",
+ * leaving one silence to carry two meanings.
+ *
+ * The middle figure (`expectedUsd`) is deliberately NOT rendered. It is the single number that reads
+ * as a quote, and this is a forecast shown to somebody deciding whether to spend the money.
  */
 export function renderCostEstimateSection(
   estimate?: PlanCostEstimate | null,
 ): string {
-  throw new Error("not implemented");
+  if (!estimate) {
+    return "";
+  }
+  return [
+    `**Estimated cost: ${formatUsd(estimate.lowUsd)} – ${formatUsd(estimate.highUsd)}** ` +
+      `(class \`${estimate.costClass}\`, confidence \`${estimate.confidence}\`)`,
+    "",
+    "Advisory only — a forecast from the plan's shape, not a quote. It does not block approval.",
+  ].join("\n");
 }
 
 export type PlanParseResult =
