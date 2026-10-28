@@ -8,6 +8,8 @@
  * instead of stacking another one on the ticket.
  */
 
+import type { PlanCostEstimate } from "./plan-cost-estimate";
+
 /** The marker identifying this Factory's own plan comment, whatever the plan says. */
 export const PLAN_COMMENT_MARKER = "<!-- dark-factory:plan -->";
 
@@ -107,6 +109,17 @@ export function planCommentBody(markdown: string, plan?: unknown): string {
     "",
     DETAILS_CLOSE,
   ].join("\n");
+}
+
+/**
+ * The estimate section of the plan comment (#488, epic #453).
+ *
+ * Signature only — the behaviour is not implemented yet (RED).
+ */
+export function renderCostEstimateSection(
+  estimate?: PlanCostEstimate | null,
+): string {
+  throw new Error("not implemented");
 }
 
 export type PlanParseResult =
