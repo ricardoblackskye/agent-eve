@@ -95,6 +95,7 @@ import {
   isPlanRevisionCapReached,
   readPlanRevisionCount,
   recordPlanRevision,
+  recordPostedPlan,
 } from "../agent/lib/dark-factory/plan-revision-recorder";
 import { resolveRunnerAnswer } from "../agent/lib/dark-factory/runner-config";
 import { createWorkerReporter } from "../agent/lib/dark-factory/worker-reporter";
@@ -868,6 +869,28 @@ async function main(): Promise<void> {
     throw new Error(`the plan comment could not be posted: ${planComment.error}`);
   }
   console.log(`\n[PLAN] Posted the plan on #${issueNum} (${planComment.action}).`);
+
+  // #505: PERSIST the plan, not only its comment. Without this `df_plans` stays empty even with a
+  // configured store, because the plan was only ever a GitHub comment. `revisionRound` is the revision
+  // already computed by the #378 amendment block (undefined on a first dispatch), so the row's
+  // `plan_revision` matches what the park reports and a re-plan lands its own row (UNIQUE(run_id,
+  // plan_revision)). The refusing console/dry-run store is skipped LOUDLY and ONLY that error is
+  // swallowed; anything else propagates, so a broken ledger fails the run (fail-closed).
+  const persistedPlan = await recordPostedPlan(runHistory, {
+    runId,
+    planRevision: revisionRound ?? 1,
+    plan: executionPlan,
+    source: revisionRound === undefined ? "architect" : "amendment",
+  });
+  if (persistedPlan.ok) {
+    console.log(
+      `[PLAN] Persisted plan revision ${revisionRound ?? 1} (plan #${persistedPlan.planId}).`,
+    );
+  } else if (persistedPlan.skipped) {
+    console.log(
+      `[PLAN] NOT persisted (${persistedPlan.error ?? "run history not configured"}) - dry-run.`,
+    );
+  }
 
   // #365 R4: STOP here and wait for a human, unless this dispatch IS the human's approval. The plan is on
   // the ticket, so it can be reviewed; nothing is coded until someone approves it. Recording the question is
