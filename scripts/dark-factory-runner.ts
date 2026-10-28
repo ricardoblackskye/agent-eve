@@ -79,6 +79,7 @@ import {
 } from "../agent/lib/dark-factory/preservation-guard";
 import { renderPlanFile } from "../agent/lib/dark-factory/plan-file";
 import { postPlanComment } from "../agent/lib/dark-factory/plan-comment";
+import { recordPlanWithEstimateSafely } from "../agent/lib/dark-factory/plan-estimate-recorder";
 import {
   explainPlanFailure,
   loadApprovedPlan,
@@ -95,7 +96,6 @@ import {
   isPlanRevisionCapReached,
   readPlanRevisionCount,
   recordPlanRevision,
-  recordPostedPlan,
 } from "../agent/lib/dark-factory/plan-revision-recorder";
 import { resolveRunnerAnswer } from "../agent/lib/dark-factory/runner-config";
 import { createWorkerReporter } from "../agent/lib/dark-factory/worker-reporter";
@@ -117,7 +117,8 @@ import {
   createCostBudgetStore,
   isCostGovernanceConfigured,
 } from "../agent/lib/dark-factory/cost-budget-store";
-import { createCostGovernor } from "../agent/lib/dark-factory/cost-governor";
+import {
+  utcMonth, createCostGovernor } from "../agent/lib/dark-factory/cost-governor";
 import { createRunHistoryStore } from "../agent/lib/dark-factory/run-history-provider";
 import {
   beginRunRecord,
@@ -870,26 +871,43 @@ async function main(): Promise<void> {
   }
   console.log(`\n[PLAN] Posted the plan on #${issueNum} (${planComment.action}).`);
 
-  // #505: PERSIST the plan, not only its comment. Without this `df_plans` stays empty even with a
-  // configured store, because the plan was only ever a GitHub comment. `revisionRound` is the revision
-  // already computed by the #378 amendment block (undefined on a first dispatch), so the row's
-  // `plan_revision` matches what the park reports and a re-plan lands its own row (UNIQUE(run_id,
-  // plan_revision)). The refusing console/dry-run store is skipped LOUDLY and ONLY that error is
-  // swallowed; anything else propagates, so a broken ledger fails the run (fail-closed).
-  const persistedPlan = await recordPostedPlan(runHistory, {
-    runId,
-    planRevision: revisionRound ?? 1,
-    plan: executionPlan,
-    source: revisionRound === undefined ? "architect" : "amendment",
-  });
-  if (persistedPlan.ok) {
-    console.log(
-      `[PLAN] Persisted plan revision ${revisionRound ?? 1} (plan #${persistedPlan.planId}).`,
-    );
-  } else if (persistedPlan.skipped) {
-    console.log(
-      `[PLAN] NOT persisted (${persistedPlan.error ?? "run history not configured"}) - dry-run.`,
-    );
+  // #505 + #487: PERSIST the plan (with the comment reference) and its cost estimate as ONE write.
+  // One seam, not two: the ledger is write-once on (run_id, plan_revision) with no upsert, so a second
+  // insert for the same revision would be rejected. `recordPlanWithEstimateSafely` delegates the plan
+  // row to `recordPostedPlan` (#505), which owns its discipline: the refusing console/dry-run store is
+  // skipped LOUDLY, and any other error PROPAGATES, so a broken ledger still fails the run. The estimate
+  // (#487) is the OBSERVATION half: its failure is reported and never fails the run.
+  //
+  // Guarded: a plain resume reuses the plan recorded when it was first posted, so re-recording would
+  // breach write-once and re-price a plan nobody re-planned (AC5).
+  if (shouldRecordPlanEstimate({ resuming: isResume, revision: isRevision })) {
+    const commentRef =
+      planComment.id === undefined
+        ? undefined
+        : {
+            provider: "github" as const,
+            id: planComment.id,
+            url: `https://github.com/${targetRepo}/issues/${issueNum}#issuecomment-${planComment.id}`,
+          };
+    const recorded = await recordPlanWithEstimateSafely(runHistory, {
+      plan: executionPlan,
+      runId,
+      model: modelId,
+      period: utcMonth(),
+      planRevision: revisionRound ?? 1,
+      storyId: issueNum,
+      source: isRevision ? "amendment" : "architect",
+      commentRef,
+    });
+    if (recorded.ok) {
+      console.log(
+        `[PLAN] Persisted plan revision ${revisionRound ?? 1} with its cost estimate (plan #${recorded.planId}).`,
+      );
+    } else if (recorded.skipped) {
+      console.log(
+        `[PLAN] NOT persisted (${recorded.error ?? "run history not configured"}) - dry-run.`,
+      );
+    }
   }
 
   // #365 R4: STOP here and wait for a human, unless this dispatch IS the human's approval. The plan is on
@@ -1637,6 +1655,26 @@ export async function releaseAbandonedRunClaim(active: ActiveRun | null): Promis
     `[ERROR] The run aborted after acceptance; released the claim on ` +
       `${active.repo}#${active.issue} (run ${active.runId}).`,
   );
+}
+
+/**
+ * Should this dispatch record a plan row and its estimate (#487)?
+ *
+ * The plan is NEW when the run is a fresh dispatch or a revision round. A plain RESUME reuses the
+ * approved plan, which was already recorded when it was first posted, so recomputing and
+ * re-persisting there would write a second estimate for a plan nobody re-planned - the thing AC5
+ * forbids.
+ *
+ * The truth table happens to match `parksForHumanApproval` today, because a new plan is exactly what
+ * gets parked for review. The two are kept SEPARATE on purpose: they answer different questions, and
+ * a future change to who parks must not silently change what gets recorded.
+ */
+export function shouldRecordPlanEstimate(input: {
+  resuming: boolean;
+  revision: boolean;
+}): boolean {
+  if (input.revision) return true;
+  return !input.resuming;
 }
 
 const isDirectRun =
