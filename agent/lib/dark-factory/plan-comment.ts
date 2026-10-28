@@ -70,6 +70,13 @@ export interface PostPlanCommentOptions {
    * read back the plan it had posted and stopped. A promise to pass it is not a fix; a compile error is.
    */
   plan: unknown;
+  /**
+   * The plan's cost estimate (#488), rendered into the human part under the marker.
+   *
+   * Optional, and absence is meaningful: no estimate renders no section, so a run that could not price
+   * its plan still posts a readable comment rather than a placeholder nobody can interpret.
+   */
+  estimate?: PlanCostEstimate | null;
 }
 
 export type PlanCommentResult =
@@ -82,8 +89,18 @@ export type PlanCommentResult =
  * The marker leads so a human opening the ticket sees the plan immediately; an HTML comment renders as
  * nothing, so putting it first costs no visual noise while making the comment findable by a retry.
  */
-export function planCommentBody(markdown: string, plan?: unknown): string {
-  const human = `${PLAN_COMMENT_MARKER}\n\n${markdown}`;
+export function planCommentBody(
+  markdown: string,
+  plan?: unknown,
+  estimate?: PlanCostEstimate | null,
+): string {
+  // #488: the estimate sits directly under the marker, so whoever decides whether to approve meets the
+  // forecast BEFORE committing to read the plan. No estimate, no section - never a placeholder, because
+  // a reader cannot tell a placeholder from a measurement (see renderCostEstimateSection).
+  const section = renderCostEstimateSection(estimate);
+  const human = section
+    ? `${PLAN_COMMENT_MARKER}\n\n${section}\n\n${markdown}`
+    : `${PLAN_COMMENT_MARKER}\n\n${markdown}`;
   if (plan === undefined) {
     return human;
   }
@@ -215,7 +232,7 @@ export async function postPlanComment(
   target: PlanCommentTarget,
   options: PostPlanCommentOptions,
 ): Promise<PlanCommentResult> {
-  const body = planCommentBody(options.markdown, options.plan);
+  const body = planCommentBody(options.markdown, options.plan, options.estimate);
 
   const listed = await target.listComments(options.owner, options.repo, options.issue);
   if (!listed.ok) {

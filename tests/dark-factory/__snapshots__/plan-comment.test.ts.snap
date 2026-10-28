@@ -1,0 +1,45 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`#488 the estimate in the plan comment > snapshots the comment body WITH an estimate 1`] = `
+"<!-- dark-factory:plan -->
+
+**Estimated cost: $0.10 – $0.41** (class \`XS\`, confidence \`low\`)
+
+Advisory only — a forecast from the plan's shape, not a quote. It does not block approval.
+
+# Plan: something
+
+## Goal
+
+make it better
+
+
+<details>
+<summary>Machine-readable plan (read back when this run resumes)</summary>
+
+\`\`\`json
+{"storyId":488,"approach":"surface the band"}
+\`\`\`
+
+</details>"
+`;
+
+exports[`#488 the estimate in the plan comment > snapshots the comment body WITHOUT an estimate 1`] = `
+"<!-- dark-factory:plan -->
+
+# Plan: something
+
+## Goal
+
+make it better
+
+
+<details>
+<summary>Machine-readable plan (read back when this run resumes)</summary>
+
+\`\`\`json
+{"storyId":488,"approach":"surface the band"}
+\`\`\`
+
+</details>"
+`;
