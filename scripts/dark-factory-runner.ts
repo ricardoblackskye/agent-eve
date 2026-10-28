@@ -79,6 +79,7 @@ import {
 } from "../agent/lib/dark-factory/preservation-guard";
 import { renderPlanFile } from "../agent/lib/dark-factory/plan-file";
 import { postPlanComment } from "../agent/lib/dark-factory/plan-comment";
+import { estimatePlanCostSafely } from "../agent/lib/dark-factory/plan-cost-estimate";
 import { recordPlanWithEstimateSafely } from "../agent/lib/dark-factory/plan-estimate-recorder";
 import {
   explainPlanFailure,
@@ -855,6 +856,10 @@ async function main(): Promise<void> {
   // the run fails during coding. Idempotent: a retry updates its own comment instead of adding another.
   // Fail-closed, because a plan nobody can read before coding is the defect this exists to fix, and every
   // other ticket write in this run already has to succeed.
+  // #488: price the plan ONCE, before the comment. The band a human approves and the row the ledger
+  // keeps have to be the same numbers, and the comment cannot read the ledger back (#487, Option B,
+  // persists AFTER this post). Best-effort: an unpriced plan still posts a readable comment.
+  const planEstimate = estimatePlanCostSafely({ plan: executionPlan, model: modelId });
   const planComment = await postPlanComment(issueWriter, {
     owner: repoOwner,
     repo: repoName,
@@ -865,6 +870,9 @@ async function main(): Promise<void> {
     // #373: the plan ITSELF, not only its rendering. Without it the comment carries no machine-readable
     // block, so the run that resumes against this comment cannot read the plan back and stops.
     plan: executionPlan,
+    // #488: the band, rendered under the marker. `undefined` renders no section at all, never a
+    // placeholder — the comment's absence of a price is the honest rendering of an absence.
+    estimate: planEstimate,
   });
   if (!planComment.ok) {
     throw new Error(`the plan comment could not be posted: ${planComment.error}`);
@@ -898,6 +906,10 @@ async function main(): Promise<void> {
       storyId: issueNum,
       source: isRevision ? "amendment" : "architect",
       commentRef,
+      // #488: the SAME value the comment rendered, so the band a human approved is the band on the row.
+      // If pricing failed before the comment, the composer may still price the plan for the ledger —
+      // persistence is best-effort and independent (#487), and the comment simply carries no band.
+      ...(planEstimate ? { estimate: () => planEstimate } : {}),
     });
     if (recorded.ok) {
       console.log(
