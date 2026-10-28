@@ -229,3 +229,86 @@ describe("the plan comment (#365 Task 11)", () => {
     });
   });
 });
+
+/**
+ * #488 — the estimate reaches the comment a human reads before approving (epic #453).
+ *
+ * The estimate is persisted AFTER this comment is posted (#487, Option B), so the band must be computed
+ * in memory and rendered here; the comment can never read it back from the ledger.
+ */
+describe("#488 the estimate in the plan comment", () => {
+  const MARKDOWN = "# Plan: something\n\n## Goal\n\nmake it better\n";
+  const PLAN = { storyId: 488, approach: "surface the band" };
+  const ESTIMATE = {
+    lowUsd: 0.1,
+    expectedUsd: 0.2,
+    highUsd: 0.41,
+    costClass: "XS" as const,
+    confidence: "low" as const,
+    features: {},
+  };
+
+  const target = (overrides: Partial<PlanCommentTarget> = {}): PlanCommentTarget => ({
+    listComments: vi.fn().mockResolvedValue({ ok: true, comments: [] }),
+    postComment: vi.fn().mockResolvedValue({ ok: true, id: 11 }),
+    editComment: vi.fn().mockResolvedValue({ ok: true, id: 12 }),
+    ...overrides,
+  });
+
+  it("renders the band under the marker, above the plan", () => {
+    const body = planCommentBody(MARKDOWN, PLAN, ESTIMATE);
+    const markerAt = body.indexOf(PLAN_COMMENT_MARKER);
+    const estimateAt = body.indexOf("Estimated cost:");
+    const planAt = body.indexOf("# Plan: something");
+    expect(markerAt).toBe(0);
+    expect(estimateAt).toBeGreaterThan(markerAt);
+    // A reviewer must meet the forecast BEFORE committing to read the plan.
+    expect(estimateAt).toBeLessThan(planAt);
+  });
+
+  it("omits the section entirely when there is no estimate", () => {
+    const body = planCommentBody(MARKDOWN, PLAN);
+    expect(body).not.toContain("Estimated cost");
+    expect(body).not.toMatch(/unknown/i);
+  });
+
+  it("keeps the human rendering above the machine block", () => {
+    const body = planCommentBody(MARKDOWN, PLAN, ESTIMATE);
+    const estimateAt = body.indexOf("Estimated cost:");
+    // Asserted present FIRST: an absent section would make indexOf return -1, which is less than
+    // anything, so a bare comparison would pass without the section existing at all.
+    expect(estimateAt).toBeGreaterThan(-1);
+    expect(estimateAt).toBeLessThan(body.indexOf("<details>"));
+  });
+
+  it("still round-trips the plan with an estimate present", () => {
+    // The section joins the HUMAN part; the machine block must stay last and intact, or a resumed run
+    // cannot read its plan back (#365 R4) and stops.
+    const parsed = parsePlanFromComment(planCommentBody(MARKDOWN, PLAN, ESTIMATE));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.plan).toEqual(PLAN);
+  });
+
+  // AC5. One case per test, so the snapshot key is the test name.
+  it("snapshots the comment body WITH an estimate", () => {
+    expect(planCommentBody(MARKDOWN, PLAN, ESTIMATE)).toMatchSnapshot();
+  });
+
+  it("snapshots the comment body WITHOUT an estimate", () => {
+    expect(planCommentBody(MARKDOWN, PLAN)).toMatchSnapshot();
+  });
+
+  it("passes the estimate through the poster", async () => {
+    const writer = target();
+    await postPlanComment(writer, {
+      owner: "o",
+      repo: "r",
+      issue: 488,
+      markdown: MARKDOWN,
+      plan: PLAN,
+      estimate: ESTIMATE,
+    });
+    const posted = (writer.postComment as ReturnType<typeof vi.fn>).mock.calls[0][3] as string;
+    expect(posted).toContain("Estimated cost:");
+  });
+});
