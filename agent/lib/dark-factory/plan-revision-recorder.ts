@@ -18,6 +18,8 @@
 import { createHash } from "node:crypto";
 import type { EventCursor } from "./run-history-store";
 import type { RunHistoryStore } from "./run-history-store";
+import type { PlanCommentRef, PlanRecordInput, PlanSource } from "./plan-ledger";
+import type { ExecutionPlan } from "./plan-validator";
 
 export interface RecordPlanRevisionInput {
   runId: string;
@@ -163,4 +165,62 @@ export async function readPlanRevisionCount(
     count,
     error: `the run's events did not finish paging after ${MAX_EVENT_PAGES} pages`,
   };
+}
+
+/**
+ * Persist the plan the runner just posted (#505).
+ *
+ * The runner posts the plan as a comment BEFORE coding so it is reviewable; without this the plan is
+ * only ever a comment and `df_plans` stays empty. This is the single write seam for that.
+ *
+ * Contract:
+ *  - a configured store records the revision and reports its `planId`;
+ *  - the refusing console/dry-run store is SKIPPED LOUDLY (`{ ok: false, skipped: true }`) — a missing
+ *    driver is a configuration choice, not a silent no-op, and must not abort an intentional dry-run;
+ *  - anything else (a real DB error, a broken store) PROPAGATES — fail-closed, because an unrecorded
+ *    plan in a real run is a defect we must not hide.
+ */
+export interface RecordPostedPlanInput {
+  runId: string;
+  planRevision: number;
+  plan: ExecutionPlan;
+  source: PlanSource;
+  /** Reference to the GitHub comment holding the plan, when the caller has it. */
+  commentRef?: PlanCommentRef;
+  occurredAt?: string;
+}
+
+export interface PostedPlanWriteResult {
+  ok: boolean;
+  /** The refusing console/dry-run store: nothing was written, and that is not an error. */
+  skipped?: boolean;
+  planId?: number;
+  error?: string;
+}
+
+export async function recordPostedPlan(
+  history: RunHistoryStore,
+  input: RecordPostedPlanInput,
+): Promise<PostedPlanWriteResult> {
+  const record: PlanRecordInput = {
+    runId: input.runId,
+    planRevision: input.planRevision,
+    storyId: input.plan.storyId,
+    source: input.source,
+    plan: input.plan,
+    ...(input.commentRef ? { commentRef: input.commentRef } : {}),
+    createdAt: input.occurredAt ?? new Date().toISOString(),
+  };
+
+  try {
+    const persisted = await history.recordPlan(record);
+    return { ok: true, planId: persisted.planId };
+  } catch (error) {
+    // The console/dry-run store refuses by THROWING (RunHistoryConfigurationError). Detect it by name
+    // so this module depends only on the store INTERFACE, not the provider factory.
+    if (error instanceof Error && error.name === "RunHistoryConfigurationError") {
+      return { ok: false, skipped: true, error: error.message };
+    }
+    throw error;
+  }
 }
