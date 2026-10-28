@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -143,5 +145,24 @@ describe("#521 the agent uses the derived budget and reports what it hit", () =>
     const attempt = result.attempts?.[0];
     expect(attempt?.promptChars).toBeGreaterThan(0);
     expect(attempt?.elapsedMs).toBeGreaterThanOrEqual(30);
+  });
+});
+
+/**
+ * #521 — the operator knob only exists if the composition root reads it. Asserted against the source, following
+ * the precedent in plan-comment.test.ts: the placement is not observable from a unit test of either piece.
+ */
+describe("#521 the runner resolves the override and hands it to the agent", () => {
+  const runner = readFileSync("scripts/dark-factory-runner.ts", "utf8");
+
+  it("resolves DF_ARCHITECT_TIMEOUT_MS before constructing the agent, and passes it through", () => {
+    const resolveAt = runner.indexOf("resolveArchitectTimeoutMs(");
+    const constructAt = runner.indexOf("new ArchitectAgent(");
+    expect(resolveAt).toBeGreaterThan(-1);
+    expect(constructAt).toBeGreaterThan(-1);
+    expect(resolveAt).toBeLessThan(constructAt);
+    expect(runner.slice(constructAt, constructAt + 2_000)).toContain(
+      "timeoutMs: architectTimeoutMs",
+    );
   });
 });
