@@ -18,6 +18,7 @@ import {
   type PlanParser,
 } from "./plan-validator";
 import { planningGuidanceForPrompt } from "./planning-guidance";
+import { ValidationError } from "./tester-agent";
 import { discoverArchitecture } from "./architect-discovery";
 import { buildTargetContract } from "./architect-prompt";
 
@@ -420,7 +421,19 @@ export const ARCHITECT_TIMEOUT_OVERHEAD_FREE_CHARS = MAX_CHARS_PER_FILE;
 export function resolveArchitectTimeoutMs(
   env: Record<string, string | undefined> = process.env,
 ): number | undefined {
-  throw new Error("not implemented");
+  const raw = env.DF_ARCHITECT_TIMEOUT_MS;
+  if (raw === undefined) {
+    return undefined;
+  }
+  // `Number` rather than the sibling tester's `parseInt`: parseInt("12.5") yields 12, so a fractional value
+  // would be accepted as valid while the message reported a number the run never used.
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new ValidationError(
+      `DF_ARCHITECT_TIMEOUT_MS must be a positive integer (received ${JSON.stringify(raw)}).`,
+    );
+  }
+  return parsed;
 }
 
 /**
@@ -431,7 +444,19 @@ export function architectTimeoutBudgetMs(
   promptChars: number,
   fixedMs?: number,
 ): number {
-  throw new Error("not implemented");
+  if (fixedMs !== undefined) {
+    return fixedMs;
+  }
+  // A NaN would make setTimeout fire at once and an Infinity would never fire, so a nonsense size is treated
+  // as no evidence rather than as a licence to run unbounded.
+  if (!Number.isFinite(promptChars) || promptChars <= ARCHITECT_TIMEOUT_OVERHEAD_FREE_CHARS) {
+    return ARCHITECT_TIMEOUT_FLOOR_MS;
+  }
+  const extraChars = promptChars - ARCHITECT_TIMEOUT_OVERHEAD_FREE_CHARS;
+  const derived =
+    ARCHITECT_TIMEOUT_FLOOR_MS +
+    (extraChars / 10_000) * ARCHITECT_TIMEOUT_MS_PER_10K_CHARS;
+  return Math.min(Math.ceil(derived), ARCHITECT_TIMEOUT_MAX_MS);
 }
 
 export class ArchitectAgent {
