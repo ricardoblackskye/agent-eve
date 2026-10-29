@@ -29,6 +29,8 @@ import { modelPriceTable } from "../agent/lib/dark-factory/cost-budget";
 import {
   PRICE_FLOOR_DATA_RELATIVE_PATH,
   PRICE_FLOOR_SOURCE,
+  PRICE_OUTLIER_MULTIPLE,
+  capRate,
   buildPriceFloorRecord,
   ceilingsBelowObserved,
   renderPriceFloorModule,
@@ -65,23 +67,43 @@ async function fetchDearestRate(
       data?: { endpoints?: Array<{ pricing?: { prompt?: string; completion?: string } }> };
     };
     const endpoints = body.data?.endpoints ?? [];
-    const rates: Array<{ input: number; output: number }> = [];
+    const inputs: number[] = [];
+    const outputs: number[] = [];
     for (const endpoint of endpoints) {
       const prompt = Number(endpoint.pricing?.prompt);
       const completion = Number(endpoint.pricing?.completion);
       if (Number.isFinite(prompt) && Number.isFinite(completion)) {
-        rates.push({ input: prompt * 1000, output: completion * 1000 });
+        inputs.push(prompt * 1000);
+        outputs.push(completion * 1000);
       }
     }
-    if (rates.length === 0) {
+    if (inputs.length === 0) {
       return { kind: "error", reason: "no priced endpoints returned" };
     }
+
+    // #499: the rates are KEPT, not reduced to a maximum. That is what lets the distribution be reported, and
+    // what stops one provider setting the reservation an order of magnitude above its peers.
+    const input = capRate(inputs);
+    const output = capRate(outputs);
+    const declinedInput = input.cappedFromUsdPer1k;
+    const declinedOutput = output.cappedFromUsdPer1k;
     return {
       kind: "ok",
       observation: {
-        inputUsdPer1k: Math.max(...rates.map((r) => r.input)),
-        outputUsdPer1k: Math.max(...rates.map((r) => r.output)),
-        providers: rates.length,
+        inputUsdPer1k: input.adoptedUsdPer1k,
+        outputUsdPer1k: output.adoptedUsdPer1k,
+        providers: inputs.length,
+        ...(input.distribution && output.distribution
+          ? { distribution: { input: input.distribution, output: output.distribution } }
+          : {}),
+        ...(declinedInput !== undefined || declinedOutput !== undefined
+          ? {
+              declinedDearestUsdPer1k: {
+                ...(declinedInput !== undefined ? { input: declinedInput } : {}),
+                ...(declinedOutput !== undefined ? { output: declinedOutput } : {}),
+              },
+            }
+          : {}),
       },
     };
   } catch (error) {
@@ -124,13 +146,28 @@ async function main(): Promise<void> {
 
   const record = buildPriceFloorRecord(observed, PRICE_FLOOR_SOURCE, new Date());
 
-  console.log("Dearest provider rate per declared model (USD per 1k):");
+  console.log("Adopted provider rate per declared model (USD per 1k):");
   for (const [id, rate] of Object.entries(observed)) {
     const shipped = modelPriceTable[id];
     console.log(
-      `  ${id}: observed in=${rate.inputUsdPer1k} out=${rate.outputUsdPer1k} ` +
+      `  ${id}: adopted in=${rate.inputUsdPer1k} out=${rate.outputUsdPer1k} ` +
         `(${rate.providers} providers) | shipped in=${shipped?.inputUsdPer1k} out=${shipped?.outputUsdPer1k}`,
     );
+    const distribution = rate.distribution;
+    if (distribution) {
+      const out = distribution.output;
+      console.log(
+        `    distribution (output): median ${out.median} | p90 ${out.p90} | second-dearest ` +
+          `${out.secondDearest} | cap ${PRICE_OUTLIER_MULTIPLE} x p90 = ${PRICE_OUTLIER_MULTIPLE * out.p90}`,
+      );
+    }
+    const declined = rate.declinedDearestUsdPer1k;
+    if (declined) {
+      console.log(
+        `    OUTLIER declined, not adopted: in=${declined.input ?? "n/a"} out=${declined.output ?? "n/a"}` +
+          " (a provider this far above its peers is reported rather than reserved against - #499)",
+      );
+    }
   }
 
   const problems = ceilingsBelowObserved(modelPriceTable, record);

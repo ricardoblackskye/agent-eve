@@ -12,7 +12,10 @@ import {
   PRICE_FLOOR_TTL_DAYS,
   PRICE_FLOOR_VERIFIED_AT,
   buildPriceFloorRecord,
+  PRICE_OUTLIER_MULTIPLE,
+  capRate,
   ceilingsBelowObserved,
+  distributionOf,
   floorAgeDays,
   floorFor,
   isFloorStale,
@@ -194,5 +197,61 @@ describe("#498 staleness is surfaced, not hidden", () => {
     };
     expect(stalenessNotice(new Date("2026-01-01T00:00:00Z"), old)).toBeTruthy();
     expect(stalenessNotice(new Date("2020-01-01T00:00:00Z"), old)).toBeNull();
+  });
+});
+
+describe("#499 - the adopted rate is not set by one outlier provider", () => {
+  // The live reading for the default model on 2026-10-29 (41 providers), and the reading that started this
+  // issue on 2026-10-27. Both are asserted: the rule must be inert on the first and binding on the second.
+  const spread = (dearest: number, second: number): number[] => [
+    ...Array<number>(2).fill(0.0006),
+    ...Array<number>(20).fill(0.00084),
+    ...Array<number>(16).fill(0.0012),
+    ...Array<number>(2).fill(second),
+    dearest,
+  ];
+  // 41 providers, reproducing the measured statistics exactly: median 0.00084, p90 0.0012, second-dearest
+  // 0.0018, dearest 0.0024. A stand-in with fewer values would not have the p90 the rule turns on.
+  const TODAY_OUTPUTS = spread(0.0024, 0.0018);
+  const OCT27_OUTPUTS = spread(0.015863057, 0.0024);
+
+  it("describes the provider distribution instead of keeping only the maximum", () => {
+    const d = distributionOf(TODAY_OUTPUTS)!;
+
+    expect(d.providers).toBe(TODAY_OUTPUTS.length);
+    expect(d.median).toBeCloseTo(0.00084, 9);
+    expect(d.secondDearest).toBeCloseTo(0.0018, 9);
+    expect(d.p90).toBeGreaterThanOrEqual(d.median);
+  });
+
+  it("has nothing to say about a single provider", () => {
+    expect(distributionOf([0.0024])).toBeNull();
+    expect(capRate([0.0024]).adoptedUsdPer1k).toBe(0.0024);
+  });
+
+  it("is INERT against today's real reading: no outlier, so the dearest is adopted", () => {
+    const capped = capRate(TODAY_OUTPUTS);
+
+    expect(capped.adoptedUsdPer1k).toBeCloseTo(0.0024, 9);
+    expect(capped.cappedFromUsdPer1k).toBeUndefined();
+  });
+
+  it("BINDS against the 2026-10-27 reading: the outlier does not set the reservation", () => {
+    const capped = capRate(OCT27_OUTPUTS);
+    const p90 = distributionOf(OCT27_OUTPUTS)!.p90;
+
+    expect(capped.adoptedUsdPer1k).toBeCloseTo(PRICE_OUTLIER_MULTIPLE * p90, 9);
+    expect(capped.adoptedUsdPer1k).toBeLessThan(0.015863057);
+    // Nothing is hidden: what was declined is reported.
+    expect(capped.cappedFromUsdPer1k).toBeCloseTo(0.015863057, 9);
+  });
+
+  it("still raises the adopted rate on a broad move, because the bound tracks the peers", () => {
+    const doubled = TODAY_OUTPUTS.map((v) => v * 2);
+
+    expect(capRate(doubled).adoptedUsdPer1k).toBeCloseTo(
+      2 * capRate(TODAY_OUTPUTS).adoptedUsdPer1k,
+      9,
+    );
   });
 });

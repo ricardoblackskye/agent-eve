@@ -40,6 +40,17 @@ export interface DearestObservation {
   outputUsdPer1k: number;
   /** Providers priced at the time, so a thin or partial read is visible rather than silent. */
   providers: number;
+  /**
+   * How the providers were distributed, per axis (#499). Recorded, not just printed: a drift issue has to be
+   * able to show the distribution of the reading that was adopted, and an outlier has to be visible at the
+   * moment it appears rather than reconstructed later.
+   */
+  distribution?: { input: RateDistribution; output: RateDistribution };
+  /**
+   * The raw dearest per axis, present ONLY when it was declined for being an outlier. Absence means the dearest
+   * was adopted as-is, which is the normal case.
+   */
+  declinedDearestUsdPer1k?: { input?: number; output?: number };
 }
 
 /** A committed record of what was actually observed upstream. */
@@ -74,6 +85,83 @@ export const PRICE_FLOOR_TTL_DAYS = 90;
 /** The dearest rate seen per model id. Observation record, not a catalog mirror. */
 export const observedDearest: Record<string, DearestObservation> =
   priceFloorRecord.observedDearest;
+
+/**
+ * The multiple of p90 above which a provider is an OUTLIER rather than the market (#499).
+ *
+ * Derived, not chosen for convenience. Measured on 2026-10-29, p90 for the default model was 0.0012, so the cap
+ * is 0.0036: inert against that day's dearest (0.0024) and binding against the 0.015863057 the observation
+ * recorded on 2026-10-27. A multiple that binds when no outlier exists is a different defect with the same
+ * symptom, which is why both readings are asserted.
+ */
+export const PRICE_OUTLIER_MULTIPLE = 3;
+
+/** How the provider rates behind one axis were distributed, so an outlier is visible when it is seen. */
+export interface RateDistribution {
+  median: number;
+  p90: number;
+  secondDearest: number;
+  providers: number;
+}
+
+/** What the refresh path may adopt for one axis, and what it declined to adopt. */
+export interface CappedRate {
+  adoptedUsdPer1k: number;
+  /** The raw dearest, present only when it exceeded the cap. */
+  cappedFromUsdPer1k?: number;
+  distribution: RateDistribution | null;
+}
+
+/**
+ * Summarise the provider rates for one axis (#499, acceptance criterion 4).
+ *
+ * The refresh path already fetches every provider rate and then keeps only the maximum, which is why an outlier
+ * could set the reservation without anyone seeing the distribution that made it one. Returns `null` when there is
+ * not enough spread to describe (a single provider has no peers to be an outlier against).
+ *
+ */
+export function distributionOf(values: readonly number[]): RateDistribution | null {
+  const rates = values.filter((v) => Number.isFinite(v)).slice().sort((a, b) => a - b);
+  if (rates.length < 2) return null;
+  return {
+    median: nearestRank(rates, 0.5),
+    p90: nearestRank(rates, 0.9),
+    secondDearest: rates[rates.length - 2] as number,
+    providers: rates.length,
+  };
+}
+
+/** Nearest-rank percentile over an ascending list, the convention the repository's benchmarks use. */
+function nearestRank(sorted: readonly number[], quantile: number): number {
+  const index = Math.min(
+    sorted.length - 1,
+    Math.max(0, Math.ceil(quantile * sorted.length) - 1),
+  );
+  return sorted[index] as number;
+}
+
+/**
+ * The rate the refresh path may adopt for one axis (#499).
+ *
+ * Inert when no provider is far from its peers; binds, and reports what it declined, when one is.
+ *
+ */
+export function capRate(values: readonly number[]): CappedRate {
+  const rates = values.filter((v) => Number.isFinite(v));
+  if (rates.length === 0) return { adoptedUsdPer1k: 0, distribution: null };
+
+  const dearest = Math.max(...rates);
+  const distribution = distributionOf(rates);
+  // One provider has no peers to be an outlier against, so nothing can be declined.
+  if (!distribution) return { adoptedUsdPer1k: dearest, distribution: null };
+
+  const cap = PRICE_OUTLIER_MULTIPLE * distribution.p90;
+  if (dearest > cap) {
+    // Reported, never hidden: the caller prints this, and the record can carry what was declined.
+    return { adoptedUsdPer1k: cap, cappedFromUsdPer1k: dearest, distribution };
+  }
+  return { adoptedUsdPer1k: dearest, distribution };
+}
 
 /**
  * The floor for a model, normalised the same way `resolvePrice` normalises. Unknown returns
@@ -172,11 +260,21 @@ export function renderPriceFloorModule(record: PriceFloorRecord): string {
     .sort()
     .map((id) => {
       const observed = record.observedDearest[id];
+      const axis = (d: RateDistribution): string =>
+        `{ median: ${d.median}, p90: ${d.p90}, secondDearest: ${d.secondDearest}, providers: ${d.providers} }`;
+      const distribution = observed.distribution
+        ? `      distribution: { input: ${axis(observed.distribution.input)}, output: ${axis(observed.distribution.output)} },\n`
+        : "";
+      const declined = observed.declinedDearestUsdPer1k
+        ? `      declinedDearestUsdPer1k: ${JSON.stringify(observed.declinedDearestUsdPer1k)},\n`
+        : "";
       return (
         `    ${JSON.stringify(id)}: {\n` +
         `      inputUsdPer1k: ${observed.inputUsdPer1k},\n` +
         `      outputUsdPer1k: ${observed.outputUsdPer1k},\n` +
         `      providers: ${observed.providers},\n` +
+        distribution +
+        declined +
         "    },"
       );
     })
