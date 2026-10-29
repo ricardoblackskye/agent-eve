@@ -56,12 +56,15 @@ export const BAND_HIGH_MULTIPLIER = 2;
 export const MIN_CALIBRATION_SAMPLES = 10;
 
 /**
- * Identity of the constant set that produced a band (#486).
+ * Identity of what produced a band (#486, #533).
  *
- * Stamped onto every persisted estimate so a later recalibration (#490) can never be averaged
- * together with bands produced by a different model. Bump this whenever a constant below changes.
+ * Stamped onto every persisted estimate so a later recalibration (#490) can never be averaged together
+ * with bands produced by a different model of the world. Bump this whenever a constant below changes —
+ * **or whenever the same input starts producing a different band**, which is why wiring the run history
+ * in (#533) moved it: no constant changed, but a repository with history now yields a scaled
+ * expectation, so v1 and v2 bands are not comparable and must never be blended.
  */
-export const PLAN_ESTIMATOR_VERSION = "v1";
+export const PLAN_ESTIMATOR_VERSION = "v2";
 
 /** Absolute cost classes, anchored to the monthly orchestrator cap. */
 export type CostClass = "XS" | "S" | "M" | "L" | "XL";

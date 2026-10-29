@@ -168,6 +168,19 @@ Second, the band is **near-constant for small stories**, which is exactly what t
 - The settled usage from Figure 2 is a measured actual per call. Nothing feeds those measured costs back
   into the plan estimate yet; that is the calibration path, tracked as **#490**.
 
+### The estimator now reads repository history
+
+`confidence` and `revisionFactor` are no longer constants: the window is chosen by
+[`plan-history.ts`](../../agent/lib/dark-factory/plan-history.ts). The estimate is calibrated against the
+repository's **finished** runs — `succeeded`, `failed` or `aborted`, newest first, capped at 20 — which the
+runner reads from the store it already holds and hands in, since the estimator is pure and cannot read one
+itself. A `blocked` run is a park rather than an outcome, so its counters are excluded; failures are
+included, because a failed run's revision counts are the thrash the factor exists to capture.
+
+The estimator's version therefore moves to **v2**: no constant changed, but the same plan now yields a
+different band for a repository with history, and the stamp is what keeps those two regimes apart in the
+ledger. See ADR 0077.
+
 ### The one learned input is also not wired
 
 `revisionFactor` is the only empirical term: `max(1, mean(iterations + fixCycles + 1))` over prior runs,

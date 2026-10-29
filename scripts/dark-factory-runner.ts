@@ -134,6 +134,13 @@ import { withNotifications } from "../agent/lib/dark-factory/notifying-run-histo
 import { runGovernedAgentCall } from "../agent/lib/dark-factory/governed-agent-call";
 import { recordRunActualCost } from "../agent/lib/dark-factory/run-cost-recorder";
 import { createUsageStore } from "../agent/lib/dark-factory/usage-store-provider";
+import {
+  FINISHED_RUN_STATUSES,
+  PLAN_HISTORY_WINDOW,
+  selectPlanHistory,
+} from "../agent/lib/dark-factory/plan-history";
+import type { RunSummary } from "../agent/lib/dark-factory/run-history";
+import type { RunHistoryStore } from "../agent/lib/dark-factory/run-history-store";
 
 // The .env bootstrap lives in runner-env.ts so it can be tested without running the pipeline.
 // It carries NO model default: agent/model-config.ts is the single source of truth (#400).
@@ -924,7 +931,15 @@ async function main(): Promise<void> {
   // #488: price the plan ONCE, before the comment. The band a human approves and the row the ledger
   // keeps have to be the same numbers, and the comment cannot read the ledger back (#487, Option B,
   // persists AFTER this post). Best-effort: an unpriced plan still posts a readable comment.
-  const planEstimate = estimatePlanCostSafely({ plan: executionPlan, model: modelId });
+  // #533: the estimator is given the repository's finished runs, so its confidence and revision factor
+  // stop being constants. Best-effort: an unreadable history yields an empty window, which is the cold
+  // start it already handles, and never fails the plan.
+  const planHistory = await readPlanHistory(runHistory, targetRepo);
+  const planEstimate = estimatePlanCostSafely({
+    plan: executionPlan,
+    model: modelId,
+    history: planHistory,
+  });
   const planComment = await postPlanComment(issueWriter, {
     owner: repoOwner,
     repo: repoName,
@@ -1734,6 +1749,43 @@ export async function recordRunCostForRun(
         error instanceof Error ? error.message : String(error)
       }`,
     );
+  }
+}
+
+/**
+ * #533 — the repository's finished runs, for the plan estimate to calibrate against.
+ *
+ * BEST-EFFORT by design: a plan must never fail because its calibration history was unavailable, so any
+ * failure warns and yields an empty window, which is exactly the cold start the estimator already
+ * handles. Read here rather than inside the estimator, which stays pure.
+ */
+export async function readPlanHistory(
+  store: RunHistoryStore,
+  repo: string,
+): Promise<RunSummary[]> {
+  try {
+    const page = await store.listRuns({
+      repo,
+      statuses: [...FINISHED_RUN_STATUSES],
+      limit: PLAN_HISTORY_WINDOW,
+      direction: "desc",
+    });
+    if (!page.ok) {
+      console.warn(
+        `[WARN] The plan's calibration history could not be read, so the estimate is a cold start: ${
+          page.error ?? "unknown"
+        }`,
+      );
+      return [];
+    }
+    return selectPlanHistory(page.value?.items ?? []);
+  } catch (error) {
+    console.warn(
+      `[WARN] The plan's calibration history could not be read, so the estimate is a cold start: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    return [];
   }
 }
 

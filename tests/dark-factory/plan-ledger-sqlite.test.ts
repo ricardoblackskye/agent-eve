@@ -6,6 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import { SqliteRunHistoryStore } from "../../agent/lib/dark-factory/run-history-store";
 import type { ExecutionPlan } from "../../agent/lib/dark-factory/plan-validator";
 import type { RunSummary } from "../../agent/lib/dark-factory/run-history";
+import { PLAN_ESTIMATOR_VERSION } from "../../agent/lib/dark-factory/plan-cost-estimate";
 
 const at = "2026-10-26T12:00:00.000Z";
 const directories: string[] = [];
@@ -78,14 +79,16 @@ describe("plan ledger on sqlite (#486)", () => {
     const written = await store.recordPlanEstimate(estimateFor(recorded.planId));
 
     expect(written.estimateId).toBeGreaterThan(0);
-    expect(written.estimatorVersion).toBe("v1");
+    // The INTENT is that the stamp round-trips, so it references the constant: a bumped literal would
+    // make this a test of the version number rather than of persistence (#533).
+    expect(written.estimatorVersion).toBe(PLAN_ESTIMATOR_VERSION);
 
     const [stored] = await store.listPlanEstimates("run-1");
     expect(stored.expectedUsd).toBeCloseTo(0.02352, 8);
     expect(stored.costClass).toBe("XS");
     expect(stored.confidence).toBe("low");
     expect(stored.features).toEqual({ targetFileCount: 2, priceSource: "known-model" });
-    expect(stored.estimatorVersion).toBe("v1");
+    expect(stored.estimatorVersion).toBe(PLAN_ESTIMATOR_VERSION);
     // Whole-run for now: no stage until per-stage attribution lands (#492).
     expect(stored).not.toHaveProperty("stage");
   });

@@ -130,3 +130,4 @@ changes, write a new one that supersedes it.
 | [0074](0074-the-calibration-actual-is-recorded-usage.md)                 | The calibration actual is recorded usage                                                            | Accepted           |
 | [0075](0075-the-run-actual-is-summed-from-its-sources.md)                | The run's actual is the sum of what it recorded                                                     | Accepted           |
 | [0076](0076-the-ledger-is-the-one-source-for-a-run-actual.md)            | The ledger is the one source for a run's actual                                                     | Accepted           |
+| [0077](0077-the-estimator-reads-repository-history.md)                   | The estimator reads the repository's finished runs                                                  | Accepted           |
