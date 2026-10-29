@@ -74,11 +74,27 @@ export function planCheckout(input: CheckoutPlanInput): CheckoutPlan {
     ? ["clone", "--depth", "1", `https://github.com/${repo}.git`, path]
     : [];
 
-  const summary = mustClone
-    ? `clone ${repo} into ${path} (credentials come from the environment, never from the URL)`
-    : `reuse the checkout already at ${path}`;
+  // A fresh checkout has no node_modules, so the target's own test command (e.g. `npx vitest run`) cannot start
+  // there — it dies before collecting a single test, and the coding loop reports a failure no source edit can
+  // fix (#541). Decide the provisioning purely through exists() so the planner stays free of I/O: a lockfile
+  // means a reproducible `npm ci`; a manifest alone means `npm install`; neither means this is not a Node project,
+  // so fail safe and run nothing rather than `npm ci` in a repository that was never a Node project. Reusing a
+  // checkout — a resume — skips this entirely, because it was already provisioned.
+  const installArgs = !mustClone
+    ? []
+    : exists(join(path, "package-lock.json"))
+      ? ["ci"]
+      : exists(join(path, "package.json"))
+        ? ["install"]
+        : [];
 
-  return { path, mustClone, cloneArgs, summary };
+  const summary =
+    (mustClone
+      ? `clone ${repo} into ${path} (credentials come from the environment, never from the URL)`
+      : `reuse the checkout already at ${path}`) +
+    (installArgs.length ? ` and run npm ${installArgs.join(" ")}` : "");
+
+  return { path, mustClone, cloneArgs, installArgs, summary };
 }
 
 /**
