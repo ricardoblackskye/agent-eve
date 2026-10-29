@@ -147,6 +147,18 @@ function revisionFactorFor(history: RunSummary[]): number {
   return Math.max(1, total / history.length);
 }
 
+/**
+ * The measured correction, or 1 (#490).
+ *
+ * `resolvePrice`-style tolerance: a value that is not a usable number is not a correction, so it is
+ * ignored rather than propagated. A `NaN` or negative multiplier would otherwise produce a band that
+ * is worse than useless — it would look like a measurement.
+ */
+function resolveCalibrationFactor(factor: number | undefined): number {
+  if (typeof factor !== "number" || !Number.isFinite(factor) || factor <= 0) return 1;
+  return factor;
+}
+
 /** Coarse on purpose: dispersion-aware confidence needs the estimate/actual pairs #490 builds. */
 function confidenceFor(history: RunSummary[]): CostConfidence {
   if (history.length === 0) return "low";
@@ -180,7 +192,8 @@ export function estimatePlanCost(input: EstimatePlanCostInput): PlanCostEstimate
     (inputTokens / 1000) * price.inputUsdPer1k +
     (outputTokens / 1000) * price.outputUsdPer1k;
   const revisionFactor = revisionFactorFor(history);
-  const expectedUsd = baseUsd * revisionFactor;
+  const calibrationFactor = resolveCalibrationFactor(input.calibrationFactor);
+  const expectedUsd = baseUsd * revisionFactor * calibrationFactor;
 
   return {
     lowUsd: expectedUsd * BAND_LOW_MULTIPLIER,
@@ -197,6 +210,7 @@ export function estimatePlanCost(input: EstimatePlanCostInput): PlanCostEstimate
       priceOutputUsdPer1k: price.outputUsdPer1k,
       priceSource,
       revisionFactor,
+      calibrationFactor,
       historySampleCount: history.length,
     },
   };
@@ -258,12 +272,14 @@ export function decomposePlanCostEstimate(
   const priceOf = input.resolvePrice ?? resolvePrice;
   const resolved = priceOf(input.model);
   const price = resolved ?? ceilingPrice();
-  // The same factor the band applies, so the parts keep summing to `expectedUsd` with history.
+  // The same factors the band applies, so the parts keep summing to `expectedUsd`.
   const revisionFactor = revisionFactorFor(input.history ?? []);
+  const calibrationFactor = resolveCalibrationFactor(input.calibrationFactor);
 
   const stageUsd = (outputTokens: number): number =>
     ((readTokens / 1000) * price.inputUsdPer1k + (outputTokens / 1000) * price.outputUsdPer1k) *
-    revisionFactor;
+    revisionFactor *
+    calibrationFactor;
 
   return [
     { stage: "architect", expectedUsd: stageUsd(clampTokenCount(ARCHITECT_OUTPUT_TOKENS)) },

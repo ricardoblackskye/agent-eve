@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  classifyCost,
   decomposePlanCostEstimate,
   estimatePlanCost,
 } from "../../agent/lib/dark-factory/plan-cost-estimate";
@@ -43,14 +44,16 @@ describe("plan-estimate calibration factor (#490)", () => {
     expect(halved.expectedUsd).toBeCloseTo(base.expectedUsd * 0.5, 10);
     expect(halved.lowUsd).toBeCloseTo(base.lowUsd * 0.5, 10);
     expect(halved.highUsd).toBeCloseTo(base.highUsd * 0.5, 10);
-    expect(halved.costClass).toBe(base.costClass);
+    // Derived, not assumed: halving CAN cross an edge, so the class must follow the scaled band.
+    expect(halved.costClass).toBe(classifyCost(halved.expectedUsd));
   });
 
   it("re-classifies a band pushed across a cost-class edge", () => {
     const base = estimatePlanCost({ plan: plan(), model: MODEL });
-    expect(base.costClass).toBe("XS");
     const scaledUp = estimatePlanCost({ plan: plan(), model: MODEL, calibrationFactor: 20 });
-    expect(scaledUp.costClass).not.toBe("XS");
+
+    expect(scaledUp.costClass).toBe(classifyCost(base.expectedUsd * 20));
+    expect(scaledUp.costClass).not.toBe(base.costClass);
   });
 
   it("records the APPLIED factor, so a persisted band stays auditable", () => {
