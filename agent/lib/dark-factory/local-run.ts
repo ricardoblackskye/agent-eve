@@ -176,17 +176,40 @@ export const defaultGitClone: GitClone = (plan, authEnv) =>
  * itself. Running `npm` (not `npx`) here keeps the install inside the target; the coding loop's `npx vitest run`
  * then resolves the nearest `node_modules` and no longer dies before collecting a test.
  */
-export const defaultNpmInstall: NpmInstall = (plan) =>
-  new Promise<number>((resolve, reject) => {
+export const defaultNpmInstall: NpmInstall = (target) =>
+  new Promise<number>((resolve) => {
     const merged: Record<string, string> = {};
     for (const [key, value] of Object.entries(process.env)) {
       if (value !== undefined) merged[key] = value;
     }
-    const child = nodeSpawn("npm", plan.installArgs, {
-      cwd: plan.path,
-      env: merged as unknown as NodeJS.ProcessEnv,
+
+    // #541, learned from a live run that reported "exit 1" with no output at all:
+    //  - on Windows `npm` resolves to `npm.cmd`, and Node REFUSES to spawn a `.cmd` without a shell (the
+    //    CVE-2024-27980 change), so the spawn fails as an ENOENT the operator never sees. The arguments here are
+    //    a closed allow-list (`ci` | `install`), so no shell-injection surface is introduced.
+    //  - the stdio is INHERITED, as the runner spawn already does; piping it with nothing reading the pipe
+    //    swallowed npm's output, and a bare exit code is precisely not "reported loudly".
+    //  - a spawn failure is REPORTED and resolves non-zero rather than rejecting: the `exit` event can fire
+    //    first, and a resolve would then silently discard the rejection.
+    let child;
+    try {
+      child = nodeSpawn("npm", target.installArgs, {
+        cwd: target.path,
+        env: merged as unknown as NodeJS.ProcessEnv,
+        shell: process.platform === "win32",
+        stdio: "inherit",
+      });
+    } catch (error) {
+      process.stderr.write(
+        `could not start npm: ${error instanceof Error ? error.message : String(error)}\n`,
+      );
+      resolve(1);
+      return;
+    }
+    child.on("error", (error) => {
+      process.stderr.write(`could not start npm: ${error.message}\n`);
+      resolve(1);
     });
-    child.on("error", reject);
     child.on("exit", (code) => resolve(code ?? 1));
   });
 
@@ -247,8 +270,15 @@ export async function runLocalRun(
         installArgs: provisioning.installArgs,
       });
       if (installCode !== 0) {
+        // Deliberately REPORTED, not worked around: falling back to `npm install` here would paper over a
+        // lockfile that is out of sync with its package.json, which is a fact about the target worth knowing.
+        // The run continues so the failure is classified rather than mysterious, and npm's own diagnosis has
+        // already gone to the operator through the inherited stdio.
         process.stderr.write(
-          `npm ${provisioning.installArgs.join(" ")} failed (exit ${installCode}) — the coding loop will report its tests as unmeasured\n`,
+          `npm ${provisioning.installArgs.join(" ")} failed (exit ${installCode}) in ${decision.checkout.path}\n` +
+            "  The checkout is NOT provisioned, so the coding loop will report its tests as unmeasured rather\n" +
+            "  than as failures of the code. A lockfile out of sync with package.json is the usual cause; fix\n" +
+            "  the target (or provision the checkout yourself) and re-run.\n",
         );
       }
     }
