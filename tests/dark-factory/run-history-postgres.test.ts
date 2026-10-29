@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { testDsnFor } from "./pg-test-helpers";
 import { afterAll, describe, expect, it } from "vitest";
 import { PostgresRunHistoryStore } from "../../agent/lib/dark-factory/run-history-postgres";
+import { PLAN_ESTIMATOR_VERSION } from "../../agent/lib/dark-factory/plan-cost-estimate";
 
 const baseDsn = process.env.DF_RUN_HISTORY_TEST_DATABASE_URL;
 // #392: this suite owns its own SCHEMA, so parallel workers cannot collide with another suite.
@@ -491,7 +492,9 @@ describeWithDatabase("PostgresRunHistoryStore integration", () => {
     expect(estimates[0].expectedUsd).toBeCloseTo(0.02352, 8);
     expect(estimates[0].costClass).toBe("XS");
     // Version stamp survives the JSONB round trip.
-    expect(estimates[0].estimatorVersion).toBe("v1");
+    // The INTENT is that the stamp round-trips, so it references the constant: a hardcoded literal
+    // tests the version number rather than persistence, and breaks on every legitimate bump (#533).
+    expect(estimates[0].estimatorVersion).toBe(PLAN_ESTIMATOR_VERSION);
 
     // A plan that was never priced has NO estimate row, never a zero-filled one.
     expect(await store.listPlanEstimates(`pg-ledger-none-${namespace}`)).toEqual([]);
