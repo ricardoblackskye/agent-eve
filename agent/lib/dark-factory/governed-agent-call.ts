@@ -9,7 +9,7 @@
  * OPT-IN: with no governor it simply runs the call, so an unconfigured deployment
  * behaves exactly as before.
  */
-import { runGovernedLlmCall } from "./governed-llm-call";
+import { runGovernedLlmCall, type GovernedLlmCallResult } from "./governed-llm-call";
 import { CostRefusedError } from "./cost-governor";
 import { recordCostRefusal } from "./cost-refusal-recorder";
 import type { CostCategory } from "./cost-budget";
@@ -77,24 +77,78 @@ export interface GovernedAgentCallOptions<T> {
  * - No governor configured => run the call and return its result (unchanged).
  * - Admitted => run the call and return its result.
  * - Refused => record the code on the run (best effort) and THROW `CostRefusedError`.
+ *
+ * Usage recording (#492) is INDEPENDENT of governance: a supplied sink records whenever the call RAN, with or
+ * without a governor, because the budget category and the usage ledger are separate subsystems. A REFUSED call
+ * records nothing — nothing ran, so there is nothing to attribute.
  */
 export async function runGovernedAgentCall<T>(
   deps: GovernedAgentCallDeps,
   options: GovernedAgentCallOptions<T>,
 ): Promise<T> {
-  if (!deps.governor) return options.run();
+  const usage = options.usage;
 
-  const outcome = await runGovernedLlmCall({
-    governor: deps.governor,
-    category: options.category,
-    model: options.model,
-    inputTokens: options.inputTokens,
-    outputTokens: options.outputTokens,
-    run: options.run,
-    ...(options.costOf ? { costOf: options.costOf } : {}),
-  });
+  /**
+   * Best-effort: the ledger must never fail the call it measures. The measurement is spread, never defaulted, so a
+   * field that was not measured stays ABSENT on the event (the ledger reports it as `unmeasured`, never as zero).
+   */
+  const recordUsage = async (result?: T): Promise<void> => {
+    if (!usage) return;
+    try {
+      await usage.sink.record({
+        taskType: usage.taskType,
+        ...(usage.measurementOf && result !== undefined ? usage.measurementOf(result) : {}),
+      });
+    } catch (error) {
+      console.warn(
+        `[usage] governed call usage was not recorded: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  };
 
-  if (outcome.ok) return outcome.result;
+  // The condition for recording is that the call RAN, not that it SUCCEEDED: a failed call still spends (the
+  // governor settles its reservation), so the ledger acknowledges it with an unmeasured event rather than silence.
+  let callRan = false;
+  const run = async (): Promise<T> => {
+    callRan = true;
+    return options.run();
+  };
+
+  if (!deps.governor) {
+    try {
+      const result = await run();
+      await recordUsage(result);
+      return result;
+    } catch (error) {
+      if (callRan) await recordUsage();
+      throw error;
+    }
+  }
+
+  let outcome: GovernedLlmCallResult<T>;
+  try {
+    outcome = await runGovernedLlmCall({
+      governor: deps.governor,
+      category: options.category,
+      model: options.model,
+      inputTokens: options.inputTokens,
+      outputTokens: options.outputTokens,
+      run,
+      ...(options.costOf ? { costOf: options.costOf } : {}),
+    });
+  } catch (error) {
+    // `callRan` distinguishes "the call ran and threw" from "the governor could not even admit it": only the
+    // former spent anything.
+    if (callRan) await recordUsage();
+    throw error;
+  }
+
+  if (outcome.ok) {
+    await recordUsage(outcome.result);
+    return outcome.result;
+  }
 
   if (deps.runHistory && deps.runId) {
     // Best effort: the call is refused either way, but the run should say why.
