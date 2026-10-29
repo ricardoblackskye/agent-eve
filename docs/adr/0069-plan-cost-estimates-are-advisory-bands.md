@@ -1,7 +1,7 @@
 # 0069 — Plan cost estimates are advisory bands, not point forecasts
 
 - **Date:** 2026-10-26
-- **Status:** Accepted
+- **Status:** Superseded by 0073
 
 ## Context
 
