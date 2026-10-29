@@ -508,7 +508,12 @@ async function main(): Promise<void> {
   // #492: planning usage reaches the ledger under its own task type, so planning spend can be separated from
   // implementation spend. `createWorkerUsageRecorder` returns null when DF_USAGE_DRIVER is unset — that IS the
   // opt-in — and the recorder is best-effort by construction, so a ledger outage cannot fail a planning attempt.
-  const architectUsage = createWorkerUsageRecorder(process.env, { runId, model: modelId });
+  const architectUsage = createWorkerUsageRecorder(process.env, {
+    runId,
+    model: modelId,
+    // Attribution the ledger's `pbiId` field exists for: a live run showed the event landing without it.
+    pbiId: issueNum,
+  });
 
   /**
    * Measured cost for the ledger, from the provider's own token counts. An unpriced model yields NO cost rather than

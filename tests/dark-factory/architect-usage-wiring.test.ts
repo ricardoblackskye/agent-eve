@@ -23,6 +23,9 @@ describe("#492 the architect call is wired to the usage ledger", () => {
     // The factory returns null when DF_USAGE_DRIVER is unset, which IS the opt-in: an unconfigured
     // deployment records nothing and behaves exactly as before.
     expect(RUNNER).toMatch(/createWorkerUsageRecorder\(\s*process\.env/);
+    // A live run produced the event WITHOUT this field, so it is pinned: the ledger's `pbiId` is how a consumer
+    // attributes an event to a backlog item, and the runner has the issue number in scope.
+    expect(RUNNER).toContain("pbiId: issueNum");
   });
 
   it("supplies a sink tagged architect on the architect call, and on no other call", () => {
