@@ -1,0 +1,40 @@
+/**
+ * Dark Factory — a run's actual cost (#531, epic #453).
+ *
+ * ONE definition of what a run cost, so the value written to `df_run_summaries.cost_usd` cannot
+ * diverge from what the calibration report reads. See ADR 0075.
+ *
+ * A run records its spend to exactly one of two places, by execution path:
+ *
+ * - `df_usage_events` — the in-process governed calls (the architect, and the reviewer);
+ * - the run's own `run.cost` events — the deployed gateway path.
+ *
+ * The two never overlap, which is what makes summing them correct rather than double counting.
+ *
+ * Properties this module must keep:
+ *
+ * - **PURE.** No store, no clock, no environment, no randomness, so a test can pin it exactly.
+ * - **ABSENT IS ZERO, NEVER NaN.** A source that recorded nothing contributes 0.
+ * - **UNUSABLE VALUES ARE IGNORED.** A negative or non-finite cost is not a cost; ignoring it is
+ *   better than propagating it, because the failure that matters is a run looking cheaper than it was.
+ * - **NO CONTENT.** Money only, never prompts, file contents or issue text.
+ */
+
+/** What a run recorded, per source. Either may be absent when that path recorded nothing. */
+export interface RunCostSources {
+  /** Summed from the usage ledger for this run. */
+  usageCostUsd?: number;
+  /** Summed from the run's own cost events, which the gateway writes. */
+  eventCostUsd?: number;
+}
+
+export interface RunActualCost {
+  costUsd: number;
+  /** What went into the total, so a reader can tell the two paths apart. */
+  sources: { usageCostUsd: number; eventCostUsd: number };
+}
+
+/** Sum a run's recorded sources into its actual cost. */
+export function sumRunActualCost(sources: RunCostSources): RunActualCost {
+  throw new Error("not implemented");
+}
