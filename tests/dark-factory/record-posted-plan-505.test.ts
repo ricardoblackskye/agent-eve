@@ -215,6 +215,21 @@ describe("samePlan (#516)", () => {
     ).toBe(false);
   });
 
+  it("matches the same plan when its keys come back REORDERED, as postgres jsonb returns them (#516)", () => {
+    // Found against the real store: jsonb does not preserve key order, so a round-tripped plan is the same
+    // plan with its fields in a different order. sqlite stores text and keeps the order, which is exactly
+    // how this hid behind a green local suite.
+    const reordered = {
+      acceptanceCriteriaMap: [],
+      summary: "s",
+      title: "t",
+      tasks: [{ title: "one", objective: "o" }],
+      targetFiles: [{ path: "a.ts", action: "modify", rationale: "r" }],
+      storyId: 516,
+    } as unknown as ExecutionPlan;
+    expect(samePlan(plan(), reordered)).toBe(true);
+  });
+
   it("ignores the comment reference, mirroring sameEvent", () => {
     expect(samePlan(plan({ commentRef: { provider: "github", id: 1, url: "u" } }), plan())).toBe(true);
   });

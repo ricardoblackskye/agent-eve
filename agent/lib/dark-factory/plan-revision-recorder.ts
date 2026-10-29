@@ -218,7 +218,25 @@ export function samePlan(left: ExecutionPlan, right: ExecutionPlan): boolean {
     const { commentRef: _derived, ...rest } = plan as ExecutionPlan & { commentRef?: unknown };
     return rest as Record<string, unknown>;
   };
-  return JSON.stringify(strip(left)) === JSON.stringify(strip(right));
+  return canonical(strip(left)) === canonical(strip(right));
+}
+
+/**
+ * A stable serialisation for comparison (#516).
+ *
+ * Key ORDER must not decide whether two plans are the same: postgres returns `jsonb` with its keys
+ * reordered, so the round-tripped plan is the same plan with its fields in a different order. sqlite
+ * stores text and preserves the order, which is exactly how a real difference hid behind a passing
+ * local test. Arrays keep their order, because position is meaningful in a plan.
+ */
+function canonical(value: unknown): string {
+  return JSON.stringify(value, (_key, val) => {
+    if (val === null || typeof val !== "object" || Array.isArray(val)) return val;
+    const entries = Object.entries(val as Record<string, unknown>).sort(([a], [b]) =>
+      a < b ? -1 : a > b ? 1 : 0,
+    );
+    return Object.fromEntries(entries);
+  });
 }
 
 /** The plan already recorded for this run and revision, if it is the same plan (#516). */
