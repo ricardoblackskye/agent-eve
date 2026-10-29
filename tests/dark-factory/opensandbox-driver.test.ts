@@ -128,7 +128,7 @@ describe("#281 opensandbox driver", () => {
   it("maps the exit code to passed, and never calls an unreadable exit code a pass", async () => {
     const good = fakeHandle();
     const goodTools = createOpenSandboxProvider(env, { createSandbox: async () => good.handle }).create("/workspace");
-    expect(await goodTools.runTests("npx vitest run")).toEqual({ passed: true, output: "ok" });
+    expect(await goodTools.runTests("npx vitest run")).toEqual({ passed: true, output: "ok", ran: true });
 
     const unknown = fakeHandle({ exitCode: undefined });
     const unknownTools = createOpenSandboxProvider(env, { createSandbox: async () => unknown.handle }).create("/workspace");
