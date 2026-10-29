@@ -2,7 +2,9 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { loadLocalEnv } from "../../scripts/load-env";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { loadLocalEnv, localEnvDir } from "../../scripts/load-env";
 
 const KEYS = ["DF_TEST_ALPHA", "DF_TEST_BETA", "DF_TEST_QUOTED"] as const;
 
@@ -44,5 +46,35 @@ describe("operator script env loading (#215)", () => {
 
   it("is a no-op when there is no env file", () => {
     expect(loadLocalEnv(dir)).toEqual([]);
+  });
+});
+
+describe("#540 - the default directory is the repository root, not the cwd", () => {
+  const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+  const originalCwd = process.cwd();
+
+  afterEach(() => {
+    process.chdir(originalCwd);
+    for (const key of KEYS) delete process.env[key];
+  });
+
+  it("resolves from the module, so the runner's own comment is true from any directory", () => {
+    expect(localEnvDir()).toBe(repoRoot);
+  });
+
+  it("does not move when the process's working directory moves", () => {
+    const before = localEnvDir();
+    process.chdir(dir);
+    expect(localEnvDir()).toBe(before);
+  });
+
+  it("does NOT load a target checkout's env — the cwd's .env.local is that project's, not ours", () => {
+    // The security-shaped half of the rule: a local run's cwd is a checkout of someone else's repository.
+    writeFileSync(join(dir, ".env.local"), "DF_TEST_ALPHA=from-the-cwd\n");
+    process.chdir(dir);
+
+    loadLocalEnv();
+
+    expect(process.env.DF_TEST_ALPHA).toBeUndefined();
   });
 });

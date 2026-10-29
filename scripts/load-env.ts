@@ -30,6 +30,16 @@ function unquote(value: string): string {
  * overriding anything already set. Returns the names it supplied, so a script
  * can report which file configured it.
  */
+/**
+ * The directory the default loads from (#540).
+ *
+ * Exported so the rule can be asserted: CI has no `.env.local` at the repository root, so a test that proved
+ * this through the filesystem could only pass on a machine that happens to have one.
+ */
+export function localEnvDir(): string {
+  throw new Error("not implemented");
+}
+
 export function loadLocalEnv(dir: string = process.cwd()): string[] {
   const supplied: string[] = [];
 
