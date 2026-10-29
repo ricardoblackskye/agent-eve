@@ -128,3 +128,4 @@ changes, write a new one that supersedes it.
 | [0072](0072-planning-budget-is-measured.md)                              | The Architect's planning budget is measured, and raisable                                           | Accepted           |
 | [0073](0073-plan-estimates-live-in-the-plan-ledger.md)                   | Plan estimates live in the plan ledger, not on the run summary                                      | Accepted           |
 | [0074](0074-the-calibration-actual-is-recorded-usage.md)                 | The calibration actual is recorded usage                                                            | Accepted           |
+| [0075](0075-the-run-actual-is-summed-from-its-sources.md)                | The run's actual is the sum of what it recorded                                                     | Accepted           |

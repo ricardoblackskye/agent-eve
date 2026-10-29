@@ -208,6 +208,20 @@ A stage whose spend was never recorded is reported as unmeasured, never as free:
 records no usage in-process yet, so a current report sets the architect's measured spend against a
 developer expectation.
 
+## The run's actual cost
+
+The run summary's `cost_usd` — the column the accuracy view joins on — is written by
+[`run-cost-recorder.ts`](../../agent/lib/dark-factory/run-cost-recorder.ts), which reads what a run
+recorded and sums it with the one definition in
+[`run-actual-cost.ts`](../../agent/lib/dark-factory/run-actual-cost.ts): the usage ledger for the
+in-process governed calls (tester excluded, matching the estimator's scope), plus the run's own
+`run.cost` events, which the deployed gateway writes. See ADR 0075.
+
+Two properties are deliberate. The write is a **narrow, single-column update**, so recording a cost
+cannot clobber a concurrent status change; and it is **best-effort**, so a ledger hiccup is reported and
+logged rather than failing a run — a run record fails closed, its bookkeeping does not. When NEITHER
+source recorded anything, nothing is written: the run stays unmeasured rather than reading as free.
+
 ## Where calibration goes next
 
 The constants above are labelled in the source as structural working numbers, and the two band
