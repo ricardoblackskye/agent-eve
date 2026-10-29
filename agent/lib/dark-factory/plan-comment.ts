@@ -6,6 +6,12 @@
  *
  * The comment is marked so a retry can find its own work: a second run updates the existing comment
  * instead of stacking another one on the ticket.
+ *
+ * A comment is also NOT a file (#538). The plan's markdown is rendered for a comment before it is posted: the
+ * plan's H1 becomes a bold line and every heading below it is demoted one level, so a comment has no page-sized
+ * title or section banners; and a prose table cell too wide to read in a table moves BELOW it in full, keyed by
+ * the row's first column, rather than being truncated. The plan FILE keeps the markdown it has, because its scale
+ * is correct there.
  */
 
 import type { PlanCostEstimate } from "./plan-cost-estimate";
@@ -84,6 +90,112 @@ export type PlanCommentResult =
   | { ok: false; action: "failed"; error: string };
 
 /**
+ * The widest a table cell may be in a COMMENT before its content moves below the table (#538).
+ *
+ * Measured on the real comment (WebFeedPOC#176): the Files table's longest cell was 651 characters while the
+ * Acceptance criteria table topped out at 68. 120 is comfortably above an ordinary phrase and far below the
+ * observed worst case, so it moves prose and leaves the tables that already read well alone.
+ */
+export const COMMENT_TABLE_CELL_LIMIT = 120;
+
+/** A cell whose content moved below its table, so the table stays readable and nothing is lost. */
+const MOVED_CELL_POINTER = "_(see below)_";
+
+/** The configured cell limit, overridable for a deployment that wants a tighter or looser comment. */
+export function commentCellLimit(env: Record<string, string | undefined> = process.env): number {
+  const raw = Number(env.DF_PLAN_COMMENT_CELL_LIMIT);
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : COMMENT_TABLE_CELL_LIMIT;
+}
+
+/** A markdown table's separator row, which is not a data row. */
+const SEPARATOR_ROW = /^\|[\s:-]+\|/;
+
+/**
+ * Render the plan's markdown for a COMMENT rather than for a file (#538).
+ *
+ * Two rules, and nothing else changes - the plan file keeps the markdown it has, because its scale is correct
+ * there:
+ *
+ * 1. **Headings.** A comment has no page title, so the plan's H1 becomes a bold line and every heading below it
+ *    is demoted by one level. GitHub sizes an H1 as a page title and an H2 as a section banner, which is what
+ *    made a 21,471-character comment read as one giant title followed by five huge headings. Demoting rather
+ *    than flattening keeps the plan's own shape: tasks stay under their sections.
+ * 2. **Table cells.** A prose cell wider than `limit` stops being a table cell: the row keeps its key and its
+ *    other columns, and the full text moves below the table as a list keyed by that key. Truncating would be a
+ *    worse lie than a wide table, and the rationale is the useful part.
+ *
+ * Pure: markdown in, markdown out, so the caller does the one environment read.
+ */
+export function normalizeCommentMarkdown(
+  markdown: string,
+  limit: number = COMMENT_TABLE_CELL_LIMIT,
+): string {
+  const lines = (markdown ?? "").split("\n");
+  const out: string[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] as string;
+
+    const heading = /^(#{1,6})(\s+)(.*)$/.exec(line);
+    if (heading) {
+      const level = (heading[1] as string).length;
+      out.push(
+        level === 1
+          ? `**${heading[3]}**`
+          : `${"#".repeat(Math.min(6, level + 1))}${heading[2]}${heading[3]}`,
+      );
+      continue;
+    }
+
+    if (line.startsWith("|")) {
+      const table: string[] = [];
+      while (i < lines.length && (lines[i] as string).startsWith("|")) {
+        table.push(lines[i] as string);
+        i++;
+      }
+      i--;
+      out.push(...boundTableCells(table, limit));
+      continue;
+    }
+
+    out.push(line);
+  }
+
+  return out.join("\n");
+}
+
+/**
+ * Move the wide prose cells of one table out of it, keyed by the row's first column.
+ *
+ * Conservative on purpose: a row whose cells do not split cleanly into the header's column count is left exactly
+ * as it is, because a row we cannot parse is a row we must not rewrite. The key column is never moved - it is
+ * what the moved text is filed under, and a long path there is not prose.
+ */
+function boundTableCells(table: string[], limit: number): string[] {
+  const header = table[0] as string;
+  const expected = header.split("|").length - 2;
+  const moved: { key: string; content: string }[] = [];
+
+  const rows = table.map((row) => {
+    if (row === header || SEPARATOR_ROW.test(row)) return row;
+    const parts = row.split("|");
+    if (parts.length - 2 !== expected || expected < 2) return row;
+
+    for (let c = 2; c <= parts.length - 2; c++) {
+      const content = (parts[c] as string).trim();
+      if (content.length > limit) {
+        moved.push({ key: (parts[1] as string).trim(), content });
+        parts[c] = ` ${MOVED_CELL_POINTER} `;
+      }
+    }
+    return parts.join("|");
+  });
+
+  if (moved.length === 0) return table;
+  return [...rows, "", ...moved.map(({ key, content }) => `- ${key} — ${content}`)];
+}
+
+/**
  * The comment body: the marker, then the plan.
  *
  * The marker leads so a human opening the ticket sees the plan immediately; an HTML comment renders as
@@ -98,9 +210,12 @@ export function planCommentBody(
   // forecast BEFORE committing to read the plan. No estimate, no section - never a placeholder, because
   // a reader cannot tell a placeholder from a measurement (see renderCostEstimateSection).
   const section = renderCostEstimateSection(estimate);
+  // #538: the HUMAN rendering is normalised for a comment; the machine payload below is not touched, because a
+  // resumed run reads the plan back out of it and the parser anchors on it byte for byte.
+  const humanMarkdown = normalizeCommentMarkdown(markdown, commentCellLimit());
   const human = section
-    ? `${PLAN_COMMENT_MARKER}\n\n${section}\n\n${markdown}`
-    : `${PLAN_COMMENT_MARKER}\n\n${markdown}`;
+    ? `${PLAN_COMMENT_MARKER}\n\n${section}\n\n${humanMarkdown}`
+    : `${PLAN_COMMENT_MARKER}\n\n${humanMarkdown}`;
   if (plan === undefined) {
     return human;
   }

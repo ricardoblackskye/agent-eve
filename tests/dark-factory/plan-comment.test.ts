@@ -28,7 +28,10 @@ describe("the plan comment (#365 Task 11)", () => {
   it("marks the comment and keeps the plan intact", () => {
     const body = planCommentBody(MARKDOWN);
     expect(body).toContain(PLAN_COMMENT_MARKER);
-    expect(body).toContain("# Plan: something");
+    // #538: the plan's content survives, rendered the way a comment needs it - no page-sized headings.
+    expect(body).toContain("**Plan: something**");
+    expect(body).toContain("### Goal");
+    expect(body).not.toMatch(/^#{1,2} /m);
     // The marker leads, so a human scanning the ticket sees the plan first, not an HTML comment.
     expect(body.startsWith(PLAN_COMMENT_MARKER)).toBe(true);
   });
@@ -153,7 +156,7 @@ describe("the plan comment (#365 Task 11)", () => {
 
     it("keeps the human rendering above the machine block", () => {
       const body = planCommentBody(MARKDOWN, PLAN);
-      const humanAt = body.indexOf("# Plan: something");
+      const humanAt = body.indexOf("Plan: something");
       const machineAt = body.indexOf("<details>");
       expect(humanAt).toBeGreaterThan(-1);
       expect(machineAt).toBeGreaterThan(humanAt);
@@ -259,7 +262,7 @@ describe("#488 the estimate in the plan comment", () => {
     const body = planCommentBody(MARKDOWN, PLAN, ESTIMATE);
     const markerAt = body.indexOf(PLAN_COMMENT_MARKER);
     const estimateAt = body.indexOf("Estimated cost:");
-    const planAt = body.indexOf("# Plan: something");
+    const planAt = body.indexOf("Plan: something");
     expect(markerAt).toBe(0);
     expect(estimateAt).toBeGreaterThan(markerAt);
     // A reviewer must meet the forecast BEFORE committing to read the plan.
