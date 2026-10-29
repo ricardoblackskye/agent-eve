@@ -76,6 +76,14 @@ export interface EstimatePlanCostInput {
   history?: RunSummary[];
   /** Defaults to the governor's own `resolvePrice` — one price source of truth. */
   resolvePrice?: (model: string | null | undefined) => ModelPrice | null;
+  /**
+   * The measured correction the calibration report emits (#490), consumed from v2.
+   *
+   * Defaults to 1, which leaves every pre-calibration band byte-identical. A non-finite or
+   * non-positive value is ignored rather than producing a `NaN` band, because understating cost is
+   * the failure that matters and `NaN` is not a cost.
+   */
+  calibrationFactor?: number;
 }
 
 export interface PlanCostEstimate {
