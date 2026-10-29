@@ -99,3 +99,124 @@ describe("#505 record the posted plan to df_plans", () => {
     ).rejects.toThrow("ledger is down");
   });
 });
+
+describe("a re-recorded plan revision is a duplicate, not a failure (#516)", () => {
+  const basePlan = {
+    storyId: 516,
+    title: "a re-recorded revision",
+    summary: "identical means identical",
+    targetFiles: [{ path: "a.ts", action: "modify" as const, rationale: "the file that changes" }],
+    tasks: [{ title: "one", objective: "do one thing" }],
+    acceptanceCriteriaMap: [],
+  } as unknown as ExecutionPlan;
+
+  async function runInStore() {
+    const history = new SqliteRunHistoryStore(":memory:", () => "run-516");
+    const accepted = await history.acceptDelivery({
+      deliveryId: `d-${Math.random().toString(16).slice(2)}`,
+      repo: "owner/repo",
+      issue: 516,
+      receivedAt: "2026-10-29T10:00:00.000Z",
+    });
+    return { history, runId: accepted.value?.runId as string };
+  }
+
+  it("treats an identical re-record as a DUPLICATE SUCCESS, writing nothing new", async () => {
+    const { history, runId } = await runInStore();
+    const first = await recordPostedPlan(history, {
+      runId,
+      planRevision: 1,
+      plan: basePlan,
+      source: "architect",
+    });
+    expect(first.ok).toBe(true);
+
+    const second = await recordPostedPlan(history, {
+      runId,
+      planRevision: 1,
+      plan: basePlan,
+      source: "architect",
+    });
+
+    // The call was HANDLED and changed nothing — a success, not a refusal.
+    expect(second.ok).toBe(true);
+    expect(second.duplicate).toBe(true);
+    expect(second.planId).toBe(first.planId);
+    // And the ledger still holds exactly one plan: the whole write is idempotent, not half of it.
+    expect(await history.listPlans(runId)).toHaveLength(1);
+    await history.close();
+  });
+
+  it("still PROPAGATES a different plan at the same revision, so the abort stays reachable", async () => {
+    const { history, runId } = await runInStore();
+    await recordPostedPlan(history, { runId, planRevision: 1, plan: basePlan, source: "architect" });
+
+    await expect(
+      recordPostedPlan(history, {
+        runId,
+        planRevision: 1,
+        plan: { ...basePlan, summary: "a genuinely different plan" } as ExecutionPlan,
+        source: "architect",
+      }),
+    ).rejects.toThrow();
+    await history.close();
+  });
+
+  it("ignores the DERIVED commentRef, so a re-post with a new reference is the same plan", async () => {
+    const { history, runId } = await runInStore();
+    await recordPostedPlan(history, {
+      runId,
+      planRevision: 1,
+      plan: basePlan,
+      source: "architect",
+      commentRef: { provider: "github", id: 1, url: "https://github.com/owner/repo/issues/516#issuecomment-1" },
+    });
+
+    const second = await recordPostedPlan(history, {
+      runId,
+      planRevision: 1,
+      plan: basePlan,
+      source: "architect",
+      commentRef: { provider: "github", id: 2, url: "https://github.com/owner/repo/issues/516#issuecomment-2" },
+    });
+
+    // GitHub derives the reference AFTER the record is written, so it must not make one plan look like two.
+    expect(second.duplicate).toBe(true);
+    expect(await history.listPlans(runId)).toHaveLength(1);
+    await history.close();
+  });
+});
+
+describe("samePlan (#516)", () => {
+  const plan = (overrides: Record<string, unknown> = {}) =>
+    ({
+      storyId: 516,
+      title: "t",
+      summary: "s",
+      targetFiles: [{ path: "a.ts", action: "modify", rationale: "r" }],
+      tasks: [{ title: "one", objective: "o" }],
+      acceptanceCriteriaMap: [],
+      ...overrides,
+    }) as unknown as ExecutionPlan;
+
+  it("matches an identical plan", () => {
+    expect(samePlan(plan(), plan())).toBe(true);
+  });
+
+  it("does NOT match a changed summary, task or target file", () => {
+    expect(samePlan(plan(), plan({ summary: "other" }))).toBe(false);
+    expect(samePlan(plan(), plan({ tasks: [{ title: "two", objective: "o" }] }))).toBe(false);
+    expect(samePlan(plan(), plan({ targetFiles: [{ path: "b.ts", action: "modify", rationale: "r" }] }))).toBe(false);
+  });
+
+  it("does NOT match a changed rationale, which is the part a human reads", () => {
+    expect(
+      samePlan(plan(), plan({ targetFiles: [{ path: "a.ts", action: "modify", rationale: "different" }] })),
+    ).toBe(false);
+  });
+
+  it("ignores the comment reference, mirroring sameEvent", () => {
+    expect(samePlan(plan({ commentRef: { provider: "github", id: 1, url: "u" } }), plan())).toBe(true);
+  });
+});
+import { samePlan } from "../../agent/lib/dark-factory/plan-revision-recorder";

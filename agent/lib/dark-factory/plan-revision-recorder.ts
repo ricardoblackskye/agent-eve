@@ -196,6 +196,23 @@ export interface PostedPlanWriteResult {
   skipped?: boolean;
   planId?: number;
   error?: string;
+  /**
+   * This exact revision was ALREADY recorded (#516).
+   *
+   * `ok` stays true: the call was handled and changed nothing, which is not the same statement as a
+   * failure — a refusal would invite the caller to retry the very write the guard exists to prevent.
+   */
+  duplicate?: boolean;
+}
+
+/**
+ * Whether a recorded plan is the same plan (#516).
+ *
+ * Ignores the comment reference for the reason `sameEvent` already gives: GitHub derives it AFTER the
+ * record is written, so it must not make two recordings of one plan look like different plans.
+ */
+export function samePlan(left: ExecutionPlan, right: ExecutionPlan): boolean {
+  throw new Error("not implemented");
 }
 
 export async function recordPostedPlan(
