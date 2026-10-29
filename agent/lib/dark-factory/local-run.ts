@@ -206,7 +206,7 @@ export const defaultRunnerSpawn: RunnerSpawn = (opts) =>
 export async function runLocalRun(
   input: LaunchInput & { spawnRunner?: RunnerSpawn; gitClone?: GitClone; npmInstall?: NpmInstall },
 ): Promise<number> {
-  const { spawnRunner, gitClone, ...rest } = input;
+  const { spawnRunner, gitClone, npmInstall, ...rest } = input;
   const decision = await buildLaunchDecision(rest);
 
   if (decision.kind === "refuse") {
@@ -224,6 +224,19 @@ export async function runLocalRun(
     if (code !== 0) {
       process.stderr.write(`git clone failed (exit ${code})\n`);
       return code;
+    }
+  }
+
+  // #541: a freshly cloned checkout has no node_modules, so provision it here, before the runner. A reused
+  // checkout was already provisioned, and a non-Node target carries no installArgs at all. A failed install is
+  // reported loudly but does NOT stop the run: the coding loop then reports its tests as unmeasured rather than as
+  // a failure caused by our own environment.
+  if (decision.checkout.installArgs.length > 0) {
+    const installCode = await (npmInstall ?? defaultNpmInstall)(decision.checkout);
+    if (installCode !== 0) {
+      process.stderr.write(
+        `npm ${decision.checkout.installArgs.join(" ")} failed (exit ${installCode}) — the coding loop will report its tests as unmeasured\n`,
+      );
     }
   }
 
