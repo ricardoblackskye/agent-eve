@@ -817,11 +817,20 @@ function assertBreakerClosed(
  * — is unmeasured: our environment's failure, never a verdict on the developer's work. This mirrors amm-scan's own
  * marker list for the same distinction. A test run that started and failed is NOT a startup failure and must stay
  * a failure, so the marker list is deliberately narrow; its negative cases are asserted beside the positive ones.
- *
- * RED stub: treats every run as having run. The GREEN step fills in the markers.
  */
 export function classifyTestRun(output: string): "ran" | "did-not-start" {
-  return "ran";
+  // These markers name a command that could not BEGIN (the live run died on `Cannot find package`), as distinct
+  // from tests that started and failed. The list is intentionally narrow; a marker that matched ordinary test
+  // output would silently unmeasure a real failure.
+  const DID_NOT_START_MARKERS = [
+    "ERR_MODULE_NOT_FOUND",
+    "Cannot find package",
+    "Failed to load config",
+    "failed to load config",
+    "command not found",
+    "is not recognized as",
+  ];
+  return DID_NOT_START_MARKERS.some((marker) => output.includes(marker)) ? "did-not-start" : "ran";
 }
 
 export async function runMultiFileCodingLoop(
@@ -852,11 +861,15 @@ export async function runMultiFileCodingLoop(
     // sub-minute work UP to a full minute, so an iteration cannot escape the budget.
     const breaker = opts.breaker;
     if (breaker) {
-      breaker.recordActivity({
-        pbiId: breaker.pbiId,
-        durationMs: Date.now() - startedAt,
-        status: res.passed ? "success" : "failure",
-      });
+      // #541: an iteration whose tests could not even start is unmeasured — our environment's failure, not the
+      // developer's — so it must not trip the breaker. A real test failure (ran, but not passed) still counts.
+      if (!res.unmeasured) {
+        breaker.recordActivity({
+          pbiId: breaker.pbiId,
+          durationMs: Date.now() - startedAt,
+          status: res.passed ? "success" : "failure",
+        });
+      }
     }
     passed = res.passed;
     if (passed) break;

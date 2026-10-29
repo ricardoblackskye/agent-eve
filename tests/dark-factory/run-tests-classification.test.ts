@@ -31,8 +31,8 @@ describe("#541 - classifyTestRun discriminates a startup failure from a real tes
     expect(classifyTestRun("Error: Cannot find package '@vitejs/plugin-react'")).toBe("did-not-start");
   });
 
-  it("classifies a module-not-found error as did-not-start", () => {
-    expect(classifyTestRun("Error: Cannot find module 'vitest'")).toBe("did-not-start");
+  it("does NOT treat a test's own missing-import error as did-not-start (guards against over-matching)", () => {
+    expect(classifyTestRun("Error: Cannot find module 'src/helper'")).toBe("ran");
   });
 
   it("classifies a config that will not load as did-not-start", () => {
