@@ -3,7 +3,9 @@
 The recursive self-improvement loop is only safe if something stops it from
 spending without bound. This page covers the **policy, ledger, budgets, and
 reserve/settle** machinery. The tenant-attribution half of "who pays" is a
-separate page: [tenant attribution and reporting](flow-tenant-attribution.md).
+separate page: [tenant attribution and reporting](flow-tenant-attribution.md), and *how each figure is
+computed* — the reservation, the settled actual, the plan band — is
+[cost estimation](dark-factory-cost-estimation.md).
 
 ## Opt-in by default
 
