@@ -7,10 +7,22 @@
  *
  * These files fill in ONLY what the shell did not provide, so an explicitly
  * exported value (a production DSN, a CI secret) always stays authoritative.
+ *
+ * The directory is the AGENT repository root, resolved from this module rather than
+ * from the process (#540). Two reasons, and the second is the important one: a local
+ * run's working directory is a checkout of the TARGET repository, so resolving from
+ * the cwd found no `.env.local` at all - and if the target happened to have one, it
+ * would be that project's configuration, never the agent's credentials.
  */
 
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+/** This module's own directory: `scripts/`. */
+const HERE = dirname(fileURLToPath(import.meta.url));
+/** The agent repository root — one level above `scripts/`. */
+const REPO_ROOT = resolve(HERE, "..");
 
 const FILES = [".env.local", ".env"] as const;
 
@@ -31,16 +43,16 @@ function unquote(value: string): string {
  * can report which file configured it.
  */
 /**
- * The directory the default loads from (#540).
+ * The directory the default loads from (#540): the AGENT repository root.
  *
  * Exported so the rule can be asserted: CI has no `.env.local` at the repository root, so a test that proved
  * this through the filesystem could only pass on a machine that happens to have one.
  */
 export function localEnvDir(): string {
-  throw new Error("not implemented");
+  return REPO_ROOT;
 }
 
-export function loadLocalEnv(dir: string = process.cwd()): string[] {
+export function loadLocalEnv(dir: string = localEnvDir()): string[] {
   const supplied: string[] = [];
 
   for (const name of FILES) {
