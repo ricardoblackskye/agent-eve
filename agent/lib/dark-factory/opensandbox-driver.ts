@@ -15,6 +15,7 @@ import {
   ALLOWED_TEST_COMMAND_PREFIXES,
   ALLOWED_WORKSPACE_EXTENSIONS,
   InvalidTaskError,
+  classifyTestRun,
   type WorkspaceTools,
 } from "./developer-agent";
 import { SandboxRefusedError, type SandboxProvider } from "./sandbox";
@@ -498,7 +499,7 @@ export function createOpenSandboxProvider(
         },
         runTests: async (
           cmd?: string,
-        ): Promise<{ passed: boolean; output: string }> => {
+        ): Promise<{ passed: boolean; output: string; ran: boolean }> => {
           const command = (
             cmd ??
             ALLOWED_TEST_COMMAND_PREFIXES[0] ??
@@ -515,7 +516,10 @@ export function createOpenSandboxProvider(
             .join("");
           // An unknown exit code is NOT a pass: never report success for a command whose outcome we
           // could not read.
-          return { passed: execution.exitCode === 0, output: stdout || stderr };
+          const output = stdout || stderr;
+          // A command that could not begin is unmeasured, not a failure of the developer's work (#541). The
+          // sandbox image is provisioned, so this is rare here, but the signal is shared with the local path.
+          return { passed: execution.exitCode === 0, output, ran: classifyTestRun(output) === "ran" };
         },
       };
     },

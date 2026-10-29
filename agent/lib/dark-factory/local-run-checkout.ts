@@ -31,6 +31,11 @@ export interface CheckoutPlan {
   mustClone: boolean;
   /** `git` arguments: the URL carries NO credential. Empty when no clone is needed. */
   cloneArgs: string[];
+  /**
+   * `npm` arguments that provision the checkout (#541), or empty when nothing should run. A fresh clone has no
+   * node_modules, so the target's own test command cannot start there otherwise.
+   */
+  installArgs: string[];
   /** A rendering safe to print: paths and a command, never a secret. */
   summary: string;
 }
