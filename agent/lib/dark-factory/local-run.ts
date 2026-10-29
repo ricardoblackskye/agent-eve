@@ -5,7 +5,12 @@ import { createRequire } from "node:module";
 import { spawn as nodeSpawn } from "node:child_process";
 import { loadLocalEnv } from "../../../scripts/load-env";
 import { preflightLocalRun, type PreflightResult } from "./local-run-preflight";
-import { planCheckout, gitAuthEnv, type CheckoutPlan } from "./local-run-checkout";
+import {
+  planCheckout,
+  planProvisioning,
+  gitAuthEnv,
+  type CheckoutPlan,
+} from "./local-run-checkout";
 
 export interface LaunchSpawn {
   cmd: string;
@@ -46,9 +51,9 @@ export type GitClone = (plan: CheckoutPlan, authEnv: Record<string, string>) => 
 
 /**
  * The provisioning step (#541): `npm ci` / `npm install` in a freshly cloned checkout, injected so tests never
- * run npm. The plan decides the arguments; this runs them there.
+ * run npm. planProvisioning() decides the arguments post-clone; this runs them there.
  */
-export type NpmInstall = (plan: CheckoutPlan) => Promise<number>;
+export type NpmInstall = (target: { path: string; installArgs: string[] }) => Promise<number>;
 
 /** This module's own directory: `agent/lib/dark-factory`. */
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -225,18 +230,27 @@ export async function runLocalRun(
       process.stderr.write(`git clone failed (exit ${code})\n`);
       return code;
     }
-  }
 
-  // #541: a freshly cloned checkout has no node_modules, so provision it here, before the runner. A reused
-  // checkout was already provisioned, and a non-Node target carries no installArgs at all. A failed install is
-  // reported loudly but does NOT stop the run: the coding loop then reports its tests as unmeasured rather than as
-  // a failure caused by our own environment.
-  if (decision.checkout.installArgs.length > 0) {
-    const installCode = await (npmInstall ?? defaultNpmInstall)(decision.checkout);
-    if (installCode !== 0) {
-      process.stderr.write(
-        `npm ${decision.checkout.installArgs.join(" ")} failed (exit ${installCode}) — the coding loop will report its tests as unmeasured\n`,
-      );
+    // #541: decide provisioning HERE, against the checkout that has just been created. Deciding before the clone
+    // answered "no lockfile" for every repository, so the install silently never ran while its unit test passed.
+    // A reused checkout (a resume) was already provisioned and is not touched. A failed install is reported loudly
+    // and does NOT stop the run: the coding loop then reports its tests as unmeasured rather than as a failure
+    // caused by our own environment.
+    const provisioning = planProvisioning({
+      path: decision.checkout.path,
+      exists: rest.exists ?? existsSync,
+    });
+    if (provisioning.installArgs.length > 0) {
+      process.stdout.write(`Provisioning the checkout: ${provisioning.summary}\n`);
+      const installCode = await (npmInstall ?? defaultNpmInstall)({
+        path: decision.checkout.path,
+        installArgs: provisioning.installArgs,
+      });
+      if (installCode !== 0) {
+        process.stderr.write(
+          `npm ${provisioning.installArgs.join(" ")} failed (exit ${installCode}) — the coding loop will report its tests as unmeasured\n`,
+        );
+      }
     }
   }
 

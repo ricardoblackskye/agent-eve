@@ -31,11 +31,6 @@ export interface CheckoutPlan {
   mustClone: boolean;
   /** `git` arguments: the URL carries NO credential. Empty when no clone is needed. */
   cloneArgs: string[];
-  /**
-   * `npm` arguments that provision the checkout (#541), or empty when nothing should run. A fresh clone has no
-   * node_modules, so the target's own test command cannot start there otherwise.
-   */
-  installArgs: string[];
   /** A rendering safe to print: paths and a command, never a secret. */
   summary: string;
 }
@@ -62,6 +57,41 @@ function workspaceName(repo: string, issue: number): string {
   return `${(trimmed === "" ? "repo" : trimmed).toLowerCase()}-${issue}`;
 }
 
+export interface ProvisionPlan {
+  /** The `npm` arguments, or empty when nothing should run. */
+  installArgs: string[];
+  /** A rendering safe to print: a command, never a secret. */
+  summary: string;
+}
+
+/**
+ * Decide how to provision a checkout that has JUST been cloned (#541).
+ *
+ * This cannot be decided before the clone. A fresh workspace has no files at all, so asking whether a lockfile
+ * exists pre-clone answers NO for every repository — which is exactly how the first version of this fix silently
+ * installed nothing while its unit test passed, because the test injected an `exists` that said YES for a path
+ * that could not exist yet. Decisions whose input is an effect must be taken after the effect.
+ *
+ * Post-clone, against the real tree, the rule stays pure by taking `exists` as an argument.
+ */
+export function planProvisioning(input: {
+  path: string;
+  exists: (path: string) => boolean;
+}): ProvisionPlan {
+  const { path, exists } = input;
+  // A lockfile means a reproducible `npm ci`; a manifest alone means `npm install`; neither means this is not a
+  // Node project, and `npm ci` there would fail the run for a reason unrelated to the story.
+  const installArgs = exists(join(path, "package-lock.json"))
+    ? ["ci"]
+    : exists(join(path, "package.json"))
+      ? ["install"]
+      : [];
+  const summary = installArgs.length
+    ? `provision the checkout with npm ${installArgs.join(" ")}`
+    : "the checkout needs no provisioning";
+  return { installArgs, summary };
+}
+
 export function planCheckout(input: CheckoutPlanInput): CheckoutPlan {
   const { repo, workspaceRoot, exists, issue } = input;
   const path = join(workspaceRoot, workspaceName(repo, issue));
@@ -79,27 +109,14 @@ export function planCheckout(input: CheckoutPlanInput): CheckoutPlan {
     ? ["clone", "--depth", "1", `https://github.com/${repo}.git`, path]
     : [];
 
-  // A fresh checkout has no node_modules, so the target's own test command (e.g. `npx vitest run`) cannot start
-  // there — it dies before collecting a single test, and the coding loop reports a failure no source edit can
-  // fix (#541). Decide the provisioning purely through exists() so the planner stays free of I/O: a lockfile
-  // means a reproducible `npm ci`; a manifest alone means `npm install`; neither means this is not a Node project,
-  // so fail safe and run nothing rather than `npm ci` in a repository that was never a Node project. Reusing a
-  // checkout — a resume — skips this entirely, because it was already provisioned.
-  const installArgs = !mustClone
-    ? []
-    : exists(join(path, "package-lock.json"))
-      ? ["ci"]
-      : exists(join(path, "package.json"))
-        ? ["install"]
-        : [];
+  const summary = mustClone
+    ? `clone ${repo} into ${path} (credentials come from the environment, never from the URL)`
+    : `reuse the checkout already at ${path}`;
 
-  const summary =
-    (mustClone
-      ? `clone ${repo} into ${path} (credentials come from the environment, never from the URL)`
-      : `reuse the checkout already at ${path}`) +
-    (installArgs.length ? ` and run npm ${installArgs.join(" ")}` : "");
-
-  return { path, mustClone, cloneArgs, installArgs, summary };
+  // Provisioning is deliberately NOT decided here (#541). A fresh workspace has no files at all, so a pre-clone
+  // lockfile check answers NO for every repository — and the install then silently never runs. The caller asks
+  // planProvisioning() once the clone exists.
+  return { path, mustClone, cloneArgs, summary };
 }
 
 /**
