@@ -110,14 +110,18 @@ export interface ModelPrice {
 export const modelPriceTable: Record<string, ModelPrice> = {
   // The project's current default and fallback (agent/model-config.ts).
   //
-  // #494/#498: OUTPUT was 0.0024 while the dearest of the 41 providers fronting this model measured
-  // 0.005559908 (2026-10-26) — 2.3x under, so every reservation under-stated the call and the breach
-  // only appeared at settle. Both rates now sit above the dearest observed rate with headroom, on
-  // purpose: this figure rose ~33% during a single session, and ADR 0027 is explicit that
-  // over-reserving is transient while under-reserving is not.
+  // #499 / ADR 0079: this figure is a bound over the PEER distribution, not over one endpoint. It was raised to
+  // 0.02 on 2026-10-27 to cover a single provider charging 0.015863057 - 18.9x the second-dearest - and that
+  // provider has since vanished from the catalog, which left 0.02 reserving 8.3x what any reachable provider
+  // charges (the dearest of 41 providers measured 0.0024 on 2026-10-29, against a p90 of 0.0012).
+  //
+  // The refresh path now adopts at most 3 x p90 (model-price-floor.ts), so one endpoint can no longer set the
+  // reservation. This ceiling sits at that cap x 1.25 = 0.0045: above what the rule can adopt, so it never binds
+  // the reservation, with a margin for a rise that occurs between verifications. ADR 0027 still holds -
+  // over-reserving is transient, under-reserving is not.
   "deepseek/deepseek-v4.1-flash": {
     inputUsdPer1k: 0.0007,
-    outputUsdPer1k: 0.02,
+    outputUsdPer1k: 0.0045,
   },
   "deepseek/deepseek-v4-pro": {
     // #494: input sat EXACTLY on the dearest provider rate (0.00191), so any rise broke the ceiling.
