@@ -31,6 +31,7 @@ import {
   type PlanSource,
 } from "./plan-ledger";
 import type { CostClass, CostConfidence } from "./plan-cost-estimate";
+import { unusableCostReason } from "./run-actual-cost";
 
 export interface AcceptRunDelivery {
   deliveryId: string;
@@ -304,7 +305,7 @@ interface RunEventRow {
 function readSummary(db: DatabaseSync, runId: string): RunSummary | null {
   const row = db
     .prepare("SELECT * FROM df_run_summaries WHERE run_id = ?")
-    .get(runId) as RunSummaryRow | undefined;
+    .get(runId) as unknown as RunSummaryRow | undefined;
   return row ? rowToSummary(row) : null;
 }
 
@@ -716,6 +717,10 @@ function writeSummary(db: DatabaseSync, summary: RunSummary): void {
     summary.gitDiff ?? null,
     summary.tenantId ?? null,
   );
+}
+
+function updateRunCost(db: DatabaseSync, runId: string, costUsd: number | null): void {
+  db.prepare(`UPDATE df_run_summaries SET cost_usd = ? WHERE run_id = ?`).run(costUsd, runId);
 }
 
 function updateCommentReference(
@@ -1658,11 +1663,31 @@ export class SqliteRunHistoryStore implements RunHistoryStore {
     }
   }
 
-  recordRunCost(
+  async recordRunCost(
     runId: string,
     costUsd: number | null,
   ): Promise<RunHistoryWriteResult<RunSummary>> {
-    throw new Error("not implemented");
+    const db = this.handle();
+    if (!db)
+      return blocked(
+        this.id,
+        new Error(`SQLite run history is unavailable at '${this.path}'.`),
+      );
+    const unusable = unusableCostReason(costUsd);
+    if (unusable) return blocked(this.id, new Error(unusable));
+    try {
+      const existing = db
+        .prepare("SELECT * FROM df_run_summaries WHERE run_id = ?")
+        .get(runId) as unknown as RunSummaryRow | undefined;
+      if (!existing) return blocked(this.id, new Error(`Run '${runId}' does not exist.`));
+      updateRunCost(db, runId, costUsd);
+      const row = db
+        .prepare("SELECT * FROM df_run_summaries WHERE run_id = ?")
+        .get(runId) as unknown as RunSummaryRow;
+      return { ok: true, mode: "live", providerId: this.id, value: rowToSummary(row) };
+    } catch (error) {
+      return blocked(this.id, error);
+    }
   }
 
   async updateCommentReference(

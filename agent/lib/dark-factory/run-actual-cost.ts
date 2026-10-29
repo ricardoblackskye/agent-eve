@@ -46,6 +46,20 @@ function usableCost(value: number | undefined): number {
   return value;
 }
 
+/**
+ * Why a value is not a usable cost, or `null` when it is one.
+ *
+ * The ONE place that decides, so an unused value. A store that writes a negative or non-finite cost
+ * has corrupted the very column this change exists to populate.
+ */
+export function unusableCostReason(costUsd: number | null | undefined): string | null {
+  if (costUsd === null) return null;
+  if (typeof costUsd !== "number" || !Number.isFinite(costUsd) || costUsd < 0) {
+    return `Run cost '${String(costUsd)}' is not a usable cost.`;
+  }
+  return null;
+}
+
 /** Sum a run's recorded sources into its actual cost. */
 export function sumRunActualCost(sources: RunCostSources): RunActualCost {
   const usageCostUsd = usableCost(sources.usageCostUsd);
