@@ -219,3 +219,24 @@ export function estimatePlanCostSafely(
     return undefined;
   }
 }
+
+
+/**
+ * One stage's share of a plan's expected cost (#490).
+ *
+ * Derived from the SAME constants as the band, so the parts always sum to `expectedUsd`: the
+ * Architect spends one context read plus its planning output, the developer the other read plus the
+ * per-task output. Splitting `CONTEXT_READS_PER_RUN` one read per stage is STRUCTURAL, not measured
+ * — the same caveat that constant already carries.
+ */
+export interface PlanCostStageEstimate {
+  stage: "architect" | "developer";
+  expectedUsd: number;
+}
+
+/** Split a plan's expected cost across the stages that spend it (#490). Parts sum to the band. */
+export function decomposePlanCostEstimate(
+  input: EstimatePlanCostInput,
+): PlanCostStageEstimate[] {
+  throw new Error("not implemented");
+}
