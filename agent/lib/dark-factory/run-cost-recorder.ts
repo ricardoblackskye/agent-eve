@@ -71,32 +71,16 @@ export async function recordRunActualCost(
     };
   }
 
-  // The run's own cost events: the other subsystem, written by the gateway path.
-  let eventCostUsd: number | undefined;
-  try {
-    const events = await deps.runHistory.listRunEvents(runId);
-    if (events.ok) {
-      eventCostUsd = sumDefined(
-        (events.value?.items ?? [])
-          .filter((entry) => entry.event.type === "run.cost")
-          .map((entry) => entry.event.costUsd),
-      );
-    }
-  } catch (error) {
-    // Best-effort: an unreadable event log costs us the gateway side of the total, not the run.
-    console.warn(
-      `[WARN] The run's cost events could not be read, so its cost may be understated: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-  }
+  // #532: with the gateway now recording its measured spend in the LEDGER, that is the one source.
+  // Adding the run's cost events as well would count the same spend twice (ADR 0076 supersedes 0075).
 
-  if (usageCostUsd === undefined && eventCostUsd === undefined) {
-    // NOT measured: writing 0 here would claim the run was free.
+  if (usageCostUsd === undefined) {
+    // NOT measured: writing 0 here would claim the run was free, and writing an estimate as an actual
+    // would be worse still.
     return { ok: false, reason: "not-measured" };
   }
 
-  const actual = sumRunActualCost({ usageCostUsd, eventCostUsd });
+  const actual = sumRunActualCost({ usageCostUsd });
   try {
     const written = await deps.runHistory.recordRunCost(runId, actual.costUsd);
     if (!written.ok) {

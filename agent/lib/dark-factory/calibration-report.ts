@@ -54,6 +54,13 @@ export interface GroupMetrics {
 
 export interface StageMetric extends GroupMetrics {
   stage: string;
+  /**
+   * Whether this stage's spend was actually recorded (#532).
+   *
+   * A stage with an expectation but no recorded actual carries NO bias, MAE or MAPE: a zero actual is
+   * not a prediction, and printing one against it would read as a measured overshoot.
+   */
+  measured: boolean;
 }
 
 export interface CostClassMetric extends GroupMetrics {
@@ -200,14 +207,25 @@ export function buildCalibrationReport(input: CalibrationReportInput): Calibrati
     sampleSize,
     excludedWithoutEstimate,
     ...wholeRun,
-    byStage: stages.map((stage) => ({
-      stage,
-      ...groupMetricsFor(
-        pairs,
-        (pair) => pair.stageExpectedUsd[stage] ?? 0,
-        (pair) => pair.stageActualUsd[stage] ?? 0,
-      ),
-    })),
+    byStage: stages.map((stage) => {
+      const measured = pairs.some((pair) => stage in pair.stageActualUsd);
+      return {
+        stage,
+        // Unmeasured carries no figures rather than a bias against zero (AC: a zero is not a prediction).
+        ...(measured
+          ? groupMetricsFor(
+              pairs,
+              (pair) => pair.stageExpectedUsd[stage] ?? 0,
+              (pair) => pair.stageActualUsd[stage] ?? 0,
+            )
+          : {
+              bias: { sampleSize: 0, value: undefined },
+              mae: { sampleSize: 0, value: undefined },
+              mape: { sampleSize: 0, value: undefined },
+            }),
+        measured,
+      };
+    }),
     byCostClass: classes.map((costClass) => ({
       costClass,
       ...groupMetricsFor(

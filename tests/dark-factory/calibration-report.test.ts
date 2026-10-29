@@ -146,15 +146,19 @@ describe("calibration report (#490)", () => {
   });
 
   it("marks a stage with no recorded actual as UNMEASURED, and does not bias it against zero", () => {
-    const built = report([
-      pair({
-        runId: "half-measured",
-        expectedUsd: 0.2,
-        actualUsd: 0.1,
-        stageActualUsd: { architect: 0.1 },
-        stageExpectedUsd: { architect: 0.08, developer: 0.12 },
-      }),
-    ]);
+    // One pair, so the minimum must be one for the report to publish anything at all.
+    const built = report(
+      [
+        pair({
+          runId: "half-measured",
+          expectedUsd: 0.2,
+          actualUsd: 0.1,
+          stageActualUsd: { architect: 0.1 },
+          stageExpectedUsd: { architect: 0.08, developer: 0.12 },
+        }),
+      ],
+      1,
+    );
 
     const developer = built.byStage.find((entry) => entry.stage === "developer")!;
     expect(developer.measured).toBe(false);

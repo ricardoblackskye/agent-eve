@@ -100,17 +100,20 @@ describe("record a run's actual cost (#531)", () => {
     await f.usage.close();
   });
 
-  it("writes NOTHING for an event-only run, which now means the usage driver is unconfigured", async () => {
+  it("writes nothing for an event-only run, leaving the store's own fold alone", async () => {
     const f = await fixture();
     await eventSpend(f, 0.4);
 
     const result = await recordRunActualCost(f, f.runId);
 
-    // A gateway event is no longer a source: without a configured ledger the run is unmeasured rather
-    // than estimated, because an estimate recorded as an actual is worse than no number at all.
+    // The RECORDER writes nothing: with no ledger row the run is unmeasured rather than estimated,
+    // because an estimate recorded as an actual is worse than no number at all.
     expect(result.ok).toBe(false);
     expect(result.reason).toBe("not-measured");
-    expect((await f.runHistory.getRun(f.runId)).value?.costUsd).toBeUndefined();
+    // What is on the run is the run history's own doing (#281 folds a cost event onto its run), not
+    // this writer's — and when the ledger DOES have a figure, the writer replaces that fold, which is
+    // why the both-sources case above totals the ledger rather than the two.
+    expect((await f.runHistory.getRun(f.runId)).value?.costUsd).toBeCloseTo(0.4, 10);
     await f.runHistory.close();
     await f.usage.close();
   });
