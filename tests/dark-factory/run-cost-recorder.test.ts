@@ -73,7 +73,7 @@ async function eventSpend(f: Fixture, costUsd: number): Promise<void> {
 }
 
 describe("record a run's actual cost (#531)", () => {
-  it("sums BOTH subsystems — neither alone is the answer", async () => {
+  it("reads the LEDGER alone once the gateway records usage there too (#532)", async () => {
     const f = await fixture();
     await ledgerSpend(f, 0.09);
     await eventSpend(f, 0.4);
@@ -81,8 +81,10 @@ describe("record a run's actual cost (#531)", () => {
     const result = await recordRunActualCost(f, f.runId);
 
     expect(result.ok).toBe(true);
-    expect(result.actual?.costUsd).toBeCloseTo(0.49, 10);
-    expect((await f.runHistory.getRun(f.runId)).value?.costUsd).toBeCloseTo(0.49, 10);
+    // The ledger is the one source now: adding the event as well would count the same spend twice.
+    expect(result.actual?.costUsd).toBeCloseTo(0.09, 10);
+    expect(result.actual?.costUsd).not.toBeCloseTo(0.49, 10);
+    expect((await f.runHistory.getRun(f.runId)).value?.costUsd).toBeCloseTo(0.09, 10);
     await f.runHistory.close();
     await f.usage.close();
   });
@@ -98,13 +100,17 @@ describe("record a run's actual cost (#531)", () => {
     await f.usage.close();
   });
 
-  it("writes a gateway-only run too", async () => {
+  it("writes NOTHING for an event-only run, which now means the usage driver is unconfigured", async () => {
     const f = await fixture();
     await eventSpend(f, 0.4);
 
-    await recordRunActualCost(f, f.runId);
+    const result = await recordRunActualCost(f, f.runId);
 
-    expect((await f.runHistory.getRun(f.runId)).value?.costUsd).toBeCloseTo(0.4, 10);
+    // A gateway event is no longer a source: without a configured ledger the run is unmeasured rather
+    // than estimated, because an estimate recorded as an actual is worse than no number at all.
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe("not-measured");
+    expect((await f.runHistory.getRun(f.runId)).value?.costUsd).toBeUndefined();
     await f.runHistory.close();
     await f.usage.close();
   });

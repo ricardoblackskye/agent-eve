@@ -145,6 +145,29 @@ describe("calibration report (#490)", () => {
     expect(built.bias.value).toBeCloseTo(0.15, 10);
   });
 
+  it("marks a stage with no recorded actual as UNMEASURED, and does not bias it against zero", () => {
+    const built = report([
+      pair({
+        runId: "half-measured",
+        expectedUsd: 0.2,
+        actualUsd: 0.1,
+        stageActualUsd: { architect: 0.1 },
+        stageExpectedUsd: { architect: 0.08, developer: 0.12 },
+      }),
+    ]);
+
+    const developer = built.byStage.find((entry) => entry.stage === "developer")!;
+    expect(developer.measured).toBe(false);
+    // A zero actual is not a prediction, so it must not produce a bias at all.
+    expect(developer.bias.value).toBeUndefined();
+    expect(developer.mae.value).toBeUndefined();
+    expect(developer.mape.value).toBeUndefined();
+
+    const architect = built.byStage.find((entry) => entry.stage === "architect")!;
+    expect(architect.measured).toBe(true);
+    expect(architect.bias.value).toBeCloseTo(-0.02, 10);
+  });
+
   it("is deterministic — the same input yields a byte-identical report", () => {
     expect(JSON.stringify(report(OVERSHOOTING))).toBe(JSON.stringify(report(OVERSHOOTING)));
   });
