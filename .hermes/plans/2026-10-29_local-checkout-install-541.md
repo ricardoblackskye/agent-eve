@@ -128,18 +128,28 @@ unmeasured and does **not** trip the breaker for it.
 - A leftover untracked clone inside the repo makes `env-example-coverage` fail locally (#519) — remove
   `df-workspaces/` before judging the suite, or discount exactly that one failure and say so.
 
-## Risks and open questions
+## Settled decisions (agreed at GATE 1)
 
-1. **Whether to provision at all, or only classify** — both (recommended: classification alone would leave the
-   coding stage unable to pass locally, which is the issue's actual complaint, and provisioning alone would
-   leave an unfixable failure looking like a bad edit) versus classifying only.
-2. **The install command** — lockfile-aware (`npm ci`, else `npm install`, else nothing) (recommended, and
-   decidable purely through the existing `exists`) versus always `npm ci`, which fails on a repository that has
-   no lockfile.
-3. **A failed install** — report it loudly and continue (recommended: the tests then classify as unmeasured and
-   nothing is silent) versus refusing the launcher before it starts.
-4. **Where the classifier lives** — with the workspace tools that own the command's output (recommended,
-   mirroring `amm-scan`'s marker list) versus in the runner, which would parse text it does not own.
-5. **What an unmeasured iteration does to the breaker** — it is not recorded as a worker failure (recommended:
-   the breaker counts three failures, and our environment's failure is not one of the developer's) versus
-   counting it anyway, which is the behaviour being fixed.
+1. **Provision AND classify.** Each half is insufficient alone: classification without provisioning leaves the
+   coding stage unable to pass locally, and provisioning without classification leaves an unfixable failure
+   looking like a bad edit.
+2. **The install command is lockfile-aware** — `npm ci`, else `npm install`, else nothing — decided through the
+   `exists` predicate the planner already takes, so it stays pure.
+3. **A failed install is reported loudly and the run continues**, so that the failure which follows is
+   classified rather than mysterious.
+4. **The classifier lives with the workspace tools** that own the command's output, mirroring `amm-scan`'s
+   marker list.
+5. **An unmeasured iteration is not recorded as a worker failure**, so it cannot trip the breaker: the breaker
+   counts three of the developer's failures, and our environment's failure is not one of them.
+
+## Risks that remain
+
+- **A genuine failing test must stay a failure.** The marker list is the risk surface: a pattern that matches
+  ordinary test output would quietly convert real failures into unmeasured ones and make a broken run look
+  healthy. The review focus asserts the negative case beside the positive ones.
+- **Provisioning costs time on a fresh checkout** (network plus an install) and buys nothing on a reuse, which
+  is why it is tied to `mustClone` rather than run unconditionally.
+- **A target with no network and no cache cannot be provisioned.** It is reported, and the tests that follow
+  are unmeasured, so the run is honest rather than stuck.
+- **The residual npx risk**: with the target's own `node_modules` present, resolution takes the nearest one;
+  a dependency the target is genuinely missing could still walk up into the agent's tree. Not addressed here.
