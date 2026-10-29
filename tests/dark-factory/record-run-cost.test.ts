@@ -12,7 +12,7 @@ const ns = randomUUID().slice(0, 8);
 const dirs: string[] = [];
 
 function makeSqlite(): SqliteRunHistoryStore {
-  const dir = mkdtempSync(join(tmpdir(), "df-runcost-"));
+  const dir = mkdtempSync(join(tmpdir(), "df-run-cost-"));
   dirs.push(dir);
   let n = 0;
   return new SqliteRunHistoryStore(join(dir, "runs.db"), () => `run-${++n}`);
@@ -40,8 +40,8 @@ function runCostSuite(
       // A UNIQUE repo per call: the Postgres leg shares one database, and a run left holding the
       // claim by an earlier test would block this delivery (the sqlite leg's fresh file hides that).
       const accepted = await store.acceptDelivery({
-        deliveryId: `runcost-${name}-${randomUUID()}`,
-        repo: `owner/runcost-${name}-${ns}-${randomUUID().slice(0, 8)}`,
+        deliveryId: `run-cost-${name}-${randomUUID()}`,
+        repo: `owner/run-cost-${name}-${ns}-${randomUUID().slice(0, 8)}`,
         issue: 531,
         receivedAt: at,
       });
@@ -150,7 +150,7 @@ describePg("#531 run cost (postgres)", () => {
     await client.connect();
     try {
       if (!(await pgTableExists(client, "df_run_summaries"))) return;
-      await client.query("DELETE FROM df_run_summaries WHERE repo LIKE 'owner/runcost-%'");
+      await client.query("DELETE FROM df_run_summaries WHERE repo LIKE 'owner/run-cost-%'");
     } finally {
       await client.end();
     }

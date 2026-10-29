@@ -12,7 +12,7 @@ const at = "2026-10-29T11:19:35.479Z";
 const dirs: string[] = [];
 
 function tempDir(): string {
-  const dir = mkdtempSync(join(tmpdir(), "df-runcostw-"));
+  const dir = mkdtempSync(join(tmpdir(), "df-run-cost-w-"));
   dirs.push(dir);
   return dir;
 }
