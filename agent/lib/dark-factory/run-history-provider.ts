@@ -104,6 +104,14 @@ export class ConsoleRunHistoryStore implements RunHistoryStore {
     // Console store refuses all writes; there is no persisted run to attach to.
   }
 
+  async recordRunCost(
+    _runId: string,
+    _costUsd: number | null,
+  ): Promise<RunHistoryWriteResult<RunSummary>> {
+    // Console store refuses all writes; there is no persisted run to attach a cost to.
+    throw new Error("not implemented");
+  }
+
   async recordRunSummary(
     _summary: RunSummary,
   ): Promise<RunHistoryWriteResult<RunSummary>> {

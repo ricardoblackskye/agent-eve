@@ -1414,6 +1414,13 @@ export class PostgresRunHistoryStore implements RunHistoryStore {
     }
   }
 
+  recordRunCost(
+    runId: string,
+    costUsd: number | null,
+  ): Promise<RunHistoryWriteResult<RunSummary>> {
+    throw new Error("not implemented");
+  }
+
   async updateCommentReference(
     runId: string,
     eventId: string,

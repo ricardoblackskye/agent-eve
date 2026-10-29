@@ -230,6 +230,18 @@ export interface RunHistoryStore extends PlanLedger {
   recordRunSummary(
     summary: RunSummary,
   ): Promise<RunHistoryWriteResult<RunSummary>>;
+  /**
+   * Record a run's actual cost (#531).
+   *
+   * A NARROW update on purpose: an `UPDATE` cannot clobber a concurrent status change the way a
+   * read-modify-write through `recordRunSummary` could, and it mirrors `updateCommentReference`.
+   * `null` clears the cost, which is a different statement from `0`: not measured, versus measured
+   * as nothing. A value that is not a usable cost is REFUSED rather than written.
+   */
+  recordRunCost(
+    runId: string,
+    costUsd: number | null,
+  ): Promise<RunHistoryWriteResult<RunSummary>>;
   listRuns(
     options?: RunListOptions,
   ): Promise<RunHistoryReadResult<Page<RunSummary, RunCursor>>>;
@@ -1644,6 +1656,13 @@ export class SqliteRunHistoryStore implements RunHistoryStore {
     } catch (error) {
       return blocked(this.id, error);
     }
+  }
+
+  recordRunCost(
+    runId: string,
+    costUsd: number | null,
+  ): Promise<RunHistoryWriteResult<RunSummary>> {
+    throw new Error("not implemented");
   }
 
   async updateCommentReference(
