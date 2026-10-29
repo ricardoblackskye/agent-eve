@@ -134,6 +134,9 @@ import { withNotifications } from "../agent/lib/dark-factory/notifying-run-histo
 import { runGovernedAgentCall } from "../agent/lib/dark-factory/governed-agent-call";
 import { recordRunActualCost } from "../agent/lib/dark-factory/run-cost-recorder";
 import { createUsageStore } from "../agent/lib/dark-factory/usage-store-provider";
+import { FINISHED_RUN_STATUSES, selectPlanHistory } from "../agent/lib/dark-factory/plan-history";
+import type { RunSummary } from "../agent/lib/dark-factory/run-history";
+import type { RunHistoryStore } from "../agent/lib/dark-factory/run-history-store";
 
 // The .env bootstrap lives in runner-env.ts so it can be tested without running the pipeline.
 // It carries NO model default: agent/model-config.ts is the single source of truth (#400).
@@ -1735,6 +1738,20 @@ export async function recordRunCostForRun(
       }`,
     );
   }
+}
+
+/**
+ * #533 — the repository's finished runs, for the plan estimate to calibrate against.
+ *
+ * BEST-EFFORT by design: a plan must never fail because its calibration history was unavailable, so any
+ * failure warns and yields an empty window, which is exactly the cold start the estimator already
+ * handles. Read here rather than inside the estimator, which stays pure.
+ */
+export async function readPlanHistory(
+  store: RunHistoryStore,
+  repo: string,
+): Promise<RunSummary[]> {
+  throw new Error("not implemented");
 }
 
 export async function releaseAbandonedRunClaim(active: ActiveRun | null): Promise<void> {
