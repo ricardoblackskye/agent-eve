@@ -29,6 +29,8 @@ export interface LaunchInput {
   allowRemoteStore?: boolean;
   /** Continue the parked run holding this issue's claim (#539) instead of starting a fresh one. */
   resume?: boolean;
+  /** Whether a path already exists — injected for tests; defaults to the filesystem. */
+  exists?: (path: string) => boolean;
 }
 
 export interface SpawnResult {
@@ -41,6 +43,12 @@ export type RunnerSpawn = (opts: LaunchSpawn) => Promise<SpawnResult>;
 
 /** The clone step, injected so tests never touch the network. */
 export type GitClone = (plan: CheckoutPlan, authEnv: Record<string, string>) => Promise<number>;
+
+/**
+ * The provisioning step (#541): `npm ci` / `npm install` in a freshly cloned checkout, injected so tests never
+ * run npm. The plan decides the arguments; this runs them there.
+ */
+export type NpmInstall = (plan: CheckoutPlan) => Promise<number>;
 
 /** This module's own directory: `agent/lib/dark-factory`. */
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -94,7 +102,7 @@ export async function buildLaunchDecision(input: LaunchInput): Promise<LaunchDec
   const checkout = planCheckout({
     repo: input.repo,
     workspaceRoot: input.workspaceRoot,
-    exists: existsSync,
+    exists: input.exists ?? existsSync,
     issue: input.issue,
   });
 
@@ -158,6 +166,25 @@ export const defaultGitClone: GitClone = (plan, authEnv) =>
     child.on("exit", (code) => resolve(code ?? 1));
   });
 
+/**
+ * The real provisioning step (#541): install the fresh checkout's dependencies with its own npm, in the checkout
+ * itself. Running `npm` (not `npx`) here keeps the install inside the target; the coding loop's `npx vitest run`
+ * then resolves the nearest `node_modules` and no longer dies before collecting a test.
+ */
+export const defaultNpmInstall: NpmInstall = (plan) =>
+  new Promise<number>((resolve, reject) => {
+    const merged: Record<string, string> = {};
+    for (const [key, value] of Object.entries(process.env)) {
+      if (value !== undefined) merged[key] = value;
+    }
+    const child = nodeSpawn("npm", plan.installArgs, {
+      cwd: plan.path,
+      env: merged as unknown as NodeJS.ProcessEnv,
+    });
+    child.on("error", reject);
+    child.on("exit", (code) => resolve(code ?? 1));
+  });
+
 /** The real run: inherit the launcher's stdio so the agent's own output is visible. */
 export const defaultRunnerSpawn: RunnerSpawn = (opts) =>
   new Promise<SpawnResult>((resolve, reject) => {
@@ -177,7 +204,7 @@ export const defaultRunnerSpawn: RunnerSpawn = (opts) =>
  * than silence. The launcher never prints the child's environment.
  */
 export async function runLocalRun(
-  input: LaunchInput & { spawnRunner?: RunnerSpawn; gitClone?: GitClone },
+  input: LaunchInput & { spawnRunner?: RunnerSpawn; gitClone?: GitClone; npmInstall?: NpmInstall },
 ): Promise<number> {
   const { spawnRunner, gitClone, ...rest } = input;
   const decision = await buildLaunchDecision(rest);
