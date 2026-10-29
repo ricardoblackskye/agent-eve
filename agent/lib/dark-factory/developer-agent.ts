@@ -142,6 +142,11 @@ export interface LoopContext {
 export interface WorkerResult {
   passed: boolean;
   output?: string;
+  /**
+   * True when the iteration's tests could not even start (e.g. the checkout is not provisioned), so the result is
+   * unmeasured rather than a failure of the developer's work (#541). Absent means measured.
+   */
+  unmeasured?: boolean;
 }
 
 /** A single coding iteration step (e.g. write code + run tests in a sandbox). */
@@ -492,7 +497,7 @@ export interface WorkspaceTools {
   readFile(relPath: string): Promise<string>;
   writeFile(relPath: string, content: string): Promise<void>;
   listFiles(pattern?: string): Promise<string[]>;
-  runTests(cmd?: string): Promise<{ passed: boolean; output: string }>;
+  runTests(cmd?: string): Promise<{ passed: boolean; output: string; ran: boolean }>;
 }
 
 export type CommandRunnerFn = (
@@ -678,7 +683,7 @@ export function createWorkspaceTools(
       return results;
     },
 
-    async runTests(cmd?: string): Promise<{ passed: boolean; output: string }> {
+    async runTests(cmd?: string): Promise<{ passed: boolean; output: string; ran: boolean }> {
       const testCmd = (cmd ?? "npx vitest run").trim();
 
       // Security: Disallow all shell metacharacters, subshells, substitutions, and redirections
@@ -717,9 +722,11 @@ export function createWorkspaceTools(
 
       if (commandRunner) {
         const res = await commandRunner(testCmd);
+        const output = res.stdout || res.stderr;
         return {
           passed: res.exitCode === 0,
-          output: res.stdout || res.stderr,
+          output,
+          ran: classifyTestRun(output) === "ran",
         };
       }
 
@@ -732,11 +739,13 @@ export function createWorkspaceTools(
           // URL. Hand it the same minimal allow-list the tester agent uses.
           env: filterChildEnv(process.env) as NodeJS.ProcessEnv,
         });
-        return { passed: true, output: stdout || stderr };
+        return { passed: true, output: stdout || stderr, ran: classifyTestRun(stdout || stderr) === "ran" };
       } catch (err: any) {
+        const output = err.stdout || err.stderr || err.message;
         return {
           passed: false,
-          output: err.stdout || err.stderr || err.message,
+          output,
+          ran: classifyTestRun(output) === "ran",
         };
       }
     },
@@ -801,6 +810,20 @@ function assertBreakerClosed(
 /**
  * Drive the multi-file coding loop guided by the ExecutionPlan.
  */
+/**
+ * Classify whether a test command actually ran to a result, or failed to start at all (#541).
+ *
+ * A command that could not begin — a missing binary, a config that will not load, a package that is not installed
+ * — is unmeasured: our environment's failure, never a verdict on the developer's work. This mirrors amm-scan's own
+ * marker list for the same distinction. A test run that started and failed is NOT a startup failure and must stay
+ * a failure, so the marker list is deliberately narrow; its negative cases are asserted beside the positive ones.
+ *
+ * RED stub: treats every run as having run. The GREEN step fills in the markers.
+ */
+export function classifyTestRun(output: string): "ran" | "did-not-start" {
+  return "ran";
+}
+
 export async function runMultiFileCodingLoop(
   opts: MultiFileCodingLoopOptions,
 ): Promise<LoopResult> {
