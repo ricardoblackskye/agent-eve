@@ -1,6 +1,7 @@
 import type { CostGovernor, CostGovernorRefusal } from "./cost-governor";
 import { randomUUID } from "node:crypto";
 import { runGovernedLlmCall } from "./governed-llm-call";
+import { resolvePrice as resolvePriceFromBudget, type ModelPrice } from "./cost-budget";
 
 /**
  * #281 (R2) T3 — the governed model gateway, core decisions (the route stays thin).
@@ -71,7 +72,35 @@ export function measureGatewayUsage(
   model: string,
   resolvePrice?: (model: string | null | undefined) => ModelPrice | null,
 ): GatewayMeasurement {
-  throw new Error("not implemented");
+  const usage = (result as { usage?: unknown } | null | undefined)?.usage;
+  if (!usage || typeof usage !== "object") return {};
+  const block = usage as Record<string, unknown>;
+
+  const count = (...names: string[]): number | undefined => {
+    for (const name of names) {
+      const value = block[name];
+      if (typeof value === "number" && Number.isFinite(value) && value >= 0) return value;
+    }
+    return undefined;
+  };
+  // Both spellings: OpenRouter speaks the OpenAI one, and a gateway that fronts providers should not
+  // lose a measurement because a vendor named the field differently.
+  const tokensIn = count("prompt_tokens", "input_tokens");
+  const tokensOut = count("completion_tokens", "output_tokens");
+
+  // ONE PRICE SOURCE: the governor's own resolver, so a settled cost can never disagree with a
+  // reservation. Cost needs BOTH counts — half a measurement is not a cost.
+  const price = (resolvePrice ?? resolvePriceFromBudget)(model);
+  const costUsd =
+    price && tokensIn !== undefined && tokensOut !== undefined
+      ? (tokensIn / 1000) * price.inputUsdPer1k + (tokensOut / 1000) * price.outputUsdPer1k
+      : undefined;
+
+  return {
+    ...(tokensIn !== undefined ? { tokensIn } : {}),
+    ...(tokensOut !== undefined ? { tokensOut } : {}),
+    ...(costUsd !== undefined ? { costUsd } : {}),
+  };
 }
 
 export interface GatewayRefusalRecord {
@@ -91,6 +120,22 @@ export interface LlmGatewayDeps {
   /** Forwards an admitted call. Injected so tests need no provider key and the key stays server-side. */
   forwardUpstream: (args: { model: string; payload: unknown }) => Promise<unknown>;
   recordUsage?: (usage: GatewayUsageRecord) => Promise<void>;
+  /**
+   * #532 — a usage-ledger sink for the sandbox's spend, built per call by the composition root.
+   *
+   * A factory rather than a sink because the run id and model arrive with the lease, and a function
+   * rather than an import because this module must not read the environment: the same reason the
+   * provider key is injected. Returning null means no usage driver is configured, which is the opt-in.
+   */
+  workerUsage?: (context: { runId: string; model: string }) =>
+    | { record(measurement?: {
+        taskType?: string;
+        tokensIn?: number;
+        tokensOut?: number;
+        costUsd?: number;
+        durationMs?: number;
+      }): Promise<boolean> }
+    | null;
   recordRefusal?: (refusal: GatewayRefusalRecord) => Promise<void>;
 }
 
@@ -163,6 +208,12 @@ export async function handleGatewayRequest(
     // 3. The SAME governed seam the in-process loop uses: reserve -> run -> settle. A refusal is
     // returned (not thrown) and is decided BEFORE `run` is invoked, so a refused call never reaches
     // the provider and costs nothing.
+    // #532: the provider's usage is in the response this call returns, so the sandbox's spend can be
+    // MEASURED rather than left as a reservation estimate. One helper feeds both the settle and the
+    // ledger, so the two can never disagree.
+    const measure = (result: unknown) => measureGatewayUsage(result, model);
+    const developerUsage = deps.workerUsage?.({ runId: lease.runId, model }) ?? null;
+
     const governed = await runGovernedLlmCall({
       governor: deps.governor,
       category: "developer",
@@ -170,6 +221,18 @@ export async function handleGatewayRequest(
       inputTokens: request.inputTokens,
       outputTokens: request.outputTokens,
       ...(lease.tenantId ? { tenantId: lease.tenantId } : {}),
+      // The SETTLED cost, so the reservation stops settling null.
+      costOf: (result: unknown) => measure(result).costUsd,
+      // Opt-in: absent when no usage driver is configured, and then nothing is recorded.
+      ...(developerUsage
+        ? {
+            usage: {
+              taskType: "developer",
+              sink: developerUsage,
+              measurementOf: (result: unknown) => measure(result),
+            },
+          }
+        : {}),
       run: () => deps.forwardUpstream({ model, payload: request.payload }),
     });
 
@@ -183,12 +246,17 @@ export async function handleGatewayRequest(
       return { status: 402, error: "budget_refused", reason: governed.reason };
     }
 
+    const measured = measure(governed.result);
     await deps.recordUsage?.({
       runId: lease.runId,
       tenantId: lease.tenantId,
       model,
       reservationId: governed.reservationId,
       estimatedUsd: governed.estimatedUsd,
+      // Absent fields stay absent: a call this gateway could not measure is not a free one.
+      ...(measured.tokensIn !== undefined ? { tokensIn: measured.tokensIn } : {}),
+      ...(measured.tokensOut !== undefined ? { tokensOut: measured.tokensOut } : {}),
+      ...(measured.costUsd !== undefined ? { costUsd: measured.costUsd } : {}),
     });
     return { status: 200, body: governed.result };
   } catch {

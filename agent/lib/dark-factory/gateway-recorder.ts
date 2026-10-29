@@ -28,7 +28,9 @@ export function createGatewayRecorder(store: RunHistoryStore): GatewayRecorder {
           stage: "worker",
           occurredAt: new Date().toISOString(),
           status: "succeeded",
-          costUsd: usage.estimatedUsd,
+          // The SETTLED cost when one was measured (#532); the reservation estimate is only a
+          // fallback, because an estimate is not an actual.
+          costUsd: usage.costUsd ?? usage.estimatedUsd,
         })
         .catch(() => undefined);
     },

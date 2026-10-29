@@ -13,6 +13,7 @@ import {
 } from "../../../agent/lib/dark-factory/llm-gateway";
 import { createRunHistoryStore } from "../../../agent/lib/dark-factory/run-history-provider";
 import { createGatewayRecorder } from "../../../agent/lib/dark-factory/gateway-recorder";
+import { createWorkerUsageRecorder } from "../../../agent/lib/dark-factory/worker-usage";
 import { createInMemoryCredentialVault } from "../../../agent/lib/dark-factory/credential-vault";
 import { resolveProviderKey } from "../../../agent/lib/dark-factory/provider-key";
 
@@ -94,6 +95,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     forwardUpstream: ({ model, payload: body }) =>
       forwardUpstream(model, body, env),
     recordUsage: (usage) => gatewayRecorder.recordUsage(usage),
+    // #532: the sink is built HERE, where the environment and the run's context are both known — the
+    // module stays free of any store and any environment dependency.
+    workerUsage: (context) => createWorkerUsageRecorder(env, context),
     recordRefusal: (refusal) => gatewayRecorder.recordRefusal(refusal),
   };
 
