@@ -10,7 +10,10 @@
 import { describe, expect, it } from "vitest";
 import { InMemoryCostBudgetProvider } from "../../agent/lib/dark-factory/cost-budget-store";
 import { createCostGovernor } from "../../agent/lib/dark-factory/cost-governor";
-import { runGovernedAgentCall } from "../../agent/lib/dark-factory/governed-agent-call";
+import {
+  CostRefusedError,
+  runGovernedAgentCall,
+} from "../../agent/lib/dark-factory/governed-agent-call";
 
 const MODEL = "deepseek/deepseek-chat";
 const ENV: Record<string, string | undefined> = { DF_COST_BUDGET_ARCHITECT_USD: "5" };
@@ -106,5 +109,92 @@ describe("#492 a governed call records usage when a sink is supplied", () => {
     expect(result).toBe("plan");
     expect(seen).toHaveLength(1);
     expect(seen[0].taskType).toBe("architect");
+  });
+
+  // --- Task 4: the Review Focus cases. Each locks in behaviour the seam must keep, so a later refactor cannot
+  // quietly drop it: telemetry never fails a call, a refused call is not attributed, and nothing is invented.
+
+  it("does not fail the call when the SINK itself throws", async () => {
+    const exploding = {
+      record: async (): Promise<boolean> => {
+        throw new Error("ledger exploded");
+      },
+    };
+    const result = await runGovernedAgentCall(
+      { governor: architectGovernor() },
+      {
+        category: "architect",
+        model: MODEL,
+        inputTokens: 1_000,
+        outputTokens: 1_000,
+        run: async () => "plan",
+        usage: { taskType: "architect", sink: exploding },
+      },
+    );
+
+    // The call's result is what matters; the ledger failure is logged, never thrown at the caller.
+    expect(result).toBe("plan");
+  });
+
+  it("records NOTHING when the cost gate refuses the call: nothing ran, so nothing is attributed", async () => {
+    const { seen, sink } = capturingSink();
+    await expect(
+      runGovernedAgentCall(
+        { governor: architectGovernor() },
+        {
+          category: "architect",
+          model: MODEL,
+          inputTokens: 0,
+          outputTokens: 100_000_000,
+          run: async () => "should not run",
+          usage: { taskType: "architect", sink },
+        },
+      ),
+    ).rejects.toBeInstanceOf(CostRefusedError);
+
+    expect(seen).toHaveLength(0);
+  });
+
+  it("records an unmeasured event when the call RAN and threw, and still rethrows", async () => {
+    const { seen, sink } = capturingSink();
+    await expect(
+      runGovernedAgentCall(
+        { governor: architectGovernor() },
+        {
+          category: "architect",
+          model: MODEL,
+          inputTokens: 1_000,
+          outputTokens: 1_000,
+          run: async () => {
+            throw new Error("provider exploded");
+          },
+          usage: { taskType: "architect", sink },
+        },
+      ),
+    ).rejects.toThrow("provider exploded");
+
+    // The spend happened even though there is no measurement (the governor settles the reservation on a throw),
+    // so the ledger acknowledges the call rather than staying silent.
+    expect(seen).toHaveLength(1);
+    expect(seen[0].taskType).toBe("architect");
+    expect(seen[0].tokensIn).toBeUndefined();
+  });
+
+  it("hands the sink ONLY what was measured, never an invented zero", async () => {
+    const { seen, sink } = capturingSink();
+    await runGovernedAgentCall(
+      { governor: architectGovernor() },
+      {
+        category: "architect",
+        model: MODEL,
+        inputTokens: 1_000,
+        outputTokens: 1_000,
+        run: async () => ({ output: "plan" }),
+        usage: { taskType: "architect", sink, measurementOf: () => ({}) },
+      },
+    );
+
+    // The ledger reports an absent measurement as `unmeasured`; writing 0 would read as "this call was free".
+    expect(Object.keys(seen[0])).toEqual(["taskType"]);
   });
 });
