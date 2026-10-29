@@ -117,6 +117,20 @@ shows the rule binding where it should and staying inert where it should.
 The shipped ceiling is 0.02 against a real dearest of 0.0024. If decision 4 goes that way, lower it to the capped
 rule's value and refresh the observation, so the shipped pair are consistent with each other and with the catalog.
 
+### Task 6 - the operations page
+
+**Files:** `docs/pages/dark-factory-price-ceilings.md` (new), `docs/pages/README.md` (the index), and a link from
+`docs/pages/dark-factory-cost-estimation.md`.
+
+Record on one page what an operator needs: what the reservation is a bound over; why it is the dearest rather than
+a median (ADR 0027's reserve-then-settle shape); the two failure modes and which one each setting invites; the
+measured history that forced both changes - the 27 Oct outlier, the drift that followed it, and today's 8.3x
+over-reservation; the refresh command and the schedule that surfaces drift; and the override for a deployment that
+knows its provider.
+
+The page CITES the ADR for the decision rather than restating it, so the prose cannot drift from the record it
+points at - the same single-home rule the observation itself follows.
+
 ---
 
 ## Validation
@@ -126,7 +140,10 @@ rule's value and refresh the observation, so the shipped pair are consistent wit
 - **The Postgres legs must RUN**: export the five `DF_*_TEST_DATABASE_URL` variables.
 - The live refresh is the only network step and stays out of the unit suite.
 
-## Decisions (agreed at GATE 1)
+## Settled decisions (agreed at GATE 1)
+
+All five were agreed as recommended. The alternatives are kept below as the record of what was
+considered, not as open questions.
 
 1. **The rule** - cap the adopted rate at a multiple of p90 and report a provider above it, rather than adopting it
    (recommended: the issue's own option 1, keeps "dearest" meaningful and fails loudly) versus a high percentile in
