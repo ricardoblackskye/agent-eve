@@ -275,16 +275,8 @@ export interface PlanCostCounts {
 export function decomposePlanCostEstimateFromCounts(
   input: PlanCostCounts,
 ): PlanCostStageEstimate[] {
-  throw new Error("not implemented");
-}
-
-/** Split a plan's expected cost across the stages that spend it (#490). Parts sum to the band. */
-export function decomposePlanCostEstimate(
-  input: EstimatePlanCostInput,
-): PlanCostStageEstimate[] {
-  const plan = input.plan;
-  const targetFileCount = clampTokenCount((plan.targetFiles ?? []).length);
-  const taskCount = clampTokenCount((plan.tasks ?? []).length);
+  const targetFileCount = clampTokenCount(input.targetFileCount);
+  const taskCount = clampTokenCount(input.taskCount);
 
   const contextFiles = Math.min(targetFileCount, MAX_CONTEXT_FILES_READ);
   const contextTokens = clampTokenCount(contextFiles * (MAX_CHARS_PER_FILE / CHARS_PER_TOKEN));
@@ -294,7 +286,6 @@ export function decomposePlanCostEstimate(
   const priceOf = input.resolvePrice ?? resolvePrice;
   const resolved = priceOf(input.model);
   const price = resolved ?? ceilingPrice();
-  // The same factors the band applies, so the parts keep summing to `expectedUsd`.
   const revisionFactor = revisionFactorFor(input.history ?? []);
   const calibrationFactor = resolveCalibrationFactor(input.calibrationFactor);
 
@@ -310,4 +301,22 @@ export function decomposePlanCostEstimate(
       expectedUsd: stageUsd(clampTokenCount(taskCount * OUTPUT_TOKENS_PER_TASK)),
     },
   ];
+}
+
+/** Split a plan's expected cost across the stages that spend it (#490). Parts sum to the band. */
+export function decomposePlanCostEstimate(
+  input: EstimatePlanCostInput,
+): PlanCostStageEstimate[] {
+  const plan = input.plan;
+  // Delegated, so the plan-based and counts-based splits can never disagree.
+  return decomposePlanCostEstimateFromCounts({
+    targetFileCount: (plan.targetFiles ?? []).length,
+    taskCount: (plan.tasks ?? []).length,
+    model: input.model,
+    ...(input.history ? { history: input.history } : {}),
+    ...(input.resolvePrice ? { resolvePrice: input.resolvePrice } : {}),
+    ...(input.calibrationFactor !== undefined
+      ? { calibrationFactor: input.calibrationFactor }
+      : {}),
+  });
 }

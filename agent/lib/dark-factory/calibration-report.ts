@@ -145,7 +145,12 @@ export const MINIMUM_SAMPLE_SIZE_ENV = "DF_CALIBRATION_MIN_SAMPLES";
  * implicit.
  */
 export function resolveMinimumSampleSize(env: Record<string, string | undefined>): number {
-  throw new Error("not implemented");
+  const raw = env[MINIMUM_SAMPLE_SIZE_ENV];
+  // Digits only: a padded, fractional or exponential value is a configuration mistake, not a
+  // sample size, and silently rounding it would hide the typo.
+  if (typeof raw !== "string" || !/^[0-9]+$/.test(raw)) return DEFAULT_MINIMUM_SAMPLE_SIZE;
+  const parsed = Number(raw);
+  return Number.isSafeInteger(parsed) && parsed >= 1 ? parsed : DEFAULT_MINIMUM_SAMPLE_SIZE;
 }
 
 /** Build the calibration report. Withholds every metric below the minimum sample size. */
