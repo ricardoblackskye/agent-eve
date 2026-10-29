@@ -18,7 +18,7 @@
 import { createHash } from "node:crypto";
 import type { EventCursor } from "./run-history-store";
 import type { RunHistoryStore } from "./run-history-store";
-import type { PlanCommentRef, PlanRecordInput, PlanSource } from "./plan-ledger";
+import type { PersistedPlan, PlanCommentRef, PlanRecordInput, PlanSource } from "./plan-ledger";
 import type { ExecutionPlan } from "./plan-validator";
 
 export interface RecordPlanRevisionInput {
@@ -196,6 +196,66 @@ export interface PostedPlanWriteResult {
   skipped?: boolean;
   planId?: number;
   error?: string;
+  /**
+   * This exact revision was ALREADY recorded (#516).
+   *
+   * `ok` stays true: the call was handled and changed nothing, which is not the same statement as a
+   * failure — a refusal would invite the caller to retry the very write the guard exists to prevent.
+   */
+  duplicate?: boolean;
+}
+
+/**
+ * Whether a recorded plan is the same plan (#516).
+ *
+ * Ignores the comment reference for the reason `sameEvent` already gives: GitHub derives it AFTER the
+ * record is written, so it must not make two recordings of one plan look like different plans.
+ */
+export function samePlan(left: ExecutionPlan, right: ExecutionPlan): boolean {
+  // Strip the comment reference, for `sameEvent`'s reason: it is derived from GitHub AFTER the record is
+  // written, so it must not make two recordings of one plan look like two different plans.
+  const strip = (plan: ExecutionPlan): Record<string, unknown> => {
+    const { commentRef: _derived, ...rest } = plan as ExecutionPlan & { commentRef?: unknown };
+    return rest as Record<string, unknown>;
+  };
+  return canonical(strip(left)) === canonical(strip(right));
+}
+
+/**
+ * A stable serialization for comparison (#516).
+ *
+ * Key ORDER must not decide whether two plans are the same: postgres returns `jsonb` with its keys
+ * reordered, so the round-tripped plan is the same plan with its fields in a different order. sqlite
+ * stores text and preserves the order, which is exactly how a real difference hid behind a passing
+ * local test. Arrays keep their order, because position is meaningful in a plan.
+ */
+function canonical(value: unknown): string {
+  return JSON.stringify(value, (_key, val) => {
+    if (val === null || typeof val !== "object" || Array.isArray(val)) return val;
+    const entries = Object.entries(val as Record<string, unknown>).sort(([a], [b]) =>
+      a < b ? -1 : a > b ? 1 : 0,
+    );
+    return Object.fromEntries(entries);
+  });
+}
+
+/** The plan already recorded for this run and revision, if it is the same plan (#516). */
+async function findSameRecordedPlan(
+  history: RunHistoryStore,
+  input: RecordPostedPlanInput,
+): Promise<PersistedPlan | undefined> {
+  try {
+    const plans = await history.listPlans(input.runId);
+    return plans.find(
+      (candidate) =>
+        candidate.planRevision === input.planRevision &&
+        candidate.source === input.source &&
+        samePlan(candidate.plan, input.plan),
+    );
+  } catch {
+    // A read that fails leaves us with the ORIGINAL error, which is the one worth reporting.
+    return undefined;
+  }
 }
 
 export async function recordPostedPlan(
@@ -220,6 +280,13 @@ export async function recordPostedPlan(
     // so this module depends only on the store INTERFACE, not the provider factory.
     if (error instanceof Error && error.name === "RunHistoryConfigurationError") {
       return { ok: false, skipped: true, error: error.message };
+    }
+    // #516: the write-once ledger rejects a second write for this revision. If what is there IS this
+    // plan, the write already happened — a duplicate, which is a success. Catching rather than reading
+    // first keeps the happy path free of an extra query and leaves the constraint as the arbiter.
+    const alreadyRecorded = await findSameRecordedPlan(history, input);
+    if (alreadyRecorded) {
+      return { ok: true, planId: alreadyRecorded.planId, duplicate: true };
     }
     throw error;
   }

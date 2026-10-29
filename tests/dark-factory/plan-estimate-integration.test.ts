@@ -105,9 +105,30 @@ describe("#487 AC4 the estimate reaches persistence", () => {
     // because the plan row is owned by recordPostedPlan (#505), that refusal PROPAGATES (fail-closed)
     // rather than being swallowed as a best-effort observation. The resume predicate is the real guard;
     // this proves a bypass still cannot sneak a duplicate past the ledger.
-    await expect(recordPlanWithEstimateSafely(store, input())).rejects.toThrow();
+    // #516 reversed this expectation deliberately. The intent was never "the run must die" — it was
+    // "a bypass cannot sneak a duplicate past the ledger", and that still holds: the second write is
+    // recognized as a duplicate and the ledger keeps exactly one plan and one estimate. What changed is
+    // that an identical re-record no longer ABORTS the run on its way to proving it.
+    const second = await recordPlanWithEstimateSafely(store, input());
+    // toMatchObject rather than field access: `duplicate` lives on the ok arm of the result union.
+    expect(second).toMatchObject({ ok: true, duplicate: true });
     expect(await store.listPlans("run-487")).toHaveLength(1);
     expect(await store.listPlanEstimates("run-487")).toHaveLength(1);
+  });
+
+  it("still REFUSES a different plan at the same revision, so the conflict stays loud (#516)", async () => {
+    const store = createStore();
+    await recordPlanWithEstimateSafely(store, input());
+
+    // Identical means identical. A genuinely different plan at a revision that is already recorded is a
+    // real defect surfacing, and it must abort rather than be absorbed as a duplicate.
+    await expect(
+      recordPlanWithEstimateSafely(store, {
+        ...input(),
+        plan: { ...input().plan, summary: "a genuinely different plan" },
+      }),
+    ).rejects.toThrow();
+    expect(await store.listPlans("run-487")).toHaveLength(1);
   });
 
   it("records a REVISION as its own plan row, with its own estimate", async () => {

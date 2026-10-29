@@ -131,3 +131,4 @@ changes, write a new one that supersedes it.
 | [0075](0075-the-run-actual-is-summed-from-its-sources.md)                | The run's actual is the sum of what it recorded                                                     | Accepted           |
 | [0076](0076-the-ledger-is-the-one-source-for-a-run-actual.md)            | The ledger is the one source for a run's actual                                                     | Accepted           |
 | [0077](0077-the-estimator-reads-repository-history.md)                   | The estimator reads the repository's finished runs                                                  | Accepted           |
+| [0078](0078-a-re-recorded-plan-revision-is-a-duplicate.md)               | A re-recorded plan revision is a duplicate, not a failure                                           | Accepted           |
