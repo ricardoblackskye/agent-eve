@@ -27,6 +27,8 @@ export interface LaunchInput {
   env: import("./local-run-preflight").PreflightEnv;
   probes?: import("./local-run-preflight").PreflightProbes;
   allowRemoteStore?: boolean;
+  /** Continue the parked run holding this issue's claim (#539) instead of starting a fresh one. */
+  resume?: boolean;
 }
 
 export interface SpawnResult {
@@ -82,6 +84,7 @@ export async function buildLaunchDecision(input: LaunchInput): Promise<LaunchDec
     issue: input.issue,
     probes: input.probes,
     allowRemoteStore: input.allowRemoteStore,
+    ...(input.resume ? { resume: true } : {}),
   });
 
   if (!result.ok) {
@@ -102,7 +105,15 @@ export async function buildLaunchDecision(input: LaunchInput): Promise<LaunchDec
 
   const spawn: LaunchSpawn = {
     cmd: RUNNER_BIN.cmd,
-    args: [...RUNNER_BIN.args, "--repo", input.repo, "--issue", String(input.issue)],
+    args: [
+      ...RUNNER_BIN.args,
+      "--repo",
+      input.repo,
+      "--issue",
+      String(input.issue),
+      // #539: the runner already reads `process.argv.includes("--resume")`; the launcher had no path for it.
+      ...(input.resume ? ["--resume"] : []),
+    ],
     cwd: checkout.path,
     // The launcher loaded .env.local into its own process.env; the child inherits those plus the explicit env.
     env,
