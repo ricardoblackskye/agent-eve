@@ -29,9 +29,15 @@ const EXPECTED_CEILINGS: Record<
   // catalog moves — that output figure rose ~33% within one session. A ceiling pinned exactly to the
   // live maximum goes stale and then under-reserves, which is #494. Comparing the table against the
   // LIVE catalog is the contract test's job; this one only pins what we ship (see ADR 0027).
+  //
+  // #499 / ADR 0079: the shipped figure is now derived from the PEER distribution rather than from one endpoint.
+  // The 0.02 that stood here was sized for a provider charging 0.015863057 - 18.9x the second-dearest - and that
+  // provider has since left the catalog, so 0.02 was reserving 8.3x what any reachable provider charges. The
+  // refresh path now adopts at most 3 x p90, and the ceiling sits at that cap x 1.25 (0.0045): above what the rule
+  // can adopt, so it does not bind the reservation, with a margin for a rise between verifications.
   "deepseek/deepseek-v4.1-flash": {
     inputUsdPer1k: 0.0007,
-    outputUsdPer1k: 0.02,
+    outputUsdPer1k: 0.0045,
   },
   "deepseek/deepseek-v4-pro": {
     inputUsdPer1k: 0.0021,

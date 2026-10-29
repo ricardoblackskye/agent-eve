@@ -24,13 +24,13 @@ export const priceFloorRecord: PriceFloorRecord = {
       inputUsdPer1k: 0.00191,
       outputUsdPer1k: 0.0038299999999999996,
       providers: 15,
-      distribution: { input: { median: 0.0013, p90: 0.00174, secondDearest: 0.00174, providers: 15 }, output: { median: 0.0028320000000000003, p90: 0.00348, secondDearest: 0.00348, providers: 15 } },
+      distribution: { input: { median: 0.0013, p90: 0.00174, secondDearest: 0.00174, providers: 15 }, output: { median: 0.002832, p90: 0.00348, secondDearest: 0.00348, providers: 15 } },
     },
     "deepseek/deepseek-v4.1-flash": {
       inputUsdPer1k: 0.0006,
       outputUsdPer1k: 0.0024,
       providers: 41,
-      distribution: { input: { median: 0.00019999999999999998, p90: 0.0003, secondDearest: 0.00045, providers: 41 }, output: { median: 0.00084, p90: 0.0012, secondDearest: 0.0018, providers: 41 } },
+      distribution: { input: { median: 0.0002, p90: 0.0003, secondDearest: 0.00045, providers: 41 }, output: { median: 0.00084, p90: 0.0012, secondDearest: 0.0018, providers: 41 } },
     },
   },
 };

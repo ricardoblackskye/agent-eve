@@ -36,12 +36,28 @@ describe("#498 the observed-dearest floor", () => {
     expect(Object.keys(observedDearest).length).toBeGreaterThanOrEqual(1);
   });
 
-  it("records the dearest rate actually seen for the default model", () => {
+  it("records the adopted rate and the distribution behind it, for the default model", () => {
     const floor = floorFor("deepseek/deepseek-v4.1-flash");
     expect(floor).toBeDefined();
     expect(floor?.inputUsdPer1k).toBe(0.0006);
-    expect(floor?.outputUsdPer1k).toBe(0.015863057);
-    expect(floor?.providers).toBeGreaterThanOrEqual(1);
+    // #499: this held the raw maximum (0.015863057 from a single endpoint). It holds the ADOPTED rate now -
+    // refreshed 2026-10-29, when the dearest of 41 providers was 0.0024 against a p90 of 0.0012, so the
+    // 3 x p90 cap (0.0036) did not bind and nothing was declined.
+    expect(floor?.outputUsdPer1k).toBe(0.0024);
+    expect(floor?.providers).toBe(41);
+    expect(floor?.distribution?.input).toEqual({
+      median: 0.0002,
+      p90: 0.0003,
+      secondDearest: 0.00045,
+      providers: 41,
+    });
+    expect(floor?.distribution?.output).toEqual({
+      median: 0.00084,
+      p90: 0.0012,
+      secondDearest: 0.0018,
+      providers: 41,
+    });
+    expect(floor?.declinedDearestUsdPer1k).toBeUndefined();
   });
 
   it("normalises the lookup the same way resolvePrice does", () => {

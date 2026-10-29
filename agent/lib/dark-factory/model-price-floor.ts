@@ -260,13 +260,17 @@ export function renderPriceFloorModule(record: PriceFloorRecord): string {
     .sort()
     .map((id) => {
       const observed = record.observedDearest[id];
+      const figure = (v: number): number => Number(v.toPrecision(12));
       const axis = (d: RateDistribution): string =>
-        `{ median: ${d.median}, p90: ${d.p90}, secondDearest: ${d.secondDearest}, providers: ${d.providers} }`;
+        `{ median: ${figure(d.median)}, p90: ${figure(d.p90)}, secondDearest: ${figure(d.secondDearest)}, ` +
+        `providers: ${d.providers} }`;
       const distribution = observed.distribution
         ? `      distribution: { input: ${axis(observed.distribution.input)}, output: ${axis(observed.distribution.output)} },\n`
         : "";
       const declined = observed.declinedDearestUsdPer1k
-        ? `      declinedDearestUsdPer1k: ${JSON.stringify(observed.declinedDearestUsdPer1k)},\n`
+        ? `      declinedDearestUsdPer1k: ${JSON.stringify(observed.declinedDearestUsdPer1k, (_k, v) =>
+            typeof v === "number" ? figure(v) : v,
+          )},\n`
         : "";
       return (
         `    ${JSON.stringify(id)}: {\n` +
