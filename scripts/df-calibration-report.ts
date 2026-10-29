@@ -181,7 +181,7 @@ async function main(): Promise<number> {
   console.log("by stage:");
   for (const stage of report.byStage) {
     console.log(
-      `  ${stage.stage.padEnd(10)} bias ${money(stage.bias.value).padStart(9)}` +
+      `  ${stage.stage.padEnd(10)}${stage.measured ? " " : " (unmeasured)"} bias ${money(stage.bias.value).padStart(9)}` +
         `  mae ${money(stage.mae.value).padStart(9)}` +
         `  mape ${percentage(stage.mape.value).padStart(9)}  n=${stage.bias.sampleSize}`,
     );

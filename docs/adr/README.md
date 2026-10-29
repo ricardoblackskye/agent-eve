@@ -129,3 +129,4 @@ changes, write a new one that supersedes it.
 | [0073](0073-plan-estimates-live-in-the-plan-ledger.md)                   | Plan estimates live in the plan ledger, not on the run summary                                      | Accepted           |
 | [0074](0074-the-calibration-actual-is-recorded-usage.md)                 | The calibration actual is recorded usage                                                            | Accepted           |
 | [0075](0075-the-run-actual-is-summed-from-its-sources.md)                | The run's actual is the sum of what it recorded                                                     | Accepted           |
+| [0076](0076-the-ledger-is-the-one-source-for-a-run-actual.md)            | The ledger is the one source for a run's actual                                                     | Accepted           |

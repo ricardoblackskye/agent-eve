@@ -204,9 +204,14 @@ Two properties matter more than the arithmetic:
   governs it; under that threshold the report prints the counts and withholds every figure, so a small
   window cannot be read as a measured zero.
 
-A stage whose spend was never recorded is reported as unmeasured, never as free: the developer path
-records no usage in-process yet, so a current report sets the architect's measured spend against a
-developer expectation.
+A stage with no recorded actual is reported as `measured: false` and carries no bias at all, rather
+than being compared against a zero that reads as a measured overshoot. The sandbox's spend — which is the
+developer's — reaches the ledger because the gateway measures the calls it pays for and records them
+typed `developer`; a deployment without a usage driver records nothing, and the report says so.
+
+The run's actual is therefore **the ledger's total alone**. The run summary reads that one source, and the
+writer REPLACES the row's cost rather than adding to it, so a figure can never be counted twice — see
+ADR 0076, which supersedes ADR 0075's two-source rule.
 
 ## The run's actual cost
 
