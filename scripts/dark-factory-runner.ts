@@ -80,6 +80,8 @@ import {
 import { renderPlanFile } from "../agent/lib/dark-factory/plan-file";
 import { postPlanComment } from "../agent/lib/dark-factory/plan-comment";
 import { estimatePlanCostSafely } from "../agent/lib/dark-factory/plan-cost-estimate";
+import { estimateCost, resolvePrice } from "../agent/lib/dark-factory/cost-budget";
+import { createWorkerUsageRecorder } from "../agent/lib/dark-factory/worker-usage";
 import { recordPlanWithEstimateSafely } from "../agent/lib/dark-factory/plan-estimate-recorder";
 import {
   explainPlanFailure,
@@ -503,6 +505,26 @@ async function main(): Promise<void> {
   // size, because that is what drives latency (a fixed 60s against a 400k-char prompt budget failed larger
   // stories outright: run df572110).
   const architectTimeoutMs = resolveArchitectTimeoutMs();
+  // #492: planning usage reaches the ledger under its own task type, so planning spend can be separated from
+  // implementation spend. `createWorkerUsageRecorder` returns null when DF_USAGE_DRIVER is unset — that IS the
+  // opt-in — and the recorder is best-effort by construction, so a ledger outage cannot fail a planning attempt.
+  const architectUsage = createWorkerUsageRecorder(process.env, {
+    runId,
+    model: modelId,
+    // Attribution the ledger's `pbiId` field exists for: a live run showed the event landing without it.
+    pbiId: issueNum,
+  });
+
+  /**
+   * Measured cost for the ledger, from the provider's own token counts. An unpriced model yields NO cost rather than
+   * a zero: the ledger reports an absent measurement as `unmeasured`, while 0 would read as "this call was free".
+   */
+  const measuredCost = (tokensIn?: number, tokensOut?: number): number | undefined => {
+    if (tokensIn === undefined && tokensOut === undefined) return undefined;
+    if (resolvePrice(modelId) === null) return undefined;
+    return estimateCost(modelId, tokensIn ?? 0, tokensOut ?? 0);
+  };
+
   const architectAgent = new ArchitectAgent({
     // #521: an explicit budget wins over the derivation.
     ...(architectTimeoutMs !== undefined ? { timeoutMs: architectTimeoutMs } : {}),
@@ -518,7 +540,7 @@ async function main(): Promise<void> {
       await checkpoint();
       // Governed (#270): an over-budget call is refused at THIS call site, and the
       // refusal code is recorded on the run.
-      return runGovernedAgentCall(
+      const planningAttempt = await runGovernedAgentCall(
         { governor, runHistory, runId },
         {
           // #484: architect planning is its own category, so plan spend stops consuming the
@@ -527,7 +549,28 @@ async function main(): Promise<void> {
           model: modelId,
           inputTokens: Math.ceil(prompt.length / 4),
           outputTokens: 8_000,
+          // #492: supplied HERE and nowhere else, so the developer and tester paths keep writing exactly what they
+          // wrote before (AC3). Absent fields stay absent on the event rather than being written as zero.
+          ...(architectUsage
+            ? {
+                usage: {
+                  taskType: "architect",
+                  sink: architectUsage,
+                  measurementOf: (attempt: {
+                    tokensIn?: number;
+                    tokensOut?: number;
+                    durationMs?: number;
+                  }) => ({
+                    tokensIn: attempt.tokensIn,
+                    tokensOut: attempt.tokensOut,
+                    durationMs: attempt.durationMs,
+                    costUsd: measuredCost(attempt.tokensIn, attempt.tokensOut),
+                  }),
+                },
+              }
+            : {}),
           run: async () => {
+            const streamStartedAt = Date.now();
             const stream = streamText({ model, prompt });
             let output = "";
             if (planAttempt !== undefined) {
@@ -539,10 +582,20 @@ async function main(): Promise<void> {
               output += chunk;
               process.stdout.write(chunk);
             }
-            return output;
+            // #492: the provider's OWN usage, which is what makes the ledger entry a measurement rather than a guess.
+            const usage = await stream.usage;
+            return {
+              output,
+              tokensIn: usage.inputTokens,
+              tokensOut: usage.outputTokens,
+              durationMs: Date.now() - streamStartedAt,
+            };
           },
         },
       );
+
+      // The agent's contract is the model's TEXT; the measurement is for the ledger only.
+      return planningAttempt.output;
     },
     maxPlanRetries: 2,
   });
