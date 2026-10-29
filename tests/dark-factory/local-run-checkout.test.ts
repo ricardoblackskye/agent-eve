@@ -90,3 +90,40 @@ describe("#404 R1 Task 3 - checkout planning", () => {
     expect(JSON.stringify(env)).toContain("Authorization");
   });
 });
+
+describe("#541 - a fresh checkout is provisioned, or its tests cannot start", () => {
+  const WS = pathJoin(ROOT, "webfeedpoc-169");
+  const lockfile = pathJoin(WS, "package-lock.json");
+  const manifest = pathJoin(WS, "package.json");
+  /** The planner asks about paths, so a set answers it the way a filesystem would. */
+  const seeing = (...paths: string[]) => (candidate: string) => paths.includes(candidate);
+
+  it("provisions with npm ci when the target carries a lockfile", () => {
+    const planned = plan({ exists: seeing(lockfile, manifest) });
+
+    expect(planned.mustClone).toBe(true);
+    expect(planned.installArgs).toEqual(["ci"]);
+  });
+
+  it("falls back to npm install when there is a manifest and no lockfile", () => {
+    expect(plan({ exists: seeing(manifest) }).installArgs).toEqual(["install"]);
+  });
+
+  it("runs NO install when the target is not a Node project at all", () => {
+    // Failing safe matters here: `npm ci` in a repository that was never a Node project would fail the run for
+    // a reason that has nothing to do with the story.
+    expect(plan({ exists: seeing() }).installArgs).toEqual([]);
+  });
+
+  it("does NOT re-install when an existing checkout is reused", () => {
+    // A resume continues the parked run in the workspace it already provisioned.
+    expect(plan({ exists: seeing(WS, lockfile, manifest) }).installArgs).toEqual([]);
+  });
+
+  it("names the provisioning in the summary, which is safe to print", () => {
+    const summary = plan({ exists: seeing(lockfile, manifest) }).summary;
+
+    expect(summary).toContain("npm ci");
+    expect(summary).not.toContain(SECRET);
+  });
+});
