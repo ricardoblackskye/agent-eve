@@ -65,8 +65,8 @@ describe("plan-estimate calibration factor (#490)", () => {
   });
 
   it("scales the stage decomposition identically, so its parts still sum to the band", () => {
-    // Compared against the SCALED band, not against another unfactored call: comparing two things
-    // that both ignore the factor would pass without the factor being applied at all.
+    // Compared against the SCALED band, not against a second call with no factor: comparing two
+    // things that both ignore the factor would pass without it being applied at all.
     const base = estimatePlanCost({ plan: plan(), model: MODEL });
     const parts = decomposePlanCostEstimate({
       plan: plan(),

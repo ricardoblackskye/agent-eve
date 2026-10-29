@@ -185,6 +185,29 @@ always `low`. The recorder accepts a history; nothing supplies one yet.
 - Trust the **settled actual** most. It is the provider's own token counts at the shared price.
 - The band is diagnostic only — it never blocks anything. The gate is the authority.
 
+## The calibration report
+
+The band is checked against what runs actually cost by
+[`calibration-report.ts`](../../agent/lib/dark-factory/calibration-report.ts), driven by
+[`scripts/df-calibration-report.ts`](../../scripts/df-calibration-report.ts)
+(`npm run df:calibration-report`). It leads with **signed bias** — the mean of `estimate - actual`, so
+a positive figure means the estimator was HIGH — then MAE and MAPE, broken down by stage and by cost
+class, and it emits the multiplicative factor `mean(actual / estimate)` that the estimator consumes in
+v2.
+
+Two properties matter more than the arithmetic:
+
+- **The actual is the run's recorded usage**, summed from the usage ledger per run and per stage. It is
+  deliberately NOT read from the accuracy view, whose actual column joins
+  `df_run_summaries.cost_usd` and is NULL on every run recorded so far. See ADR 0074.
+- **Below the minimum sample size nothing is published.** `DF_CALIBRATION_MIN_SAMPLES` (default 10)
+  governs it; under that threshold the report prints the counts and withholds every figure, so a small
+  window cannot be read as a measured zero.
+
+A stage whose spend was never recorded is reported as unmeasured, never as free: the developer path
+records no usage in-process yet, so a current report sets the architect's measured spend against a
+developer expectation.
+
 ## Where calibration goes next
 
 The constants above are labelled in the source as structural working numbers, and the two band
