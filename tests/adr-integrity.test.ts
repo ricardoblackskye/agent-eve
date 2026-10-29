@@ -97,4 +97,80 @@ describe("ADR set integrity (#237)", () => {
     expect(INDEX).toMatch(/Superseded/);
     expect(INDEX).toMatch(/template\.md/);
   });
+
+  /**
+   * #489 — the record of where a plan estimate is persisted must stay true to the schema that ships.
+   *
+   * The ADR this guards exists because its predecessor claimed a storage location (`RunSummary`) that was never
+   * built, and the divergence stood from #486 until an audit found it. So the check runs in the direction that
+   * would have caught it: take the persistence identifiers the ADR NAMES, and require every one of them to exist
+   * in the store implementations.
+   */
+  describe("plan-estimate storage ADR (#489)", () => {
+    const STORAGE_ADR = "0073-plan-estimates-live-in-the-plan-ledger.md";
+    const STORE_SOURCES = [
+      join(ROOT, "agent", "lib", "dark-factory", "run-history-postgres.ts"),
+      join(ROOT, "agent", "lib", "dark-factory", "run-history-store.ts"),
+    ];
+
+    it("names storage that the shipped schema actually defines", () => {
+      const path = join(ADR_DIR, STORAGE_ADR);
+      // Assert existence as an ASSERTION, not by letting a read throw: a missing file must read as a real RED.
+      expect(existsSync(path), `${STORAGE_ADR} is missing`).toBe(true);
+      const adr = readFileSync(path, "utf8");
+      const schema = STORE_SOURCES.map((file) => readFileSync(file, "utf8")).join("\n");
+
+      // Extract the identifiers from the ADR itself. A literal list here would let the ADR drift while the
+      // guard kept passing, which is the failure mode this exists to prevent.
+      const named = [...new Set([...adr.matchAll(/`(df_[a-z_]+)`/g)].map((m) => m[1]))];
+      // Non-vacuity anchor: an ADR that stops naming its identifiers would otherwise satisfy this silently.
+      expect(named.length, "the ADR names no storage identifiers").toBeGreaterThan(0);
+
+      const missing = named.filter((id) => !schema.includes(id));
+      expect(missing, `the ADR names storage that does not exist: ${missing.join(", ")}`).toEqual([]);
+
+      // CONTROL: the lookup must discriminate, or the assertion above is satisfied by any string at all.
+      expect(schema.includes("df_definitely_not_a_real_table")).toBe(false);
+    });
+
+    it("names the claims it rests on, and the schema carries them", () => {
+      const path = join(ADR_DIR, STORAGE_ADR);
+      expect(existsSync(path), `${STORAGE_ADR} is missing`).toBe(true);
+      const adr = readFileSync(path, "utf8");
+      const schema = STORE_SOURCES.map((file) => readFileSync(file, "utf8")).join("\n");
+
+      // The stamp that makes recalibration safe, and the key the accuracy view joins on.
+      const required = ["estimator_version", "run_id"];
+      expect(required.length).toBeGreaterThan(0);
+      for (const identifier of required) {
+        expect(adr, `the ADR must name ${identifier}`).toContain(identifier);
+        expect(schema, `the schema must define ${identifier}`).toContain(identifier);
+      }
+    });
+  });
+
+  /**
+   * #489 — a supersession is only useful if the chain can be walked BOTH ways. The rule above resolves forward
+   * (does the successor exist); this resolves backward, so a record cannot point at a successor that silently
+   * says nothing about it.
+   */
+  it("requires a superseding ADR to reference what it supersedes", () => {
+    const superseded = FILES.filter((name) => /Superseded by \d{4}/.test(readAdr(name)));
+    // Non-vacuity anchor: with nothing superseded yet, this guard would prove nothing at all.
+    expect(superseded.length, "no ADR is superseded, so this rule is untested").toBeGreaterThan(0);
+
+    const mentions = (text: string, number: string): boolean => text.includes(number);
+    // CONTROL: the predicate must be able to say NO, or the assertion below is decoration.
+    expect(mentions("This record supersedes something else entirely.", "0069")).toBe(false);
+
+    for (const name of superseded) {
+      const target = readAdr(name).match(/Superseded by (\d{4})/)![1];
+      const successor = FILES.find((other) => other.startsWith(target));
+      expect(successor, `${name} names a successor that does not exist`).toBeDefined();
+      expect(
+        mentions(readAdr(successor!), name.slice(0, 4)),
+        `${successor} must reference ${name.slice(0, 4)} as the record it supersedes`,
+      ).toBe(true);
+    }
+  });
 });
