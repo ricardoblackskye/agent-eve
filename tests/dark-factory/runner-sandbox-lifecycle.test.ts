@@ -9,7 +9,7 @@ function recordingProvider() {
     writeFile: async () => {},
     readFile: async () => "",
     listFiles: async () => [],
-    runTests: async () => ({ passed: true, output: "" }),
+    runTests: async () => ({ passed: true, output: "", ran: true }),
   };
   const provider = {
     driver: "local" as const,

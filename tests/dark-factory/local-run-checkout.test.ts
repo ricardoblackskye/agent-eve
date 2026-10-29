@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   gitAuthEnv,
   planCheckout,
+  planProvisioning,
 } from "../../agent/lib/dark-factory/local-run-checkout";
 
 /**
@@ -88,5 +89,40 @@ describe("#404 R1 Task 3 - checkout planning", () => {
     expect(planned.cloneArgs.join(" ")).not.toContain(SECRET);
     expect(planned.path).not.toContain(SECRET);
     expect(JSON.stringify(env)).toContain("Authorization");
+  });
+});
+
+
+describe("#541 - provisioning is decided AFTER the clone, from the real checkout", () => {
+  const WS = pathJoin(ROOT, "webfeedpoc-169");
+  const lockfile = pathJoin(WS, "package-lock.json");
+  const manifest = pathJoin(WS, "package.json");
+  /** The planner asks about paths, so a set answers it the way a filesystem would. */
+  const seeing = (...paths: string[]) => (candidate: string) => paths.includes(candidate);
+
+  it("does NOT guess a provisioning command before the clone", () => {
+    // A pre-clone decision answers NO for every repository, because a fresh workspace has no files yet. The plan
+    // must therefore carry no guess: this is the defect the live run exposed.
+    expect("installArgs" in plan()).toBe(false);
+  });
+
+  it("provisions with npm ci when the CLONED checkout carries a lockfile", () => {
+    expect(planProvisioning({ path: WS, exists: seeing(lockfile) }).installArgs).toEqual(["ci"]);
+  });
+
+  it("falls back to npm install when the cloned checkout has a manifest and no lockfile", () => {
+    expect(planProvisioning({ path: WS, exists: seeing(manifest) }).installArgs).toEqual(["install"]);
+  });
+
+  it("runs NO install when the cloned checkout is not a Node project at all", () => {
+    // Fail safe: `npm ci` in a repository that was never a Node project would fail the run for an unrelated reason.
+    expect(planProvisioning({ path: WS, exists: seeing() }).installArgs).toEqual([]);
+  });
+
+  it("names the provisioning in a summary that is safe to print", () => {
+    const summary = planProvisioning({ path: WS, exists: seeing(lockfile) }).summary;
+
+    expect(summary).toContain("npm ci");
+    expect(summary).not.toContain(SECRET);
   });
 });

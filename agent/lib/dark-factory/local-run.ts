@@ -5,7 +5,12 @@ import { createRequire } from "node:module";
 import { spawn as nodeSpawn } from "node:child_process";
 import { loadLocalEnv } from "../../../scripts/load-env";
 import { preflightLocalRun, type PreflightResult } from "./local-run-preflight";
-import { planCheckout, gitAuthEnv, type CheckoutPlan } from "./local-run-checkout";
+import {
+  planCheckout,
+  planProvisioning,
+  gitAuthEnv,
+  type CheckoutPlan,
+} from "./local-run-checkout";
 
 export interface LaunchSpawn {
   cmd: string;
@@ -29,6 +34,8 @@ export interface LaunchInput {
   allowRemoteStore?: boolean;
   /** Continue the parked run holding this issue's claim (#539) instead of starting a fresh one. */
   resume?: boolean;
+  /** Whether a path already exists — injected for tests; defaults to the filesystem. */
+  exists?: (path: string) => boolean;
 }
 
 export interface SpawnResult {
@@ -41,6 +48,12 @@ export type RunnerSpawn = (opts: LaunchSpawn) => Promise<SpawnResult>;
 
 /** The clone step, injected so tests never touch the network. */
 export type GitClone = (plan: CheckoutPlan, authEnv: Record<string, string>) => Promise<number>;
+
+/**
+ * The provisioning step (#541): `npm ci` / `npm install` in a freshly cloned checkout, injected so tests never
+ * run npm. planProvisioning() decides the arguments post-clone; this runs them there.
+ */
+export type NpmInstall = (target: { path: string; installArgs: string[] }) => Promise<number>;
 
 /** This module's own directory: `agent/lib/dark-factory`. */
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -94,7 +107,7 @@ export async function buildLaunchDecision(input: LaunchInput): Promise<LaunchDec
   const checkout = planCheckout({
     repo: input.repo,
     workspaceRoot: input.workspaceRoot,
-    exists: existsSync,
+    exists: input.exists ?? existsSync,
     issue: input.issue,
   });
 
@@ -158,6 +171,48 @@ export const defaultGitClone: GitClone = (plan, authEnv) =>
     child.on("exit", (code) => resolve(code ?? 1));
   });
 
+/**
+ * The real provisioning step (#541): install the fresh checkout's dependencies with its own npm, in the checkout
+ * itself. Running `npm` (not `npx`) here keeps the install inside the target; the coding loop's `npx vitest run`
+ * then resolves the nearest `node_modules` and no longer dies before collecting a test.
+ */
+export const defaultNpmInstall: NpmInstall = (target) =>
+  new Promise<number>((resolve) => {
+    const merged: Record<string, string> = {};
+    for (const [key, value] of Object.entries(process.env)) {
+      if (value !== undefined) merged[key] = value;
+    }
+
+    // #541, learned from a live run that reported "exit 1" with no output at all:
+    //  - on Windows `npm` resolves to `npm.cmd`, and Node REFUSES to spawn a `.cmd` without a shell (the
+    //    CVE-2024-27980 change), so the spawn fails as an ENOENT the operator never sees. The arguments here are
+    //    a closed allow-list (`ci` | `install`), so no shell-injection surface is introduced.
+    //  - the stdio is INHERITED, as the runner spawn already does; piping it with nothing reading the pipe
+    //    swallowed npm's output, and a bare exit code is precisely not "reported loudly".
+    //  - a spawn failure is REPORTED and resolves non-zero rather than rejecting: the `exit` event can fire
+    //    first, and a resolve would then silently discard the rejection.
+    let child;
+    try {
+      child = nodeSpawn("npm", target.installArgs, {
+        cwd: target.path,
+        env: merged as unknown as NodeJS.ProcessEnv,
+        shell: process.platform === "win32",
+        stdio: "inherit",
+      });
+    } catch (error) {
+      process.stderr.write(
+        `could not start npm: ${error instanceof Error ? error.message : String(error)}\n`,
+      );
+      resolve(1);
+      return;
+    }
+    child.on("error", (error) => {
+      process.stderr.write(`could not start npm: ${error.message}\n`);
+      resolve(1);
+    });
+    child.on("exit", (code) => resolve(code ?? 1));
+  });
+
 /** The real run: inherit the launcher's stdio so the agent's own output is visible. */
 export const defaultRunnerSpawn: RunnerSpawn = (opts) =>
   new Promise<SpawnResult>((resolve, reject) => {
@@ -177,9 +232,9 @@ export const defaultRunnerSpawn: RunnerSpawn = (opts) =>
  * than silence. The launcher never prints the child's environment.
  */
 export async function runLocalRun(
-  input: LaunchInput & { spawnRunner?: RunnerSpawn; gitClone?: GitClone },
+  input: LaunchInput & { spawnRunner?: RunnerSpawn; gitClone?: GitClone; npmInstall?: NpmInstall },
 ): Promise<number> {
-  const { spawnRunner, gitClone, ...rest } = input;
+  const { spawnRunner, gitClone, npmInstall, ...rest } = input;
   const decision = await buildLaunchDecision(rest);
 
   if (decision.kind === "refuse") {
@@ -197,6 +252,35 @@ export async function runLocalRun(
     if (code !== 0) {
       process.stderr.write(`git clone failed (exit ${code})\n`);
       return code;
+    }
+
+    // #541: decide provisioning HERE, against the checkout that has just been created. Deciding before the clone
+    // answered "no lockfile" for every repository, so the install silently never ran while its unit test passed.
+    // A reused checkout (a resume) was already provisioned and is not touched. A failed install is reported loudly
+    // and does NOT stop the run: the coding loop then reports its tests as unmeasured rather than as a failure
+    // caused by our own environment.
+    const provisioning = planProvisioning({
+      path: decision.checkout.path,
+      exists: rest.exists ?? existsSync,
+    });
+    if (provisioning.installArgs.length > 0) {
+      process.stdout.write(`Provisioning the checkout: ${provisioning.summary}\n`);
+      const installCode = await (npmInstall ?? defaultNpmInstall)({
+        path: decision.checkout.path,
+        installArgs: provisioning.installArgs,
+      });
+      if (installCode !== 0) {
+        // Deliberately REPORTED, not worked around: falling back to `npm install` here would paper over a
+        // lockfile that is out of sync with its package.json, which is a fact about the target worth knowing.
+        // The run continues so the failure is classified rather than mysterious, and npm's own diagnosis has
+        // already gone to the operator through the inherited stdio.
+        process.stderr.write(
+          `npm ${provisioning.installArgs.join(" ")} failed (exit ${installCode}) in ${decision.checkout.path}\n` +
+            "  The checkout is NOT provisioned, so the coding loop will report its tests as unmeasured rather\n" +
+            "  than as failures of the code. A lockfile out of sync with package.json is the usual cause; fix\n" +
+            "  the target (or provision the checkout yourself) and re-run.\n",
+        );
+      }
     }
   }
 

@@ -203,6 +203,7 @@ function sandboxSpy(options: {
           return {
             passed: options.passes ?? options.project !== false,
             output: options.output ?? "",
+            ran: true,
           };
         },
       };

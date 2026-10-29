@@ -9,6 +9,7 @@ import {
   renderProblems,
   runLocalRun,
   type LaunchSpawn,
+  type NpmInstall,
   type RunnerSpawn,
   type SpawnResult,
 } from "../../agent/lib/dark-factory/local-run";
@@ -240,5 +241,57 @@ describe("#539 - the launcher drives a resume", () => {
       expect(decision.problems.map((p) => p.code)).toContain("claim-not-held");
       expect(decision.problems[0]?.fix).toContain("without --resume");
     }
+  });
+});
+describe("#541 - a fresh Node checkout is provisioned before the runner runs", () => {
+  const lockfileExists = (p: string) => p.includes("package-lock.json");
+  const workspaceExists = (p: string) => p.includes("df-workspaces/webfeedpoc-169");
+
+  it("runs npm ci in a freshly cloned Node checkout before the runner", async () => {
+    const installed: string[][] = [];
+    const npmInstall: NpmInstall = async (plan) => {
+      installed.push(plan.installArgs);
+      return 0;
+    };
+    const spawnRunner: RunnerSpawn = async () => ({ exitCode: 0 });
+
+    const code = await runLocalRun(
+      baseInput({ exists: lockfileExists, spawnRunner, gitClone: async () => 0, npmInstall }) as never,
+    );
+
+    expect(installed).toEqual([["ci"]]);
+    expect(code).toBe(0);
+  });
+
+  it("does NOT provision a reused checkout", async () => {
+    const installed: string[][] = [];
+    const npmInstall: NpmInstall = async (plan) => {
+      installed.push(plan.installArgs);
+      return 0;
+    };
+    const spawnRunner: RunnerSpawn = async () => ({ exitCode: 0 });
+
+    const code = await runLocalRun(
+      baseInput({ exists: workspaceExists, spawnRunner, gitClone: async () => 0, npmInstall }) as never,
+    );
+
+    expect(installed).toEqual([]);
+    expect(code).toBe(0);
+  });
+
+  it("reports a failed install loudly but STILL runs the runner", async () => {
+    const spawned: LaunchSpawn[] = [];
+    const spawnRunner: RunnerSpawn = async (o) => {
+      spawned.push(o);
+      return { exitCode: 0 };
+    };
+    const npmInstall: NpmInstall = async () => 42;
+
+    const code = await runLocalRun(
+      baseInput({ exists: lockfileExists, spawnRunner, gitClone: async () => 0, npmInstall }) as never,
+    );
+
+    expect(spawned).toHaveLength(1);
+    expect(code).toBe(0);
   });
 });

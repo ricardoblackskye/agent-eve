@@ -1116,6 +1116,16 @@ async function main(): Promise<void> {
 
             // Run vitest to verify acceptance criteria
             const testOutcome = await ctx.tools.runTests("npx vitest run");
+            if (!testOutcome.ran) {
+              // #541: the test command could not even start (e.g. the checkout was not provisioned), so this
+              // iteration is unmeasured — our environment's failure, not the developer's — and must not trip the
+              // breaker. The run is not recorded as passing, and nothing is silently blamed on the code.
+              console.log(
+                "     Test result: COULD NOT RUN — the tests did not start (the checkout may be unprovisioned); this iteration is unmeasured",
+              );
+              return { passed: false, output: testOutcome.output, unmeasured: true };
+            }
+
             console.log(
               `     Test result: ${testOutcome.passed ? "PASS" : "FAIL"}`,
             );

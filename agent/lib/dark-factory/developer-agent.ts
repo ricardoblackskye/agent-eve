@@ -142,6 +142,11 @@ export interface LoopContext {
 export interface WorkerResult {
   passed: boolean;
   output?: string;
+  /**
+   * True when the iteration's tests could not even start (e.g. the checkout is not provisioned), so the result is
+   * unmeasured rather than a failure of the developer's work (#541). Absent means measured.
+   */
+  unmeasured?: boolean;
 }
 
 /** A single coding iteration step (e.g. write code + run tests in a sandbox). */
@@ -492,7 +497,7 @@ export interface WorkspaceTools {
   readFile(relPath: string): Promise<string>;
   writeFile(relPath: string, content: string): Promise<void>;
   listFiles(pattern?: string): Promise<string[]>;
-  runTests(cmd?: string): Promise<{ passed: boolean; output: string }>;
+  runTests(cmd?: string): Promise<{ passed: boolean; output: string; ran: boolean }>;
 }
 
 export type CommandRunnerFn = (
@@ -678,7 +683,7 @@ export function createWorkspaceTools(
       return results;
     },
 
-    async runTests(cmd?: string): Promise<{ passed: boolean; output: string }> {
+    async runTests(cmd?: string): Promise<{ passed: boolean; output: string; ran: boolean }> {
       const testCmd = (cmd ?? "npx vitest run").trim();
 
       // Security: Disallow all shell metacharacters, subshells, substitutions, and redirections
@@ -717,9 +722,11 @@ export function createWorkspaceTools(
 
       if (commandRunner) {
         const res = await commandRunner(testCmd);
+        const output = res.stdout || res.stderr;
         return {
           passed: res.exitCode === 0,
-          output: res.stdout || res.stderr,
+          output,
+          ran: classifyTestRun(output) === "ran",
         };
       }
 
@@ -732,11 +739,13 @@ export function createWorkspaceTools(
           // URL. Hand it the same minimal allow-list the tester agent uses.
           env: filterChildEnv(process.env) as NodeJS.ProcessEnv,
         });
-        return { passed: true, output: stdout || stderr };
+        return { passed: true, output: stdout || stderr, ran: classifyTestRun(stdout || stderr) === "ran" };
       } catch (err: any) {
+        const output = err.stdout || err.stderr || err.message;
         return {
           passed: false,
-          output: err.stdout || err.stderr || err.message,
+          output,
+          ran: classifyTestRun(output) === "ran",
         };
       }
     },
@@ -801,6 +810,29 @@ function assertBreakerClosed(
 /**
  * Drive the multi-file coding loop guided by the ExecutionPlan.
  */
+/**
+ * Classify whether a test command actually ran to a result, or failed to start at all (#541).
+ *
+ * A command that could not begin — a missing binary, a config that will not load, a package that is not installed
+ * — is unmeasured: our environment's failure, never a verdict on the developer's work. This mirrors amm-scan's own
+ * marker list for the same distinction. A test run that started and failed is NOT a startup failure and must stay
+ * a failure, so the marker list is deliberately narrow; its negative cases are asserted beside the positive ones.
+ */
+export function classifyTestRun(output: string): "ran" | "did-not-start" {
+  // These markers name a command that could not BEGIN (the live run died on `Cannot find package`), as distinct
+  // from tests that started and failed. The list is intentionally narrow; a marker that matched ordinary test
+  // output would silently make a real failure unmeasured.
+  const DID_NOT_START_MARKERS = [
+    "ERR_MODULE_NOT_FOUND",
+    "Cannot find package",
+    "Failed to load config",
+    "failed to load config",
+    "command not found",
+    "is not recognized as",
+  ];
+  return DID_NOT_START_MARKERS.some((marker) => output.includes(marker)) ? "did-not-start" : "ran";
+}
+
 export async function runMultiFileCodingLoop(
   opts: MultiFileCodingLoopOptions,
 ): Promise<LoopResult> {
@@ -829,11 +861,15 @@ export async function runMultiFileCodingLoop(
     // sub-minute work UP to a full minute, so an iteration cannot escape the budget.
     const breaker = opts.breaker;
     if (breaker) {
-      breaker.recordActivity({
-        pbiId: breaker.pbiId,
-        durationMs: Date.now() - startedAt,
-        status: res.passed ? "success" : "failure",
-      });
+      // #541: an iteration whose tests could not even start is unmeasured — our environment's failure, not the
+      // developer's — so it must not trip the breaker. A real test failure (ran, but not passed) still counts.
+      if (!res.unmeasured) {
+        breaker.recordActivity({
+          pbiId: breaker.pbiId,
+          durationMs: Date.now() - startedAt,
+          status: res.passed ? "success" : "failure",
+        });
+      }
     }
     passed = res.passed;
     if (passed) break;
