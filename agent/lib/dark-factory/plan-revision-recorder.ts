@@ -18,7 +18,7 @@
 import { createHash } from "node:crypto";
 import type { EventCursor } from "./run-history-store";
 import type { RunHistoryStore } from "./run-history-store";
-import type { PlanCommentRef, PlanRecordInput, PlanSource } from "./plan-ledger";
+import type { PersistedPlan, PlanCommentRef, PlanRecordInput, PlanSource } from "./plan-ledger";
 import type { ExecutionPlan } from "./plan-validator";
 
 export interface RecordPlanRevisionInput {
@@ -212,7 +212,32 @@ export interface PostedPlanWriteResult {
  * record is written, so it must not make two recordings of one plan look like different plans.
  */
 export function samePlan(left: ExecutionPlan, right: ExecutionPlan): boolean {
-  throw new Error("not implemented");
+  // Strip the comment reference, for `sameEvent`'s reason: it is derived from GitHub AFTER the record is
+  // written, so it must not make two recordings of one plan look like two different plans.
+  const strip = (plan: ExecutionPlan): Record<string, unknown> => {
+    const { commentRef: _derived, ...rest } = plan as ExecutionPlan & { commentRef?: unknown };
+    return rest as Record<string, unknown>;
+  };
+  return JSON.stringify(strip(left)) === JSON.stringify(strip(right));
+}
+
+/** The plan already recorded for this run and revision, if it is the same plan (#516). */
+async function findSameRecordedPlan(
+  history: RunHistoryStore,
+  input: RecordPostedPlanInput,
+): Promise<PersistedPlan | undefined> {
+  try {
+    const plans = await history.listPlans(input.runId);
+    return plans.find(
+      (candidate) =>
+        candidate.planRevision === input.planRevision &&
+        candidate.source === input.source &&
+        samePlan(candidate.plan, input.plan),
+    );
+  } catch {
+    // A read that fails leaves us with the ORIGINAL error, which is the one worth reporting.
+    return undefined;
+  }
 }
 
 export async function recordPostedPlan(
@@ -237,6 +262,13 @@ export async function recordPostedPlan(
     // so this module depends only on the store INTERFACE, not the provider factory.
     if (error instanceof Error && error.name === "RunHistoryConfigurationError") {
       return { ok: false, skipped: true, error: error.message };
+    }
+    // #516: the write-once ledger rejects a second write for this revision. If what is there IS this
+    // plan, the write already happened — a duplicate, which is a success. Catching rather than reading
+    // first keeps the happy path free of an extra query and leaves the constraint as the arbiter.
+    const alreadyRecorded = await findSameRecordedPlan(history, input);
+    if (alreadyRecorded) {
+      return { ok: true, planId: alreadyRecorded.planId, duplicate: true };
     }
     throw error;
   }

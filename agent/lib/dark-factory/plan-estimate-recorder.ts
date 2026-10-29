@@ -194,7 +194,14 @@ export interface RecordPlanWithEstimateInput
 }
 
 export type RecordPlanWithEstimateResult =
-  | { ok: true; planId: number; estimate?: PersistedPlanEstimate; estimateError?: string }
+  | {
+      ok: true;
+      planId: number;
+      estimate?: PersistedPlanEstimate;
+      estimateError?: string;
+      /** This revision was already recorded, so nothing was written (#516). */
+      duplicate?: boolean;
+    }
   | { ok: false; skipped?: boolean; error: string };
 
 /**
@@ -230,6 +237,12 @@ export async function recordPlanWithEstimateSafely(
   const planId = written.planId;
   if (planId === undefined) {
     return { ok: false, error: "the plan was recorded without a planId" };
+  }
+  // #516: this plan was ALREADY recorded for this revision. The estimate belongs to the plan write this
+  // call accompanied, so re-pricing it would put a second forecast against one plan — the same rule the
+  // write-once ledger enforces one level down. Report the duplicate and write nothing.
+  if (written.duplicate) {
+    return { ok: true, planId, duplicate: true };
   }
   // The plan row landed, so the estimate is now possible. Its failure is reported SEPARATELY: an
   // estimate is an observation, not a control, and a pricing problem must not cost the run its plan.
