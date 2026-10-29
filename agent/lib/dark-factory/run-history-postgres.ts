@@ -1,3 +1,4 @@
+import { unusableCostReason } from "./run-actual-cost";
 import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import {
@@ -1412,6 +1413,33 @@ export class PostgresRunHistoryStore implements RunHistoryStore {
     } catch (error) {
       return failedWrite(error);
     }
+  }
+
+  async recordRunCost(
+    runId: string,
+    costUsd: number | null,
+  ): Promise<RunHistoryWriteResult<RunSummary>> {
+    const unusable = unusableCostReason(costUsd);
+    if (unusable) return this.refused(unusable);
+    try {
+      await this.ensureSchema();
+      const client = await this.pool();
+      const updated = await client.query<RunSummaryRow>(
+        "UPDATE df_run_summaries SET cost_usd = $2 WHERE run_id = $1 RETURNING *",
+        [runId, costUsd],
+      );
+      const row = updated.rows[0];
+      if (!row) return this.refused(`Run '${runId}' does not exist.`);
+      return { ok: true, mode: "live", providerId: this.id, value: rowToSummary(row) };
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      return this.refused(`Run history store write failed: ${detail}`);
+    }
+  }
+
+  /** A write that was refused, reported rather than thrown. */
+  private refused(error: string): RunHistoryWriteResult<RunSummary> {
+    return { ok: false, mode: "blocked", providerId: this.id, error };
   }
 
   async updateCommentReference(

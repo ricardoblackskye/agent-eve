@@ -182,6 +182,7 @@ export const PG_SUITES = [
   // #424: the AMM driver owns its own schema. It reuses the run-history DSN because the CI unit job sets five DSNs and
   // a suite that wants its own namespace takes a schema - the same arrangement active-run-claim.test.ts uses (#392).
   { file: "amm-scan-postgres.test.ts", dsnVar: "DF_RUN_HISTORY_TEST_DATABASE_URL", schema: "df_test_amm_scan_postgres" },
+  { file: "record-run-cost.test.ts", dsnVar: "DF_RUN_HISTORY_TEST_DATABASE_URL", schema: "df_test_run_cost_record" },
 ] as const;
 
 /**

@@ -12,9 +12,22 @@ import { describe, expect, it } from "vitest";
 
 const RUNNER = readFileSync(join(process.cwd(), "scripts", "dark-factory-runner.ts"), "utf8");
 
-/** Every `runGovernedAgentCall(` call site, split so one call's text cannot satisfy another's assertion. */
+/**
+ * Every `runGovernedAgentCall(` call site, split so one call's text cannot satisfy another's assertion.
+ *
+ * Each site is CUT at the next top-level function declaration: the LAST call in the file would otherwise
+ * extend to EOF and absorb whatever follows it — which is how a later helper's own `usage:` made the "no
+ * other call supplies a sink" assertion fail for a call that had not changed at all. The check itself is
+ * unchanged, and a site that genuinely supplies a sink still contains it.
+ */
 function governedCallSites(source: string): string[] {
-  return source.split("runGovernedAgentCall(").slice(1);
+  return source
+    .split("runGovernedAgentCall(")
+    .slice(1)
+    .map((site) => {
+      const nextDeclaration = site.search(/\n(?:export )?(?:async )?function /);
+      return nextDeclaration === -1 ? site : site.slice(0, nextDeclaration);
+    });
 }
 
 describe("#492 the architect call is wired to the usage ledger", () => {
