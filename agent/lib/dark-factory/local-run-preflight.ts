@@ -65,6 +65,14 @@ export interface PreflightInput {
   probes?: PreflightProbes;
   /** Set only by an explicit operator flag: a hosted store carries a certificate a local run cannot verify. */
   allowRemoteStore?: boolean;
+  /**
+   * The operator asked to CONTINUE a parked run (#539) rather than start a fresh one.
+   *
+   * The two entry points have opposite claim preconditions: a fresh run refuses a held claim, and a resume
+   * requires one. Without this the claim check would refuse every resume, which is why the flag reaches the
+   * preflight and not only the spawn.
+   */
+  resume?: boolean;
 }
 
 export interface PreflightResult {

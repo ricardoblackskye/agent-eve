@@ -247,3 +247,54 @@ describe("#404 R1 - the preflight reports every problem at once", () => {
     expect(codes(first.problems)).toEqual(codes(second.problems));
   });
 });
+
+describe("#539 - the claim check learns what a resume needs", () => {
+  const holder = (status: string): PreflightProbes => ({
+    ...HEALTHY,
+    activeClaim: async () => ({ ok: true, holder: { runId: "122ff27b-e044-489a-851f-593b7404ab70", status } }),
+  });
+  const noHolder: PreflightProbes = { ...HEALTHY, activeClaim: async () => ({ ok: true }) };
+
+  it("PASSES a resume while the run it continues is parked", async () => {
+    // The state a resume exists to continue. Against the old check this refused, which would have refused
+    // every resume while looking like a legitimate refusal.
+    const result = await preflightLocalRun({ env: completeEnv(), ...TARGET, probes: holder("blocked"), resume: true });
+
+    expect(codes(result.problems)).not.toContain("claim-held");
+    expect(result.ok).toBe(true);
+  });
+
+  it("REFUSES a resume with no held claim, because there is nothing to continue", async () => {
+    const result = await preflightLocalRun({ env: completeEnv(), ...TARGET, probes: noHolder, resume: true });
+
+    expect(result.ok).toBe(false);
+    expect(codes(result.problems)).toEqual(["claim-not-held"]);
+  });
+
+  it("REFUSES a resume while a live worker holds the claim", async () => {
+    // The case that protects against two processes on one issue, and the easiest one to get wrong by treating
+    // every holder as resumable.
+    const result = await preflightLocalRun({ env: completeEnv(), ...TARGET, probes: holder("running"), resume: true });
+
+    expect(codes(result.problems)).toEqual(["claim-held"]);
+  });
+
+  it("REFUSES a resume while the run has not started yet", async () => {
+    const result = await preflightLocalRun({ env: completeEnv(), ...TARGET, probes: holder("queued"), resume: true });
+
+    expect(codes(result.problems)).toEqual(["claim-held"]);
+  });
+
+  it("keeps refusing a FRESH run while any claim is held", async () => {
+    // Unchanged behaviour, asserted so the new rule cannot loosen it.
+    const result = await preflightLocalRun({ env: completeEnv(), ...TARGET, probes: holder("blocked") });
+
+    expect(codes(result.problems)).toEqual(["claim-held"]);
+  });
+
+  it("names the run being resumed, so the operator knows which one it is", async () => {
+    const result = await preflightLocalRun({ env: completeEnv(), ...TARGET, probes: holder("running"), resume: true });
+
+    expect(result.problems[0]?.subject).toContain("122ff27b");
+  });
+});
