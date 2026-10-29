@@ -39,7 +39,39 @@ export interface GatewayUsageRecord {
   tenantId?: string | undefined;
   model: string;
   reservationId: string;
+  /** The RESERVATION estimate. Kept for the trail; superseded by `costUsd` when one was measured. */
   estimatedUsd: number;
+  /** Measured input tokens from the upstream response. Absent stays absent, never 0. */
+  tokensIn?: number | undefined;
+  /** Measured output tokens from the upstream response. */
+  tokensOut?: number | undefined;
+  /** The SETTLED cost, when one was measured. A reservation estimate is not an actual. */
+  costUsd?: number | undefined;
+}
+
+/** What the gateway could measure from a forwarded call (#532). Every field is optional by design. */
+export interface GatewayMeasurement {
+  tokensIn?: number | undefined;
+  tokensOut?: number | undefined;
+  /** Absent when the model has no known price: an unpriced call is not a free one. */
+  costUsd?: number | undefined;
+}
+
+/**
+ * Measure a forwarded call from the upstream response (#532).
+ *
+ * The gateway already receives the provider's own usage for the call it just paid for, so the sandbox's
+ * spend can be recorded as a MEASUREMENT rather than a reservation estimate. Reads the OpenAI-compatible
+ * `usage` block; anything else yields absent fields, because a shape the provider did not send is not a
+ * measurement. PURE: no network, no clock, no environment — the price resolver is injectable so a test can
+ * move a rate.
+ */
+export function measureGatewayUsage(
+  result: unknown,
+  model: string,
+  resolvePrice?: (model: string | null | undefined) => ModelPrice | null,
+): GatewayMeasurement {
+  throw new Error("not implemented");
 }
 
 export interface GatewayRefusalRecord {
