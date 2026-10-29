@@ -40,7 +40,7 @@ kept pure on purpose, and it changes what the label MEANS. That is a separate de
 - The band rises for repositories with history, which is the intent. A plan's cost class can therefore move
   for the same story, and the `v2` stamp is what keeps that regime distinguishable in the ledger.
 - `confidence` now counts something: `medium` from one sample, `high` from ten. It still measures how much
-  history there is, not how well estimates have matched actuals — the coarse label the code describes.
+  history there is, not how well estimates have matched what runs actually cost — the coarse label the code describes.
 - The window is per repository, not per kind of work. A repository mixing very different work sizes feeds
   one factor, which is coarser than the data allows; the calibration report can inform a finer window later
   rather than this guessing at one now.
