@@ -238,5 +238,30 @@ export interface PlanCostStageEstimate {
 export function decomposePlanCostEstimate(
   input: EstimatePlanCostInput,
 ): PlanCostStageEstimate[] {
-  throw new Error("not implemented");
+  const plan = input.plan;
+  const targetFileCount = clampTokenCount((plan.targetFiles ?? []).length);
+  const taskCount = clampTokenCount((plan.tasks ?? []).length);
+
+  const contextFiles = Math.min(targetFileCount, MAX_CONTEXT_FILES_READ);
+  const contextTokens = clampTokenCount(contextFiles * (MAX_CHARS_PER_FILE / CHARS_PER_TOKEN));
+  // One context read per stage; the band charges CONTEXT_READS_PER_RUN reads in total.
+  const readTokens = clampTokenCount(contextTokens * (CONTEXT_READS_PER_RUN / 2));
+
+  const priceOf = input.resolvePrice ?? resolvePrice;
+  const resolved = priceOf(input.model);
+  const price = resolved ?? ceilingPrice();
+  // The same factor the band applies, so the parts keep summing to `expectedUsd` with history.
+  const revisionFactor = revisionFactorFor(input.history ?? []);
+
+  const stageUsd = (outputTokens: number): number =>
+    ((readTokens / 1000) * price.inputUsdPer1k + (outputTokens / 1000) * price.outputUsdPer1k) *
+    revisionFactor;
+
+  return [
+    { stage: "architect", expectedUsd: stageUsd(clampTokenCount(ARCHITECT_OUTPUT_TOKENS)) },
+    {
+      stage: "developer",
+      expectedUsd: stageUsd(clampTokenCount(taskCount * OUTPUT_TOKENS_PER_TASK)),
+    },
+  ];
 }
