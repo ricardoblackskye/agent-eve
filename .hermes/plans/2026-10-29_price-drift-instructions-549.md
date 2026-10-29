@@ -36,6 +36,19 @@ require each to resolve to a real file.
   only the prefix of `.eve/e2e-usage.sqlite`; an extractor without a boundary would report a path nobody wrote.
 - Prove it is live: after GREEN, put the stale name back and confirm the guard goes red again.
 
+## Closing the "a real file is not a right instruction" limit
+
+The existence check alone cannot tell whether the sentence names the RIGHT file. Single-source it instead: the
+module already exports `PRICE_FLOOR_DATA_RELATIVE_PATH` so the writer and the reader cannot disagree (ADR 0071),
+so the guard asserts the instruction names that constant's value, not merely some file that exists. Two companion
+claims become provable the same way:
+
+- the command in the instruction is the one that performs the write: `prices:check` exists in `package.json` and
+  the script it points at really handles `--write`;
+- every other path-like mention still resolves (the boundary-aware extraction keeps its own check).
+
+That leaves only editorial wording unprovable - which file, which command and which flag are all pinned.
+
 ## Also prove the posted text locally
 
 The repair step builds its body in a shell heredoc, so a quoting slip would break the step at runtime and the
