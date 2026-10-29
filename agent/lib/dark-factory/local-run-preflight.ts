@@ -21,6 +21,7 @@ export type PreflightProblemCode =
   | "store-unreachable"
   | "sandbox-not-configured"
   | "sandbox-unreachable"
+  | "claim-not-held"
   | "claim-held";
 
 export interface PreflightProblem {
@@ -65,6 +66,14 @@ export interface PreflightInput {
   probes?: PreflightProbes;
   /** Set only by an explicit operator flag: a hosted store carries a certificate a local run cannot verify. */
   allowRemoteStore?: boolean;
+  /**
+   * The operator asked to CONTINUE a parked run (#539) rather than start a fresh one.
+   *
+   * The two entry points have opposite claim preconditions: a fresh run refuses a held claim, and a resume
+   * requires one. Without this the claim check would refuse every resume, which is why the flag reaches the
+   * preflight and not only the spawn.
+   */
+  resume?: boolean;
 }
 
 export interface PreflightResult {
@@ -290,6 +299,28 @@ export async function preflightLocalRun(input: PreflightInput): Promise<Prefligh
         subject: "the run-history store (claim check)",
         fix: `the ledger could not be read (${claim.error ?? "no response"}), so a held claim cannot be ruled out`,
       });
+    } else if (input.resume) {
+      // #539: a resume CONTINUES a parked run, so a held claim is what it needs - and only while that run is
+      // parked. A live worker would mean two processes on one issue; a queued run has nothing to continue.
+      const holder = claim.holder;
+      if (!holder) {
+        problems.push({
+          code: "claim-not-held",
+          subject: `${repo}#${issue}`,
+          fix:
+            "a resume continues a run that is holding this issue's claim, and none is; start a fresh run " +
+            `without --resume: npm run df:local-run -- --repo ${repo} --issue ${issue}`,
+        });
+      } else if (holder.status !== "blocked") {
+        problems.push({
+          code: "claim-held",
+          subject: `${holder.runId} holds ${repo}#${issue} (status '${holder.status}')`,
+          fix:
+            `a resume continues a PARKED run ('blocked'), and ${holder.runId} is '${holder.status}'; a run ` +
+            "that is actually working must finish before it can be resumed",
+        });
+      }
+      // A parked holder is not a problem here: it is the run this resume exists to continue.
     } else if (claim.holder) {
       problems.push({
         code: "claim-held",

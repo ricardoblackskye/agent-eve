@@ -22,7 +22,30 @@ npm run df:local-run -- --repo ricardoblackskye/WebFeedPOC --issue 169
 
 Optional flags: `--workspace-root <dir>` (default `<cwd>/df-workspaces`, documented under
 [The workspace root](#the-workspace-root-501)), `--allow-remote-store` (accept a hosted store — see ADR 0050,
-never disables CA verification).
+never disables CA verification), and `--resume` (continue the parked run that holds this issue's claim instead
+of starting a fresh one).
+
+## Resuming a parked run
+
+A park is a wait, not an end state. The run holds the issue's claim until a human answers it, and `--resume`
+is how it continues:
+
+```bash
+npm run df:local-run -- --repo ricardoblackskye/WebFeedPOC --issue 169 --resume
+```
+
+The preflight **inverts** its claim rule for a resume, because the two entry points have opposite
+preconditions:
+
+- a **fresh run** refuses while any claim is held — something else is already working that issue;
+- a **resume** requires one, and only while that run is parked (`blocked`). A `running` run is a live worker,
+  so resuming it would put two processes on one issue; a `queued` run has nothing to continue. Both refuse,
+  naming the status. With no claim at all the launcher says there is nothing to resume and names the
+  fresh-run command instead.
+
+A resume reads the approved plan back off the ticket rather than asking the architect again (#365), and a bare
+`--resume` with no reply is read as approval — the parked question advertises replying as the way to begin
+(#378).
 
 ## Prerequisites, and the exact refusal each produces
 

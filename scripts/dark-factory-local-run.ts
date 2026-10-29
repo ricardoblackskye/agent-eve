@@ -25,6 +25,7 @@ interface Parsed {
   issue: number;
   workspaceRoot: string;
   allowRemoteStore: boolean;
+  resume: boolean;
 }
 
 function parseArgs(argv: string[]): Parsed | { error: string } {
@@ -33,6 +34,7 @@ function parseArgs(argv: string[]): Parsed | { error: string } {
   const fallbackRoot = join(process.cwd(), "df-workspaces");
   let workspaceRoot = process.env.DF_WORKSPACE_ROOT ?? fallbackRoot;
   let allowRemoteStore = false;
+  let resume = false;
 
   const args = argv.slice(2);
   for (let i = 0; i < args.length; i++) {
@@ -41,6 +43,7 @@ function parseArgs(argv: string[]): Parsed | { error: string } {
     else if (arg === "--issue") issue = Number(args[++i]);
     else if (arg === "--workspace-root") workspaceRoot = args[++i];
     else if (arg === "--allow-remote-store") allowRemoteStore = true;
+    else if (arg === "--resume") resume = true;
     else return { error: `unknown argument: ${arg}` };
   }
 
@@ -48,7 +51,7 @@ function parseArgs(argv: string[]): Parsed | { error: string } {
   if (issue === undefined || !Number.isInteger(issue)) {
     return { error: "--issue <number> is required" };
   }
-  return { repo, issue, workspaceRoot, allowRemoteStore };
+  return { repo, issue, workspaceRoot, allowRemoteStore, resume };
 }
 
 /** TCP reachability of a store URL — a missing database is a prerequisite, not a crash. */
@@ -122,6 +125,7 @@ async function main(): Promise<number> {
     issue: parsed.issue,
     workspaceRoot: parsed.workspaceRoot,
     allowRemoteStore: parsed.allowRemoteStore,
+    resume: parsed.resume,
     env: process.env,
     probes,
     gitClone: defaultGitClone,
