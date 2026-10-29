@@ -256,6 +256,28 @@ export interface PlanCostStageEstimate {
   expectedUsd: number;
 }
 
+/**
+ * The counts a persisted estimate records, so a report can rebuild the stage split (#490).
+ *
+ * A `df_plan_estimates` row stores `target_file_count` and `task_count`, not the plan, so the split
+ * is rebuilt from what was actually persisted rather than from a plan that is no longer available.
+ */
+export interface PlanCostCounts {
+  targetFileCount: number;
+  taskCount: number;
+  model: string;
+  history?: RunSummary[];
+  resolvePrice?: (model: string | null | undefined) => ModelPrice | null;
+  calibrationFactor?: number;
+}
+
+/** Split the expected cost using only the counts a persisted estimate carries (#490). */
+export function decomposePlanCostEstimateFromCounts(
+  input: PlanCostCounts,
+): PlanCostStageEstimate[] {
+  throw new Error("not implemented");
+}
+
 /** Split a plan's expected cost across the stages that spend it (#490). Parts sum to the band. */
 export function decomposePlanCostEstimate(
   input: EstimatePlanCostInput,

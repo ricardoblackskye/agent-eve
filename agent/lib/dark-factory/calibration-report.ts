@@ -17,7 +17,7 @@
  * - **THE TESTER IS EXCLUDED**, consistent with the estimator's v1 scope.
  */
 
-import type { CostClass, CostConfidence } from "./plan-cost-estimate";
+import { MIN_CALIBRATION_SAMPLES, type CostClass, type CostConfidence } from "./plan-cost-estimate";
 
 /** Usage task types outside the estimator's scope, so they never reach a metric (AC6). */
 export const EXCLUDED_TASK_TYPES: readonly string[] = ["tester"];
@@ -130,6 +130,23 @@ function groupMetricsFor(
 
 /** Cost classes in ascending order, so a report reads consistently between runs. */
 const COST_CLASS_ORDER: CostClass[] = ["XS", "S", "M", "L", "XL"];
+
+/** The minimum sample size a report falls back to when nothing is configured. */
+export const DEFAULT_MINIMUM_SAMPLE_SIZE = MIN_CALIBRATION_SAMPLES;
+
+/** The environment variable that raises or lowers that minimum. */
+export const MINIMUM_SAMPLE_SIZE_ENV = "DF_CALIBRATION_MIN_SAMPLES";
+
+/**
+ * The configured minimum sample, or the default (#490 AC1).
+ *
+ * A report is an OBSERVATION, not a control, so an unusable value falls back to the default rather
+ * than refusing to run — and the caller reports which minimum it used, so the number is never
+ * implicit.
+ */
+export function resolveMinimumSampleSize(env: Record<string, string | undefined>): number {
+  throw new Error("not implemented");
+}
 
 /** Build the calibration report. Withholds every metric below the minimum sample size. */
 export function buildCalibrationReport(input: CalibrationReportInput): CalibrationReport {
