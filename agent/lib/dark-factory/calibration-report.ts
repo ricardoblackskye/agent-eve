@@ -86,7 +86,119 @@ export interface CalibrationReport {
   factor?: number;
 }
 
+/** Mean of the observations, or `undefined` when there are none. */
+function mean(values: number[]): number | undefined {
+  if (values.length === 0) return undefined;
+  return values.reduce((total, value) => total + value, 0) / values.length;
+}
+
+/**
+ * A metric and the number of observations behind it.
+ *
+ * The count is emitted even when the value is withheld: "we saw 3 runs" and "we saw 3 runs and the
+ * figure is not publishable yet" are different findings, and only the count survives a refusal.
+ */
+function metricOf(values: number[]): Metric {
+  return { sampleSize: values.length, value: mean(values) };
+}
+
+/**
+ * Signed bias first, then the error magnitudes, for one group of pairs.
+ *
+ * MAPE divides by the actual, so pairs whose actual is zero are excluded from THAT metric only —
+ * and its `sampleSize` reports how many survived, rather than the metric silently reading `Infinity`.
+ */
+function groupMetricsFor(
+  pairs: CalibrationPair[],
+  expectedOf: (pair: CalibrationPair) => number,
+  actualOf: (pair: CalibrationPair) => number,
+): GroupMetrics {
+  const errors = pairs.map((pair) => expectedOf(pair) - actualOf(pair));
+  return {
+    bias: metricOf(errors),
+    mae: metricOf(errors.map((error) => Math.abs(error))),
+    mape: metricOf(
+      pairs
+        .filter((pair) => actualOf(pair) !== 0)
+        .map(
+          (pair) =>
+            (Math.abs(expectedOf(pair) - actualOf(pair)) / Math.abs(actualOf(pair))) * 100,
+        ),
+    ),
+  };
+}
+
+/** Cost classes in ascending order, so a report reads consistently between runs. */
+const COST_CLASS_ORDER: CostClass[] = ["XS", "S", "M", "L", "XL"];
+
 /** Build the calibration report. Withholds every metric below the minimum sample size. */
 export function buildCalibrationReport(input: CalibrationReportInput): CalibrationReport {
-  throw new Error("not implemented");
+  const pairs = input.pairs;
+  const sampleSize = pairs.length;
+  const excludedWithoutEstimate = Math.max(0, input.runsWithoutEstimate);
+  const wholeRun = groupMetricsFor(
+    pairs,
+    (pair) => pair.expectedUsd,
+    (pair) => pair.actualUsd,
+  );
+
+  if (sampleSize < input.minimumSampleSize) {
+    // Nothing publishable: the counts come through, no value does. A withheld report must not be
+    // mistakable for a clean one that happened to measure zero.
+    return {
+      reportable: false,
+      reason: "below-minimum-sample-size",
+      sampleSize,
+      excludedWithoutEstimate,
+      bias: { sampleSize, value: undefined },
+      mae: { sampleSize, value: undefined },
+      mape: { sampleSize: wholeRun.mape.sampleSize, value: undefined },
+      byStage: [],
+      byCostClass: [],
+    };
+  }
+
+  const stages = [
+    ...new Set(
+      pairs.flatMap((pair) => [
+        ...Object.keys(pair.stageExpectedUsd),
+        ...Object.keys(pair.stageActualUsd),
+      ]),
+    ),
+  ]
+    .filter((stage) => !EXCLUDED_TASK_TYPES.includes(stage))
+    .sort();
+
+  const classes = COST_CLASS_ORDER.filter((costClass) =>
+    pairs.some((pair) => pair.costClass === costClass),
+  );
+
+  return {
+    reportable: true,
+    sampleSize,
+    excludedWithoutEstimate,
+    ...wholeRun,
+    byStage: stages.map((stage) => ({
+      stage,
+      ...groupMetricsFor(
+        pairs,
+        (pair) => pair.stageExpectedUsd[stage] ?? 0,
+        (pair) => pair.stageActualUsd[stage] ?? 0,
+      ),
+    })),
+    byCostClass: classes.map((costClass) => ({
+      costClass,
+      ...groupMetricsFor(
+        pairs.filter((pair) => pair.costClass === costClass),
+        (pair) => pair.expectedUsd,
+        (pair) => pair.actualUsd,
+      ),
+    })),
+    // Mean of actual / estimate: the multiplicative correction a band built from multipliers needs.
+    factor: mean(
+      pairs
+        .filter((pair) => pair.expectedUsd !== 0)
+        .map((pair) => pair.actualUsd / pair.expectedUsd),
+    ),
+  };
 }

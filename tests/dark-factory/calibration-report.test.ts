@@ -18,7 +18,7 @@ function pair(overrides: Partial<CalibrationPair> = {}): CalibrationPair {
   };
 }
 
-/** Two pairs, each a clean factor of two: bias 0.10, MAE 0.10, MAPE 75%, factor 0.5. */
+/** Two pairs, each 0.10 high: bias 0.10, MAE 0.10, MAPE 75%. Factors 0.5 and 0.667. */
 const OVERSHOOTING = [
   pair({ runId: "run-1", expectedUsd: 0.2, actualUsd: 0.1 }),
   pair({ runId: "run-2", expectedUsd: 0.3, actualUsd: 0.2 }),
@@ -42,7 +42,8 @@ describe("calibration report (#490)", () => {
 
   it("emits the multiplicative factor v2 consumes", () => {
     const built = report(OVERSHOOTING);
-    expect(built.factor).toBeCloseTo(0.5, 10);
+    // Derived, not assumed: each pair contributes actual / estimate.
+    expect(built.factor).toBeCloseTo((0.1 / 0.2 + 0.2 / 0.3) / 2, 10);
   });
 
   it("excludes a run with no estimate rather than counting it as zero", () => {
@@ -80,14 +81,14 @@ describe("calibration report (#490)", () => {
     ]);
 
     const architect = built.byStage.find((entry) => entry.stage === "architect")!;
-    expect(architect.sampleSize).toBe(2);
+    expect(architect.bias.sampleSize).toBe(2);
     expect(architect.bias.value).toBeCloseTo((0.08 - 0.04 + 0.08 - 0.04) / 2, 10);
 
     const classes = built.byCostClass.map((entry) => entry.costClass);
     expect(classes).toContain("XS");
     expect(classes).toContain("M");
     const xs = built.byCostClass.find((entry) => entry.costClass === "XS")!;
-    expect(xs.sampleSize).toBe(1);
+    expect(xs.bias.sampleSize).toBe(1);
     expect(xs.bias.value).toBeCloseTo(0.1, 10);
   });
 
@@ -128,7 +129,7 @@ describe("calibration report (#490)", () => {
     expect(atMinimum.reportable).toBe(true);
     expect(atMinimum.reason).toBeUndefined();
     expect(atMinimum.bias.value).toBeCloseTo(0.1, 10);
-    expect(atMinimum.factor).toBeCloseTo(0.5, 10);
+    expect(atMinimum.factor).toBeCloseTo((0.1 / 0.2 + 0.2 / 0.3) / 2, 10);
   });
 
   it("keeps MAPE finite when a run's actual is zero, excluding it from that metric only", () => {
