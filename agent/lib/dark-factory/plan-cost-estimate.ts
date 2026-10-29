@@ -76,6 +76,14 @@ export interface EstimatePlanCostInput {
   history?: RunSummary[];
   /** Defaults to the governor's own `resolvePrice` — one price source of truth. */
   resolvePrice?: (model: string | null | undefined) => ModelPrice | null;
+  /**
+   * The measured correction the calibration report emits (#490), consumed from v2.
+   *
+   * Defaults to 1, which leaves every pre-calibration band byte-identical. A non-finite or
+   * non-positive value is ignored rather than producing a `NaN` band, because understating cost is
+   * the failure that matters and `NaN` is not a cost.
+   */
+  calibrationFactor?: number;
 }
 
 export interface PlanCostEstimate {
@@ -139,6 +147,18 @@ function revisionFactorFor(history: RunSummary[]): number {
   return Math.max(1, total / history.length);
 }
 
+/**
+ * The measured correction, or 1 (#490).
+ *
+ * `resolvePrice`-style tolerance: a value that is not a usable number is not a correction, so it is
+ * ignored rather than propagated. A `NaN` or negative multiplier would otherwise produce a band that
+ * is worse than useless — it would look like a measurement.
+ */
+function resolveCalibrationFactor(factor: number | undefined): number {
+  if (typeof factor !== "number" || !Number.isFinite(factor) || factor <= 0) return 1;
+  return factor;
+}
+
 /** Coarse on purpose: dispersion-aware confidence needs the estimate/actual pairs #490 builds. */
 function confidenceFor(history: RunSummary[]): CostConfidence {
   if (history.length === 0) return "low";
@@ -172,7 +192,8 @@ export function estimatePlanCost(input: EstimatePlanCostInput): PlanCostEstimate
     (inputTokens / 1000) * price.inputUsdPer1k +
     (outputTokens / 1000) * price.outputUsdPer1k;
   const revisionFactor = revisionFactorFor(history);
-  const expectedUsd = baseUsd * revisionFactor;
+  const calibrationFactor = resolveCalibrationFactor(input.calibrationFactor);
+  const expectedUsd = baseUsd * revisionFactor * calibrationFactor;
 
   return {
     lowUsd: expectedUsd * BAND_LOW_MULTIPLIER,
@@ -189,6 +210,7 @@ export function estimatePlanCost(input: EstimatePlanCostInput): PlanCostEstimate
       priceOutputUsdPer1k: price.outputUsdPer1k,
       priceSource,
       revisionFactor,
+      calibrationFactor,
       historySampleCount: history.length,
     },
   };
@@ -218,4 +240,83 @@ export function estimatePlanCostSafely(
     );
     return undefined;
   }
+}
+
+
+/**
+ * One stage's share of a plan's expected cost (#490).
+ *
+ * Derived from the SAME constants as the band, so the parts always sum to `expectedUsd`: the
+ * Architect spends one context read plus its planning output, the developer the other read plus the
+ * per-task output. Splitting `CONTEXT_READS_PER_RUN` one read per stage is STRUCTURAL, not measured
+ * — the same caveat that constant already carries.
+ */
+export interface PlanCostStageEstimate {
+  stage: "architect" | "developer";
+  expectedUsd: number;
+}
+
+/**
+ * The counts a persisted estimate records, so a report can rebuild the stage split (#490).
+ *
+ * A `df_plan_estimates` row stores `target_file_count` and `task_count`, not the plan, so the split
+ * is rebuilt from what was actually persisted rather than from a plan that is no longer available.
+ */
+export interface PlanCostCounts {
+  targetFileCount: number;
+  taskCount: number;
+  model: string;
+  history?: RunSummary[];
+  resolvePrice?: (model: string | null | undefined) => ModelPrice | null;
+  calibrationFactor?: number;
+}
+
+/** Split the expected cost using only the counts a persisted estimate carries (#490). */
+export function decomposePlanCostEstimateFromCounts(
+  input: PlanCostCounts,
+): PlanCostStageEstimate[] {
+  const targetFileCount = clampTokenCount(input.targetFileCount);
+  const taskCount = clampTokenCount(input.taskCount);
+
+  const contextFiles = Math.min(targetFileCount, MAX_CONTEXT_FILES_READ);
+  const contextTokens = clampTokenCount(contextFiles * (MAX_CHARS_PER_FILE / CHARS_PER_TOKEN));
+  // One context read per stage; the band charges CONTEXT_READS_PER_RUN reads in total.
+  const readTokens = clampTokenCount(contextTokens * (CONTEXT_READS_PER_RUN / 2));
+
+  const priceOf = input.resolvePrice ?? resolvePrice;
+  const resolved = priceOf(input.model);
+  const price = resolved ?? ceilingPrice();
+  const revisionFactor = revisionFactorFor(input.history ?? []);
+  const calibrationFactor = resolveCalibrationFactor(input.calibrationFactor);
+
+  const stageUsd = (outputTokens: number): number =>
+    ((readTokens / 1000) * price.inputUsdPer1k + (outputTokens / 1000) * price.outputUsdPer1k) *
+    revisionFactor *
+    calibrationFactor;
+
+  return [
+    { stage: "architect", expectedUsd: stageUsd(clampTokenCount(ARCHITECT_OUTPUT_TOKENS)) },
+    {
+      stage: "developer",
+      expectedUsd: stageUsd(clampTokenCount(taskCount * OUTPUT_TOKENS_PER_TASK)),
+    },
+  ];
+}
+
+/** Split a plan's expected cost across the stages that spend it (#490). Parts sum to the band. */
+export function decomposePlanCostEstimate(
+  input: EstimatePlanCostInput,
+): PlanCostStageEstimate[] {
+  const plan = input.plan;
+  // Delegated, so the plan-based and counts-based splits can never disagree.
+  return decomposePlanCostEstimateFromCounts({
+    targetFileCount: (plan.targetFiles ?? []).length,
+    taskCount: (plan.tasks ?? []).length,
+    model: input.model,
+    ...(input.history ? { history: input.history } : {}),
+    ...(input.resolvePrice ? { resolvePrice: input.resolvePrice } : {}),
+    ...(input.calibrationFactor !== undefined
+      ? { calibrationFactor: input.calibrationFactor }
+      : {}),
+  });
 }
