@@ -34,7 +34,24 @@ export interface RunActualCost {
   sources: { usageCostUsd: number; eventCostUsd: number };
 }
 
+/**
+ * A usable cost, or 0 for anything that is not one.
+ *
+ * Absent and unusable are both 0 here on purpose: a run whose ledger read failed should not look like
+ * a run that spent a negative amount, and the caller decides separately whether it measured anything
+ * at all before writing the total.
+ */
+function usableCost(value: number | undefined): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return 0;
+  return value;
+}
+
 /** Sum a run's recorded sources into its actual cost. */
 export function sumRunActualCost(sources: RunCostSources): RunActualCost {
-  throw new Error("not implemented");
+  const usageCostUsd = usableCost(sources.usageCostUsd);
+  const eventCostUsd = usableCost(sources.eventCostUsd);
+  return {
+    costUsd: usageCostUsd + eventCostUsd,
+    sources: { usageCostUsd, eventCostUsd },
+  };
 }
