@@ -33,6 +33,29 @@ export interface GovernedAgentCallDeps {
   runId?: string;
 }
 
+/**
+ * Best-effort usage recording for a governed call (#492).
+ *
+ * The shape mirrors `WorkerUsageSink` in `developer-agent.ts`: a NARROW structural contract, so this seam stays free
+ * of any store dependency, and the call site decides whether a sink exists at all. Recording is scoped to ONE call
+ * site — the architect's — so the developer and tester paths keep writing exactly what they wrote before.
+ */
+export interface UsageMeasurement {
+  tokensIn?: number;
+  tokensOut?: number;
+  costUsd?: number;
+  durationMs?: number;
+}
+
+export interface GovernedCallUsage<T> {
+  /** The task type recorded on the event, e.g. "architect". */
+  taskType: string;
+  /** Best-effort sink. A failure is logged, never thrown at the call it measures. */
+  sink: { record(measurement?: UsageMeasurement & { taskType?: string }): Promise<boolean> };
+  /** Measured usage from the call's result. An absent field stays ABSENT on the event, never 0. */
+  measurementOf?: (result: T) => UsageMeasurement;
+}
+
 export interface GovernedAgentCallOptions<T> {
   category: CostCategory;
   /** Provider model id; an unpriced model is refused, not guessed. */
@@ -44,6 +67,8 @@ export interface GovernedAgentCallOptions<T> {
   run: () => Promise<T>;
   /** Measured cost from the result; `undefined` = unmeasured. */
   costOf?: (result: T) => number | undefined;
+  /** Usage-ledger recording (#492). Absent means no usage event — the opt-in default. */
+  usage?: GovernedCallUsage<T>;
 }
 
 /**
