@@ -34,5 +34,18 @@ export function selectPlanHistory(
   runs: RunSummary[],
   limit: number = PLAN_HISTORY_WINDOW,
 ): RunSummary[] {
-  throw new Error("not implemented");
+  const cap = Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : PLAN_HISTORY_WINDOW;
+  return runs
+    .filter((candidate) => FINISHED_RUN_STATUSES.includes(candidate.status))
+    // Dropped, not clamped: averaging a malformed row would produce a band that is not merely wrong but
+    // unusable, and a cold start is a better answer than a NaN.
+    .filter(
+      (candidate) => usableCounter(candidate.iterationCount) && usableCounter(candidate.fixCycleCount),
+    )
+    .slice(0, cap);
+}
+
+/** Whether a revision counter can be summed at all. */
+function usableCounter(value: number): boolean {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }
