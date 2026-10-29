@@ -116,6 +116,22 @@ never read — that file is that project's configuration, not our credentials.
 - **Names a parked claim.** If a prior run still holds the issue's claim, the refusal names the holder. Retiring
   it is #404 R2.
 
+## The checkout is provisioned before the coding loop (#541)
+
+A freshly cloned checkout has no `node_modules`, so the target's own test command (e.g. `npx vitest run`) dies
+before collecting a single test. The coding loop would then report a failure no edit to the target's source can
+fix, and the developer would burn its self-corrections on our environment.
+
+To stop that, the launcher provisions the checkout it just cloned: `npm ci` when a lockfile is present,
+`npm install` when only a `package.json` is, and nothing when neither (a repository that was never a Node project
+is not fed `npm ci`). A reused checkout — a resume — is not re-installed, because it was already provisioned. The
+plan's `summary` names the command so it is visible before the run starts.
+
+If the install fails, the launcher reports it loudly and continues: the coding loop then reports its tests as
+**unmeasured** rather than as a failing edit. A test command that could not even start — a missing binary, a
+config that will not load, a package that is not installed — is unmeasured, never a verdict on the developer's
+work, and it does **not** trip the self-correction breaker. A test run that started and failed is still a failure.
+
 ## The workspace root (#501)
 
 The launcher clones the target into `<workspace-root>/<repo>-<issue>`. The root comes from `DF_WORKSPACE_ROOT`, or
