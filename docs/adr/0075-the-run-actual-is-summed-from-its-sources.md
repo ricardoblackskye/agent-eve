@@ -1,6 +1,6 @@
 # The run's actual is the sum of what it recorded
 
-**Status:** Accepted
+**Status:** Superseded by 0076
 **Date:** 2026-10-29
 
 ## Context

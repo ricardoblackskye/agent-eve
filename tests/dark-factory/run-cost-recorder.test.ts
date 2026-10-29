@@ -73,7 +73,7 @@ async function eventSpend(f: Fixture, costUsd: number): Promise<void> {
 }
 
 describe("record a run's actual cost (#531)", () => {
-  it("sums BOTH subsystems — neither alone is the answer", async () => {
+  it("reads the LEDGER alone once the gateway records usage there too (#532)", async () => {
     const f = await fixture();
     await ledgerSpend(f, 0.09);
     await eventSpend(f, 0.4);
@@ -81,8 +81,10 @@ describe("record a run's actual cost (#531)", () => {
     const result = await recordRunActualCost(f, f.runId);
 
     expect(result.ok).toBe(true);
-    expect(result.actual?.costUsd).toBeCloseTo(0.49, 10);
-    expect((await f.runHistory.getRun(f.runId)).value?.costUsd).toBeCloseTo(0.49, 10);
+    // The ledger is the one source now: adding the event as well would count the same spend twice.
+    expect(result.actual?.costUsd).toBeCloseTo(0.09, 10);
+    expect(result.actual?.costUsd).not.toBeCloseTo(0.49, 10);
+    expect((await f.runHistory.getRun(f.runId)).value?.costUsd).toBeCloseTo(0.09, 10);
     await f.runHistory.close();
     await f.usage.close();
   });
@@ -98,12 +100,19 @@ describe("record a run's actual cost (#531)", () => {
     await f.usage.close();
   });
 
-  it("writes a gateway-only run too", async () => {
+  it("writes nothing for an event-only run, leaving the store's own fold alone", async () => {
     const f = await fixture();
     await eventSpend(f, 0.4);
 
-    await recordRunActualCost(f, f.runId);
+    const result = await recordRunActualCost(f, f.runId);
 
+    // The RECORDER writes nothing: with no ledger row the run is unmeasured rather than estimated,
+    // because an estimate recorded as an actual is worse than no number at all.
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe("not-measured");
+    // What is on the run is the run history's own doing (#281 folds a cost event onto its run), not
+    // this writer's — and when the ledger DOES have a figure, the writer replaces that fold, which is
+    // why the both-sources case above totals the ledger rather than the two.
     expect((await f.runHistory.getRun(f.runId)).value?.costUsd).toBeCloseTo(0.4, 10);
     await f.runHistory.close();
     await f.usage.close();
