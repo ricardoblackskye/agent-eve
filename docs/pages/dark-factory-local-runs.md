@@ -98,6 +98,11 @@ npm run df:local-run -- --repo ricardoblackskye/WebFeedPOC --issue 169
 
 The launcher never prints a secret value. The runner still fails closed on a missing key.
 
+`.env.local` is resolved from the **agent repository root**, not from the working directory (#540), and a
+shell-exported value always wins over the file. Two consequences worth knowing: a runner started directly
+inside a target checkout still gets the agent's environment, and a *target* project's own `.env.local` is
+never read — that file is that project's configuration, not our credentials.
+
 ## What the launcher does that you cannot see
 
 - **Owns the working directory.** It prepares (or reuses) `~/df-workspaces/<repo>-<issue>` as a checkout of the

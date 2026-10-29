@@ -93,7 +93,9 @@ async function main(): Promise<number> {
 
   // The agent's .env.local (OPENROUTER_API_KEY, store URLs) is loaded HERE so the child inherits it; the runner
   // never has to know where it came from. This is the one place env loading happens for the launcher-driven path.
-  loadLocalEnv(process.cwd());
+  // No argument: the directory is the agent repository root, not the cwd (#540), so a launcher run from another
+  // directory cannot pick up whatever `.env.local` happens to be lying there.
+  loadLocalEnv();
 
   const probes = {
     reachStore: async (url: string) => tcpReachable(url),
