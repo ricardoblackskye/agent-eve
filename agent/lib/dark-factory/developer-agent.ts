@@ -821,7 +821,7 @@ function assertBreakerClosed(
 export function classifyTestRun(output: string): "ran" | "did-not-start" {
   // These markers name a command that could not BEGIN (the live run died on `Cannot find package`), as distinct
   // from tests that started and failed. The list is intentionally narrow; a marker that matched ordinary test
-  // output would silently unmeasure a real failure.
+  // output would silently make a real failure unmeasured.
   const DID_NOT_START_MARKERS = [
     "ERR_MODULE_NOT_FOUND",
     "Cannot find package",
