@@ -104,18 +104,28 @@ walks the resolution, stating plainly which half was demonstrated.
 - A leftover untracked clone inside the repo makes `env-example-coverage` fail locally (#519) — remove
   `df-workspaces/` before judging the suite, or discount exactly that one failure and say so.
 
-## Risks and open questions
+## Settled decisions (agreed at GATE 1)
 
-1. **What the default becomes** — the agent repository root, from `import.meta.url` (recommended: it makes the
-   runner's own comment true and can never read a target's env) versus leaving `process.cwd()`.
-2. **The launcher's explicit `process.cwd()`** — drop it so one rule governs (recommended) versus keep it,
-   which leaves the launcher fragile in exactly the way this issue is about.
-3. **How to test a default that CI cannot satisfy** — export the resolved directory and assert the rule
-   (recommended: CI has no `.env.local`, so a filesystem assertion could only be written dishonestly) versus
-   asserting through the filesystem on a machine that happens to have one.
-4. **The consequence for the four operator scripts** — they all inherit the change (recommended: accept it,
-   and say so in the commit; they are run from the repo anyway, and this removes the fragility rather than
-   adding any) versus passing the cwd explicitly at each call site to preserve today's behaviour.
-5. **A shared repo-root helper** — compute it locally in `load-env.ts` (recommended if no shared helper already
-   exists; `local-run.ts` computes its own the same way) versus extracting one, which is a wider refactor than
-   this bug needs.
+1. **The default is the agent repository root**, resolved from `import.meta.url`. It makes the runner's own
+   comment true, and it can never read a target checkout's env.
+2. **The launcher stops passing `process.cwd()`.** One rule governs every caller.
+3. **The resolved directory is exported and asserted.** CI has no `.env.local`, so a filesystem-based assertion
+   could only be written dishonestly; asserting the rule itself is the honest form.
+4. **The four operator scripts inherit the change.** Accepted, and stated in the commit: they are run from the
+   repository anyway, and this removes fragility rather than adding any.
+5. **The repo root is computed locally in `load-env.ts`**, the way `local-run.ts` already computes its own. No
+   shared helper; that is a wider refactor than this bug needs.
+
+## Notes that shape the tests
+
+- The no-override rule is already covered against an explicit directory, and it cannot be re-asserted against
+  the new default without a `.env.local` at the repository root — which CI does not have. A test that depends
+  on one machine's file would be worse than no test, so the default's coverage is the rule itself: the resolved
+  directory, and that it does not move with the process.
+- The security-shaped case is asserted directly: with the working directory in a folder that HAS an
+  `.env.local`, nothing from it may reach `process.env`.
+
+## Risks that remain
+
+- **A caller that legitimately wanted the cwd's env no longer gets it.** That is the decision, not a
+  side effect: the agent's credentials live in the agent's repository.
