@@ -7,7 +7,7 @@
 
 [ADR 0069](0069-plan-cost-estimates-are-advisory-bands.md) decided that a plan estimate would live on `RunSummary`,
 on the reasoning that a separate store would need four provider implementations for v1. **That is not what was
-built.** #486 persisted the estimate in the plan ledger instead:
+built.** [#486](https://github.com/ricardoblackskye/agent-eve/issues/486) persisted the estimate in the plan ledger instead:
 
 - tables `df_plans` and `df_plan_estimates`, the latter keyed by `plan_id` and carrying `run_id`, `estimator_version`,
   `low_usd`, `expected_usd`, `high_usd`, `cost_class`, `confidence`, `revision_factor`, `history_samples`,
@@ -43,7 +43,7 @@ This record **supersedes 0069 in full**, and re-affirms the decisions within it 
 
 ## Consequences
 
-Makes easy: per-run and per-class rollups through the existing `(period, cost_class)` index; a recalibration that
+Makes easy: per-run and per-class aggregates through the existing `(period, cost_class)` index; a recalibration that
 cannot mix estimator generations; and the accuracy join, because the estimate and the actual now sit on their
 respective sides of it deliberately.
 
@@ -52,7 +52,7 @@ lesson is procedural, not technical — a decision recorded at plan time must be
 the change is closed, or the record becomes a plausible account of a system that does not exist.
 
 Forces follow-on work: the accuracy view needs a **run-level actual written from the settled calls** before it can
-report a single row, and the by-stage split needs architect usage events. Both are tracked on the epic
+report a single row, and the by-stage split needs architect usage events. The first is the calibration report's blocker, [#490](https://github.com/ricardoblackskye/agent-eve/issues/490); the second is [#492](https://github.com/ricardoblackskye/agent-eve/issues/492). Both are tracked on the epic
 [#453](https://github.com/ricardoblackskye/agent-eve/issues/453), alongside the calibration report that consumes the
 result.
 
