@@ -49,7 +49,6 @@ async function fixture(): Promise<Fixture> {
 /** A ledger row, as the architect's call records one (#492). */
 async function ledgerSpend(f: Fixture, costUsd: number, taskType = "architect"): Promise<void> {
   await f.usage.record({
-    eventId: `evt-${randomUUID()}`,
     runId: f.runId,
     taskType,
     model: MODEL,

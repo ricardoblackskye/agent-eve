@@ -10,21 +10,29 @@ import { resolve } from "node:path";
 const RUNNER = readFileSync(resolve(process.cwd(), "scripts/dark-factory-runner.ts"), "utf8");
 
 describe("the runner records the run's cost (#531)", () => {
-  it("calls the recorder", () => {
-    expect(RUNNER).toContain("recordRunActualCost");
+  it("calls the recorder, imported from the module that owns the definition", () => {
+    expect(RUNNER).toContain("await recordRunActualCost(");
+    expect(RUNNER).toContain('from "../agent/lib/dark-factory/run-cost-recorder"');
   });
 
-  it("passes a recorder built from the run history it already holds", () => {
+  it("passes a recorder built from the run history the active run already holds", () => {
     expect(RUNNER).toMatch(/recordRunActualCost\(/);
     expect(RUNNER).toMatch(/runHistory/);
   });
 
+  it("calls it from BOTH entry paths — a run that aborts spent money too", () => {
+    const calls = RUNNER.match(/recordRunCostForRun\(activeRun/g) ?? [];
+    expect(calls).toHaveLength(2);
+  });
+
   it("treats the write as best-effort, so a cost can never fail a run", () => {
-    const index = RUNNER.indexOf("recordRunActualCost(");
+    // `await` disambiguates the CALL from the import, which appears first in the file.
+    const index = RUNNER.indexOf("await recordRunActualCost(");
     // Asserted first: with the call absent, `indexOf` returns -1 and the slice below would be the
     // whole file, so a stray `catch` anywhere would satisfy this case vacuously.
     expect(index).toBeGreaterThan(-1);
-    const call = RUNNER.slice(Math.max(0, index - 600), index + 300);
-    expect(call).toMatch(/catch/);
+    // The call spans several lines, so the window must clear its arguments before the catch.
+    const call = RUNNER.slice(index, index + 1500);
+    expect(call).toMatch(/catch\s*\(/);
   });
 });

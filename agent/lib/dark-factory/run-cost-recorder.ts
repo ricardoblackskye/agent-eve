@@ -38,10 +38,77 @@ export interface RunCostRecordResult {
   actual?: RunActualCost;
 }
 
+/** Costs that are actual numbers, since an unmeasured row carries none. */
+function sumDefined(values: Array<number | undefined>): number | undefined {
+  const costs = values.filter((value): value is number => typeof value === "number");
+  if (costs.length === 0) return undefined;
+  return costs.reduce((total, value) => total + value, 0);
+}
+
 /** Record a run's actual cost from what it recorded. Never throws. */
 export async function recordRunActualCost(
   deps: RunCostRecorderDeps,
   runId: string,
 ): Promise<RunCostRecordResult> {
-  throw new Error("not implemented");
+  // The ledger: the in-process governed calls. The tester is filtered out to match the estimator's
+  // own scope (ADR 0074), so the pair compares like with like.
+  let usageCostUsd: number | undefined;
+  try {
+    const report = await queryUsage(deps.usage, { runId });
+    if (!report.ok) {
+      return { ok: false, reason: "usage-unreadable", error: report.error };
+    }
+    usageCostUsd = sumDefined(
+      (report.report.byTaskType ?? [])
+        .filter((entry) => !EXCLUDED_TASK_TYPES.includes(entry.taskType))
+        .map((entry) => entry.costUsd),
+    );
+  } catch (error) {
+    return {
+      ok: false,
+      reason: "usage-unreadable",
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+
+  // The run's own cost events: the other subsystem, written by the gateway path.
+  let eventCostUsd: number | undefined;
+  try {
+    const events = await deps.runHistory.listRunEvents(runId);
+    if (events.ok) {
+      eventCostUsd = sumDefined(
+        (events.value?.items ?? [])
+          .filter((entry) => entry.event.type === "run.cost")
+          .map((entry) => entry.event.costUsd),
+      );
+    }
+  } catch (error) {
+    // Best-effort: an unreadable event log costs us the gateway side of the total, not the run.
+    console.warn(
+      `[WARN] The run's cost events could not be read, so its cost may be understated: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+
+  if (usageCostUsd === undefined && eventCostUsd === undefined) {
+    // NOT measured: writing 0 here would claim the run was free.
+    return { ok: false, reason: "not-measured" };
+  }
+
+  const actual = sumRunActualCost({ usageCostUsd, eventCostUsd });
+  try {
+    const written = await deps.runHistory.recordRunCost(runId, actual.costUsd);
+    if (!written.ok) {
+      return { ok: false, reason: "write-failed", error: written.error, actual };
+    }
+    return { ok: true, actual };
+  } catch (error) {
+    return {
+      ok: false,
+      reason: "write-failed",
+      error: error instanceof Error ? error.message : String(error),
+      actual,
+    };
+  }
 }

@@ -132,6 +132,8 @@ import {
 } from "../agent/lib/dark-factory/run-record";
 import { withNotifications } from "../agent/lib/dark-factory/notifying-run-history";
 import { runGovernedAgentCall } from "../agent/lib/dark-factory/governed-agent-call";
+import { recordRunActualCost } from "../agent/lib/dark-factory/run-cost-recorder";
+import { createUsageStore } from "../agent/lib/dark-factory/usage-store-provider";
 
 // The .env bootstrap lives in runner-env.ts so it can be tested without running the pipeline.
 // It carries NO model default: agent/model-config.ts is the single source of truth (#400).
@@ -1703,6 +1705,38 @@ export function recordPassingTestResults(
  * operator needs to see, and masking it would hide the original cause. The report always names how to
  * retire the claim by hand, so even a broken release leaves the operator a way out.
  */
+/**
+ * #531 — record what the run cost, so `df_plan_estimate_accuracy` finally has an actual to join on.
+ *
+ * Reads the run's recorded usage and its own cost events, sums them, and writes the total to the run
+ * summary. BEST-EFFORT BY DESIGN: a cost is an observation about a run, not a control over it, so
+ * every failure — including an unconfigured store — is reported and the run is unaffected. Exported so
+ * both entry paths can call it, and so its behaviour is reachable from a test.
+ */
+export async function recordRunCostForRun(
+  active: ActiveRun | null,
+  env: Record<string, string | undefined>,
+): Promise<void> {
+  if (!active) return;
+  try {
+    const result = await recordRunActualCost(
+      { runHistory: active.runHistory, usage: createUsageStore(env) },
+      active.runId,
+    );
+    if (!result.ok && result.reason !== "not-measured") {
+      console.warn(
+        `[WARN] The run's cost could not be recorded (${result.reason}): ${result.error ?? "no detail"}`,
+      );
+    }
+  } catch (error) {
+    console.warn(
+      `[WARN] The run's cost could not be recorded: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+}
+
 export async function releaseAbandonedRunClaim(active: ActiveRun | null): Promise<void> {
   // No run, or a run that aborted before its label writer existed: nothing can be released.
   if (!active || !active.labelWriter) return;
@@ -1757,10 +1791,17 @@ const isDirectRun =
   import.meta.url === pathToFileURL(process.argv[1]).href;
 
 if (isDirectRun) {
-  void main().catch(async (error: unknown) => {
+  void main()
+    .then(async () => {
+      // #531: recorded on the normal path too, so a parked or completed run still carries its cost.
+      await recordRunCostForRun(activeRun, process.env);
+    })
+    .catch(async (error: unknown) => {
     console.error(
       `[ERROR] Runner aborted: ${error instanceof Error ? error.message : String(error)}`,
     );
+    // #531: an aborted run spent money too — before the claim is released and the run is cleared.
+    await recordRunCostForRun(activeRun, process.env);
     // #503 AC5: an abort that escaped `main` must still END the run, or the issue keeps the claim (and
     // the `df:running` label) with nothing left to release it. Done BEFORE the control store closes, and
     // it never throws, so the original abort stays the visible cause.
