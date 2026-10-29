@@ -107,7 +107,7 @@ describe("#487 AC4 the estimate reaches persistence", () => {
     // this proves a bypass still cannot sneak a duplicate past the ledger.
     // #516 reversed this expectation deliberately. The intent was never "the run must die" — it was
     // "a bypass cannot sneak a duplicate past the ledger", and that still holds: the second write is
-    // recognised as a duplicate and the ledger keeps exactly one plan and one estimate. What changed is
+    // recognized as a duplicate and the ledger keeps exactly one plan and one estimate. What changed is
     // that an identical re-record no longer ABORTS the run on its way to proving it.
     const second = await recordPlanWithEstimateSafely(store, input());
     // toMatchObject rather than field access: `duplicate` lives on the ok arm of the result union.

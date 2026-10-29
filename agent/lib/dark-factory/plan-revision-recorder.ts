@@ -222,7 +222,7 @@ export function samePlan(left: ExecutionPlan, right: ExecutionPlan): boolean {
 }
 
 /**
- * A stable serialisation for comparison (#516).
+ * A stable serialization for comparison (#516).
  *
  * Key ORDER must not decide whether two plans are the same: postgres returns `jsonb` with its keys
  * reordered, so the round-tripped plan is the same plan with its fields in a different order. sqlite
