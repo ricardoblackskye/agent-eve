@@ -1,17 +1,18 @@
 /**
  * Docs drift guards (#238) — make documentation drift fail CI.
  *
- * Four guards, each a pure function `(scanned data) => violations[]` plus:
+ * Five guards, each a pure function `(scanned data) => violations[]` plus:
  *  - an integration test over the real repo (green today), and
  *  - a mutation test that injects synthetic drift and asserts the guard fires
  *    (proves the guard is not vacuous — a vacuous guard is worse than none).
  *
- * All four run in the standard `vitest` Unit Tests CI job, so drift fails CI
+ * All five run in the standard `vitest` Unit Tests CI job, so drift fails CI
  * rather than auto-opening a PR.
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import { join, dirname, resolve, basename } from "node:path";
+import { PRICE_FLOOR_DATA_RELATIVE_PATH } from "../agent/lib/dark-factory/model-price-floor";
 import { listApiRoutes, getReferencePage } from "../app/documentation/reference/generators";
 
 const ROOT = process.cwd();
@@ -232,5 +233,73 @@ describe("guard: every Dark Factory module is documented", () => {
   it("mutation: an undocumented module is caught", () => {
     const ghost = "agent/lib/dark-factory/ghost-module.ts";
     expect(findUndocumentedModules([...modules, ghost], docText)).toContain(ghost);
+  });
+});
+
+/**
+ * Guard 5 (#549): an operator instruction must name the file the command actually writes.
+ *
+ * The Price Drift workflow posts a repair step naming the file to refresh. It named a JSON path that ADR 0071
+ * had already moved to a generated TS module, and nothing failed - the instruction was wrong for as long as
+ * nobody read it. Two checks, because "a file with that name exists" is not the claim being made:
+ *  - every path-like mention resolves in the repo, and
+ *  - the path the instruction names IS the constant the writer itself uses
+ *    (`PRICE_FLOOR_DATA_RELATIVE_PATH` exists so the writer and the reader cannot disagree).
+ */
+const PRICE_DRIFT_WORKFLOW = ".github/workflows/price-drift.yml";
+const PATH_LIKE =
+  /(?<![\w./-])(?:[A-Za-z0-9_.-]+\/)+[A-Za-z0-9_.-]+\.(?:ts|json|md|yml|yaml|sql|sqlite)\b/g;
+
+/** Every distinct repo-relative path-like mention, boundary-aware: `e2e-usage.sqlite` is not `e2e-usage.sql`. */
+function pathsNamedIn(text: string): string[] {
+  return [...new Set([...text.matchAll(PATH_LIKE)].map((m) => m[0]))];
+}
+
+function unresolvedPaths(paths: string[], resolvePath: (candidate: string) => boolean): string[] {
+  return paths.filter((candidate) => !resolvePath(candidate));
+}
+
+describe("guard: an operator instruction names real files (#549)", () => {
+  const workflow = readFileSync(PRICE_DRIFT_WORKFLOW, "utf8");
+  const fromRoot = (candidate: string): boolean => existsSync(resolve(process.cwd(), candidate));
+
+  it("finds path-like mentions at all (otherwise the guard is vacuous)", () => {
+    const named = pathsNamedIn(workflow);
+    expect(named.length).toBeGreaterThan(0);
+    expect(named).toContain("agent/lib/dark-factory/cost-budget.ts");
+  });
+
+  it("integration: every path the repair step names exists in the tree", () => {
+    const named = pathsNamedIn(workflow);
+    expect(named.length).toBeGreaterThan(0);
+    expect(unresolvedPaths(named, fromRoot)).toEqual([]);
+  });
+
+  it("integration: names the module the refresh command actually writes, not merely one that exists", () => {
+    expect(workflow).toContain(PRICE_FLOOR_DATA_RELATIVE_PATH);
+    expect(fromRoot(PRICE_FLOOR_DATA_RELATIVE_PATH)).toBe(true);
+  });
+
+  it("integration: names a refresh command whose script really handles the write flag", () => {
+    expect(workflow).toContain("prices:check");
+    expect(workflow).toContain("--write");
+    const scripts = JSON.parse(readFileSync(resolve(process.cwd(), "package.json"), "utf8")).scripts;
+    const command: string = scripts["prices:check"];
+    expect(command).toBeTruthy();
+    const scriptFile = command.replace(/^tsx\s+/, "").trim();
+    expect(fromRoot(scriptFile)).toBe(true);
+    expect(readFileSync(resolve(process.cwd(), scriptFile), "utf8")).toContain("--write");
+  });
+
+  it("mutation: an invented path is reported, so the resolver is not answering yes to everything", () => {
+    expect(unresolvedPaths(["agent/lib/dark-factory/ghost-module.ts"], fromRoot)).toEqual([
+      "agent/lib/dark-factory/ghost-module.ts",
+    ]);
+  });
+
+  it("mutation: a real-but-wrong path fails the constant check", () => {
+    const drifted = workflow.replace(PRICE_FLOOR_DATA_RELATIVE_PATH, "agent/lib/dark-factory/model-price-floor-data.json");
+    expect(pathsNamedIn(drifted)).toContain("agent/lib/dark-factory/model-price-floor-data.json");
+    expect(drifted).not.toContain(PRICE_FLOOR_DATA_RELATIVE_PATH);
   });
 });
