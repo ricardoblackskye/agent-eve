@@ -7,9 +7,9 @@ exports[`#488 the estimate in the plan comment > snapshots the comment body WITH
 
 Advisory only — a forecast from the plan's shape, not a quote. It does not block approval.
 
-# Plan: something
+**Plan: something**
 
-## Goal
+### Goal
 
 make it better
 
@@ -27,9 +27,9 @@ make it better
 exports[`#488 the estimate in the plan comment > snapshots the comment body WITHOUT an estimate 1`] = `
 "<!-- dark-factory:plan -->
 
-# Plan: something
+**Plan: something**
 
-## Goal
+### Goal
 
 make it better
 

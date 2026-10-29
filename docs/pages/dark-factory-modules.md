@@ -537,9 +537,13 @@ Dark Factory — Plan Approval Gate (#365 R4). Parks the run after the plan is p
 
 Dark Factory — Plan Comment (#365). Posts the rendered plan on the ticket right after planning and before the coding loop, so a run that later fails still leaves reviewable intent. The comment carries a marker, which makes it idempotent: a retry finds its own comment and updates it rather than stacking another one on the ticket.
 
+The comment is rendered for a comment rather than for a file (#538): the plan's H1 becomes a bold line and every
+heading below it is demoted one level, and a prose table cell wider than `COMMENT_TABLE_CELL_LIMIT` moves below its
+table in full, keyed by the row's first column, instead of being truncated. The plan FILE keeps its own markdown.
+
 **Source:** [`agent/lib/dark-factory/plan-comment.ts`](../../agent/lib/dark-factory/plan-comment.ts)
 
-**Exports:** `PLAN_COMMENT_MARKER`, `PlanCommentRecord`, `PlanCommentResult`, `PlanCommentTarget`, `PostPlanCommentOptions`, `findPlanComment`, `planCommentBody`, `postPlanComment`
+**Exports:** `COMMENT_TABLE_CELL_LIMIT`, `PLAN_COMMENT_MARKER`, `PlanCommentRecord`, `PlanCommentResult`, `PlanCommentTarget`, `PostPlanCommentOptions`, `commentCellLimit`, `findPlanComment`, `normalizeCommentMarkdown`, `planCommentBody`, `postPlanComment`
 
 ## plan-file
 
