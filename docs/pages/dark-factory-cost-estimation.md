@@ -16,6 +16,9 @@ usd = (tokensIn / 1000) * inputUsdPer1k  +  (tokensOut / 1000) * outputUsdPer1k
 
 ## The price source — one table, shared by every figure
 
+Where those ceilings come from, what keeps them current, and what they deliberately do not cover: see
+[Price ceilings](dark-factory-price-ceilings.md).
+
 [`cost-budget.ts`](../../agent/lib/dark-factory/cost-budget.ts) owns the only price lookup,
 `resolvePrice(model)`, and every figure below goes through it. A plan estimate therefore cannot
 disagree with a reservation about what a token costs.

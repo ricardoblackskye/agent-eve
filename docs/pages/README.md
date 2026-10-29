@@ -22,6 +22,7 @@ describes, and design decisions live as [Architecture Decision Records](../adr/R
 - [Worker sandbox and credential boundary](flow-worker-sandbox.md)
 - [Cost and usage governance](flow-cost-governance.md)
 - [Cost estimation: how each figure is computed](dark-factory-cost-estimation.md)
+- [Price ceilings: what the reservation is a bound over](dark-factory-price-ceilings.md)
 - [Tenant attribution and reporting](flow-tenant-attribution.md)
 - [Observability](flow-observability.md)
 
