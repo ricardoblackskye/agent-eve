@@ -205,3 +205,40 @@ describe("#501 the real clone prepares its workspace root", () => {
     }
   });
 });
+
+describe("#539 - the launcher drives a resume", () => {
+  const parked = {
+    ...healthyProbes,
+    activeClaim: async () => ({ ok: true, holder: { runId: "122ff27b-e044-489a-851f-593b7404ab70", status: "blocked" } }),
+  };
+  const none = { ...healthyProbes, activeClaim: async () => ({ ok: true }) };
+
+  it("forwards --resume to the runner when asked, and NOT otherwise", async () => {
+    const withFlag = await buildLaunchDecision(baseInput({ resume: true, probes: parked }));
+    expect(withFlag.kind).toBe("launch");
+    if (withFlag.kind === "launch") expect(withFlag.spawn.args).toContain("--resume");
+
+    const without = await buildLaunchDecision(baseInput({ probes: parked }));
+    expect(without.kind).toBe("refuse"); // a parked claim refuses a FRESH run
+  });
+
+  it("LAUNCHES a resume that continues a parked claim — the whole point of #539", async () => {
+    const decision = await buildLaunchDecision(baseInput({ resume: true, probes: parked }));
+
+    expect(decision.kind).toBe("launch");
+    if (decision.kind === "launch") {
+      expect(decision.spawn.args).toContain("--resume");
+      expect(decision.spawn.args.join(" ")).toContain("--issue 169");
+    }
+  });
+
+  it("REFUSES a resume with nothing to continue, in the same one block the launcher already gives", async () => {
+    const decision = await buildLaunchDecision(baseInput({ resume: true, probes: none }));
+
+    expect(decision.kind).toBe("refuse");
+    if (decision.kind === "refuse") {
+      expect(decision.problems.map((p) => p.code)).toContain("claim-not-held");
+      expect(decision.problems[0]?.fix).toContain("without --resume");
+    }
+  });
+});
