@@ -259,4 +259,45 @@ describe("Definition of Done — Acceptance Criteria Traceability & Anti-Rubber-
   });
 });
 
+/**
+ * #502 AC4 - an absent map must not read as "nothing to verify, therefore passed".
+ *
+ * `allPassed` was `failingAcs.length === 0`, which an empty matrix satisfies, so a plan that mapped nothing came
+ * back as a clean result. That is the costly half of the omission: the definition-of-done machinery proceeded as
+ * though a plan with no mappings had nothing to check.
+ */
+describe("#502 the definition of done cannot mistake an unmapped plan for a passing one", () => {
+  const plan = (map: unknown) => ({ storyId: 502, title: "t", targetFiles: [], acceptanceCriteriaMap: map }) as never;
 
+  it("reports missingMap and does NOT report allPassed when the field is absent", async () => {
+    const { evaluateAcTraceability } = await import("../../agent/lib/dark-factory/definition-of-done");
+    const absent = ((): unknown => {
+      const { acceptanceCriteriaMap: _omitted, ...rest } = plan([]) as unknown as Record<string, unknown>;
+      return rest;
+    })();
+
+    const result = evaluateAcTraceability(absent as never, []);
+    expect(result.missingMap).toBe(true);
+    expect(result.allPassed).toBe(false);
+  });
+
+  it("treats an empty map the same way", async () => {
+    const { evaluateAcTraceability } = await import("../../agent/lib/dark-factory/definition-of-done");
+    const result = evaluateAcTraceability(plan([]), []);
+    expect(result.missingMap).toBe(true);
+    expect(result.allPassed).toBe(false);
+  });
+
+  it("control: a mapped plan with passing tests still reports allPassed", async () => {
+    const { evaluateAcTraceability } = await import("../../agent/lib/dark-factory/definition-of-done");
+    const mapped = plan([
+      { acId: "AC1", description: "d", testFile: "tests/a.test.ts", testCaseName: "works" },
+    ]);
+    const result = evaluateAcTraceability(mapped, [
+      { testFile: "tests/a.test.ts", testCaseName: "works", passed: true },
+    ] as never);
+
+    expect(result.missingMap).toBe(false);
+    expect(result.allPassed).toBe(true);
+  });
+});

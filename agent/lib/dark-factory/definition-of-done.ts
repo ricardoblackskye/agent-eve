@@ -162,6 +162,11 @@ export interface AcVerificationResult {
   matrix: AcTraceabilityItem[];
   allPassed: boolean;
   failingAcs: AcTraceabilityItem[];
+  /**
+   * #502: the plan carried no usable mappings. `allPassed` used to be `failingAcs.length === 0`, which an empty
+   * matrix satisfies - so a plan that mapped nothing reported as PASSED, i.e. an omission read as a clean result.
+   */
+  missingMap: boolean;
 }
 
 /**
@@ -172,7 +177,8 @@ export function evaluateAcTraceability(
   plan: ExecutionPlan,
   testResults: AcTestResult[] = [],
 ): AcVerificationResult {
-  const mappings = plan.acceptanceCriteriaMap ?? [];
+  const hasMap = Array.isArray(plan.acceptanceCriteriaMap) && plan.acceptanceCriteriaMap.length > 0;
+  const mappings = hasMap ? plan.acceptanceCriteriaMap : [];
   const matrix: AcTraceabilityItem[] = mappings.map((ac) => {
     const match = testResults.find(
       (tr) =>
@@ -193,8 +199,10 @@ export function evaluateAcTraceability(
   const failingAcs = matrix.filter((item) => !item.passed);
   return {
     matrix,
-    allPassed: failingAcs.length === 0,
+    // A plan that mapped nothing has NOT passed: there was nothing to verify, which is the omission itself.
+    allPassed: hasMap && failingAcs.length === 0,
     failingAcs,
+    missingMap: !hasMap,
   };
 }
 

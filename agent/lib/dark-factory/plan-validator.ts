@@ -333,10 +333,30 @@ export function validateExecutionPlan(
     }
   }
 
-  // 4. Acceptance Criteria mapping check
+  // Acceptance Criteria mapping PRESENCE check (#502). The contract declares this field non-optional (see
+  // ExecutionPlan), so it is REFUSED rather than tolerated. The coverage check below is driven by the STORY text,
+  // which means a plan with no mappings passed whenever the story yielded no AC ids - so whether the field was
+  // required effectively depended on whether an extractor matched the story's prose. A plan that never says how
+  // its acceptance criteria will be tested is not one a reviewer can meaningfully approve; that is the posture
+  // #378 took for plan approval, applied to completeness.
+  if (!Array.isArray(plan.acceptanceCriteriaMap)) {
+    errors.push(
+      plan.acceptanceCriteriaMap === undefined || plan.acceptanceCriteriaMap === null
+        ? "Plan is missing acceptanceCriteriaMap: it must map each acceptance criterion to the test that covers " +
+            "it, as an array of { acId, description, testFile, testCaseName }."
+        : "Plan acceptanceCriteriaMap must be an array of { acId, description, testFile, testCaseName } mappings.",
+    );
+  } else if (plan.acceptanceCriteriaMap.length === 0) {
+    errors.push(
+      "Plan acceptanceCriteriaMap is empty: a plan that maps no acceptance criteria says nothing about how they " +
+        "will be tested.",
+    );
+  }
+
+  // 4. Acceptance Criteria mapping coverage check
   const requiredAcs = extractStoryAcceptanceCriteria(storyText);
   const mappedAcIds = new Set(
-    (plan.acceptanceCriteriaMap || []).map((m) =>
+    (Array.isArray(plan.acceptanceCriteriaMap) ? plan.acceptanceCriteriaMap : []).map((m) =>
       m.acId.toUpperCase().replace("-", ""),
     ),
   );
@@ -348,7 +368,7 @@ export function validateExecutionPlan(
   }
 
   // 5. Test mapping completeness check
-  if (plan.acceptanceCriteriaMap) {
+  if (Array.isArray(plan.acceptanceCriteriaMap)) {
     for (const mapping of plan.acceptanceCriteriaMap) {
       if (!mapping.testFile?.trim() || !mapping.testCaseName?.trim()) {
         errors.push(
