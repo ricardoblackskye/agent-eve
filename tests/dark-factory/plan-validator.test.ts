@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   validateExecutionPlan,
+  extractStoryAcceptanceCriteria,
   type ExecutionPlan,
 } from "../../agent/lib/dark-factory/plan-validator";
 
@@ -345,5 +346,105 @@ describe("#502 a plan must map its acceptance criteria", () => {
 
     expect(earlier.valid).toBe(true);
     expect(later.valid).toBe(false);
+  });
+});
+
+/**
+ * #555 - the coverage rule must read the criteria the story STATES.
+ *
+ * Two failures measured on real issue bodies before this change: criteria written as "- [ ]" bullets yielded no
+ * ids at all (#499, the rule checked nothing), and a passing prose mention of "AC6" became the only criterion on a
+ * body whose four real criteria were checkboxes (#518, the rule checked the wrong thing).
+ *
+ * The extractor is scoped to the acceptance-criteria SECTION: everything outside it stops counting, and the
+ * section's own bullets stop being invisible.
+ */
+describe("#555 the extractor reads the criteria the story states", () => {
+  const checkboxStory = [
+    "## Why",
+    "Some context. See #123 and a stray AC9 reference for flavour.",
+    "",
+    "## Acceptance criteria",
+    "- [ ] the footer renders on the home page",
+    "- [ ] a test covers the footer",
+    "- [x] the footer is responsive",
+    "",
+    "## Out of scope",
+    "- [ ] something else entirely",
+  ].join("\n");
+
+  it("AC1: a checkbox acceptance-criteria section yields its criteria (the #499 shape)", () => {
+    const acs = extractStoryAcceptanceCriteria(checkboxStory);
+    expect(acs.length).toBeGreaterThan(0);
+    expect(acs).toEqual(["AC1", "AC2", "AC3"]);
+  });
+
+  it("AC2: a mention is NOT a criterion, wherever it sits (the #518 shape, verbatim)", () => {
+    // The real #518 body, whose mention is a plain paragraph INSIDE the criteria section - the shape my first
+    // fixture got wrong, which is why the unit test passed while the live probe still returned [AC6].
+    const real = [
+      "## Acceptance criteria",
+      "- [ ] The rendered comment body is bounded BELOW GitHub's limit.",
+      "- [ ] The chosen bound is recorded (ADR) with the trade-off it accepts.",
+      "",
+      "Discovered while implementing #488; recorded there as AC6's unmet half.",
+    ].join("\n");
+
+    expect(extractStoryAcceptanceCriteria(real)).toEqual(["AC1", "AC2"]);
+    expect(extractStoryAcceptanceCriteria(real)).not.toContain("AC6");
+  });
+
+  it("AC2: a mention outside the section is ignored too", () => {
+    expect(extractStoryAcceptanceCriteria(checkboxStory)).not.toContain("AC9");
+  });
+
+  it("AC2: an explicit label INSIDE the section still wins, and out-of-scope bullets are ignored", () => {
+    const story = [
+      "## Acceptance criteria",
+      "AC1: the footer renders",
+      "AC2: a test covers it",
+      "",
+      "## Out of scope",
+      "- [ ] something else",
+    ].join("\n");
+    expect(extractStoryAcceptanceCriteria(story)).toEqual(["AC1", "AC2"]);
+  });
+
+  it("AC3 control: a story that states no criteria yields none, and does not invalidate plans", () => {
+    expect(extractStoryAcceptanceCriteria("Please add a footer to the home page.")).toEqual([]);
+    expect(extractStoryAcceptanceCriteria("")).toEqual([]);
+  });
+
+  it("AC4: every recognized shape is pinned, including the Given fallback", () => {
+    const shapes: Array<[string, string[]]> = [
+      ["## Acceptance criteria\nAC1: a\nAC-2: b", ["AC1", "AC2"]],
+      ["## Acceptance criteria\n- [ ] a\n- [x] b", ["AC1", "AC2"]],
+      ["## Acceptance criteria\n- a\n- b", ["AC1", "AC2"]],
+      ["## Acceptance criteria\n1. a\n2. b", ["AC1", "AC2"]],
+      ["- Given a page\n- Given a test", ["AC1", "AC2"]],
+      // A bold label, which is how this repository writes section names as often as a heading.
+      ["**Acceptance Criteria**\n- AC1: given a page\n- AC2: given a test", ["AC1", "AC2"]],
+      ["**Acceptance criteria**\n- [ ] a\n- [ ] b", ["AC1", "AC2"]],
+    ];
+    for (const [story, expected] of shapes) {
+      expect(extractStoryAcceptanceCriteria(story), story.replace(/\n/g, " | ")).toEqual(expected);
+    }
+  });
+
+  it("the section ends at the next heading of the same or higher level, and not at a deeper one", () => {
+    const deeper = [
+      "## Acceptance criteria",
+      "- [ ] a",
+      "### Notes",
+      "- [ ] not a criterion, this is inside the section",
+      "## Out of scope",
+      "- [ ] and neither is this",
+    ].join("\n");
+    expect(extractStoryAcceptanceCriteria(deeper)).toEqual(["AC1", "AC2"]);
+  });
+
+  it("a criteria list with no heading yields nothing, rather than scanning the whole body", () => {
+    // The documented limit: prose criteria with no heading stay uncheckable instead of becoming false positives.
+    expect(extractStoryAcceptanceCriteria("Please make sure:\n- [ ] the footer renders")).toEqual([]);
   });
 });

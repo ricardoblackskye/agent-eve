@@ -45,7 +45,7 @@ being invisible.
 ## Soundness, at the level of the test rather than the run
 
 A story that states no criteria must not invalidate every plan (the issue's AC3), so non-vacuity belongs to the
-extraction's own tests, not to a run-time refusal: each recognised shape gets a case, and the criteria-in-section
+extraction's own tests, not to a run-time refusal: each recognized shape gets a case, and the criteria-in-section
 case asserts a NON-EMPTY result, so a future format drift fails loudly instead of quietly reducing the rule to a
 no-op again.
 
@@ -59,7 +59,7 @@ no-op again.
 
 1. Section-scoped extraction with ordered-bullet support, RED first on the #499 shape (vacuous) and the #518 shape
    (phantom criterion).
-2. Tests: a case per recognised shape, the checkbox-section case asserting non-empty, the phantom-mention case
+2. Tests: a case per recognized shape, the checkbox-section case asserting non-empty, the phantom-mention case
    asserting the mention is NOT a criterion, and the control that a criteria-free story yields none.
 3. Re-run the coverage rule's existing tests, and confirm #502's suite still passes unmodified.
 
