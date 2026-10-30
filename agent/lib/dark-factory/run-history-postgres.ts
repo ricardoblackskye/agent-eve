@@ -93,6 +93,7 @@ interface RunEventRow {
   git_diff: string | null;
   comment_reference: string | null;
   cost_refusal: string | null;
+  agent_output_summary?: string | null;
   test_results: string | null;
   trace: string | null;
   breaker_trip: string | null;
@@ -145,6 +146,7 @@ const POSTGRES_SCHEMA = `
     pr_url TEXT,
     comment_reference TEXT,
     cost_refusal TEXT,
+    agent_output_summary TEXT,
     test_results TEXT,
     trace TEXT,
     breaker_trip TEXT,
@@ -159,6 +161,7 @@ const POSTGRES_SCHEMA = `
   ALTER TABLE df_run_events ADD COLUMN IF NOT EXISTS accepted_count BIGINT;
   ALTER TABLE df_run_events ADD COLUMN IF NOT EXISTS comment_reference TEXT;
   ALTER TABLE df_run_events ADD COLUMN IF NOT EXISTS cost_refusal TEXT;
+  ALTER TABLE df_run_events ADD COLUMN IF NOT EXISTS agent_output_summary TEXT;
   ALTER TABLE df_run_events ADD COLUMN IF NOT EXISTS test_results TEXT;
   ALTER TABLE df_run_events ADD COLUMN IF NOT EXISTS trace TEXT;
   ALTER TABLE df_run_events ADD COLUMN IF NOT EXISTS breaker_trip TEXT;
@@ -457,6 +460,10 @@ function rowToEvent(row: RunEventRow): PersistedRunEvent {
       ...(row.cost_refusal !== null && row.cost_refusal !== undefined
         ? { costRefusal: row.cost_refusal as RunEvent["costRefusal"] }
         : {}),
+      ...(row.agent_output_summary !== null &&
+      row.agent_output_summary !== undefined
+        ? { agentOutputSummary: row.agent_output_summary }
+        : {}),
       ...(row.test_results !== null && row.test_results !== undefined
         ? { testResults: readTestResults(row.test_results) }
         : {}),
@@ -671,8 +678,9 @@ function insertEvent(client: PoolClient, event: RunEvent): Promise<unknown> {
        run_id, event_id, type, stage, occurred_at, status, attempt,
        review_round, iteration_count, fix_cycle_count, finding_count,
        resolved_count, accepted_count, latency_ms, cost_usd, pr_url,
-       comment_reference, cost_refusal, test_results, trace, breaker_trip
-     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)`,
+       comment_reference, cost_refusal, test_results, trace, breaker_trip,
+       agent_output_summary
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)`,
     [
       event.runId,
       event.eventId,
@@ -695,6 +703,7 @@ function insertEvent(client: PoolClient, event: RunEvent): Promise<unknown> {
       event.testResults ? JSON.stringify(event.testResults) : null,
       event.trace ? JSON.stringify(event.trace) : null,
       event.breakerTrip ? JSON.stringify(event.breakerTrip) : null,
+      event.agentOutputSummary ?? null,
     ],
   );
 }

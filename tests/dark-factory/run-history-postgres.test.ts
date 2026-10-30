@@ -3,6 +3,7 @@ import { testDsnFor } from "./pg-test-helpers";
 import { afterAll, describe, expect, it } from "vitest";
 import { PostgresRunHistoryStore } from "../../agent/lib/dark-factory/run-history-postgres";
 import { PLAN_ESTIMATOR_VERSION } from "../../agent/lib/dark-factory/plan-cost-estimate";
+import { toRunEvent } from "../../agent/lib/dark-factory/run-history";
 
 const baseDsn = process.env.DF_RUN_HISTORY_TEST_DATABASE_URL;
 // #392: this suite owns its own SCHEMA, so parallel workers cannot collide with another suite.
@@ -100,6 +101,38 @@ describeWithDatabase("PostgresRunHistoryStore integration", () => {
     expect(written.ok).toBe(true);
     const stored = await store.getRun(runId);
     expect(stored.value?.gitDiff).toBe(SAMPLE_DIFF);
+  });
+
+  it("round-trips the captured agent-output summary through postgres (#558)", async () => {
+    const issue = baseIssue + 20;
+    const deliveryId = `pg-agent-output-${namespace}`;
+    const accepted = await store.acceptDelivery({
+      deliveryId,
+      repo: "owner/repo",
+      issue,
+      receivedAt: at,
+    });
+    const runId = accepted.value?.runId;
+    if (!runId)
+      throw new Error("Postgres delivery acceptance returned no runId");
+
+    const SUMMARY = "no allow-listed command applies to this change";
+    const appended = await store.appendEvent(
+      toRunEvent({
+        eventId: "pg-agent-output-1",
+        runId,
+        type: "worker.roadblock",
+        stage: "worker",
+        occurredAt: at,
+        status: "running",
+        agentOutputSummary: SUMMARY,
+      }),
+    );
+    expect(appended.ok).toBe(true);
+
+    const events = (await store.listRunEvents(runId)).value?.items ?? [];
+    const roadblock = events.find((e) => e.event.type === "worker.roadblock");
+    expect(roadblock?.event.agentOutputSummary).toBe(SUMMARY);
   });
 
   it("round-trips tester test results on review-round events through postgres (#296)", async () => {
