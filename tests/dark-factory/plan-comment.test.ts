@@ -7,7 +7,13 @@ import {
   planCommentBody,
   postPlanComment,
   type PlanCommentTarget,
+  PLAN_BLOCK_MARKER,
+  MAX_COMMENT_CHARS,
+  planBlockBody,
+  parsePlanFromComments,
 } from "../../agent/lib/dark-factory/plan-comment";
+import { renderPlanFile } from "../../agent/lib/dark-factory/plan-file";
+import { ARCHITECT_OUTPUT_TOKENS } from "../../agent/lib/dark-factory/plan-cost-estimate";
 
 /**
  * #365 Task 11 — the plan is posted on the ticket BEFORE the coding loop, exactly once.
@@ -61,16 +67,21 @@ describe("the plan comment (#365 Task 11)", () => {
       markdown: MARKDOWN,
       plan: { storyId: 7 },
     });
-    expect(result).toEqual({ ok: true, action: "created", id: 11 });
-    expect(writer.postComment).toHaveBeenCalledTimes(1);
+    // #518: two comments now - the human plan and its machine block.
+    expect(result).toEqual({ ok: true, action: "created", id: 11, blockId: 11 });
+    expect(writer.postComment).toHaveBeenCalledTimes(2);
     expect(writer.editComment).not.toHaveBeenCalled();
   });
 
-  it("updates its own comment instead of posting a second one, so a retry does not duplicate it", async () => {
+  it("updates both of its own comments instead of posting more, so a retry does not duplicate it", async () => {
     const writer = target({
-      listComments: vi
-        .fn()
-        .mockResolvedValue({ ok: true, comments: [{ id: 42, body: PLAN_COMMENT_MARKER }] }),
+      listComments: vi.fn().mockResolvedValue({
+        ok: true,
+        comments: [
+          { id: 42, body: PLAN_COMMENT_MARKER },
+          { id: 43, body: PLAN_BLOCK_MARKER },
+        ],
+      }),
     });
 
     const result = await postPlanComment(writer, {
@@ -81,10 +92,37 @@ describe("the plan comment (#365 Task 11)", () => {
       plan: { storyId: 7 },
     });
 
-    expect(result).toEqual({ ok: true, action: "updated", id: 12 });
+    expect(result).toEqual({ ok: true, action: "updated", id: 12, blockId: 12 });
     // The duplicate is the bug being prevented: the ticket must not collect one comment per attempt.
     expect(writer.postComment).not.toHaveBeenCalled();
     expect(writer.editComment).toHaveBeenCalledWith("o", "r", 42, expect.stringContaining(PLAN_COMMENT_MARKER));
+    expect(writer.editComment).toHaveBeenCalledWith("o", "r", 43, expect.stringContaining(PLAN_BLOCK_MARKER));
+  });
+
+  it("upgrades a ticket that predates the split by adding the block comment once", async () => {
+    // The real shape of every ticket that already carries a plan: one comment, no block. The run must not
+    // re-post the human comment, and must add exactly one block.
+    const writer = target({
+      listComments: vi.fn().mockResolvedValue({ ok: true, comments: [{ id: 42, body: PLAN_COMMENT_MARKER }] }),
+    });
+
+    const result = await postPlanComment(writer, {
+      owner: "o",
+      repo: "r",
+      issue: 7,
+      markdown: MARKDOWN,
+      plan: { storyId: 7 },
+    });
+
+    expect(result).toEqual({ ok: true, action: "updated", id: 12, blockId: 11 });
+    expect(writer.editComment).toHaveBeenCalledTimes(1);
+    expect(writer.postComment).toHaveBeenCalledTimes(1);
+    expect(writer.postComment).toHaveBeenCalledWith("o", "r", 7, expect.stringContaining("<details>"));
+    const parsed = parsePlanFromComments([
+      { id: 42, body: MARKDOWN },
+      { id: 11, body: (writer.postComment as ReturnType<typeof vi.fn>).mock.calls[0][3] as string },
+    ]);
+    expect(parsed.ok).toBe(true);
   });
 
   it("reports a failure instead of throwing, so the caller decides the policy", async () => {
@@ -148,18 +186,23 @@ describe("the plan comment (#365 Task 11)", () => {
       targetFiles: [{ path: "app/chat.tsx", action: "modify", rationale: "add a line" }],
     };
 
-    it("round-trips the plan through the comment", () => {
-      const parsed = parsePlanFromComment(planCommentBody(MARKDOWN, PLAN));
+    it("round-trips the plan through the pair of comments that were posted", () => {
+      // #518: the block moved into its own comment, so the round-trip is over the pair.
+      const parsed = parsePlanFromComments([
+        { id: 1, body: planCommentBody(MARKDOWN) },
+        { id: 2, body: planBlockBody(PLAN) },
+      ]);
       expect(parsed.ok).toBe(true);
       if (parsed.ok) expect(parsed.plan).toEqual(PLAN);
     });
 
-    it("keeps the human rendering above the machine block", () => {
-      const body = planCommentBody(MARKDOWN, PLAN);
-      const humanAt = body.indexOf("Plan: something");
-      const machineAt = body.indexOf("<details>");
-      expect(humanAt).toBeGreaterThan(-1);
-      expect(machineAt).toBeGreaterThan(humanAt);
+    it("keeps the human rendering and the machine block in separate comments", () => {
+      const human = planCommentBody(MARKDOWN);
+      const block = planBlockBody(PLAN);
+      expect(human.indexOf("Plan: something")).toBeGreaterThan(-1);
+      expect(human).not.toContain("<details>");
+      expect(block).toContain("<details>");
+      expect(block).not.toContain("Plan: something");
     });
 
     it("fails closed on a comment written before this release", () => {
@@ -210,12 +253,16 @@ describe("the plan comment (#365 Task 11)", () => {
           },
         ],
       };
-      const parsed = parsePlanFromComment(planCommentBody(MARKDOWN, hostile));
+      // #518: the block is its own comment now, and it is still escaped.
+      const parsed = parsePlanFromComments([
+        { id: 1, body: planCommentBody(MARKDOWN) },
+        { id: 2, body: planBlockBody(hostile) },
+      ]);
       expect(parsed.ok).toBe(true);
       if (parsed.ok) expect(parsed.plan).toEqual(hostile);
     });
 
-    it("posts the plan as part of the comment", async () => {
+    it("posts the plan, as a human comment and its machine block", async () => {
       const writer = target();
       await postPlanComment(writer, {
         owner: "o",
@@ -224,9 +271,15 @@ describe("the plan comment (#365 Task 11)", () => {
         markdown: MARKDOWN,
         plan: PLAN,
       });
-      const posted = (writer.postComment as ReturnType<typeof vi.fn>).mock
-        .calls[0][3] as string;
-      const parsed = parsePlanFromComment(posted);
+      const calls = (writer.postComment as ReturnType<typeof vi.fn>).mock.calls;
+      const humanPosted = calls[0][3] as string;
+      const blockPosted = calls[1][3] as string;
+      expect(humanPosted).toContain(PLAN_COMMENT_MARKER);
+      expect(humanPosted).not.toContain("<details>");
+      const parsed = parsePlanFromComments([
+        { id: 1, body: humanPosted },
+        { id: 2, body: blockPosted },
+      ]);
       expect(parsed.ok).toBe(true);
       if (parsed.ok) expect(parsed.plan).toEqual(PLAN);
     });
@@ -259,7 +312,7 @@ describe("#488 the estimate in the plan comment", () => {
   });
 
   it("renders the band under the marker, above the plan", () => {
-    const body = planCommentBody(MARKDOWN, PLAN, ESTIMATE);
+    const body = planCommentBody(MARKDOWN, ESTIMATE);
     const markerAt = body.indexOf(PLAN_COMMENT_MARKER);
     const estimateAt = body.indexOf("Estimated cost:");
     const planAt = body.indexOf("Plan: something");
@@ -270,35 +323,42 @@ describe("#488 the estimate in the plan comment", () => {
   });
 
   it("omits the section entirely when there is no estimate", () => {
-    const body = planCommentBody(MARKDOWN, PLAN);
+    const body = planCommentBody(MARKDOWN);
     expect(body).not.toContain("Estimated cost");
     expect(body).not.toMatch(/unknown/i);
   });
 
-  it("keeps the human rendering above the machine block", () => {
-    const body = planCommentBody(MARKDOWN, PLAN, ESTIMATE);
+  it("keeps the forecast in the plan comment, ahead of the plan, with no block beside it", () => {
+    const body = planCommentBody(MARKDOWN, ESTIMATE);
     const estimateAt = body.indexOf("Estimated cost:");
     // Asserted present FIRST: an absent section would make indexOf return -1, which is less than
     // anything, so a bare comparison would pass without the section existing at all.
     expect(estimateAt).toBeGreaterThan(-1);
-    expect(estimateAt).toBeLessThan(body.indexOf("<details>"));
+    expect(estimateAt).toBeLessThan(body.indexOf("Plan: something"));
+    // #518: the machine block is a separate comment now, so it must not be in the reader's way here.
+    expect(body).not.toContain("<details>");
   });
 
   it("still round-trips the plan with an estimate present", () => {
     // The section joins the HUMAN part; the machine block must stay last and intact, or a resumed run
     // cannot read its plan back (#365 R4) and stops.
-    const parsed = parsePlanFromComment(planCommentBody(MARKDOWN, PLAN, ESTIMATE));
+    const parsed = parsePlanFromComments([
+      { id: 1, body: planCommentBody(MARKDOWN, ESTIMATE) },
+      { id: 2, body: planBlockBody(PLAN) },
+    ]);
     expect(parsed.ok).toBe(true);
     if (parsed.ok) expect(parsed.plan).toEqual(PLAN);
   });
 
   // AC5. One case per test, so the snapshot key is the test name.
   it("snapshots the comment body WITH an estimate", () => {
-    expect(planCommentBody(MARKDOWN, PLAN, ESTIMATE)).toMatchSnapshot();
+    expect(planCommentBody(MARKDOWN, ESTIMATE)).toMatchSnapshot();
   });
 
   it("snapshots the comment body WITHOUT an estimate", () => {
-    expect(planCommentBody(MARKDOWN, PLAN)).toMatchSnapshot();
+    expect(planCommentBody(MARKDOWN)).toMatchSnapshot();
+    // #518: the block is its own comment, so snapshot it too - the half that a resumed run reads.
+    expect(planBlockBody(PLAN)).toMatchSnapshot();
   });
 
   it("passes the estimate through the poster", async () => {
@@ -313,5 +373,94 @@ describe("#488 the estimate in the plan comment", () => {
     });
     const posted = (writer.postComment as ReturnType<typeof vi.fn>).mock.calls[0][3] as string;
     expect(posted).toContain("Estimated cost:");
+  });
+});
+
+describe("#518 the plan comment is bounded, and the machine block gets its own comment", () => {
+  const filler = (n: number) => "x".repeat(n);
+  // The fixture is DERIVED from the Architect's output budget, so it moves when that constant moves.
+  const budgetChars = ARCHITECT_OUTPUT_TOKENS * 4;
+  const worstCasePlan = {
+    storyId: 518,
+    approach: filler(2000),
+    tasks: Array.from({ length: 40 }, (_, i) => ({ title: `task ${i + 1}`, objective: filler(400) })),
+    targetFiles: Array.from({ length: 24 }, (_, i) => ({
+      path: `src/module-${i + 1}.ts`,
+      action: "modify",
+      rationale: filler(500),
+    })),
+  };
+  const markdown = renderPlanFile(worstCasePlan as never, {
+    issueUrl: "https://github.com/o/r/issues/1",
+  });
+  const human = planCommentBody(markdown);
+  const block = planBlockBody(worstCasePlan);
+
+  it("the fixture really is the worst case (tied to the Architect's budget, not guessed)", () => {
+    expect(markdown.length + JSON.stringify(worstCasePlan).length).toBeGreaterThanOrEqual(budgetChars);
+  });
+
+  it("each comment fits the budget, and the pair is why one comment did not", () => {
+    expect(human.length).toBeLessThanOrEqual(MAX_COMMENT_CHARS);
+    expect(block.length).toBeLessThanOrEqual(MAX_COMMENT_CHARS);
+    expect(human.length + block.length).toBeGreaterThan(MAX_COMMENT_CHARS);
+  });
+
+  it("the human comment carries no machine block; the block comment carries nothing else", () => {
+    expect(human).not.toContain("<details>");
+    expect(human).toContain(PLAN_COMMENT_MARKER);
+    expect(block).toContain(PLAN_BLOCK_MARKER);
+    expect(block).toContain("<details>");
+  });
+
+  it("resume round-trip at size: the plan comes back from the pair", () => {
+    const parsed = parsePlanFromComments([
+      { id: 1, body: human },
+      { id: 2, body: block },
+    ]);
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.plan).toEqual(worstCasePlan);
+    }
+  });
+
+  it("a legacy single-comment plan still resumes (#518 decision 3)", () => {
+    const legacyBlock = planBlockBody(worstCasePlan).replace(`${PLAN_BLOCK_MARKER}\n\n`, "");
+    const parsed = parsePlanFromComments([{ id: 1, body: `${human}\n\n${legacyBlock}` }]);
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.plan).toEqual(worstCasePlan);
+    }
+  });
+
+  it("over budget fails naming the limit, and refuses BEFORE touching the network", async () => {
+    const calls: string[] = [];
+    const target: PlanCommentTarget = {
+      listComments: async () => {
+        calls.push("list");
+        return { ok: true, comments: [] };
+      },
+      postComment: async () => {
+        calls.push("post");
+        return { ok: true, id: 1 };
+      },
+      editComment: async () => {
+        calls.push("edit");
+        return { ok: true, id: 1 };
+      },
+    };
+    const result = await postPlanComment(target, {
+      owner: "o",
+      repo: "r",
+      issue: 1,
+      markdown: filler(MAX_COMMENT_CHARS + 1000),
+      plan: worstCasePlan,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain(String(MAX_COMMENT_CHARS));
+      expect(result.error).toMatch(/budget|limit/i);
+    }
+    expect(calls).toEqual([]);
   });
 });

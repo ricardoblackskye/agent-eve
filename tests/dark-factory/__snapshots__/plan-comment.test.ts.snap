@@ -12,16 +12,7 @@ Advisory only — a forecast from the plan's shape, not a quote. It does not blo
 ### Goal
 
 make it better
-
-
-<details>
-<summary>Machine-readable plan (read back when this run resumes)</summary>
-
-\`\`\`json
-{"storyId":488,"approach":"surface the band"}
-\`\`\`
-
-</details>"
+"
 `;
 
 exports[`#488 the estimate in the plan comment > snapshots the comment body WITHOUT an estimate 1`] = `
@@ -32,7 +23,11 @@ exports[`#488 the estimate in the plan comment > snapshots the comment body WITH
 ### Goal
 
 make it better
+"
+`;
 
+exports[`#488 the estimate in the plan comment > snapshots the comment body WITHOUT an estimate 2`] = `
+"<!-- dark-factory:plan-block -->
 
 <details>
 <summary>Machine-readable plan (read back when this run resumes)</summary>

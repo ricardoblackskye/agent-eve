@@ -1,4 +1,5 @@
 import { Buffer } from "node:buffer";
+import { MAX_COMMENT_CHARS } from "./dark-factory/plan-comment";
 
 export interface DeliverReportOptions {
   token: string;
@@ -25,7 +26,7 @@ export interface DeliverReportResult {
   commentUrl?: string;
 }
 
-const MAX_COMMENT_CHARS = 60000; // GitHub's comment limit is 65536; stay safely under.
+// One canonical budget (#518), so this file and the plan comment cannot drift apart.
 
 /**
  * Truncate a markdown string to at most `limit` characters, cutting on a

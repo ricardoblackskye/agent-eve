@@ -17,6 +17,15 @@
 import type { PlanCostEstimate } from "./plan-cost-estimate";
 
 /** The marker identifying this Factory's own plan comment, whatever the plan says. */
+/** GitHub's hard limit on a comment body. */
+export const GITHUB_COMMENT_LIMIT = 65536;
+
+/** The budget a comment body must stay under. Kept in step with sprint-delivery's own ceiling. */
+export const MAX_COMMENT_CHARS = 60000;
+
+/** The marker identifying this Factory's own MACHINE block, which lives in its own comment since #518. */
+export const PLAN_BLOCK_MARKER = "<!-- dark-factory:plan-block -->";
+
 export const PLAN_COMMENT_MARKER = "<!-- dark-factory:plan -->";
 
 /** A markdown code fence. A constant because the block writes one and the parser looks for it. */
@@ -86,7 +95,13 @@ export interface PostPlanCommentOptions {
 }
 
 export type PlanCommentResult =
-  | { ok: true; action: "created" | "updated"; id?: number }
+  | {
+      ok: true;
+      action: "created" | "updated";
+      id?: number;
+      /** #518: the machine block lives in its own comment, so a successful post returns two ids. */
+      blockId?: number;
+    }
   | { ok: false; action: "failed"; error: string };
 
 /**
@@ -203,7 +218,6 @@ function boundTableCells(table: string[], limit: number): string[] {
  */
 export function planCommentBody(
   markdown: string,
-  plan?: unknown,
   estimate?: PlanCostEstimate | null,
 ): string {
   // #488: the estimate sits directly under the marker, so whoever decides whether to approve meets the
@@ -216,31 +230,17 @@ export function planCommentBody(
   const human = section
     ? `${PLAN_COMMENT_MARKER}\n\n${section}\n\n${humanMarkdown}`
     : `${PLAN_COMMENT_MARKER}\n\n${humanMarkdown}`;
-  if (plan === undefined) {
-    return human;
-  }
+  // #518: the machine block is NOT here any more. Human markdown plus a full machine copy of the same plan
+  // exceeded GitHub's comment limit for a large plan, and truncating either half would break #365 - so the
+  // block lives in its own comment (planBlockBody) and each half is bounded by construction.
+  return human;
+}
 
-  // Escaped so plan TEXT cannot become plan STRUCTURE. Both cases were caught by the tests here:
-  // a rationale containing "</details>" would close the block early, and one containing a fence would
-  // truncate the JSON payload at the first fence the parser found. These are valid JSON escapes that
-  // decode back, so the round-trip stays exact.
-  const json = JSON.stringify(plan)
-    .replace(/</g, "\\u003c")
-    .replace(/>/g, "\\u003e")
-    .replace(/`/g, "\\u0060");
-
-  return [
-    human,
-    "",
-    DETAILS_OPEN,
-    "<summary>Machine-readable plan (read back when this run resumes)</summary>",
-    "",
-    `${FENCE}json`,
-    json,
-    FENCE,
-    "",
-    DETAILS_CLOSE,
-  ].join("\n");
+/** Escape so plan TEXT cannot become plan STRUCTURE: a rationale containing "</details>" would close the block
+ * early and one containing a fence would truncate the payload. These are valid JSON escapes that decode back, so
+ * the round-trip stays exact. */
+function escapeForBlock(json: string): string {
+  return json.replace(/</g, "\\u003c").replace(/>/g, "\\u003e").replace(/`/g, "\\u0060");
 }
 
 /**
@@ -292,9 +292,18 @@ export type PlanParseResult =
  * they read, not a fresh one.
  */
 export function parsePlanFromComment(commentBody: string): PlanParseResult {
+  return parseMarkedComment(commentBody, PLAN_COMMENT_MARKER, "this comment is not a Dark Factory plan comment");
+}
+
+/** The machine block in its own comment (#518) - same block, different marker. */
+export function parsePlanBlockComment(commentBody: string): PlanParseResult {
+  return parseMarkedComment(commentBody, PLAN_BLOCK_MARKER, "this comment is not a Dark Factory plan block");
+}
+
+function parseMarkedComment(commentBody: string, marker: string, notOurs: string): PlanParseResult {
   const body = (commentBody ?? "").replace(/\s+$/, "");
-  if (!body.includes(PLAN_COMMENT_MARKER)) {
-    return { ok: false, error: "this comment is not a Dark Factory plan comment" };
+  if (!body.includes(marker)) {
+    return { ok: false, error: notOurs };
   }
   if (!body.endsWith(DETAILS_CLOSE)) {
     return {
@@ -347,7 +356,26 @@ export async function postPlanComment(
   target: PlanCommentTarget,
   options: PostPlanCommentOptions,
 ): Promise<PlanCommentResult> {
-  const body = planCommentBody(options.markdown, options.plan, options.estimate);
+  // #518 AC4: refuse BEFORE the network, naming the limit. The old failure was a raw 422 from GitHub that
+  // named nothing, and the run died on a plan nobody could read.
+  const bodies = [
+    { label: "the plan comment", body: planCommentBody(options.markdown, options.estimate) },
+    { label: "the machine block comment", body: planBlockBody(options.plan) },
+  ];
+  for (const { label, body } of bodies) {
+    if (body.length > MAX_COMMENT_CHARS) {
+      return {
+        ok: false,
+        action: "failed",
+        error:
+          `${label} would be ${body.length} characters, over the ${MAX_COMMENT_CHARS}-character budget for a ` +
+          `GitHub comment (the hard limit is ${GITHUB_COMMENT_LIMIT}). This run stops here rather than posting ` +
+          `a comment the API will reject with a 422 that names nothing`,
+      };
+    }
+  }
+  const humanBody = bodies[0].body;
+  const blockBody = bodies[1].body;
 
   const listed = await target.listComments(options.owner, options.repo, options.issue);
   if (!listed.ok) {
@@ -357,16 +385,16 @@ export async function postPlanComment(
       error: `could not read the ticket's comments: ${listed.error ?? "unknown error"}`,
     };
   }
+  const comments = listed.comments ?? [];
+  const existing = findPlanComment(comments);
+  const existingBlock = findPlanBlockComment(comments);
 
-  const existing = findPlanComment(listed.comments ?? []);
+  // The human comment first: it is what a reviewer reads, and it carries the marker this Factory uses to
+  // find its own work on a retry.
+  let humanId: number | undefined;
+  let action: "created" | "updated";
   if (existing) {
-    // Update in place. Posting again would stack one comment per attempt on the ticket.
-    const updated = await target.editComment(
-      options.owner,
-      options.repo,
-      existing.id,
-      body,
-    );
+    const updated = await target.editComment(options.owner, options.repo, existing.id, humanBody);
     if (!updated.ok) {
       return {
         ok: false,
@@ -374,21 +402,95 @@ export async function postPlanComment(
         error: `could not update the plan comment: ${updated.error ?? "unknown error"}`,
       };
     }
-    return { ok: true, action: "updated", id: updated.id ?? existing.id };
+    humanId = updated.id ?? existing.id;
+    action = "updated";
+  } else {
+    const posted = await target.postComment(options.owner, options.repo, options.issue, humanBody);
+    if (!posted.ok) {
+      return {
+        ok: false,
+        action: "failed",
+        error: `could not post the plan comment: ${posted.error ?? "unknown error"}`,
+      };
+    }
+    humanId = posted.id;
+    action = "created";
   }
 
-  const posted = await target.postComment(
-    options.owner,
-    options.repo,
-    options.issue,
-    body,
-  );
-  if (!posted.ok) {
-    return {
-      ok: false,
-      action: "failed",
-      error: `could not post the plan comment: ${posted.error ?? "unknown error"}`,
-    };
+  // Then the machine block (#518). A failure here must stop the run: a plan comment without its block cannot
+  // be read back, and a resumed run fails closed on exactly that (#373).
+  let blockId: number | undefined;
+  if (existingBlock) {
+    const updated = await target.editComment(options.owner, options.repo, existingBlock.id, blockBody);
+    if (!updated.ok) {
+      return {
+        ok: false,
+        action: "failed",
+        error: `the plan comment was ${action} but its machine block was not updated: ${updated.error ?? "unknown error"}`,
+      };
+    }
+    blockId = updated.id ?? existingBlock.id;
+  } else {
+    const posted = await target.postComment(options.owner, options.repo, options.issue, blockBody);
+    if (!posted.ok) {
+      return {
+        ok: false,
+        action: "failed",
+        error: `the plan comment was ${action} but its machine block was not posted: ${posted.error ?? "unknown error"}`,
+      };
+    }
+    blockId = posted.id;
   }
-  return { ok: true, action: "created", id: posted.id };
+
+  return { ok: true, action, id: humanId, blockId };
+}
+
+/**
+ * The MACHINE comment (#518): the block alone, in its own comment, because the human comment plus this one
+ * together exceed GitHub's limit for a large plan. Both halves stay whole, so the human still approves exactly
+ * what the resumed run reads back (#365).
+ */
+export function planBlockBody(plan: unknown): string {
+  return [
+    PLAN_BLOCK_MARKER,
+    "",
+    DETAILS_OPEN,
+    "<summary>Machine-readable plan (read back when this run resumes)</summary>",
+    "",
+    `${FENCE}json`,
+    escapeForBlock(JSON.stringify(plan)),
+    FENCE,
+    "",
+    DETAILS_CLOSE,
+  ].join("\n");
+}
+
+/** This Factory's machine block comment, if the ticket already carries one. */
+export function findPlanBlockComment(
+  comments: PlanCommentRecord[],
+): PlanCommentRecord | undefined {
+  return comments.find(
+    (comment) => typeof comment.body === "string" && comment.body.includes(PLAN_BLOCK_MARKER),
+  );
+}
+
+/**
+ * Read the plan back from a ticket's comments (#518): the block in its own comment, or a legacy comment that
+ * carries both halves in one body.
+ */
+export function parsePlanFromComments(comments: readonly PlanCommentRecord[]): PlanParseResult {
+  const list = [...comments];
+  const block = findPlanBlockComment(list);
+  if (block?.body) {
+    const parsed = parsePlanBlockComment(block.body);
+    if (parsed.ok) {
+      return parsed;
+    }
+    return parsed;
+  }
+  const human = findPlanComment(list);
+  if (human?.body) {
+    return parsePlanFromComment(human.body);
+  }
+  return { ok: false, error: "the ticket carries no Dark Factory plan comment" };
 }

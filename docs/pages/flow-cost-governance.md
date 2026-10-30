@@ -186,3 +186,15 @@ rolled up and charged. This page describes the shape the factory already enforce
 the #214 legs extend the ledger with tenant-scoped aggregation and the settle
 workflow. Track #214 / #215 for that work rather than assuming it is implemented
 here.
+
+## The plan comment is two comments (#518)
+
+A plan at the Architect's output budget does not fit in one GitHub comment, because the body carried the plan
+twice: the rendering a human approves, and the machine block a resumed run reads back. Both halves are kept whole -
+truncating either would break the premise that the human approves exactly what the run executes - so the machine
+block now has its own comment.
+
+The human comment carries the plan and the forecast; the block comment carries the plan for the resume, marked so
+the pair can be found again. At the measured worst case each sits at about half of GitHub's 65,536-character limit,
+and either one over the budget stops the run with a message naming the limit, rather than a raw 422 from the API.
+See ADR 0080.

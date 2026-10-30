@@ -8,7 +8,11 @@ import {
   planApprovalEventId,
   type PlanApprovalDeps,
 } from "../../agent/lib/dark-factory/plan-approval";
-import { planCommentBody } from "../../agent/lib/dark-factory/plan-comment";
+import {
+  parsePlanFromComments,
+  planBlockBody,
+  planCommentBody,
+} from "../../agent/lib/dark-factory/plan-comment";
 
 /**
  * #365 R4 Task 2 — the run parks between planning and coding.
@@ -192,7 +196,8 @@ describe("resuming against the approved plan (#365 R4 Task 3)", () => {
   it("reads the plan back from the Factory's own comment, among other people's", async () => {
     const deps = comments([
       { id: 1, body: "someone else's discussion" },
-      { id: 2, body: planCommentBody("# Plan: approved\n", APPROVED) },
+      { id: 1, body: planCommentBody("# Plan: approved\n") },
+      { id: 2, body: planBlockBody(APPROVED) },
       { id: 3, body: "another reply" },
     ]);
     const result = await loadApprovedPlan(deps, { owner: "o", repo: "r", issue: 365 });

@@ -17,6 +17,7 @@
 import {
   findPlanComment,
   parsePlanFromComment,
+  parsePlanFromComments,
   type PlanCommentRecord,
 } from "./plan-comment";
 
@@ -237,7 +238,9 @@ export async function loadApprovedPlan(
     };
   }
 
-  const parsed = parsePlanFromComment(comment.body);
+  // #518: the machine block lives in its own comment now, so read the pair; a legacy single-comment plan
+  // still parses through the same call.
+  const parsed = parsePlanFromComments(listed.comments ?? []);
   if (!parsed.ok) {
     return {
       ok: false,
