@@ -303,6 +303,23 @@ interface ValidationCheck {
  * Uses a pluggable check registry (strategy pattern) so checks can be added,
  * removed, or reordered without touching runValidation.
  */
+/**
+ * A command the Tester's own guard refused (#560). The runner is the only place that decides
+ * this, and it is injected, so the capture wraps it rather than teaching a pure guard about its
+ * caller - the same shape as the Developer's unmeasured tap.
+ */
+export interface RefusedCommand {
+  command: string;
+  args: string[];
+  reason: string;
+}
+
+/**
+ * Called when the runner refuses a command. Optional, so existing callers are unaffected, and
+ * the refusal STILL propagates: the capture is an addition, never a replacement.
+ */
+export type RefusedCommandTap = (info: RefusedCommand) => void | Promise<void>;
+
 export class TesterAgent {
   readonly timeoutMs: number;
   readonly runner: CommandRunner;
@@ -313,7 +330,10 @@ export class TesterAgent {
 
   constructor(
     config: TesterAgentConfig = {},
-    options: { commandRunner?: CommandRunner } = {},
+    options: {
+      commandRunner?: CommandRunner;
+      onRefusedCommand?: RefusedCommandTap;
+    } = {},
   ) {
     this.timeoutMs = config.checkTimeoutMs ?? 60000;
     this.maxOutputLines = config.maxOutputLines ?? 1000;
