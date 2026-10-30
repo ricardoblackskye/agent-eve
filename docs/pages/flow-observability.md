@@ -94,3 +94,10 @@ Tester's verdict is exactly what it was. The tap fires only on the allow-list me
 every `ValidationError`, because that class is also what a caller bug throws - tapping those would
 report a programming mistake as an agent roadblock. And a command that runs and *fails* is a normal
 result, not a roadblock: only a command that could not run at all is.
+
+**Where it is read.** The ticket is the human-facing half and the run detail page is the other. The
+page renders an `AGENT OUTPUT` panel alongside its siblings, listing the captured rows: the type, the
+timestamp as stored, the bounded summary, and a link to the posted comment when the recorder stored
+one. It is given the **raw** events rather than the view-model's timeline, because the summary lives
+on the event itself and a rendered timeline would have dropped it. A run with nothing captured shows
+the empty state, and an event carrying no summary is not listed at all - it is not agent output.

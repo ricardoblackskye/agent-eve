@@ -19,6 +19,7 @@ import {
   type TableRow,
   type TimelineEntry,
 } from "./view-model";
+import type { PersistedRunEvent } from "../../../agent/lib/dark-factory/run-history-store";
 
 export function StatePanel({
   state,
@@ -587,6 +588,57 @@ export function OutcomeArtifacts({ prUrl }: { prUrl?: string }): ReactNode {
           </a>
         ) : (
           <StatePanel state="empty" message="No PR opened yet" />
+        )}
+      </div>
+    </section>
+  );
+}
+
+/**
+ * Captured agent output for a run (#561): the typed, bounded summaries the recorder stored.
+ * Read-only, and only events that CARRY one are listed - an event with no summary is not agent
+ * output and must not be rendered as a blank row.
+ */
+export function AgentOutputPanel({
+  events,
+}: {
+  events: PersistedRunEvent[];
+}): ReactNode {
+  // Only events that CARRY a captured summary are agent output (#558). Any other event is a
+  // different lifecycle fact, and listing it here would render a blank row.
+  const captured = events.filter(
+    (item) => item.event.agentOutputSummary !== undefined,
+  );
+
+  return (
+    <section className="df-panel">
+      <PanelHead title="AGENT OUTPUT" badges={["AGENT"]} />
+      <div className="df-panel-body">
+        {captured.length === 0 ? (
+          <StatePanel state="empty" message="No agent output captured" />
+        ) : (
+          <ul className="df-agent-output-list">
+            {captured.map(({ event, sequence }) => (
+              <li className="df-agent-output-row" key={sequence}>
+                <p className="df-agent-output-meta">
+                  {event.type} | {event.occurredAt}
+                </p>
+                <p className="df-agent-output-text">
+                  {event.agentOutputSummary}
+                </p>
+                {/* Only rendered when the recorder actually posted one: the reference is stored
+                    after the post, so its absence means there is nothing to open. */}
+                {event.commentReference ? (
+                  <a
+                    className="df-agent-output-link"
+                    href={event.commentReference.url}
+                  >
+                    View the issue comment
+                  </a>
+                ) : null}
+              </li>
+            ))}
+          </ul>
         )}
       </div>
     </section>
