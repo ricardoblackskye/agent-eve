@@ -19,6 +19,7 @@ import {
   type TableRow,
   type TimelineEntry,
 } from "./view-model";
+import type { PersistedRunEvent } from "../../../agent/lib/dark-factory/run-history-store";
 
 export function StatePanel({
   state,
@@ -591,6 +592,20 @@ export function OutcomeArtifacts({ prUrl }: { prUrl?: string }): ReactNode {
       </div>
     </section>
   );
+}
+
+/**
+ * Captured agent output for a run (#561): the typed, bounded summaries the recorder stored.
+ * Read-only, and only events that CARRY one are listed - an event with no summary is not agent
+ * output and must not be rendered as a blank row.
+ */
+export function AgentOutputPanel({
+  events,
+}: {
+  events: PersistedRunEvent[];
+}): ReactNode {
+  void events;
+  return null;
 }
 
 export function RunDiffPanel({ gitDiff }: { gitDiff?: string }): ReactNode {
