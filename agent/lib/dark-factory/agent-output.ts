@@ -60,10 +60,30 @@ export class UnknownAgentProfileError extends Error {
   }
 }
 
+/** A captured, bounded record ready to be appended to the run ledger. */
+export interface PreparedAgentOutput extends AgentOutputEvent {
+  /** The redacted, capped text. Never a transcript. */
+  text: string;
+  /** True when the text was capped, so a reader knows it is partial. */
+  truncated: boolean;
+}
+
+/** Raised when a captured item is not one of the agreed types. */
+export class UnsupportedAgentOutputTypeError extends Error {
+  readonly type: string;
+  constructor(type: string) {
+    super(`Unsupported agent output type "${type}"`);
+    this.name = "UnsupportedAgentOutputTypeError";
+    this.type = type;
+  }
+}
+
 export interface AgentOutputRecorder {
   readonly profile: AgentProfile;
   /** Map a captured item onto its run-event fields. */
   toEvent(item: CapturedAgentOutput): AgentOutputEvent;
+  /** Redact and cap a captured item, refusing an unsupported type. */
+  prepare(item: CapturedAgentOutput): PreparedAgentOutput;
 }
 
 /**
@@ -107,6 +127,10 @@ class MappedAgentOutputRecorder implements AgentOutputRecorder {
     return item.commentReference === undefined
       ? { ...mapped }
       : { ...mapped, commentReference: item.commentReference };
+  }
+
+  prepare(_item: CapturedAgentOutput): PreparedAgentOutput {
+    throw new Error("not implemented");
   }
 }
 

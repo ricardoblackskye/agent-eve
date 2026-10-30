@@ -2,8 +2,10 @@ import { describe, it, expect } from "vitest";
 import {
   resolveAgentOutputRecorder,
   UnknownAgentProfileError,
+  UnsupportedAgentOutputTypeError,
   type CapturedAgentOutput,
 } from "../../agent/lib/dark-factory/agent-output";
+import { MAX_COMMENT_CHARS } from "../../agent/lib/dark-factory/plan-comment";
 
 describe("Agent output recorder contract (#558)", () => {
   it("resolves the recorder registered for the architect profile", () => {
@@ -96,5 +98,78 @@ describe("Agent output recorder contract (#558)", () => {
     };
 
     expect("commentReference" in recorder.toEvent(item)).toBe(false);
+  });
+
+  it("redacts an inline DF_ secret before the text leaves the recorder", () => {
+    const recorder = resolveAgentOutputRecorder("developer");
+    const item: CapturedAgentOutput = {
+      profile: "developer",
+      type: "roadblock",
+      text: "the sandbox refused: DF_API_KEY=sk-live-notARealSecret was rejected",
+    };
+
+    const prepared = recorder.prepare(item);
+
+    expect(prepared.text).toContain("[redacted DF_API_KEY]");
+    expect(prepared.text).not.toContain("sk-live-notARealSecret");
+  });
+
+  it("caps an oversized item and flags it as truncated", () => {
+    const recorder = resolveAgentOutputRecorder("developer");
+    const item: CapturedAgentOutput = {
+      profile: "developer",
+      type: "roadblock",
+      text: "x".repeat(MAX_COMMENT_CHARS + 5_000),
+    };
+
+    const prepared = recorder.prepare(item);
+
+    expect(prepared.text.length).toBe(MAX_COMMENT_CHARS);
+    expect(prepared.truncated).toBe(true);
+  });
+
+  it("does not flag a within-budget item as truncated", () => {
+    // Control for the case above: a passing truncation assertion must not be
+    // satisfiable by always reporting truncated.
+    const recorder = resolveAgentOutputRecorder("developer");
+    const prepared = recorder.prepare({
+      profile: "developer",
+      type: "milestone",
+      text: "developer loop finished",
+    });
+
+    expect(prepared.truncated).toBe(false);
+  });
+
+  it("refuses a type outside the agreed set", () => {
+    const recorder = resolveAgentOutputRecorder("architect");
+    // Valid case first, so a throwing stub cannot satisfy this vacuously.
+    expect(
+      recorder.prepare({
+        profile: "architect",
+        type: "milestone",
+        text: "planned",
+      }).type,
+    ).toBe("worker.progress");
+    expect(() =>
+      recorder.prepare({
+        profile: "architect",
+        type: "transcript" as never,
+        text: "the whole model transcript",
+      }),
+    ).toThrow(UnsupportedAgentOutputTypeError);
+  });
+
+  it("carries the mapped event fields alongside the bounded text", () => {
+    const recorder = resolveAgentOutputRecorder("architect");
+    const prepared = recorder.prepare({
+      profile: "architect",
+      type: "decision-question",
+      text: "Which migration order do you want?",
+    });
+
+    expect(prepared.type).toBe("worker.question");
+    expect(prepared.stage).toBe("worker");
+    expect(prepared.status).toBe("blocked");
   });
 });
