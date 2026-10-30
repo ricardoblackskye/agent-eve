@@ -372,3 +372,44 @@ describe("canonical run history records", () => {
     });
   });
 });
+
+
+describe("worker.roadblock output events (#558)", () => {
+  it("accepts a roadblock that is not a parked question", () => {
+    // A roadblock is recoverable: unlike worker.question it must not be forced
+    // to the blocked status that the park/resume path depends on.
+    const roadblock = toRunEvent({
+      ...event("worker.roadblock"),
+      status: "running",
+    });
+
+    expect(roadblock.type).toBe("worker.roadblock");
+    expect(roadblock.status).toBe("running");
+  });
+
+  it("accepts a roadblock carrying its issue comment reference", () => {
+    const roadblock = toRunEvent({
+      ...event("worker.roadblock"),
+      commentReference: {
+        provider: "github",
+        id: 42,
+        url: "https://github.com/example/repo/issues/1#issuecomment-42",
+      },
+    });
+
+    expect(roadblock.commentReference?.url).toBe(
+      "https://github.com/example/repo/issues/1#issuecomment-42",
+    );
+  });
+
+  it("keeps the existing type contract intact", () => {
+    // Controls: the new type must not widen the contract. A parked question
+    // still requires blocked, and an undefined type is still refused.
+    expect(() =>
+      toRunEvent({ ...event("worker.question"), status: "running" }),
+    ).toThrow(/blocked/i);
+    expect(() =>
+      toRunEvent({ ...event(), type: "worker.nonsense" as never }),
+    ).toThrow(/type/i);
+  });
+});
