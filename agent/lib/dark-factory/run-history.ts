@@ -56,6 +56,7 @@ export type RunEventType =
   | "dispatch.attempt"
   | "worker.progress"
   | "worker.question"
+  | "worker.roadblock"
   | "worker.completed"
   | "review.round"
   | "pr.opened"
@@ -254,6 +255,7 @@ const RUN_EVENT_TYPES: readonly RunEventType[] = [
   "dispatch.attempt",
   "worker.progress",
   "worker.question",
+  "worker.roadblock",
   "worker.completed",
   "review.round",
   "pr.opened",
