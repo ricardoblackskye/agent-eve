@@ -604,8 +604,35 @@ export function AgentOutputPanel({
 }: {
   events: PersistedRunEvent[];
 }): ReactNode {
-  void events;
-  return null;
+  // Only events that CARRY a captured summary are agent output (#558). Any other event is a
+  // different lifecycle fact, and listing it here would render a blank row.
+  const captured = events.filter(
+    (item) => item.event.agentOutputSummary !== undefined,
+  );
+
+  return (
+    <section className="df-panel">
+      <PanelHead title="AGENT OUTPUT" badges={["AGENT"]} />
+      <div className="df-panel-body">
+        {captured.length === 0 ? (
+          <StatePanel state="empty" message="No agent output captured" />
+        ) : (
+          <ul className="df-agent-output-list">
+            {captured.map(({ event, sequence }) => (
+              <li className="df-agent-output-row" key={sequence}>
+                <p className="df-agent-output-meta">
+                  {event.type} | {event.occurredAt}
+                </p>
+                <p className="df-agent-output-text">
+                  {event.agentOutputSummary}
+                </p>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </section>
+  );
 }
 
 export function RunDiffPanel({ gitDiff }: { gitDiff?: string }): ReactNode {
