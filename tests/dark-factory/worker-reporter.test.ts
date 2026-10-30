@@ -16,6 +16,7 @@ import {
   createWorkerReporter,
   renderMessage,
   MAX_ATTEMPT,
+  MAX_QUESTION_CHARS,
   type WorkerMessage,
 } from "../../agent/lib/dark-factory/worker-reporter";
 import { ALLOWED_ENV_KEYS } from "../../agent/lib/dark-factory/tester-agent";
@@ -624,5 +625,88 @@ describe("RunHistoryWorkerReporter fail-closed and idempotent (#260)", () => {
     });
     // One POST, then one EDIT (patch) on the retry — not two POSTs.
     expect(calls.filter((c) => c.method === "POST")).toHaveLength(1);
+  });
+});
+
+describe("worker roadblock emissions (#558)", () => {
+  it("accepts a roadblock kind and still refuses an undefined one", () => {
+    const accepted = toWorkerMessage({
+      kind: "roadblock",
+      runId: "run-1",
+      repo: "ricardoblackskye/agent-eve",
+      issue: 558,
+      question: "no allow-listed command applies to this change",
+    });
+
+    expect(accepted.kind).toBe("roadblock");
+    // Control: the new kind must not open the allow-list to anything else.
+    expect(() =>
+      toWorkerMessage({
+        kind: "nonsense" as never,
+        runId: "run-1",
+        repo: "a/b",
+        issue: 1,
+      }),
+    ).toThrow(InvalidWorkerMessageError);
+  });
+
+  it("bounds the roadblock text the way a question is bounded", () => {
+    expect(() =>
+      toWorkerMessage({
+        kind: "roadblock",
+        runId: "run-1",
+        repo: "a/b",
+        issue: 1,
+        question: "x".repeat(MAX_QUESTION_CHARS + 1),
+      }),
+    ).toThrow(/at most/i);
+  });
+
+  it("renders a roadblock as recoverable, not as a run blocked on a human", () => {
+    const rendered = renderMessage(
+      toWorkerMessage({
+        kind: "roadblock",
+        runId: "run-1",
+        repo: "a/b",
+        issue: 1,
+        question: "the tester could not measure the test",
+      }),
+    );
+
+    expect(rendered).toContain("the tester could not measure the test");
+    // A roadblock is recoverable: borrowing the question wording would tell a
+    // reader the run is waiting on them, which is exactly wrong.
+    expect(rendered).not.toMatch(/blocked on a human decision/i);
+  });
+
+  it("records a roadblock as worker.roadblock with a running status", async () => {
+    const history = new SqliteRunHistoryStore(":memory:", () => "roadblock-run-1");
+    const accepted = await history.acceptDelivery({
+      deliveryId: "roadblock-delivery",
+      repo: "ricardoblackskye/agent-eve",
+      issue: 558,
+      receivedAt: "2026-10-30T12:00:00.000Z",
+    });
+    const runId = accepted.value?.runId;
+    if (!runId) throw new Error("run acceptance returned no runId");
+
+    const reporter = createWorkerReporter({}, { runHistory: history });
+    const result = await reporter.report({
+      kind: "roadblock",
+      runId,
+      repo: "ricardoblackskye/agent-eve",
+      issue: 558,
+      eventId: "roadblock-1",
+      occurredAt: "2026-10-30T12:01:00.000Z",
+      question: "no allow-listed command applies to this change",
+    });
+
+    expect(result.ok).toBe(true);
+    const events = await history.listRunEvents(runId);
+    const roadblock = (events.value ?? []).find(
+      (event) => event.type === "worker.roadblock",
+    );
+    expect(roadblock).toBeDefined();
+    expect(roadblock?.status).toBe("running");
   });
 });
