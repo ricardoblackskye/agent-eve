@@ -19,14 +19,23 @@ import { resolveAgentOutputRecorder } from "../../agent/lib/dark-factory/agent-o
 describe("the coding loop surfaces an unmeasured iteration (#559)", () => {
   it("hands the unmeasured iteration to the caller's tap, once", async () => {
     const onUnmeasured = vi.fn();
+    // ONE unmeasured iteration, then measured failures. The first fixture returned unmeasured on
+    // EVERY attempt, which cannot tell "one tap call per run" from "one per iteration" - the tap
+    // fires per unmeasured iteration by design, so the fixture has to isolate a single one.
+    let calls = 0;
     const result = await runCodingLoop({
-      maxIterations: 3,
+      maxIterations: 2,
       onUnmeasured,
-      worker: async (): Promise<WorkerResult> => ({
-        passed: false,
-        unmeasured: true,
-        output: "the checkout is not provisioned",
-      }),
+      worker: async (): Promise<WorkerResult> => {
+        calls += 1;
+        return calls === 1
+          ? {
+              passed: false,
+              unmeasured: true,
+              output: "the checkout is not provisioned",
+            }
+          : { passed: false, output: "a real failure on the second attempt" };
+      },
     });
 
     expect(onUnmeasured).toHaveBeenCalledTimes(1);

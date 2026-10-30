@@ -205,7 +205,18 @@ export async function runCodingLoop(
 
   for (let attempt = 1; attempt <= opts.maxIterations; attempt++) {
     iterations = attempt;
-    passed = (await opts.worker({ iteration: attempt })).passed;
+    const result = await opts.worker({ iteration: attempt });
+    passed = result.passed;
+    // An unmeasured iteration is NOT a failure of the developer's work (#541, #559): its tests
+    // never started, so it is a roadblock to surface rather than a result to fix. Hand it to the
+    // caller's tap, which owns whatever store and reporter exist. The tap deliberately does not
+    // change this loop's outcome - that would be a behaviour decision with its own blast radius.
+    if (!passed && result.unmeasured === true) {
+      await opts.onUnmeasured?.({
+        iteration: attempt,
+        ...(result.output !== undefined ? { output: result.output } : {}),
+      });
+    }
     if (passed) break;
   }
 
