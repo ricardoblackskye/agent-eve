@@ -102,6 +102,7 @@ import {
 } from "../agent/lib/dark-factory/plan-revision-recorder";
 import { resolveRunnerAnswer } from "../agent/lib/dark-factory/runner-config";
 import { createWorkerReporter } from "../agent/lib/dark-factory/worker-reporter";
+import { resolveAgentOutputRecorder } from "../agent/lib/dark-factory/agent-output";
 import { createStateStore } from "../agent/lib/dark-factory/state-provider";
 import { TRIGGER_LABELS } from "../agent/lib/dark-factory/trigger";
 import type { CodeAuthorProvider } from "../agent/lib/dark-factory/code-author";
@@ -1123,6 +1124,42 @@ async function main(): Promise<void> {
               console.log(
                 "     Test result: COULD NOT RUN — the tests did not start (the checkout may be unprovisioned); this iteration is unmeasured",
               );
+              // #559: the signal above used to die with the console line. Record it as a roadblock
+              // so an environment failure is readable against the run and on the ticket. The capture
+              // is OBSERVATIONAL: it is wrapped so a store or reporter failure can never change the
+              // #541 semantics below - the iteration stays unmeasured either way.
+              if (activeRun) {
+                try {
+                  const recorder = resolveAgentOutputRecorder("developer");
+                  const prepared = recorder.prepare({
+                    profile: "developer",
+                    type: "roadblock",
+                    text:
+                      `iteration ${ctx.iteration}: the tests did not start ` +
+                      `(the checkout may be unprovisioned): ${testOutcome.output ?? ""}`,
+                  });
+                  // One identity per run+iteration, so a retry EDITS the rolling comment rather
+                  // than stacking another one.
+                  await createWorkerReporter(process.env, {
+                    store: createStateStore(env),
+                    runHistory: activeRun.runHistory,
+                  }).report({
+                    kind: "roadblock",
+                    runId: activeRun.runId,
+                    repo: activeRun.repo,
+                    issue: activeRun.issue,
+                    eventId: `roadblock:${activeRun.runId}:${ctx.iteration}`,
+                    occurredAt: new Date().toISOString(),
+                    question: prepared.text,
+                  });
+                } catch (error) {
+                  console.log(
+                    `     (the unmeasured roadblock could not be recorded: ${
+                      error instanceof Error ? error.message : String(error)
+                    })`,
+                  );
+                }
+              }
               return { passed: false, output: testOutcome.output, unmeasured: true };
             }
 
