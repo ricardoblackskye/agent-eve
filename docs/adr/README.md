@@ -132,6 +132,7 @@ changes, write a new one that supersedes it.
 | [0076](0076-the-ledger-is-the-one-source-for-a-run-actual.md)            | The ledger is the one source for a run's actual                                                     | Accepted           |
 | [0077](0077-the-estimator-reads-repository-history.md)                   | The estimator reads the repository's finished runs                                                  | Accepted           |
 | [0078](0078-a-re-recorded-plan-revision-is-a-duplicate.md)               | A re-recorded plan revision is a duplicate, not a failure                                           | Accepted           |
-| [0079](0079-dearest-means-the-peer-distribution.md)                     | "Dearest" means the peer distribution, not one endpoint                                             | Accepted           |
-| [0080](0080-the-plan-comment-is-split-not-truncated.md)                     | The plan comment is split, not truncated                                                           | Accepted           |
-| [0081](0081-a-plan-that-maps-no-criteria-is-refused.md)                       | A plan that maps no acceptance criteria is refused                                                 | Accepted           |
+| [0079](0079-dearest-means-the-peer-distribution.md)                      | "Dearest" means the peer distribution, not one endpoint                                             | Accepted           |
+| [0080](0080-the-plan-comment-is-split-not-truncated.md)                  | The plan comment is split, not truncated                                                            | Accepted           |
+| [0081](0081-a-plan-that-maps-no-criteria-is-refused.md)                  | A plan that maps no acceptance criteria is refused                                                  | Accepted           |
+| [0082](0082-agent-output-is-a-bounded-summary-not-a-transcript.md)       | Captured agent output is a bounded, redacted summary                                                | Accepted           |
