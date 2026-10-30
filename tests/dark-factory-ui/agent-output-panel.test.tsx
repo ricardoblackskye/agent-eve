@@ -42,6 +42,26 @@ function notCaptured(sequence = 2): PersistedRunEvent {
   } as PersistedRunEvent;
 }
 
+function capturedWithComment(summary: string): PersistedRunEvent {
+  return {
+    sequence: 3,
+    event: {
+      eventId: "evt-3",
+      runId: "run-561",
+      type: "worker.roadblock",
+      stage: "worker",
+      occurredAt: AT,
+      status: "running",
+      agentOutputSummary: summary,
+      commentReference: {
+        provider: "github",
+        id: 2,
+        url: "https://github.com/example/repo/issues/1#issuecomment-2",
+      },
+    },
+  } as PersistedRunEvent;
+}
+
 describe("AgentOutputPanel (#561)", () => {
   it("renders a captured summary with its type and timestamp", () => {
     const { container } = render(
@@ -71,5 +91,25 @@ describe("AgentOutputPanel (#561)", () => {
     expect(container.querySelector(".df-state-empty")).not.toBeNull();
     expect(container.querySelector(".df-state-error")).toBeNull();
     expect(container.querySelectorAll(".df-agent-output-row").length).toBe(0);
+  });
+
+  it("links the posted issue comment when the recorder stored a reference", () => {
+    const { container } = render(
+      <AgentOutputPanel events={[capturedWithComment("see the ticket")]} />,
+    );
+
+    const link = container.querySelector("a");
+    expect(link?.getAttribute("href")).toBe(
+      "https://github.com/example/repo/issues/1#issuecomment-2",
+    );
+  });
+
+  it("CONTROL: renders no link when no reference was stored", () => {
+    // Paired with the case above, so a link rendered unconditionally cannot pass.
+    const { container } = render(
+      <AgentOutputPanel events={[captured("no ticket link")]} />,
+    );
+
+    expect(container.querySelector("a")).toBeNull();
   });
 });
