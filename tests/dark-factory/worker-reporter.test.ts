@@ -703,10 +703,11 @@ describe("worker roadblock emissions (#558)", () => {
 
     expect(result.ok).toBe(true);
     const events = await history.listRunEvents(runId);
-    const roadblock = (events.value ?? []).find(
-      (event) => event.type === "worker.roadblock",
+    const roadblock = (events.value?.items ?? []).find(
+      (item) => item.event.type === "worker.roadblock",
     );
     expect(roadblock).toBeDefined();
-    expect(roadblock?.status).toBe("running");
+    expect(roadblock?.event.status).toBe("running");
+    history.close();
   });
 });

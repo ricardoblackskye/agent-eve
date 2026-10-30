@@ -33,7 +33,11 @@ import type { RunHistoryStore } from "./run-history-store";
 import { toRunEvent } from "./run-history";
 import type { StateReadResult, StateStore } from "./state";
 
-export type WorkerMessageKind = "progress" | "completed" | "question";
+export type WorkerMessageKind =
+  | "progress"
+  | "completed"
+  | "question"
+  | "roadblock";
 
 /** Canonical, provider-agnostic report from a worker. Fields, not free prose. */
 export interface WorkerMessage {
@@ -70,7 +74,12 @@ export const MAX_TEST_EVIDENCE_CHARS = 300;
 export const MAX_ATTEMPT = 1000;
 
 const REPO_PAIR_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
-const KINDS: WorkerMessageKind[] = ["progress", "completed", "question"];
+const KINDS: WorkerMessageKind[] = [
+  "progress",
+  "completed",
+  "question",
+  "roadblock",
+];
 
 function positiveInt(value: unknown, field: string): number {
   if (
@@ -194,7 +203,7 @@ export function toWorkerMessage(input: Partial<WorkerMessage>): WorkerMessage {
     });
   }
 
-  if (message.kind === "question") {
+  if (message.kind === "question" || message.kind === "roadblock") {
     const question =
       typeof input.question === "string" ? input.question.trim() : "";
     if (!question) {
@@ -253,6 +262,13 @@ export function renderMessage(message: WorkerMessage): string {
       );
     }
     return lines.join("\n");
+  }
+  if (message.kind === "roadblock") {
+    return (
+      `🤖 **Eve** (Dark Factory) — a worker hit a **roadblock** on ${where}\n\n` +
+      `${message.question}\n\n` +
+      "_Not waiting on you: the run records this and carries on._"
+    );
   }
   return (
     `🤖 **Eve** (Dark Factory) — this run is **blocked on a human decision** (${where})\n\n` +
@@ -322,7 +338,9 @@ class RunHistoryWorkerReporter implements WorkerReporter {
           ? "worker.progress"
           : valid.kind === "completed"
             ? "worker.completed"
-            : "worker.question",
+            : valid.kind === "roadblock"
+              ? "worker.roadblock"
+              : "worker.question",
       stage: "worker",
       occurredAt: valid.occurredAt,
       status: valid.kind === "question" ? "blocked" : "running",
