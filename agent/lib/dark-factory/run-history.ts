@@ -133,6 +133,13 @@ export interface RunEvent {
    */
   costRefusal?: CostGovernorRefusal;
   /**
+   * Bounded, redacted summary of the notable output a worker captured (#558).
+   * Never a transcript, and never raw prompts. The bound must equal the
+   * reporter's MAX_QUESTION_CHARS, because anything longer is refused when
+   * posted; a guard in the tests keeps the two in step.
+   */
+  agentOutputSummary?: string;
+  /**
    * A circuit-breaker trip recorded on the run (#313): a closed vocabulary of
    * reasons plus the numeric bound that was hit. Never free text.
    */
@@ -459,6 +466,13 @@ function optionalCommentReference(
 ): CommentReference | undefined {
   return value === undefined ? undefined : commentReference(value);
 }
+
+/**
+ * Hard cap on a captured agent-output summary (#558). It mirrors the bound the
+ * reporter enforces on a posted message, because a summary the ledger accepts
+ * must be one the reporter will post.
+ */
+export const MAX_AGENT_OUTPUT_CHARS = 2000;
 
 /** The canonical cost-refusal codes (#270); kept in sync with CostGovernorRefusal. */
 const COST_REFUSALS: readonly CostGovernorRefusal[] = [
