@@ -30,7 +30,7 @@ describe("Agent output recorder contract (#558)", () => {
 
     // worker.question is validated to carry status "blocked" (run-history.ts),
     // so the mapping must produce it rather than leaving it to the caller.
-    expect(recorder.toEvent(item, "2026-10-30T10:00:00.000Z")).toEqual({
+    expect(recorder.toEvent(item)).toEqual({
       type: "worker.question",
       stage: "worker",
       status: "blocked",
@@ -45,23 +45,56 @@ describe("Agent output recorder contract (#558)", () => {
       text: "plan posted to the issue",
     };
 
-    expect(recorder.toEvent(item, "2026-10-30T10:00:00.000Z")).toEqual({
+    expect(recorder.toEvent(item)).toEqual({
       type: "worker.progress",
       stage: "worker",
     });
   });
 
-  it("carries the comment reference through the mapping", () => {
+  it("maps a roadblock onto its own type without forcing a blocked status", () => {
+    const recorder = resolveAgentOutputRecorder("developer");
+    const item: CapturedAgentOutput = {
+      profile: "developer",
+      type: "roadblock",
+      text: "no allow-listed command applies to this change",
+    };
+
+    // A roadblock is recoverable, so it must NOT borrow worker.question's
+    // blocked status (which is what the park/resume path treats as parked).
+    expect(recorder.toEvent(item)).toEqual({
+      type: "worker.roadblock",
+      stage: "worker",
+    });
+  });
+
+  it("carries the issue comment reference through the mapping", () => {
     const recorder = resolveAgentOutputRecorder("architect");
     const item: CapturedAgentOutput = {
       profile: "architect",
       type: "decision-question",
       text: "Which database should the fixture target?",
-      commentReference: "https://github.com/example/repo/issues/1#issuecomment-2",
+      commentReference: {
+        provider: "github",
+        id: 2,
+        url: "https://github.com/example/repo/issues/1#issuecomment-2",
+      },
     };
 
-    expect(
-      recorder.toEvent(item, "2026-10-30T10:00:00.000Z").commentReference,
-    ).toBe("https://github.com/example/repo/issues/1#issuecomment-2");
+    expect(recorder.toEvent(item).commentReference).toEqual({
+      provider: "github",
+      id: 2,
+      url: "https://github.com/example/repo/issues/1#issuecomment-2",
+    });
+  });
+
+  it("omits the comment reference entirely when none was posted", () => {
+    const recorder = resolveAgentOutputRecorder("tester");
+    const item: CapturedAgentOutput = {
+      profile: "tester",
+      type: "milestone",
+      text: "test run completed",
+    };
+
+    expect("commentReference" in recorder.toEvent(item)).toBe(false);
   });
 });
