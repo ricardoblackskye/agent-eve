@@ -8,6 +8,7 @@ import {
   planApprovalEventId,
   type PlanApprovalDeps,
 } from "../../agent/lib/dark-factory/plan-approval";
+import { MAX_QUESTION_CHARS } from "../../agent/lib/dark-factory/worker-reporter";
 import {
   parsePlanFromComments,
   planBlockBody,
@@ -54,6 +55,25 @@ describe("the park (#365 R4 Task 2)", () => {
     expect(report.issue).toBe(365);
     // Stable, so the same delivery parking twice records one event rather than two.
     expect(report.eventId).toBe(planApprovalEventId("run-1"));
+  });
+
+  it("bounds and redacts the question before it is reported (#558)", async () => {
+    const d = deps();
+    await parkForApproval(d, {
+      ...options,
+      question:
+        "the plan needs a decision:\nDF_API_KEY=placeholder-not-a-real-key\n" +
+        "x".repeat(4000),
+    });
+
+    const report = (d.reporter.report as ReturnType<typeof vi.fn>).mock
+      .calls[0][0];
+    // Bounded: the reporter hard-rejects a question over MAX_QUESTION_CHARS, so a
+    // caller-supplied question that long would otherwise crash the park outright.
+    expect(report.question.length).toBeLessThanOrEqual(MAX_QUESTION_CHARS);
+    // Redacted before it reaches the ticket or the ledger.
+    expect(report.question).not.toContain("placeholder-not-a-real-key");
+    expect(report.question).toContain("[redacted DF_API_KEY]");
   });
 
   it("asks a caller-supplied question, so a park need not always be about approval (#381 R2)", async () => {

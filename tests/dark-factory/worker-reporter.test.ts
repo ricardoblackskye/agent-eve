@@ -708,6 +708,12 @@ describe("worker roadblock emissions (#558)", () => {
     );
     expect(roadblock).toBeDefined();
     expect(roadblock?.event.status).toBe("running");
+    // Decision 2: the ledger keeps a bounded, redacted summary of what was
+    // captured, so a run's notable output is readable against the run itself and
+    // not only on the ticket.
+    expect(roadblock?.event.agentOutputSummary).toBe(
+      "no allow-listed command applies to this change",
+    );
     history.close();
   });
 });
