@@ -58,3 +58,31 @@ unrecognized event type is displayed literally
 ([ADR 0003](../../docs/adr/0003-unmeasured-is-never-zero.md)). The run detail, KPI
 tiles, and terminal trend all come from the same read API — there is no second
 source of truth.
+
+## Captured agent output: what survives a run
+
+An Agent's notable output used to die on the console. It is now recorded as a typed, bounded,
+redacted summary against the run and posted as a readable comment.
+
+**Three types only** (epic #557): a **decision-question** asks a human (`worker.question`, which
+validation requires to carry `blocked`), a **roadblock** is a recoverable problem that the run
+reports and carries on from (`worker.roadblock`), and a **milestone** is a stage boundary
+(`worker.progress`). The model's full transcript and raw shell output are deliberately **not**
+captured.
+
+**Bounded and redacted.** Text is capped at the same 2000-character bound the reporter enforces on
+a posted message - the recorder adopts its consumer's limit rather than choosing a ceiling of its
+own - and it passes through the diff sanitiser first. That sanitiser rewrites env-file style `DF_*`
+assignments; it does **not** rewrite a secret echoed mid-sentence, and a test pins that boundary.
+See [ADR 0082](../adr/0082-agent-output-is-a-bounded-summary-not-a-transcript.md).
+
+**Where it lands.** The run ledger stores the bounded summary
+(`df_run_events.agent_output_summary`), and the reporter records it against the run and posts one
+rolling comment per run, idempotent by `(runId, kind)`, so a retry **edits** rather than
+duplicating. The capture is observational: if the store or the reporter fails, the run's own
+behaviour is unchanged.
+
+**An unmeasured iteration is a roadblock, not a failure.** When the test command cannot even start
+(an unprovisioned checkout, #541) the iteration is *unmeasured* - the environment's failure, not
+the developer's. That distinction used to be logged and dropped; it is now recorded as a roadblock
+so it survives the console, and the runner returns the iteration as unmeasured exactly as before.
