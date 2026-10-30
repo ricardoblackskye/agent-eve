@@ -20,6 +20,7 @@ import {
   parsePlanFromComments,
   type PlanCommentRecord,
 } from "./plan-comment";
+import { resolveAgentOutputRecorder } from "./agent-output";
 
 /** What the human is asked. One place, so the ticket and the tests agree on the wording. */
 export const PLAN_APPROVAL_QUESTION =
@@ -120,6 +121,23 @@ export type ParkResult =
     }
   | { ok: false; error: string };
 
+/** The Architect's recorder: the first agent the factory calls (#557). */
+const ARCHITECT_OUTPUT = resolveAgentOutputRecorder("architect");
+
+/**
+ * Bound and redact the question through the agent-output recorder before it is
+ * recorded (#558). The reporter hard-rejects a question longer than
+ * MAX_QUESTION_CHARS, so a long caller-supplied question would otherwise crash the
+ * park; and a secret in the text must not reach the ticket or the ledger.
+ */
+function boundedQuestion(question: string): string {
+  return ARCHITECT_OUTPUT.prepare({
+    profile: "architect",
+    type: "decision-question",
+    text: question,
+  }).text;
+}
+
 /**
  * Park the run and ask a human to approve the plan.
  *
@@ -140,7 +158,7 @@ export async function parkForApproval(
     occurredAt: options.occurredAt,
     // A target that cannot be justified asks a different question (#381 R2); everything else still asks
     // for approval, which is the only path that reaches coding.
-    question: options.question ?? PLAN_APPROVAL_QUESTION,
+    question: boundedQuestion(options.question ?? PLAN_APPROVAL_QUESTION),
   });
 
   if (!reported.ok) {

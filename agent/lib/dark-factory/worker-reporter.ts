@@ -345,6 +345,11 @@ class RunHistoryWorkerReporter implements WorkerReporter {
       occurredAt: valid.occurredAt,
       status: valid.kind === "question" ? "blocked" : "running",
       ...(valid.attempt !== undefined ? { iterationCount: valid.attempt } : {}),
+      // #558 decision 2: the row keeps a bounded, redacted summary of what was
+      // captured, so the run's notable output is readable against the run itself.
+      ...(valid.question !== undefined
+        ? { agentOutputSummary: valid.question }
+        : {}),
     });
 
     try {
