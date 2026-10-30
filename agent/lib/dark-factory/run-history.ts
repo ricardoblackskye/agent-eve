@@ -483,6 +483,27 @@ const COST_REFUSALS: readonly CostGovernorRefusal[] = [
   "tenant_unconfigured",
 ];
 
+/**
+ * A captured agent-output summary (#558): one bounded, redacted string. Capped so
+ * a stored row cannot become a transcript, and capped at the SAME bound the
+ * reporter enforces on a posted message (a guard in the tests keeps them equal).
+ */
+function optionalAgentOutputSummary(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  const text = typeof value === "string" ? value.trim() : "";
+  if (!text) {
+    return invalid("agentOutputSummary", value, "to be a non-empty string");
+  }
+  if (text.length > MAX_AGENT_OUTPUT_CHARS) {
+    return invalid(
+      "agentOutputSummary",
+      text.length,
+      `to be at most ${MAX_AGENT_OUTPUT_CHARS} characters`,
+    );
+  }
+  return text;
+}
+
 function optionalCostRefusal(value: unknown): CostGovernorRefusal | undefined {
   if (value === undefined) return undefined;
   if (
@@ -688,6 +709,9 @@ export function toRunEvent(input: Partial<RunEvent>): RunEvent {
   const prUrl = optionalPrUrl(input.prUrl);
   const commentReference = optionalCommentReference(input.commentReference);
   const costRefusal = optionalCostRefusal(input.costRefusal);
+  const agentOutputSummary = optionalAgentOutputSummary(
+    input.agentOutputSummary,
+  );
   const testResults = optionalTestResults(input.testResults);
   const trace = optionalTrace(input.trace);
   const breakerTrip = optionalBreakerTrip(input.breakerTrip);
@@ -778,6 +802,7 @@ export function toRunEvent(input: Partial<RunEvent>): RunEvent {
     ...(prUrl !== undefined ? { prUrl } : {}),
     ...(commentReference !== undefined ? { commentReference } : {}),
     ...(costRefusal !== undefined ? { costRefusal } : {}),
+    ...(agentOutputSummary !== undefined ? { agentOutputSummary } : {}),
     ...(testResults !== undefined ? { testResults } : {}),
     ...(trace !== undefined ? { trace } : {}),
     ...(breakerTrip !== undefined ? { breakerTrip } : {}),

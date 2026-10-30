@@ -297,6 +297,7 @@ interface RunEventRow {
   pr_url: string | null;
   comment_reference: string | null;
   cost_refusal: string | null;
+  agent_output_summary?: string | null;
   test_results: string | null;
   trace: string | null;
   breaker_trip: string | null;
@@ -407,6 +408,10 @@ function rowToEvent(row: RunEventRow): PersistedRunEvent {
         : {}),
       ...(row.cost_refusal !== null && row.cost_refusal !== undefined
         ? { costRefusal: row.cost_refusal as RunEvent["costRefusal"] }
+        : {}),
+      ...(row.agent_output_summary !== null &&
+      row.agent_output_summary !== undefined
+        ? { agentOutputSummary: row.agent_output_summary }
         : {}),
       ...(row.test_results !== null && row.test_results !== undefined
         ? { testResults: readTestResults(row.test_results) }
@@ -531,6 +536,7 @@ const SQLITE_SCHEMA = `
     pr_url TEXT,
     comment_reference TEXT,
     cost_refusal TEXT,
+    agent_output_summary TEXT,
     test_results TEXT,
     trace TEXT,
     breaker_trip TEXT,
@@ -740,8 +746,9 @@ function writeEvent(db: DatabaseSync, event: RunEvent): void {
        run_id, event_id, type, stage, occurred_at, status, attempt,
        review_round, iteration_count, fix_cycle_count, finding_count,
        resolved_count, accepted_count, latency_ms, cost_usd, pr_url,
-       comment_reference, cost_refusal, test_results, trace, breaker_trip
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       comment_reference, cost_refusal, test_results, trace, breaker_trip,
+       agent_output_summary
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     event.runId,
     event.eventId,
@@ -764,6 +771,7 @@ function writeEvent(db: DatabaseSync, event: RunEvent): void {
     event.testResults ? JSON.stringify(event.testResults) : null,
     event.trace ? JSON.stringify(event.trace) : null,
     event.breakerTrip ? JSON.stringify(event.breakerTrip) : null,
+    event.agentOutputSummary ?? null,
   );
 }
 
@@ -1116,6 +1124,11 @@ export class SqliteRunHistoryStore implements RunHistoryStore {
       }
       if (!eventColumns.some((column) => column.name === "cost_refusal")) {
         db.exec("ALTER TABLE df_run_events ADD COLUMN cost_refusal TEXT");
+      }
+      if (!eventColumns.some((column) => column.name === "agent_output_summary")) {
+        db.exec(
+          "ALTER TABLE df_run_events ADD COLUMN agent_output_summary TEXT",
+        );
       }
       if (!eventColumns.some((column) => column.name === "test_results")) {
         db.exec("ALTER TABLE df_run_events ADD COLUMN test_results TEXT");
