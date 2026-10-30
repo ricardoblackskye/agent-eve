@@ -100,18 +100,33 @@ describe("Agent output recorder contract (#558)", () => {
     expect("commentReference" in recorder.toEvent(item)).toBe(false);
   });
 
-  it("redacts an inline DF_ secret before the text leaves the recorder", () => {
+  it("redacts a DF_ secret assignment before the text leaves the recorder", () => {
     const recorder = resolveAgentOutputRecorder("developer");
     const item: CapturedAgentOutput = {
       profile: "developer",
       type: "roadblock",
-      text: "the sandbox refused: DF_API_KEY=sk-live-notARealSecret was rejected",
+      text: "the sandbox refused:\nDF_API_KEY=placeholder-not-a-real-key\nand stopped",
     };
 
     const prepared = recorder.prepare(item);
 
     expect(prepared.text).toContain("[redacted DF_API_KEY]");
-    expect(prepared.text).not.toContain("sk-live-notARealSecret");
+    expect(prepared.text).not.toContain("placeholder-not-a-real-key");
+  });
+
+  it("does not rewrite a secret echoed mid-sentence - the sanitiser's boundary", () => {
+    // GUARD, not a bug fix: the reused sanitiser targets env-file style
+    // assignments (at a line start, optionally behind a diff prefix). A secret
+    // echoed mid-sentence is NOT rewritten, which ADR 0082 records as the
+    // boundary of what "redacted" means here.
+    const recorder = resolveAgentOutputRecorder("developer");
+    const prepared = recorder.prepare({
+      profile: "developer",
+      type: "roadblock",
+      text: "the client echoed DF_API_KEY=placeholder-not-a-real-key back",
+    });
+
+    expect(prepared.text).not.toContain("[redacted");
   });
 
   it("caps an oversized item and flags it as truncated", () => {

@@ -12,6 +12,8 @@
  */
 
 import type { RunEvent, RunEventType, RunStage, RunStatus } from "./run-history";
+import { sanitizeDiff } from "./diff-capture";
+import { MAX_COMMENT_CHARS } from "./plan-comment";
 
 /**
  * The ledger's canonical issue-comment reference. Derived from the public
@@ -129,8 +131,25 @@ class MappedAgentOutputRecorder implements AgentOutputRecorder {
       : { ...mapped, commentReference: item.commentReference };
   }
 
-  prepare(_item: CapturedAgentOutput): PreparedAgentOutput {
-    throw new Error("not implemented");
+  prepare(item: CapturedAgentOutput): PreparedAgentOutput {
+    const mapped = EVENT_BY_TYPE[item.type];
+    if (mapped === undefined) {
+      throw new UnsupportedAgentOutputTypeError(item.type);
+    }
+
+    // Reuse the diff capture's sanitiser rather than adding a second
+    // redaction path: it strips env-file style `DF_*` assignments and caps
+    // length. It deliberately does NOT rewrite a secret echoed mid-sentence,
+    // which ADR 0082 records as the boundary of this guarantee.
+    const redacted = sanitizeDiff(item.text);
+    const truncated = redacted.length > MAX_COMMENT_CHARS;
+    const bounded = truncated
+      ? redacted.slice(0, MAX_COMMENT_CHARS)
+      : redacted;
+
+    return item.commentReference === undefined
+      ? { ...mapped, text: bounded, truncated }
+      : { ...mapped, text: bounded, truncated, commentReference: item.commentReference };
   }
 }
 
