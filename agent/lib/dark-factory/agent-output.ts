@@ -22,7 +22,7 @@ import { MAX_QUESTION_CHARS } from "./worker-reporter";
  */
 type CommentReference = NonNullable<RunEvent["commentReference"]>;
 
-/** The agreed set of capturable output types. Anything else is not captured. */
+/** The agreed set of output types the factory captures. Anything else is not. */
 export type AgentOutputType = "decision-question" | "roadblock" | "milestone";
 
 /** The agent profiles that opt into capture. */
