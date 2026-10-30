@@ -255,3 +255,95 @@ A user must authenticate via Google OAuth before accessing the Eve Chat UI.
   });
 });
 
+/**
+ * #502 - a plan that never mapped its acceptance criteria must be REFUSED, not tolerated.
+ *
+ * The contract already said so: `ExecutionPlan.acceptanceCriteriaMap` is non-optional (plan-validator.ts:53) while
+ * the validation was conditional (:351), so a plan carrying no mappings passed. The AC-coverage check that would
+ * otherwise catch it is driven by `extractStoryAcceptanceCriteria`, which matches only AC-numbered labels or
+ * "- Given" bullets - so whether the field was required effectively depended on whether an extractor matched the
+ * story's prose. Measured before the change, with the story written in this repository's own checkbox style:
+ * a mapping-less plan validated TRUE.
+ *
+ * Cases come in pairs on purpose. The AC-bearing variant documents that the old rule caught it by accident; the
+ * prose/checkbox variant is the actual gap, and it is the one the rule must close.
+ */
+describe("#502 a plan must map its acceptance criteria", () => {
+  const acBearingStory = "Add a footer.\n\nAC1: the footer renders\nAC2: a test covers it";
+  const checkboxStory = "## Acceptance criteria\n- [ ] the footer renders\n- [ ] a test covers it";
+  const proseStory = "Please add a footer to the home page.";
+
+  const completePlan = {
+    storyId: 502,
+    title: "footer",
+    approach: "add it",
+    tasks: [{ title: "t", objective: "o" }],
+    targetFiles: [{ path: "app/page.tsx", action: "modify", rationale: "r" }],
+    acceptanceCriteriaMap: [
+      { acId: "AC1", description: "renders", testFile: "tests/a.test.ts", testCaseName: "renders" },
+      { acId: "AC2", description: "covered", testFile: "tests/a.test.ts", testCaseName: "covers" },
+    ],
+  };
+  const withoutMap = ((): Record<string, unknown> => {
+    const { acceptanceCriteriaMap: _omitted, ...rest } = completePlan;
+    return rest;
+  })();
+
+  it("AC3 control: a plan WITH mappings still validates, for every story format", () => {
+    for (const story of [acBearingStory, checkboxStory, proseStory]) {
+      const result = validateExecutionPlan(completePlan as never, story);
+      expect(result.valid, story.slice(0, 24)).toBe(true);
+      expect(result.errors).toEqual([]);
+    }
+  });
+
+  it("AC1: an ABSENT map is refused - including when the story yields no AC ids", () => {
+    for (const story of [acBearingStory, checkboxStory, proseStory]) {
+      expect(validateExecutionPlan(withoutMap as never, story).valid, story.slice(0, 24)).toBe(false);
+    }
+  });
+
+  it("AC1: an EMPTY map is refused", () => {
+    for (const story of [acBearingStory, checkboxStory, proseStory]) {
+      expect(
+        validateExecutionPlan({ ...completePlan, acceptanceCriteriaMap: [] } as never, story).valid,
+        story.slice(0, 24),
+      ).toBe(false);
+    }
+  });
+
+  it("AC1: a map that is not an array is refused rather than crashing the validator", () => {
+    // Before this change it threw: `(plan.acceptanceCriteriaMap || []).map is not a function`. A malformed plan
+    // aborted validation instead of being refused, which is the same class as #501.
+    let result: { valid: boolean; errors: string[] } | undefined;
+    expect(() => {
+      result = validateExecutionPlan(
+        { ...completePlan, acceptanceCriteriaMap: "AC1 -> tests/a.test.ts" } as never,
+        acBearingStory,
+      );
+    }).not.toThrow();
+    expect(result?.valid).toBe(false);
+  });
+
+  it("AC2: the refusal names the field, so a parked run can explain why", () => {
+    const refusals = [
+      validateExecutionPlan(withoutMap as never, proseStory),
+      validateExecutionPlan({ ...completePlan, acceptanceCriteriaMap: [] } as never, proseStory),
+      validateExecutionPlan({ ...completePlan, acceptanceCriteriaMap: {} } as never, proseStory),
+    ];
+    for (const result of refusals) {
+      expect(result.valid).toBe(false);
+      expect(result.errors.join(" ")).toMatch(/acceptanceCriteriaMap/);
+    }
+  });
+
+  it("AC5: a retry that DROPS the mappings is not an improvement", () => {
+    // The real sequence from WebFeedPOC#173: attempt 2 carried three mappings, attempt 3 omitted the field, and
+    // the omission was ACCEPTED. The later attempt must be invalid, so the loop cannot treat it as progress.
+    const earlier = validateExecutionPlan(completePlan as never, checkboxStory);
+    const later = validateExecutionPlan(withoutMap as never, checkboxStory);
+
+    expect(earlier.valid).toBe(true);
+    expect(later.valid).toBe(false);
+  });
+});
