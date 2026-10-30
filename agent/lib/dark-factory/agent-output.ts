@@ -13,7 +13,7 @@
 
 import type { RunEvent, RunEventType, RunStage, RunStatus } from "./run-history";
 import { sanitizeDiff } from "./diff-capture";
-import { MAX_COMMENT_CHARS } from "./plan-comment";
+import { MAX_QUESTION_CHARS } from "./worker-reporter";
 
 /**
  * The ledger's canonical issue-comment reference. Derived from the public
@@ -141,10 +141,15 @@ class MappedAgentOutputRecorder implements AgentOutputRecorder {
     // redaction path: it strips env-file style `DF_*` assignments and caps
     // length. It deliberately does NOT rewrite a secret echoed mid-sentence,
     // which ADR 0082 records as the boundary of this guarantee.
+    //
+    // The item bound is the CONSUMER's, not a ceiling of our own choosing:
+    // the reporter hard-rejects a message whose text exceeds
+    // MAX_QUESTION_CHARS, so a larger bound here would hand it something it
+    // refuses. One authority over the same input.
     const redacted = sanitizeDiff(item.text);
-    const truncated = redacted.length > MAX_COMMENT_CHARS;
+    const truncated = redacted.length > MAX_QUESTION_CHARS;
     const bounded = truncated
-      ? redacted.slice(0, MAX_COMMENT_CHARS)
+      ? redacted.slice(0, MAX_QUESTION_CHARS)
       : redacted;
 
     return item.commentReference === undefined
