@@ -86,3 +86,11 @@ behaviour is unchanged.
 (an unprovisioned checkout, #541) the iteration is *unmeasured* - the environment's failure, not
 the developer's. That distinction used to be logged and dropped; it is now recorded as a roadblock
 so it survives the console, and the runner returns the iteration as unmeasured exactly as before.
+
+**The Tester's own roadblock is a refused command.** Its runner permits only `npx` with
+`{ tsc, cspell, vitest, gitleaks }` and throws for anything else. Because that runner is injected, the
+capture wraps it: the refusal is reported through a tap and the error is rethrown unchanged, so the
+Tester's verdict is exactly what it was. The tap fires only on the allow-list message rather than on
+every `ValidationError`, because that class is also what a caller bug throws - tapping those would
+report a programming mistake as an agent roadblock. And a command that runs and *fails* is a normal
+result, not a roadblock: only a command that could not run at all is.
