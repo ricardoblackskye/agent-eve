@@ -159,10 +159,31 @@ export interface LoopResult {
   fixCycles: number;
 }
 
+/**
+ * An iteration whose tests could not even start, so its result is unmeasured rather than a
+ * failure of the developer's work (#541, #559). The loop classifies it; the caller decides what
+ * to record, because the loop is pure and owns no store or reporter.
+ */
+export interface UnmeasuredIteration {
+  /** 1-based iteration index, matching `LoopContext.iteration`. */
+  iteration: number;
+  /** The worker's own explanation, when it gave one. */
+  output?: string;
+}
+
+/**
+ * Called when an iteration is unmeasured. Optional, so existing callers are unaffected.
+ * The tap is an addition: the loop's return value does not change because of it.
+ */
+export type UnmeasuredTap = (
+  info: UnmeasuredIteration,
+) => void | Promise<void>;
+
 /** Options for runCodingLoop. */
 export interface CodingLoopOptions {
   worker: WorkerFn;
   maxIterations: number;
+  onUnmeasured?: UnmeasuredTap;
 }
 
 /**
