@@ -9,6 +9,7 @@ import {
   MeasuredMetrics,
   OutcomeArtifacts,
   PanelHead,
+  AgentOutputPanel,
   BreakerTripPanel,
   RunDetailPanel,
   RunDiffPanel,
@@ -89,6 +90,9 @@ export default function DarkFactoryRunDetailPage() {
       </section>
       <RunDetailPanel summary={run.data.summary} view={view} />
       <OutcomeArtifacts prUrl={view.prUrl} />
+      {/* The panel needs the RAW event, where the recorder's summary lives; the view's
+          timeline is already a presentation of it and would have lost the summary. */}
+      <AgentOutputPanel events={run.data.events} />
       <RunDiffPanel gitDiff={view.gitDiff} />
       <TestOutputPanel testResults={view.testResults} />
       <TracePanel trace={view.trace} />
