@@ -10,7 +10,7 @@
 > is [Dark Factory (R1)](dark-factory.md) and the flow walkthroughs in the
 > [flow deep-dives](flow-run-lifecycle.md).
 
-_107 modules._
+_126 modules._
 
 ## agent-cli-author
 
@@ -19,6 +19,12 @@ pointed at the governed gateway and a per-run LEASE as its credential. A failed 
 never treated as authored code, and `withSandbox` always releases the sandbox.
 
 **Source:** [`agent/lib/dark-factory/agent-cli-author.ts`](../../agent/lib/dark-factory/agent-cli-author.ts)
+
+## agent-output
+
+Agent output capture (#558, epic #557). One extendable seam that turns each Agent's notable output into typed, capped and redacted records on the run ledger. The agreed taxonomy is deliberately small - decision-questions, roadblocks and milestones - and maps onto the run-history event types rather than inventing a parallel vocabulary, so a decision-question becomes a blocked worker.question and a milestone becomes worker.progress. The ledger stores a bounded, redacted summary plus the comment reference, never a transcript, and the readable prose lives on the issue.
+
+**Source:** [`agent/lib/dark-factory/agent-output.ts`](../../agent/lib/dark-factory/agent-output.ts)
 
 ## architect-discovery
 
