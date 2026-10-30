@@ -320,6 +320,37 @@ export interface RefusedCommand {
  */
 export type RefusedCommandTap = (info: RefusedCommand) => void | Promise<void>;
 
+/**
+ * The allow-list refusal text produced by `defaultCommandRunner`. Matched on the MESSAGE, not only
+ * on the error class: `ValidationError` is also what a caller bug throws ("validation input is
+ * invalid"), and tapping those would report a programming mistake as an agent roadblock.
+ */
+const REFUSAL_PATTERN = /Command not allowed/i;
+
+/**
+ * Wrap a runner so a refused command is reported through the tap and then rethrown unchanged
+ * (#560). Any other failure - including a caller-bug ValidationError - passes straight through.
+ */
+function withRefusalTap(
+  runner: CommandRunner,
+  tap: RefusedCommandTap,
+): CommandRunner {
+  return async (command, args, timeoutMs) => {
+    try {
+      return await runner(command, args, timeoutMs);
+    } catch (error) {
+      if (error instanceof ValidationError && REFUSAL_PATTERN.test(error.message)) {
+        try {
+          await tap({ command, args, reason: error.message });
+        } catch {
+          // The tap is observational. Its own failure must not change the refusal the caller sees.
+        }
+      }
+      throw error;
+    }
+  };
+}
+
 export class TesterAgent {
   readonly timeoutMs: number;
   readonly runner: CommandRunner;
@@ -339,7 +370,14 @@ export class TesterAgent {
     this.maxOutputLines = config.maxOutputLines ?? 1000;
     this.smokeTestTimeoutMultiplier = config.smokeTestTimeoutMultiplier ?? 3;
     this.config = config;
-    this.runner = options.commandRunner ?? defaultCommandRunner;
+    const runner = options.commandRunner ?? defaultCommandRunner;
+    // #560: a refused command is the Tester's own roadblock. The guard is pure and cannot observe
+    // its caller, and the runner is INJECTED, so the capture wraps it. The refusal still
+    // propagates: this is an addition, never a replacement.
+    this.runner =
+      options.onRefusedCommand === undefined
+        ? runner
+        : withRefusalTap(runner, options.onRefusedCommand);
 
     // Build the check registry. Order here defines execution order.
     this.checks = [
