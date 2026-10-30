@@ -626,6 +626,16 @@ export function AgentOutputPanel({
                 <p className="df-agent-output-text">
                   {event.agentOutputSummary}
                 </p>
+                {/* Only rendered when the recorder actually posted one: the reference is stored
+                    after the post, so its absence means there is nothing to open. */}
+                {event.commentReference ? (
+                  <a
+                    className="df-agent-output-link"
+                    href={event.commentReference.url}
+                  >
+                    View the issue comment
+                  </a>
+                ) : null}
               </li>
             ))}
           </ul>
