@@ -6,6 +6,10 @@ import {
   type CapturedAgentOutput,
 } from "../../agent/lib/dark-factory/agent-output";
 import { MAX_COMMENT_CHARS } from "../../agent/lib/dark-factory/plan-comment";
+import {
+  MAX_QUESTION_CHARS,
+  toWorkerMessage,
+} from "../../agent/lib/dark-factory/worker-reporter";
 
 describe("Agent output recorder contract (#558)", () => {
   it("resolves the recorder registered for the architect profile", () => {
@@ -129,18 +133,48 @@ describe("Agent output recorder contract (#558)", () => {
     expect(prepared.text).not.toContain("[redacted");
   });
 
-  it("caps an oversized item and flags it as truncated", () => {
+  it("bounds an oversized question by its consumer limit, and the reporter accepts it", () => {
+    const recorder = resolveAgentOutputRecorder("architect");
+    const prepared = recorder.prepare({
+      profile: "architect",
+      type: "decision-question",
+      text: "x".repeat(MAX_COMMENT_CHARS + 5_000),
+    });
+
+    expect(prepared.text.length).toBe(MAX_QUESTION_CHARS);
+    expect(prepared.truncated).toBe(true);
+    // The contract, not merely the length: the bound must be the CONSUMER's,
+    // or the reporter refuses the message we hand it (it hard-rejects a
+    // question longer than MAX_QUESTION_CHARS).
+    expect(() =>
+      toWorkerMessage({
+        kind: "question",
+        runId: "run-1",
+        repo: "a/b",
+        issue: 1,
+        question: prepared.text,
+      }),
+    ).not.toThrow();
+  });
+
+  it("bounds an oversized roadblock by the same consumer limit", () => {
     const recorder = resolveAgentOutputRecorder("developer");
-    const item: CapturedAgentOutput = {
+    const prepared = recorder.prepare({
       profile: "developer",
       type: "roadblock",
-      text: "x".repeat(MAX_COMMENT_CHARS + 5_000),
-    };
+      text: "y".repeat(MAX_COMMENT_CHARS + 5_000),
+    });
 
-    const prepared = recorder.prepare(item);
-
-    expect(prepared.text.length).toBe(MAX_COMMENT_CHARS);
-    expect(prepared.truncated).toBe(true);
+    expect(prepared.text.length).toBe(MAX_QUESTION_CHARS);
+    expect(() =>
+      toWorkerMessage({
+        kind: "roadblock",
+        runId: "run-1",
+        repo: "a/b",
+        issue: 1,
+        question: prepared.text,
+      }),
+    ).not.toThrow();
   });
 
   it("does not flag a within-budget item as truncated", () => {
