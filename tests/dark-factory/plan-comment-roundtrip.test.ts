@@ -9,7 +9,7 @@
  *
  * That comment was written by the same release. It carried the marker and the rendered markdown, and no
  * machine-readable block at all — because the runner called `postPlanComment` with `markdown` and no `plan`,
- * and `planCommentBody(markdown, plan?)` returns human markdown alone when `plan` is undefined.
+ * and the call site omitted `plan`, so no machine block was written anywhere.
  *
  * So the builder that owns the block, and that has its own passing round-trip test, was never the one the
  * runner used. The gap was invisible because `plan` is OPTIONAL: an omission compiles, runs, and posts a plan
@@ -21,6 +21,8 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   parsePlanFromComment,
+  parsePlanFromComments,
+  planBlockBody,
   planCommentBody,
 } from "../../agent/lib/dark-factory/plan-comment";
 
@@ -53,8 +55,12 @@ describe("#373 the plan survives the ticket round-trip", () => {
     }
   });
 
-  it("round-trips a plan through the body the runner is now required to post", () => {
-    const parsed = parsePlanFromComment(planCommentBody(MARKDOWN, PLAN));
+  it("round-trips a plan through the two comments the runner is now required to post", () => {
+    // #518: the block is its own comment, so the round-trip is over the pair.
+    const parsed = parsePlanFromComments([
+      { id: 1, body: planCommentBody(MARKDOWN) },
+      { id: 2, body: planBlockBody(PLAN) },
+    ]);
 
     expect(parsed).toEqual({ ok: true, plan: PLAN });
   });

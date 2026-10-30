@@ -5,6 +5,8 @@ import {
   normalizeCommentMarkdown,
   parsePlanFromComment,
   planCommentBody,
+  parsePlanFromComments,
+  planBlockBody,
 } from "../../agent/lib/dark-factory/plan-comment";
 
 /**
@@ -112,18 +114,25 @@ describe("#538 - the boundary: the file and the machine payload are untouched", 
     expect(fileMarkdown()).toContain("## Files to change");
   });
 
-  it("a resumed run can still read the plan back out of the comment", () => {
-    const body = planCommentBody(fileMarkdown(), plan());
+  it("a resumed run can still read the plan back, and #538's comment rendering does not break the pair", () => {
+    // #518: the machine block is its own comment now, so the read-back is over the pair. The point #538 pinned
+    // still stands: rendering the HUMAN half for a comment must not cost the read-back.
+    const plan = { storyId: 538, approach: "add a footer line to the home page" };
+    const parsed = parsePlanFromComments([
+      { id: 1, body: planCommentBody(fileMarkdown()) },
+      { id: 2, body: planBlockBody(plan) },
+    ]);
 
-    expect(parsePlanFromComment(body).ok).toBe(true);
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.plan).toEqual(plan);
   });
 
   it("re-posting the same plan produces the same body", () => {
-    expect(planCommentBody(fileMarkdown(), plan())).toBe(planCommentBody(fileMarkdown(), plan()));
+    expect(planCommentBody(fileMarkdown())).toBe(planCommentBody(fileMarkdown()));
   });
 
   it("the WHOLE comment has no H1 or H2, the estimate section included", () => {
-    const body = planCommentBody(fileMarkdown(), plan(), {
+    const body = planCommentBody(fileMarkdown(), {
       lowUsd: 0.1, highUsd: 0.2, costClass: "small", confidence: "medium",
     } as never);
 

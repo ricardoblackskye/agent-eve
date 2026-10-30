@@ -6,6 +6,8 @@ import {
   parsePlanFromComment,
   planCommentBody,
   renderCostEstimateSection,
+  parsePlanFromComments,
+  planBlockBody,
 } from "../../agent/lib/dark-factory/plan-comment";
 import { renderPlanFile } from "../../agent/lib/dark-factory/plan-file";
 import type { PlanCostEstimate } from "../../agent/lib/dark-factory/plan-cost-estimate";
@@ -193,8 +195,8 @@ describe("#488 AC6 the comment's size for a large plan", () => {
   it("keeps the section's own cost O(1), and still round-trips the plan at size", () => {
     const plan = largePlan();
     const markdown = render(plan);
-    const withEstimate = planCommentBody(markdown, plan, ESTIMATE);
-    const withoutEstimate = planCommentBody(markdown, plan);
+    const withEstimate = planCommentBody(markdown, ESTIMATE);
+    const withoutEstimate = planCommentBody(markdown);
     console.log(
       `[#488 AC6] with an estimate ${withEstimate.length} chars, without ${withoutEstimate.length} ` +
         `(limit ${GITHUB_COMMENT_LIMIT}); plan markdown alone ${markdown.length}`,
@@ -203,19 +205,26 @@ describe("#488 AC6 the comment's size for a large plan", () => {
     // this is the whole of #488's contribution to the body's size, whatever the plan's size.
     expect(withEstimate.length - withoutEstimate.length).toBeLessThan(400);
     // A body this large is exactly where a broken machine block would be hardest to notice.
-    expect(parsePlanFromComment(withEstimate).ok).toBe(true);
+    expect(
+      parsePlanFromComments([
+        { id: 1, body: withEstimate },
+        { id: 2, body: planBlockBody(plan) },
+      ]).ok,
+    ).toBe(true);
   });
 
   /**
-   * AC6's ABSOLUTE half is UNMET, and this change does not cause it: the same plan renders 67,297 chars
-   * WITHOUT any cost section — already over the limit — because the body carries the plan twice.
-   *
-   * Bounding it means deciding what to drop (the human rendering a reviewer approves, the machine block a
-   * resumed run reads back, or the plan itself at the source) and each choice costs something real. That is
-   * its own change, tracked in #518 rather than silently widened into #488.
+   * AC6's ABSOLUTE half was left UNMET by #488 — the same plan rendered 67,297 chars with the plan carried
+   * twice — and it was tracked in #518 rather than silently widened into #488. #518 delivered it by moving the
+   * machine block into its own comment, so EACH comment is now bounded, and this pins that.
    */
-  it.skip("AC6 (absolute) a plan at the output budget stays under 65536 (#518)", () => {
+  it("AC6 (absolute) a plan at the output budget keeps every comment under 65536 (#518)", () => {
     const plan = largePlan();
-    expect(planCommentBody(render(plan), plan, ESTIMATE).length).toBeLessThan(GITHUB_COMMENT_LIMIT);
+    const human = planCommentBody(render(plan), ESTIMATE);
+    const block = planBlockBody(plan);
+    expect(human.length).toBeLessThan(GITHUB_COMMENT_LIMIT);
+    expect(block.length).toBeLessThan(GITHUB_COMMENT_LIMIT);
+    // Non-vacuity: the pair really did exceed one comment, so the bound is doing work.
+    expect(human.length + block.length).toBeGreaterThan(GITHUB_COMMENT_LIMIT);
   });
 });
