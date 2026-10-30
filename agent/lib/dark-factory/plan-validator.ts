@@ -75,27 +75,103 @@ const UI_SIGNALS = [
 ];
 
 /**
+ * The story's acceptance-criteria section, or an empty string when it has none (#555).
+ *
+ * Scoped to the SECTION rather than the whole body, because scanning everything is wrong in both directions and
+ * both were measured on real issue bodies: a passing mention of "AC6" in prose became the only criterion the
+ * coverage rule checked (a body whose four real criteria were checkboxes), and criteria written as checkboxes were
+ * invisible to it altogether.
+ *
+ * A section opens at a heading naming acceptance criteria, or at a bold label (`**Acceptance Criteria**`) - both
+ * are how these are actually written. A heading section runs to the next heading of the same or a higher level, so
+ * a deeper heading inside it does not end it. A list with no label at all is deliberately NOT a section: prose
+ * criteria stay uncheckable rather than becoming a false positive.
+ */
+function acceptanceCriteriaSection(storyText: string): string {
+  const lines = storyText.split("\n");
+  const heading = /^(#{1,6})\s*(.+)$/;
+  // A bold label on its own line is how this repository writes section names in story text as often as it uses a
+  // heading (`**Acceptance Criteria**`), so both open a section.
+  const boldLabel = /^\*\*(.+?)\*\*:?\s*$/;
+  let start = -1;
+  let level = 0;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    const asHeading = heading.exec(line);
+    const asBold = asHeading ? null : boldLabel.exec(line);
+    if (!asHeading && !asBold) {
+      continue;
+    }
+    const text = asHeading ? asHeading[2] : (asBold as RegExpExecArray)[1];
+
+    if (start === -1) {
+      if (/acceptance criteria/i.test(text)) {
+        start = i + 1;
+        level = asHeading ? asHeading[1].length : 0;
+      }
+      continue;
+    }
+
+    // Inside the section: a heading of the same or a higher level ends it. A bold-label section ends at the next
+    // heading of any level, or at the next bold label.
+    if (asHeading && (level === 0 || asHeading[1].length <= level)) {
+      return lines.slice(start, i).join("\n");
+    }
+    if (asBold && level === 0) {
+      return lines.slice(start, i).join("\n");
+    }
+  }
+
+  return start === -1 ? "" : lines.slice(start).join("\n");
+}
+
+/** A bullet, optionally a markdown checkbox - the form this repository writes acceptance criteria in (#555). */
+const CRITERIA_BULLET = /^\s*(?:[-*+]|\d+\.)\s+(?:\[[ xX]\]\s*)?\S/;
+
+/**
  * Extracts declared AC identifiers (e.g. AC1, AC2, AC-1) or indexed Given/When/Then blocks from story text.
+ *
+ * Order matters (#555): explicit labels within the acceptance-criteria section, then that section's own bullets
+ * numbered in order, then - for a story written as Gherkin with no heading - the `- Given` bullets it documents.
  */
 export function extractStoryAcceptanceCriteria(storyText: string): string[] {
   const acIds = new Set<string>();
+  const section = acceptanceCriteriaSection(storyText);
 
-  // Pattern 1: explicit AC labels like AC1:, AC 1, AC-1
-  const explicitMatches = storyText.matchAll(/\b(AC-?\d+)\b/gi);
-  for (const match of explicitMatches) {
+  // Pattern 1: explicit AC labels like AC1:, AC 1, AC-1 - declared WITHIN the section. Declared means at the start
+  // of a line, optionally behind a bullet marker or bold emphasis. A label embedded mid-sentence is a MENTION, not
+  // a criterion: the real #518 body says "recorded there as AC6's unmet half" inside its criteria section, and
+  // treating that as the criterion made the rule check a phantom while ignoring four real bullets.
+  const declared = /^\s*(?:[-*+]|\d+\.)?\s*\*{0,2}(AC-?\d+)\b/gim;
+  for (const match of section.matchAll(declared)) {
     acIds.add(match[1].toUpperCase().replace("-", ""));
   }
+  if (acIds.size > 0) {
+    return Array.from(acIds);
+  }
 
-  // If no explicit AC numbers found, find bullet points starting with 'given'
-  if (acIds.size === 0) {
-    const lines = storyText.split("\n");
+  // Pattern 2: the section's own bullets, numbered in order. `- Given` blocks land here too.
+  if (section !== "") {
     let count = 1;
-    for (const rawLine of lines) {
-      const line = rawLine.trim().toLowerCase();
-      if (line.startsWith("- given") || line.startsWith("* given")) {
+    for (const rawLine of section.split("\n")) {
+      if (CRITERIA_BULLET.test(rawLine)) {
         acIds.add(`AC${count}`);
         count++;
       }
+    }
+    if (acIds.size > 0) {
+      return Array.from(acIds);
+    }
+  }
+
+  // Pattern 3: the documented Given/When/Then fallback, for a story written without a heading.
+  let count = 1;
+  for (const rawLine of storyText.split("\n")) {
+    const line = rawLine.trim().toLowerCase();
+    if (line.startsWith("- given") || line.startsWith("* given")) {
+      acIds.add(`AC${count}`);
+      count++;
     }
   }
 
