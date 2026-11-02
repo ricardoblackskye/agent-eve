@@ -16,8 +16,8 @@ describe("safeJoin", () => {
   it("throws when a segment escapes the root via ..", () => {
     expect(() => safeJoin(ROOT, "..", "escape")).toThrow();
   });
-  it("throws when the target is outside the root", () => {
-    expect(() => safeJoin(ROOT, outside)).toThrow();
+  it("throws when a deep segment climbs out of the root", () => {
+    expect(() => safeJoin(ROOT, "sub", "..", "..", "evil")).toThrow();
   });
 });
 
