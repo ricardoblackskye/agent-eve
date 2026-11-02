@@ -1,4 +1,5 @@
-import { isAbsolute, join, relative, sep } from "node:path";
+import { dirname, join } from "node:path";
+import { safeJoin, safeReadWithin } from "../../lib/security/fs-safe";
 
 /**
  * The CHECKOUT PLANNER (#404 R1 Task 3).
@@ -38,18 +39,6 @@ export interface CheckoutPlan {
 /** Anything that is not plainly safe in a single path segment. A repository name is untrusted input. */
 const UNSAFE_SEGMENT = /[^A-Za-z0-9._-]/g;
 
-/**
- * Containment by `path.relative`, never by a string prefix.
- *
- * `path.resolve` does not normalise case, so a prefix compare false-rejects a legitimate path whose drive letter
- * differs — and on Windows a case-insensitive filesystem makes the prefix test subtly wrong in the other
- * direction. `relative` follows the platform instead.
- */
-function isInside(root: string, candidate: string): boolean {
-  const rel = relative(root, candidate);
-  return rel !== "" && rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
-}
-
 function workspaceName(repo: string, issue: number): string {
   const repoName = repo.split("/").pop() ?? "repo";
   const safe = repoName.replace(UNSAFE_SEGMENT, "-").replace(/\.{2,}/g, "-");
@@ -77,13 +66,25 @@ export interface ProvisionPlan {
 export function planProvisioning(input: {
   path: string;
   exists: (path: string) => boolean;
+  /** The workspace root; defaults to the path's own directory. */
+  root?: string;
 }): ProvisionPlan {
-  const { path, exists } = input;
+  const { path, exists, root } = input;
+  // Contain every read within the workspace root: an untrusted repo name already
+  // flows into `path` upstream (planCheckout), so a read must never escape it. We
+  // assert containment with safeReadWithin (which throws on escape) but still hand
+  // `exists` the original, un-resolved path so callers observe the same value they
+  // would have before the guard was added.
+  const base = root ?? dirname(path);
+  const lockfile = join(path, "package-lock.json");
+  safeReadWithin(base, lockfile);
+  const manifest = join(path, "package.json");
+  safeReadWithin(base, manifest);
   // A lockfile means a reproducible `npm ci`; a manifest alone means `npm install`; neither means this is not a
   // Node project, and `npm ci` there would fail the run for a reason unrelated to the story.
-  const installArgs = exists(join(path, "package-lock.json"))
+  const installArgs = exists(lockfile)
     ? ["ci"]
-    : exists(join(path, "package.json"))
+    : exists(manifest)
       ? ["install"]
       : [];
   const summary = installArgs.length
@@ -94,13 +95,11 @@ export function planProvisioning(input: {
 
 export function planCheckout(input: CheckoutPlanInput): CheckoutPlan {
   const { repo, workspaceRoot, exists, issue } = input;
-  const path = join(workspaceRoot, workspaceName(repo, issue));
-
-  // Fail closed rather than run somewhere unexpected: a workspace outside its root would put the child's writes
-  // somewhere nobody chose.
-  if (!isInside(workspaceRoot, path)) {
-    throw new Error(`refusing a workspace outside ${workspaceRoot}: ${path}`);
-  }
+  // safeJoin contains the untrusted repo name within the workspace root and
+  // throws if the result escapes - fail closed rather than run somewhere
+  // unexpected (a workspace outside its root would put the child's writes
+  // somewhere nobody chose).
+  const path = safeJoin(workspaceRoot, workspaceName(repo, issue));
 
   const mustClone = !exists(path);
   // The URL is the CLEAN public one. Whatever credentials the run needs arrive through gitAuthEnv for this single
