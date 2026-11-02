@@ -55,6 +55,15 @@ describe("the local sandbox has one runtime and one endpoint (#570)", () => {
     expect(SMOKE).toMatch(/credential[_-]?vault|vault-proof|substitution/i);
   });
 
+  it("runs the vault substitution on success, not only after a failure (#570 regression)", () => {
+    // The assertion must live in the success path. If it sat only in main().catch,
+    // a basic smoke that succeeds against a reachable-but-incapable server still passed.
+    const catchIdx = SMOKE.indexOf("main().catch");
+    const probeIdx = SMOKE.indexOf("vault-proof.py");
+    expect(probeIdx).toBeGreaterThan(-1);
+    expect(probeIdx).toBeLessThan(catchIdx);
+  });
+
   it("CONTROL: the proven bootstrap still exists", () => {
     expect(read("scripts/k8s-vault-proof/bootstrap.sh")).toMatch(/minikube/);
   });

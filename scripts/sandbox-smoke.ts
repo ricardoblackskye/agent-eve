@@ -72,6 +72,12 @@ async function main(): Promise<void> {
     step("file round-trip verified");
 
     console.log("SMOKE OK");
+    // #570 AC5: reachability is not capability. A sandbox that answers /health can
+    // still be incapable of serving the vault, so the substitution is the assertion
+    // that counts. It MUST run on the success path - a smoke that only probes the
+    // vault after a failure would report success against a reachable-but-incapable
+    // server (the exact gap this issue was filed around).
+    assertVaultReachable(endpoint);
   } finally {
     if (sandbox) {
       step("terminating sandbox (kill + close)");
@@ -83,22 +89,27 @@ async function main(): Promise<void> {
   }
 }
 
+function assertVaultReachable(endpoint: string): void {
+  const port = endpoint.split(":").pop() ?? "18082";
+  // #570 AC5: prove the vault substitution end-to-end. A reachable-but-incapable server
+  // must not pass, so this is the real assertion of record (not the /health reachability
+  // above). Runs on the success path; throws so the catch below exits non-zero after teardown.
+  const probe = spawnSync("python", ["scripts/k8s-vault-proof/vault-proof.py", "--port", port], {
+    stdio: "inherit",
+  });
+  if (probe.status !== 0) {
+    throw new Error(
+      "OpenSandbox smoke: the vault substitution FAILED - this runtime cannot serve the vault",
+    );
+  }
+}
+
 main().catch((error: unknown) => {
   if (error instanceof SandboxException) {
     console.error(`SMOKE FAILED: [${error.error.code}] ${error.error.message ?? ""}`);
     if (error.requestId) console.error(`request id: ${error.requestId}`);
   } else {
     console.error(`SMOKE FAILED: ${error instanceof Error ? error.message : String(error)}`);
-  }
-  // #570: reachability is not capability. A sandbox that starts and answers /health is no
-  // evidence it can inject a credential, so the substitution is the assertion that counts.
-  const port = endpoint.split(":").pop();
-  const probe = spawnSync("python", ["scripts/k8s-vault-proof/vault-proof.py", "--port", port ?? "18082"], {
-    stdio: "inherit",
-  });
-  if (probe.status !== 0) {
-    console.error("OpenSandbox smoke: the vault substitution FAILED - this runtime cannot serve the vault");
-    process.exit(1);
   }
   process.exit(1);
 });
