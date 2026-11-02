@@ -18,10 +18,24 @@ set -euo pipefail
 NS_CP="${NS_CP:-opensandbox-system}"     # control-plane namespace
 NS_SB="${NS_SB:-opensandbox}"            # sandbox namespace
 REPO_DIR="${REPO_DIR:-$HOME/opensandbox-repo}"
+# helm and kubectl are NATIVE Windows binaries and do NOT translate MSYS paths (/c/Users/...),
+# so anything handed to them as a FILE PATH must be in mixed form (C:/Users/...). Repo paths
+# used only by bash (cd, heredocs) are fine as-is. REPO_NATIVE is the path for native tools.
+REPO_NATIVE="$(cygpath -m "$REPO_DIR" 2>/dev/null || echo "$REPO_DIR")"
 MINIKUBE="${MINIKUBE:-/c/Program Files/Kubernetes/Minikube/minikube.exe}"
 HELM="${HELM:-$LOCALAPPDATA/Temp/helm/windows-amd64/helm.exe}"
 FORWARD_PORT="${FORWARD_PORT:-18082}"
 KEYID="${KEYID:-a}"                      # one character in [0-9a-z]
+
+# --- 0. preflight: the engine minikube drives -------------------------------
+# AC6: with the engine down, the first thing reported used to be minikube failing on a
+# Docker-internal named pipe, which names neither the cause nor the remedy. Say it plainly.
+if ! docker version --format '{{.Server.Version}}' >/dev/null 2>&1; then
+  echo "ERROR: Docker Desktop's engine is not reachable." >&2
+  echo "  minikube drives Docker on this host, so nothing can start without it." >&2
+  echo "  Start Docker Desktop (Linux containers), confirm 'docker ps' works, then re-run." >&2
+  exit 1
+fi
 
 # --- 1. cluster ------------------------------------------------------------
 if ! "$MINIKUBE" status >/dev/null 2>&1; then
@@ -76,49 +90,68 @@ sandbox_create_timeout_seconds = 300
 image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:release-1.1.1"
 mode = "dns+nft"
 
-[ingress]
-mode = "gateway"
 
-[ingress.gateway]
-address = "opensandbox.example.com"
-
-[ingress.gateway.route]
-mode = "header"
-
-[ingress.secure_access]
-active_key = "$KEYID"
-
-[[ingress.secure_access.keys]]
-key_id = "$KEYID"
-key = "$KEY"
 EOF
 
-# --- 6. install (subchart overrides go under the DEPENDENCY NAME) ----------
+# --- 5b. the sandbox WORKLOAD namespace ------------------------------------
+# The chart creates only the control-plane namespace (--create-namespace below). The
+# workload namespace the config names is deliberately NOT created by the chart - its
+# values.yaml says so - and the server refuses to create a sandbox without it:
+#   Create sandbox failed: Namespace not found: (404)
+# This was invisible on a cluster built by an earlier manual run, where the namespace
+# already existed, and only surfaced on a genuine cold start.
+kubectl create namespace "$NS_SB" --dry-run=client -o yaml | kubectl apply -f -
+
+# --- 6. install (subchart overrides: the umbrella passes opensandbox-server.* to the
+# server subchart, whose gateway values live under server.gateway.* — so the override is
+# opensandbox-server.server.gateway.*, NOT opensandbox-server.gateway.*. The bare path maps
+# to nothing and silently leaves [ingress] mode="direct". secureAccess signing uses
+# activeKey + keys[].key_id/key, not keyId/key.) ----------
+# helm is a native Windows binary and does NOT translate MSYS paths, so the config path must be
+# handed to it in the mixed form (C:/Users/...). cygpath -m does that; where cygpath is absent
+# (non-MSYS hosts) the raw path is already what helm expects.
+CONFIG_TOML="$REPO_NATIVE/.local/config.toml"
+# REPAIR: an earlier version of this script owned this ConfigMap with kubectl
+# (`kubectl create configmap ... | kubectl apply`), and a managedFields entry cannot be
+# edited away - the only way to clear a foreign field manager is to delete the object.
+# Helm recreates it from configToml in the upgrade below, so nothing is lost and nothing
+# needs detecting: this is unconditional, and therefore idempotent by construction.
+# (The first attempt at this used a jsonpath to detect the foreign manager, and it reported
+# "no foreign field manager" while one was plainly present - a broken detector is worse
+# than no detector, so it is gone.)
+kubectl -n "$NS_CP" delete configmap opensandbox-server-config --ignore-not-found
+echo "config for helm: $CONFIG_TOML"
 cd "$REPO_DIR/manifests/charts/opensandbox"
 "$HELM" dependency build
 "$HELM" upgrade --install opensandbox . -n "$NS_CP" --create-namespace \
-  --set opensandbox-server.gateway.secureAccess.keyId="$KEYID" \
-  --set opensandbox-server.gateway.secureAccess.key="$KEY" \
-  --set ingress-gateway.gateway.secureAccess.keyId="$KEYID" \
-  --set ingress-gateway.gateway.secureAccess.key="$KEY"
+  --set opensandbox-server.server.gateway.enabled=true \
+  --set opensandbox-server.server.gateway.host=opensandbox.example.com \
+  --set opensandbox-server.server.gateway.gatewayRouteMode=header \
+  --set opensandbox-server.server.gateway.secureAccess.activeKey="$KEYID" \
+  --set "opensandbox-server.server.gateway.secureAccess.keys[0].key_id=$KEYID" \
+  --set "opensandbox-server.server.gateway.secureAccess.keys[0].key=$KEY" \
+  --set ingress-gateway.enabled=true \
+  --set "ingress-gateway.gateway.secureAccess.keys[0].key_id=$KEYID" \
+  --set "ingress-gateway.gateway.secureAccess.keys[0].key=$KEY" \
+  --set-file opensandbox-server.configToml="$CONFIG_TOML" \
+  --set opensandbox-server.server.env[0].name=OPENSANDBOX_INSECURE_SERVER \
+  --set opensandbox-server.server.env[0].value=YES \
+  --set opensandbox-server.server.env[1].name=OPENSANDBOX_CONFIG \
+  --set opensandbox-server.server.env[1].value=/etc/opensandbox/config.toml
 
 # --- 7. CRDs the base chart omits (the controller crashloops without them) -
 for crd in pools sandboxsnapshots; do
-  kubectl apply -f "$REPO_DIR/kubernetes/config/crd/bases/sandbox.opensandbox.io_${crd}.yaml"
+  kubectl apply -f "$REPO_NATIVE/kubernetes/config/crd/bases/sandbox.opensandbox.io_${crd}.yaml"
 done
 
-# --- 8. config + the three environment fixes -------------------------------
-kubectl -n "$NS_CP" create configmap opensandbox-server-config \
-  --from-file=config.toml="$REPO_DIR/.local/config.toml" \
-  --dry-run=client -o yaml | kubectl apply -f -
-
-# OPENSANDBOX_CONFIG is the critical one: the chart sets SANDBOX_CONFIG_PATH
-# (a name the server never reads), so without this the server silently runs a
-# default config with no [egress] and credentialProxy.enabled is always rejected.
-kubectl -n "$NS_CP" set env deployment/opensandbox-server \
-  OPENSANDBOX_INSECURE_SERVER=YES \
-  OPENSANDBOX_CONFIG=/etc/opensandbox/config.toml
-
+# --- 8. (removed) the config and the env are Helm values now -----------------
+# Both were once applied with kubectl against objects the chart creates, which left
+# the ConfigMap with two managers (helm + kubectl-client-side-apply) and made every
+# subsequent `helm upgrade` abort with "Apply failed with 1 conflict". Helm is the
+# single owner now: the config arrives via configToml, the env via server.env[], and
+# the only remaining kubectl apply is for the CRDs the base chart omits (step 7).
+# No manual rollout restart is needed either - a values change alters the pod spec,
+# so the rollout is spec-driven. The wait below stays, so the caller knows it is up.
 kubectl -n "$NS_CP" rollout restart deployment/opensandbox-server
 kubectl -n "$NS_CP" rollout restart deployment/opensandbox-controller-manager 2>/dev/null || true
 kubectl -n "$NS_CP" rollout status  deployment/opensandbox-server --timeout=180s

@@ -12,6 +12,10 @@
 # when no key is supplied and we are binding to loopback, so a keyed/remote server can never take the
 # insecure path by accident.
 set -euo pipefail
+# NOTE (AC7, #570): this starts the uvx opensandbox-server DOCKER runtime, which is
+# suitable for NON-VAULT use only. It hard-rejects secure_access and never serves
+# /credential-vault, so it cannot serve the vault the Dark Factory's credential path
+# needs. `npm run df:sandbox-up` starts the Kubernetes runtime instead, which can.
 
 CONFIG="${SANDBOX_CONFIG_PATH:-$HOME/.sandbox.toml}"
 # NATIVE tools (uvx/python) do NOT translate MSYS paths on Windows/git-bash: passing

@@ -76,8 +76,9 @@ export DF_CONTROL_DRIVER=postgres
 export DF_CONTROL_DATABASE_URL="postgres://postgres@localhost:5432/darkfactory?sslmode=disable"
 
 # 2. The sandbox seam (reuse the repo's own helpers — it already knows the cluster).
-npm run df:sandbox-up        # scripts/sandbox-server-up.sh
-npm run df:sandbox-smoke     # probes the seam and the image in the cluster
+npm run df:sandbox-up          # bootstrap.sh: minikube + Helm control plane (vault-capable)
+npm run df:sandbox-forward     # port-forward :18082 into this host (the endpoint below)
+npm run df:sandbox-smoke       # proves the vault substitution, not just reachability
 
 export DF_SANDBOX_DRIVER=opensandbox
 export DF_SANDBOX_ENDPOINT="http://127.0.0.1:18082"
@@ -175,3 +176,99 @@ The launcher reports a held claim in the **same one block** as every other prere
 A parked holder **is** retired — a park is a wait, and the retirement is what stops it resuming. Retirement applies
 no terminal label (`df:done`/`df:failed` describe an attempt's outcome; retirement is neither). See
 [ADR 0051](../../docs/adr/0051-df-retiring-a-stale-claim-is-abandonment.md).
+
+## When the sandbox setup goes wrong
+
+Every entry below cost real time to diagnose, and each was invisible until something was run
+from nothing rather than against an already-prepared cluster. Symptom first, because that is
+what you will actually see.
+
+### `minikube start` fails with a docker-pipe error
+
+```text
+failed to connect to the docker API at npipe:////./pipe/dockerDesktopLinuxEngine
+```text
+
+**Cause:** Docker Desktop's engine is not running.
+**Fix:** start Docker Desktop. The message names a Docker-internal pipe rather than the
+missing prerequisite, which is why this is easy to misread as a minikube problem: check
+`docker ps` first. If the `docker` CLI works but minikube cannot see the engine, the engine
+has stopped since the CLI last succeeded.
+
+### `helm` or `kubectl` cannot find a path that plainly exists
+
+```text
+Error: failed parsing --set-file data: open /c/Users/.../config.toml:
+  The system cannot find the path specified
+error: the path "/c/Users/.../sandbox.opensandbox.io_pools.yaml" does not exist
+```text
+
+**Cause:** `helm` and `kubectl` are native Windows binaries and do **not** translate MSYS
+paths. `cd` and heredoc redirection work because bash handles those; a path handed to a native tool as a
+*file argument* does not.
+**Fix:** convert once with `cygpath -m` and use that form for every native consumer. The
+script does this with `REPO_NATIVE`. A guard asserts it, because the `kubectl` case had been
+failing silently: the chart-omitted CRDs were never applied on a fresh machine, and the
+controller crashloops as a result.
+
+### `helm upgrade` fails with `Apply failed with 1 conflict`
+
+```text
+Apply failed with 1 conflict: conflict with "kubectl-client-side-apply" using v1: .data.config.toml
+```text
+
+**Cause:** something other than Helm owns an object Helm created, so two field managers
+disagree. Patching a chart-owned object with `kubectl apply` or `kubectl set env` is the usual
+route in.
+**Fix:** pass what you want through Helm **values** instead. A managedFields entry cannot be
+edited away, so an already-broken cluster is repaired by deleting the object and letting Helm
+recreate it - safe precisely because its content lives in the values.
+
+### A release reads `failed` while the pods are still running
+
+**Cause:** a failed upgrade leaves the release in `failed` and the control plane unready.
+**Fix:** read `helm list -n opensandbox-system` rather than the pod list; a release that never
+completed is not a working sandbox, however healthy the pods look in passing.
+
+### `Create sandbox failed: Namespace not found: (404)`
+
+**Cause:** the chart creates only the **control-plane** namespace. The sandbox **workload**
+namespace is deliberately not its to create, and the server refuses to create a sandbox
+without it.
+**Fix:** the setup creates it. Note this only ever shows up on a cluster built from nothing -
+on a long-lived cluster the namespace usually exists already, from a manual step nobody
+recorded.
+
+### The controller crashloops with "no matches for kind Pool/SandboxSnapshot"
+
+**Cause:** the base chart ships only the `BatchSandbox` CRD. `Pool` and `SandboxSnapshot` are
+missing, and the controller cannot start without them.
+**Fix:** apply the two from `kubernetes/config/crd/bases/` - the setup does, as the one
+remaining `kubectl apply`, because they are cluster-scoped and not Helm-owned.
+
+### Sandboxes stay `Pending` with `Insufficient memory`
+
+**Cause:** leftover sandboxes from earlier runs exhaust the single minikube node.
+**Fix:** delete them between runs rather than resizing the node.
+
+### The `[ingress]` config section is missing
+
+**Cause:** `opensandbox-server.gateway.enabled` defaults to **false**, and the chart generates
+the `[ingress]` block only when it is enabled. A hand-written block in the config file
+compensates for the omission without solving it.
+**Fix:** enable the gateway in values and let the chart generate the block, so the config is
+stated in one place.
+
+### Cold start takes about twelve minutes
+
+Not a fault, but worth knowing before assuming something has hung: nearly all of it is image
+pulls from the registry on a cold cluster. Measured from `minikube delete` to a working
+control plane.
+
+### The runtime that cannot serve the vault
+
+The `uvx opensandbox-server` Docker runtime hard-rejects `secure_access` and never serves
+`/credential-vault`. Anything needing credential injection - which includes the Dark Factory's
+push path - requires the Kubernetes runtime above. A sandbox that starts and answers `/health`
+is not evidence that it can do the job: the assertion that counts is a real
+placeholder-to-secret substitution.
