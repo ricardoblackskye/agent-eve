@@ -71,13 +71,20 @@ export function planProvisioning(input: {
 }): ProvisionPlan {
   const { path, exists, root } = input;
   // Contain every read within the workspace root: an untrusted repo name already
-  // flows into `path` upstream, so a read must never escape it.
+  // flows into `path` upstream (planCheckout), so a read must never escape it. We
+  // assert containment with safeReadWithin (which throws on escape) but still hand
+  // `exists` the original, un-resolved path so callers observe the same value they
+  // would have before the guard was added.
   const base = root ?? dirname(path);
+  const lockfile = join(path, "package-lock.json");
+  safeReadWithin(base, lockfile);
+  const manifest = join(path, "package.json");
+  safeReadWithin(base, manifest);
   // A lockfile means a reproducible `npm ci`; a manifest alone means `npm install`; neither means this is not a
   // Node project, and `npm ci` there would fail the run for a reason unrelated to the story.
-  const installArgs = exists(safeReadWithin(base, join(path, "package-lock.json")))
+  const installArgs = exists(lockfile)
     ? ["ci"]
-    : exists(safeReadWithin(base, join(path, "package.json")))
+    : exists(manifest)
       ? ["install"]
       : [];
   const summary = installArgs.length
