@@ -1,4 +1,4 @@
-import { isAbsolute, relative, resolve, sep } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
 /**
  * Containment by `path.relative`, never by a string prefix.
@@ -16,9 +16,12 @@ function escapesRoot(root: string, candidate: string): boolean {
   return rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel);
 }
 
-/** Join `segments` under `root`, throwing if the result escapes `root`. */
+/** Join `segments` under `root`, throwing if the result escapes `root`.
+ *  Returns `join(root, ...segments)` (NOT `resolve`) so the result keeps the same
+ *  relative/absolute form the caller built `root` with — resolving would turn a
+ *  `C:/ws` base into `/home/.../C:/ws` on Linux and break `startsWith(root)`. */
 export function safeJoin(root: string, ...segments: string[]): string {
-  const target = resolve(root, ...segments);
+  const target = join(root, ...segments);
   if (escapesRoot(root, target)) {
     throw new Error(`refusing a path outside ${root}: ${target}`);
   }
