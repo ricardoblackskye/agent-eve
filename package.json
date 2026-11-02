@@ -25,6 +25,7 @@
     "df:retire-claim": "tsx scripts/df-retire-claim.ts",
     "df:sandbox-up": "bash scripts/k8s-vault-proof/bootstrap.sh",
     "df:sandbox-smoke": "tsx scripts/sandbox-smoke.ts",
+    "df:sandbox-clean": "bash scripts/df-sandbox-clean.sh",
     "df:cost-budget": "tsx scripts/df-cost-budget.ts",
     "models:verify": "tsx scripts/openrouter-verify-models.ts",
     "prices:check": "tsx scripts/openrouter-check-prices.ts",

@@ -27,6 +27,16 @@ HELM="${HELM:-$LOCALAPPDATA/Temp/helm/windows-amd64/helm.exe}"
 FORWARD_PORT="${FORWARD_PORT:-18082}"
 KEYID="${KEYID:-a}"                      # one character in [0-9a-z]
 
+# --- 0. preflight: the engine minikube drives -------------------------------
+# AC6: with the engine down, the first thing reported used to be minikube failing on a
+# Docker-internal named pipe, which names neither the cause nor the remedy. Say it plainly.
+if ! docker version --format '{{.Server.Version}}' >/dev/null 2>&1; then
+  echo "ERROR: Docker Desktop's engine is not reachable." >&2
+  echo "  minikube drives Docker on this host, so nothing can start without it." >&2
+  echo "  Start Docker Desktop (Linux containers), confirm 'docker ps' works, then re-run." >&2
+  exit 1
+fi
+
 # --- 1. cluster ------------------------------------------------------------
 if ! "$MINIKUBE" status >/dev/null 2>&1; then
   "$MINIKUBE" start --driver=docker --cpus=4 --memory=4096
