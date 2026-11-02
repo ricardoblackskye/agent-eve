@@ -18,6 +18,10 @@ set -euo pipefail
 NS_CP="${NS_CP:-opensandbox-system}"     # control-plane namespace
 NS_SB="${NS_SB:-opensandbox}"            # sandbox namespace
 REPO_DIR="${REPO_DIR:-$HOME/opensandbox-repo}"
+# helm and kubectl are NATIVE Windows binaries and do NOT translate MSYS paths (/c/Users/...),
+# so anything handed to them as a FILE PATH must be in mixed form (C:/Users/...). Repo paths
+# used only by bash (cd, heredocs) are fine as-is. REPO_NATIVE is the path for native tools.
+REPO_NATIVE="$(cygpath -m "$REPO_DIR" 2>/dev/null || echo "$REPO_DIR")"
 MINIKUBE="${MINIKUBE:-/c/Program Files/Kubernetes/Minikube/minikube.exe}"
 HELM="${HELM:-$LOCALAPPDATA/Temp/helm/windows-amd64/helm.exe}"
 FORWARD_PORT="${FORWARD_PORT:-18082}"
@@ -80,6 +84,20 @@ mode = "dns+nft"
 EOF
 
 # --- 6. install (subchart overrides go under the DEPENDENCY NAME) ----------
+# helm is a native Windows binary and does NOT translate MSYS paths, so the config path must be
+# handed to it in the mixed form (C:/Users/...). cygpath -m does that; where cygpath is absent
+# (non-MSYS hosts) the raw path is already what helm expects.
+CONFIG_TOML="$REPO_NATIVE/.local/config.toml"
+# REPAIR: an earlier version of this script owned this ConfigMap with kubectl
+# (`kubectl create configmap ... | kubectl apply`), and a managedFields entry cannot be
+# edited away - the only way to clear a foreign field manager is to delete the object.
+# Helm recreates it from configToml in the upgrade below, so nothing is lost and nothing
+# needs detecting: this is unconditional, and therefore idempotent by construction.
+# (The first attempt at this used a jsonpath to detect the foreign manager, and it reported
+# "no foreign field manager" while one was plainly present - a broken detector is worse
+# than no detector, so it is gone.)
+kubectl -n "$NS_CP" delete configmap opensandbox-server-config --ignore-not-found
+echo "config for helm: $CONFIG_TOML"
 cd "$REPO_DIR/manifests/charts/opensandbox"
 "$HELM" dependency build
 "$HELM" upgrade --install opensandbox . -n "$NS_CP" --create-namespace \
@@ -88,7 +106,7 @@ cd "$REPO_DIR/manifests/charts/opensandbox"
   --set ingress-gateway.gateway.secureAccess.keyId="$KEYID" \
   --set ingress-gateway.gateway.secureAccess.key="$KEY" \
   --set opensandbox-server.gateway.enabled=true \
-  --set-file opensandbox-server.configToml="$REPO_DIR/.local/config.toml" \
+  --set-file opensandbox-server.configToml="$CONFIG_TOML" \
   --set opensandbox-server.server.env[0].name=OPENSANDBOX_INSECURE_SERVER \
   --set opensandbox-server.server.env[0].value=YES \
   --set opensandbox-server.server.env[1].name=OPENSANDBOX_CONFIG \
@@ -96,7 +114,7 @@ cd "$REPO_DIR/manifests/charts/opensandbox"
 
 # --- 7. CRDs the base chart omits (the controller crashloops without them) -
 for crd in pools sandboxsnapshots; do
-  kubectl apply -f "$REPO_DIR/kubernetes/config/crd/bases/sandbox.opensandbox.io_${crd}.yaml"
+  kubectl apply -f "$REPO_NATIVE/kubernetes/config/crd/bases/sandbox.opensandbox.io_${crd}.yaml"
 done
 
 # --- 8. (removed) the config and the env are Helm values now -----------------
