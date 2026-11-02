@@ -83,6 +83,15 @@ mode = "dns+nft"
 
 EOF
 
+# --- 5b. the sandbox WORKLOAD namespace ------------------------------------
+# The chart creates only the control-plane namespace (--create-namespace below). The
+# workload namespace the config names is deliberately NOT created by the chart - its
+# values.yaml says so - and the server refuses to create a sandbox without it:
+#   Create sandbox failed: Namespace not found: (404)
+# This was invisible on a cluster built by an earlier manual run, where the namespace
+# already existed, and only surfaced on a genuine cold start.
+kubectl create namespace "$NS_SB" --dry-run=client -o yaml | kubectl apply -f -
+
 # --- 6. install (subchart overrides go under the DEPENDENCY NAME) ----------
 # helm is a native Windows binary and does NOT translate MSYS paths, so the config path must be
 # handed to it in the mixed form (C:/Users/...). cygpath -m does that; where cygpath is absent
