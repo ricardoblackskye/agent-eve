@@ -52,7 +52,7 @@ describe("the local sandbox has one runtime and one endpoint (#570)", () => {
 
   it("makes the vault substitution the smoke's assertion, not just reachability", () => {
     // A reachable-but-incapable server must not pass.
-    expect(SMOKE).toMatch(/credential[_-]?vault|vault-proof|substitut/i);
+    expect(SMOKE).toMatch(/credential[_-]?vault|vault-proof|substitution/i);
   });
 
   it("CONTROL: the proven bootstrap still exists", () => {

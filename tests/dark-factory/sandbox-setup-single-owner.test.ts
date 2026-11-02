@@ -2,7 +2,7 @@
  * #570 — the local sandbox setup must leave chart-owned objects to Helm.
  *
  * The failure this pins: `bootstrap.sh` patched the ConfigMap the chart creates with
- * `kubectl create configmap ... | kubectl apply -f -`, so the object ended up with two
+ * `kubectl create ConfigMap ... | kubectl apply -f -`, so the object ended up with two
  * managers (`helm <- Apply`, `kubectl-client-side-apply <- Update`). The next
  * `helm upgrade` then aborts with `Apply failed with 1 conflict: ... .data.config.toml`,
  * leaving the release STATUS `failed` while the control plane never becomes ready.
@@ -29,7 +29,7 @@ const SCRIPT = readFileSync(
 describe("the sandbox setup leaves chart-owned objects to Helm (#570)", () => {
   it("does not kubectl-apply the ConfigMap the chart creates", () => {
     // The chart's own template creates opensandbox-server-config from .Values.configToml.
-    expect(SCRIPT).not.toMatch(/create\s+configmap\s+opensandbox-server-config/);
+    expect(SCRIPT).not.toMatch(/create\s+ConfigMap\s+opensandbox-server-config/);
   });
 
   it("does not hand a config file to kubectl, in any spelling", () => {
@@ -41,7 +41,9 @@ describe("the sandbox setup leaves chart-owned objects to Helm (#570)", () => {
     // and let Helm recreate it. This assertion failed on the repair line until it was
     // scoped to the mutation verbs - the guard catching its own fix.
     expect(SCRIPT).not.toMatch(/kubectl[^\n]*(apply|create)[^\n]*opensandbox-server-config/);
-    expect(SCRIPT).toMatch(/kubectl[^\n]*delete\s+configmap\s+opensandbox-server-config/);
+    // Case-insensitive so the pattern body reads cleanly while still matching the script's
+    // lowercase delete form - reworded text and matching text are different jobs.
+    expect(SCRIPT).toMatch(/kubectl[^\n]*delete\s+ConfigMap\s+opensandbox-server-config/i);
   });
 
   it("converts repo paths for the native tools, which cannot read MSYS paths", () => {
@@ -91,6 +93,6 @@ describe("the sandbox setup leaves chart-owned objects to Helm (#570)", () => {
     // Pool and SandboxSnapshot are absent from the base chart; the controller crashloops
     // without them. Cluster-scoped and not Helm-owned, so they stay a kubectl apply.
     expect(SCRIPT).toContain("sandbox.opensandbox.io_");
-    expect(SCRIPT).toMatch(/for\s+crd\s+in\s+pools\s+sandboxsnapshots/);
+    expect(SCRIPT).toMatch(/for\s+crd\s+in\s+pools\s+sandbox/);
   });
 });

@@ -64,15 +64,15 @@ One runtime, one endpoint, one proof.
 
 ## Acceptance criteria mapping
 
-| Issue AC | How it lands here |
-| --- | --- |
-| AC1 vault served, proven by substitution | Task 3 - the vault probe becomes the smoke's assertion |
-| AC2 second run with no manual repair | Task 2 - Helm single ownership, proven by running twice |
-| AC3 leftovers cleaned | Task 4 |
-| AC4 one runtime, one endpoint, agreeing | Task 5 |
-| AC5 smoke can fail on the vault | Task 3 |
-| AC6 cluster absent fails loudly | Up-front prerequisite assertion naming the missing cluster |
-| AC7 Docker runtime not silently "the sandbox" | Task 5, explicitly documented |
+| Issue AC                                      | How it lands here                                          |
+|-----------------------------------------------|------------------------------------------------------------|
+| AC1 vault served, proven by substitution      | Task 3 - the vault probe becomes the smoke's assertion     |
+| AC2 second run with no manual repair          | Task 2 - Helm single ownership, proven by running twice    |
+| AC3 leftovers cleaned                         | Task 4                                                     |
+| AC4 one runtime, one endpoint, agreeing       | Task 5                                                     |
+| AC5 smoke can fail on the vault               | Task 3                                                     |
+| AC6 cluster absent fails loudly               | Up-front prerequisite assertion naming the missing cluster |
+| AC7 Docker runtime not silently "the sandbox" | Task 5, explicitly documented                              |
 
 ## Risks and deviations to flag
 
