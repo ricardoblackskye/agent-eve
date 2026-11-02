@@ -1,10 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { join } from "node:path";
+import { resolve } from "node:path";
 import { safeJoin, safeReadWithin } from "../../../../agent/lib/security/fs-safe";
 
 describe("safeJoin", () => {
   it("joins a segment that stays inside the root", () => {
-    expect(safeJoin("/ws", "repo-1")).toBe(join("/ws", "repo-1"));
+    expect(safeJoin("/ws", "repo-1")).toBe(resolve("/ws", "repo-1"));
   });
 
   it("throws when a segment escapes the root", () => {
@@ -18,7 +18,7 @@ describe("safeJoin", () => {
 
 describe("safeReadWithin", () => {
   it("returns the resolved target when it stays inside the root", () => {
-    const target = join("/ws", "repo-1", "package-lock.json");
+    const target = resolve("/ws", "repo-1", "package-lock.json");
     expect(safeReadWithin("/ws", target)).toBe(target);
   });
 
@@ -27,6 +27,6 @@ describe("safeReadWithin", () => {
   });
 
   it("throws when the target uses .. to climb out of the root", () => {
-    expect(() => safeReadWithin("/ws", join("/ws", "..", "etc", "passwd"))).toThrow();
+    expect(() => safeReadWithin("/ws", resolve("/ws", "..", "etc", "passwd"))).toThrow();
   });
 });
