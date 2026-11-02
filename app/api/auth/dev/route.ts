@@ -13,6 +13,7 @@ import {
 import { decideCallback } from "../../../auth-callback";
 import { safeNextPath } from "../../../auth-gate";
 import { resolveRequestOrigin } from "../../../request-origin";
+import { safeRedirect } from "../../../../agent/lib/security/safe-redirect";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -62,7 +63,7 @@ export async function GET(request: NextRequest) {
     secret,
   });
   const response = NextResponse.redirect(
-    new URL(decision.redirectTo, resolveRequestOrigin(request)),
+    safeRedirect(resolveRequestOrigin(request), decision.redirectTo),
     302,
   );
   response.cookies.set(
