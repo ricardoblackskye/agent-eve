@@ -211,7 +211,9 @@
     "MAPE",
     "mae",
     "MAE",
-    "Minimise"
+    "Minimise",
+    "npipe",
+    "MSYS"
   ],
   "ignorePaths": [
     "node_modules/**",
