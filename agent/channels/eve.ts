@@ -7,6 +7,7 @@ import {
 } from "eve/channels/auth";
 import type { SessionAuthContext } from "eve/context";
 import { createPlatformAdapter } from "../lib/dark-factory/platform";
+import { constantTimeEqual } from "../lib/security/constant-time";
 import { selectPlatformAuth } from "../lib/dark-factory/platform-auth";
 
 /**
@@ -30,7 +31,7 @@ const bearerAuth = (request: Request): SessionAuthContext | null => {
   const authHeader = request.headers.get("authorization");
   const token = extractBearerToken(authHeader);
 
-  if (token === expectedKey) {
+  if (constantTimeEqual(token, expectedKey)) {
     return {
       attributes: {},
       authenticator: "bearer-token",
