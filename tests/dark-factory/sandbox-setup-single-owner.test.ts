@@ -79,6 +79,14 @@ describe("the sandbox setup leaves chart-owned objects to Helm (#570)", () => {
     expect(SCRIPT).toMatch(/^\s*HELM=/m);
   });
 
+  it("creates the sandbox workload namespace, which the chart does not", () => {
+    // Found only by a cold start: the config named NS_SB, the chart creates only the
+    // control-plane namespace, and the server refused every sandbox with
+    // "Create sandbox failed: Namespace not found: (404)". On a long-lived cluster the
+    // namespace already existed, so nothing failed and nothing was noticed.
+    expect(SCRIPT).toMatch(/kubectl\s+create\s+namespace\s+"\$NS_SB"/);
+  });
+
   it("CONTROL: still applies the CRDs the base chart omits", () => {
     // Pool and SandboxSnapshot are absent from the base chart; the controller crashloops
     // without them. Cluster-scoped and not Helm-owned, so they stay a kubectl apply.
