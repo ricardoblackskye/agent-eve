@@ -36,7 +36,20 @@ describe("the sandbox setup leaves chart-owned objects to Helm (#570)", () => {
     // Mechanism, not line shape: the mutation is ONE long line, so the line-scoped
     // version of this test missed it and passed falsely.
     expect(SCRIPT).not.toMatch(/from-file=[^\n]*config\.toml/);
-    expect(SCRIPT).not.toMatch(/kubectl[^\n]*opensandbox-server-config/);
+    // APPLYING or CREATING it is the co-ownership bug. DELETING it is the repair, and is
+    // required: a stale field manager cannot be edited away, so the object must be deleted
+    // and let Helm recreate it. This assertion failed on the repair line until it was
+    // scoped to the mutation verbs - the guard catching its own fix.
+    expect(SCRIPT).not.toMatch(/kubectl[^\n]*(apply|create)[^\n]*opensandbox-server-config/);
+    expect(SCRIPT).toMatch(/kubectl[^\n]*delete\s+configmap\s+opensandbox-server-config/);
+  });
+
+  it("converts repo paths for the native tools, which cannot read MSYS paths", () => {
+    // helm and kubectl are native Windows binaries; /c/Users/... means nothing to them, so
+    // both a --set-file and a kubectl apply -f died on it.
+    expect(SCRIPT).toContain("REPO_NATIVE");
+    expect(SCRIPT).toContain("cygpath -m");
+    expect(SCRIPT).toMatch(/kubectl\s+apply\s+-f\s+"\$REPO_NATIVE/);
   });
 
   it("does not kubectl-set-env the server Deployment the chart owns", () => {
