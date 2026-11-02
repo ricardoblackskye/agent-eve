@@ -76,21 +76,7 @@ sandbox_create_timeout_seconds = 300
 image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:release-1.1.1"
 mode = "dns+nft"
 
-[ingress]
-mode = "gateway"
 
-[ingress.gateway]
-address = "opensandbox.example.com"
-
-[ingress.gateway.route]
-mode = "header"
-
-[ingress.secure_access]
-active_key = "$KEYID"
-
-[[ingress.secure_access.keys]]
-key_id = "$KEYID"
-key = "$KEY"
 EOF
 
 # --- 6. install (subchart overrides go under the DEPENDENCY NAME) ----------
@@ -100,25 +86,27 @@ cd "$REPO_DIR/manifests/charts/opensandbox"
   --set opensandbox-server.gateway.secureAccess.keyId="$KEYID" \
   --set opensandbox-server.gateway.secureAccess.key="$KEY" \
   --set ingress-gateway.gateway.secureAccess.keyId="$KEYID" \
-  --set ingress-gateway.gateway.secureAccess.key="$KEY"
+  --set ingress-gateway.gateway.secureAccess.key="$KEY" \
+  --set opensandbox-server.gateway.enabled=true \
+  --set-file opensandbox-server.configToml="$REPO_DIR/.local/config.toml" \
+  --set opensandbox-server.server.env[0].name=OPENSANDBOX_INSECURE_SERVER \
+  --set opensandbox-server.server.env[0].value=YES \
+  --set opensandbox-server.server.env[1].name=OPENSANDBOX_CONFIG \
+  --set opensandbox-server.server.env[1].value=/etc/opensandbox/config.toml
 
 # --- 7. CRDs the base chart omits (the controller crashloops without them) -
 for crd in pools sandboxsnapshots; do
   kubectl apply -f "$REPO_DIR/kubernetes/config/crd/bases/sandbox.opensandbox.io_${crd}.yaml"
 done
 
-# --- 8. config + the three environment fixes -------------------------------
-kubectl -n "$NS_CP" create configmap opensandbox-server-config \
-  --from-file=config.toml="$REPO_DIR/.local/config.toml" \
-  --dry-run=client -o yaml | kubectl apply -f -
-
-# OPENSANDBOX_CONFIG is the critical one: the chart sets SANDBOX_CONFIG_PATH
-# (a name the server never reads), so without this the server silently runs a
-# default config with no [egress] and credentialProxy.enabled is always rejected.
-kubectl -n "$NS_CP" set env deployment/opensandbox-server \
-  OPENSANDBOX_INSECURE_SERVER=YES \
-  OPENSANDBOX_CONFIG=/etc/opensandbox/config.toml
-
+# --- 8. (removed) the config and the env are Helm values now -----------------
+# Both were once applied with kubectl against objects the chart creates, which left
+# the ConfigMap with two managers (helm + kubectl-client-side-apply) and made every
+# subsequent `helm upgrade` abort with "Apply failed with 1 conflict". Helm is the
+# single owner now: the config arrives via configToml, the env via server.env[], and
+# the only remaining kubectl apply is for the CRDs the base chart omits (step 7).
+# No manual rollout restart is needed either - a values change alters the pod spec,
+# so the rollout is spec-driven. The wait below stays, so the caller knows it is up.
 kubectl -n "$NS_CP" rollout restart deployment/opensandbox-server
 kubectl -n "$NS_CP" rollout restart deployment/opensandbox-controller-manager 2>/dev/null || true
 kubectl -n "$NS_CP" rollout status  deployment/opensandbox-server --timeout=180s

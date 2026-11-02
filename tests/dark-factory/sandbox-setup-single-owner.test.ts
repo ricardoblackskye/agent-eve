@@ -51,8 +51,12 @@ describe("the sandbox setup leaves chart-owned objects to Helm (#570)", () => {
 
   it("passes the server env through the chart's env value, not kubectl", () => {
     expect(SCRIPT).toContain("opensandbox-server.server.env");
-    expect(SCRIPT).toContain("OPENSANDBOX_INSECURE_SERVER=YES");
-    expect(SCRIPT).toContain("OPENSANDBOX_CONFIG=/etc/opensandbox/config.toml");
+    // helm sets name and value as separate flags, so the joined literal never appears -
+    // asserting it was wrong, not the script.
+    expect(SCRIPT).toContain("server.env[0].name=OPENSANDBOX_INSECURE_SERVER");
+    expect(SCRIPT).toContain("server.env[0].value=YES");
+    expect(SCRIPT).toContain("server.env[1].name=OPENSANDBOX_CONFIG");
+    expect(SCRIPT).toContain("server.env[1].value=/etc/opensandbox/config.toml");
   });
 
   it("CONTROL: still installs the chart with Helm", () => {
