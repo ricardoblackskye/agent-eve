@@ -74,6 +74,22 @@ describe("the sandbox setup leaves chart-owned objects to Helm (#570)", () => {
     expect(SCRIPT).toContain("server.env[1].value=/etc/opensandbox/config.toml");
   });
 
+  it("configures the gateway via the chart's real value path (not a dead one)", () => {
+    // The umbrella passes opensandbox-server.* to the server subchart, whose gateway
+    // values live under server.gateway.* — so the override must be
+    // opensandbox-server.server.gateway.*. The bare opensandbox-server.gateway.* path maps
+    // to nothing and silently leaves [ingress] mode="direct" (no secure_access). This is
+    // exactly the bug that left the hand-written [ingress] block with no chart-generated
+    // replacement. secureAccess signing keys are activeKey + keys[].key_id/key, not
+    // keyId/key.
+    expect(SCRIPT).toMatch(/opensandbox-server\.server\.gateway\.enabled=true/);
+    expect(SCRIPT).not.toMatch(/opensandbox-server\.gateway\.enabled/);
+    expect(SCRIPT).toMatch(/opensandbox-server\.server\.gateway\.secureAccess\.activeKey/);
+    expect(SCRIPT).toMatch(/opensandbox-server\.server\.gateway\.secureAccess\.keys\[0\]\.key_id/);
+    expect(SCRIPT).not.toMatch(/secureAccess\.keyId/);
+    expect(SCRIPT).toMatch(/ingress-gateway\.enabled=true/);
+  });
+
   it("CONTROL: still installs the chart with Helm", () => {
     // The script invokes "$HELM", not the literal `helm`. The first version of this
     // control asserted the literal and so failed against a script doing it correctly.

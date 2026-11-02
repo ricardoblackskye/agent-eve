@@ -102,7 +102,11 @@ EOF
 # already existed, and only surfaced on a genuine cold start.
 kubectl create namespace "$NS_SB" --dry-run=client -o yaml | kubectl apply -f -
 
-# --- 6. install (subchart overrides go under the DEPENDENCY NAME) ----------
+# --- 6. install (subchart overrides: the umbrella passes opensandbox-server.* to the
+# server subchart, whose gateway values live under server.gateway.* — so the override is
+# opensandbox-server.server.gateway.*, NOT opensandbox-server.gateway.*. The bare path maps
+# to nothing and silently leaves [ingress] mode="direct". secureAccess signing uses
+# activeKey + keys[].key_id/key, not keyId/key.) ----------
 # helm is a native Windows binary and does NOT translate MSYS paths, so the config path must be
 # handed to it in the mixed form (C:/Users/...). cygpath -m does that; where cygpath is absent
 # (non-MSYS hosts) the raw path is already what helm expects.
@@ -120,11 +124,15 @@ echo "config for helm: $CONFIG_TOML"
 cd "$REPO_DIR/manifests/charts/opensandbox"
 "$HELM" dependency build
 "$HELM" upgrade --install opensandbox . -n "$NS_CP" --create-namespace \
-  --set opensandbox-server.gateway.secureAccess.keyId="$KEYID" \
-  --set opensandbox-server.gateway.secureAccess.key="$KEY" \
-  --set ingress-gateway.gateway.secureAccess.keyId="$KEYID" \
-  --set ingress-gateway.gateway.secureAccess.key="$KEY" \
-  --set opensandbox-server.gateway.enabled=true \
+  --set opensandbox-server.server.gateway.enabled=true \
+  --set opensandbox-server.server.gateway.host=opensandbox.example.com \
+  --set opensandbox-server.server.gateway.gatewayRouteMode=header \
+  --set opensandbox-server.server.gateway.secureAccess.activeKey="$KEYID" \
+  --set "opensandbox-server.server.gateway.secureAccess.keys[0].key_id=$KEYID" \
+  --set "opensandbox-server.server.gateway.secureAccess.keys[0].key=$KEY" \
+  --set ingress-gateway.enabled=true \
+  --set "ingress-gateway.gateway.secureAccess.keys[0].key_id=$KEYID" \
+  --set "ingress-gateway.gateway.secureAccess.keys[0].key=$KEY" \
   --set-file opensandbox-server.configToml="$CONFIG_TOML" \
   --set opensandbox-server.server.env[0].name=OPENSANDBOX_INSECURE_SERVER \
   --set opensandbox-server.server.env[0].value=YES \

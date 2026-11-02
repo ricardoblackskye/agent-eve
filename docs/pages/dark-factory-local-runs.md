@@ -76,8 +76,9 @@ export DF_CONTROL_DRIVER=postgres
 export DF_CONTROL_DATABASE_URL="postgres://postgres@localhost:5432/darkfactory?sslmode=disable"
 
 # 2. The sandbox seam (reuse the repo's own helpers — it already knows the cluster).
-npm run df:sandbox-up        # scripts/sandbox-server-up.sh
-npm run df:sandbox-smoke     # probes the seam and the image in the cluster
+npm run df:sandbox-up          # bootstrap.sh: minikube + Helm control plane (vault-capable)
+npm run df:sandbox-forward     # port-forward :18082 into this host (the endpoint below)
+npm run df:sandbox-smoke       # proves the vault substitution, not just reachability
 
 export DF_SANDBOX_DRIVER=opensandbox
 export DF_SANDBOX_ENDPOINT="http://127.0.0.1:18082"
