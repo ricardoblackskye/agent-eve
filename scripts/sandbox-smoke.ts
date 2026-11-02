@@ -7,7 +7,7 @@
  *
  *   npx tsx scripts/sandbox-smoke.ts
  *
- * Env: DF_SANDBOX_ENDPOINT (host[:port], default 127.0.0.1:8080), DF_SANDBOX_PROTOCOL (http|https),
+ * Env: DF_SANDBOX_ENDPOINT (host[:port], default 127.0.0.1:18082), DF_SANDBOX_PROTOCOL (http|https),
  * OPEN_SANDBOX_API_KEY (only if the server was started with a key), DF_SANDBOX_IMAGE,
  * DF_SANDBOX_TIMEOUT_SECONDS.
  *
@@ -16,8 +16,9 @@
  * failure path calls them too.
  */
 import { ConnectionConfig, Sandbox, SandboxException, type Sandbox as SandboxHandle } from "@alibaba-group/opensandbox";
+import { spawnSync } from "node:child_process";
 
-const endpoint = (process.env.DF_SANDBOX_ENDPOINT ?? "127.0.0.1:8080").trim();
+const endpoint = (process.env.DF_SANDBOX_ENDPOINT ?? "127.0.0.1:18082").trim();
 const protocol = (process.env.DF_SANDBOX_PROTOCOL ?? "http").trim();
 const apiKey = (process.env.OPEN_SANDBOX_API_KEY ?? "").trim();
 const image = (process.env.DF_SANDBOX_IMAGE ?? "python:3.12").trim();
@@ -88,6 +89,16 @@ main().catch((error: unknown) => {
     if (error.requestId) console.error(`request id: ${error.requestId}`);
   } else {
     console.error(`SMOKE FAILED: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  // #570: reachability is not capability. A sandbox that starts and answers /health is no
+  // evidence it can inject a credential, so the substitution is the assertion that counts.
+  const port = endpoint.split(":").pop();
+  const probe = spawnSync("python", ["scripts/k8s-vault-proof/vault-proof.py", "--port", port ?? "18082"], {
+    stdio: "inherit",
+  });
+  if (probe.status !== 0) {
+    console.error("OpenSandbox smoke: the vault substitution FAILED - this runtime cannot serve the vault");
+    process.exit(1);
   }
   process.exit(1);
 });
