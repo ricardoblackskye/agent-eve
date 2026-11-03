@@ -18,6 +18,10 @@ FILTER_REGEX_EXCLUDE: >-
 # We must not mutate them, so scope these linters off the vendor tree.
 MARKDOWN_MARKDOWN_LINK_CHECK_FILTER_REGEX_EXCLUDE: (vendor/)
 REPOSITORY_KICS_FILTER_REGEX_EXCLUDE: (vendor/)
+# KICS runs `scan --path .`, so MegaLinter's FILTER_REGEX_EXCLUDE does not stop it reaching the
+# vendored charts. Exclude them with KICS's own flag; the 4 findings (3 placeholder keys and one
+# Ed25519 test vector) are all upstream files we must not mutate.
+REPOSITORY_KICS_ARGUMENTS: --exclude-paths vendor
 JAVASCRIPT_DEFAULT_STYLE: prettier
 JSON_PRETTIER_FILTER_REGEX_EXCLUDE: (\.next/|\.eve/|\.vercel/|node_modules/)
 # tsqllint is Microsoft's T-SQL linter; this repo's migrations are PostgreSQL
