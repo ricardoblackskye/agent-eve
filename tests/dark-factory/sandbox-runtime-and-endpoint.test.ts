@@ -30,9 +30,12 @@ const SMOKE = read("scripts/sandbox-smoke.ts");
 
 describe("the local sandbox has one runtime and one endpoint (#570)", () => {
   it("points df:sandbox-up at the Kubernetes bootstrap, not the Docker server", () => {
-    // The Docker runtime cannot serve the vault; the bootstrap can and is the proven path.
-    expect(pkg.scripts["df:sandbox-up"]).toMatch(/k8s-vault-proof\/bootstrap\.sh/);
+    // #553 moved the supported entry point to a TypeScript core that runs the same Kubernetes
+    // path and also proves the vault. The INTENT of #570 is unchanged: the Docker server must
+    // not be the path. The raw shell bootstrap stays reachable as df:sandbox-up-shell.
+    expect(pkg.scripts["df:sandbox-up"]).toMatch(/scripts\/sandbox-up\.ts/);
     expect(pkg.scripts["df:sandbox-up"]).not.toMatch(/sandbox-server-up\.sh/);
+    expect(pkg.scripts["df:sandbox-up-shell"]).toMatch(/k8s-vault-proof\/bootstrap\.sh/);
   });
 
   it("documents the Docker runtime's limitation, since it is still shipped", () => {
