@@ -139,6 +139,17 @@ export async function provisionSandbox(
     ]);
   }
 
+  // The chart declares its subcharts as file:// dependencies; helm needs `dependency build`
+  // to resolve them into charts/ before `upgrade --install`, or it fails with "repo not found".
+  // (bootstrap.sh does this too, but this core path runs instead of the shell.)
+  const build = await exec("helm", ["dependency", "build", chartPath], { env: process.env });
+  if (build.code !== 0) {
+    return fail(endpoint, [
+      "helm dependency build failed; the vendored chart could not resolve its subcharts. " +
+      "Run: npm run df:sandbox-vendor",
+    ]);
+  }
+
   const deploy = await exec(
     "helm",
     [
@@ -155,6 +166,19 @@ export async function provisionSandbox(
   );
   if (deploy.code !== 0) {
     return fail(endpoint, ["helm upgrade --install failed; see its output above."]);
+  }
+
+  // The chart does a spec-driven rollout on upgrade; the server pod is not Ready the instant
+  // helm returns. Wait for it (bounded) before probing, or the reachability check fires early.
+  // This is the same wait bootstrap.sh runs — the core path replaces the shell but must keep it.
+  for (const target of ["deployment/opensandbox-server", "deployment/opensandbox-controller-manager"]) {
+    const wait = await exec("kubectl", ["rollout", "status", target, "-n", NS_CP, "--timeout=240s"]);
+    if (wait.code !== 0) {
+      return fail(endpoint, [
+        `the control plane did not become ready: ${target} timed out.`,
+        wait.stderr.trim() || "check: kubectl -n opensandbox-system get pods",
+      ]);
+    }
   }
 
   // --- 5. the proofs run HERE, not in the operator's other terminal -------

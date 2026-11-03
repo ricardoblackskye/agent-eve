@@ -1,0 +1,25 @@
+# #553 — the vendoring lock and every shell script must keep LF endings.
+#
+# Why: `core.autocrlf=true` is the default on Windows, and it checked
+# scripts/sandbox-vendor/artifacts.lock.json out with CRLF. The digest comparison then failed
+# on a trailing \r while both digests printed identically — invisible whitespace, and the
+# script refused to vendor a perfectly good image. Pinning eol=lf makes the checkout
+# independent of the operator's git config.
+#
+# `-text` on binary blobs stops git from ever attempting a conversion.
+
+* text=auto eol=lf
+
+# Lock files and scripts are read by native Windows binaries and by bash; neither tolerates
+# a stray \r in a digest or a shebang.
+*.json            text eol=lf
+*.sh              text eol=lf
+*.ts              text eol=lf
+*.py              text eol=lf
+*.yaml            text eol=lf
+*.yml             text eol=lf
+*.md              text eol=lf
+
+# Image tarballs are binary; never touch them.
+*.tar             binary
+*.tgz             binary

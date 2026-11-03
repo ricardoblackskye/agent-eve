@@ -14,9 +14,10 @@
  *   npm run df:sandbox-up                       # local minikube
  *   KUBE_CONTEXT=prod-east npm run df:sandbox-up   # an existing cluster (AC4)
  */
-import { execFile } from "node:child_process";
+import { execFile, execFileSync, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import {
   provisionSandbox,
@@ -27,15 +28,30 @@ import {
 
 const execFileAsync = promisify(execFile);
 
-const ROOT = resolve(__dirname, "..");
+// The repo is ESM ("type": "module"), so __dirname does not exist here. This is the same
+// idiom scripts/load-env.ts uses. Found by running the CLI for real: the unit tests never
+// execute it, so they could not catch this.
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 /**
  * Real exec: runs a native binary and normalises the result. Non-zero exits are RETURNED, not
  * thrown, so the core can report a refusal instead of a stack trace.
+ *
+ * Binary resolution honours env overrides (HELM/KUBECTL/MINIKUBE/DOCKER) so the operator can
+ * point at installed binaries without them being on PATH. Found by running for real: the core
+ * calls exec("helm", ...) but helm here lives only at the HELM env var.
  */
+const BIN_ENV: Record<string, string | undefined> = {
+  helm: process.env.HELM,
+  kubectl: process.env.KUBECTL,
+  minikube: process.env.MINIKUBE,
+  docker: process.env.DOCKER,
+};
+const resolveBin = (command: string): string => BIN_ENV[command] ?? command;
+
 const exec: ExecFn = async (command, args, options): Promise<ExecResult> => {
   try {
-    const { stdout, stderr } = await execFileAsync(command, args, {
+    const { stdout, stderr } = await execFileAsync(resolveBin(command), args, {
       env: options?.env ?? process.env,
       maxBuffer: 32 * 1024 * 1024,
     });
@@ -84,6 +100,48 @@ async function runVaultProof(endpoint: string): Promise<boolean> {
   return true;
 }
 
+/** Starts the port-forward as a detached process and waits for it to be listening. */
+async function startForward(): Promise<() => Promise<void>> {
+  const port = Number(process.env.FORWARD_PORT ?? 18082);
+  const child = spawn(resolveBin("kubectl"), [
+    "port-forward",
+    "-n", "opensandbox-system",
+    "svc/opensandbox-server",
+    `${port}:80`,
+  ], { stdio: "ignore", detached: true });
+  child.unref();
+
+  // Poll until the local port answers, or give up after 30s.
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch(`http://localhost:${port}`);
+      if (res.status < 500) break;
+    } catch {
+      await new Promise((r) => setTimeout(r, 500));
+    }
+  }
+
+  return async () => {
+    if (child.pid === undefined) return;
+    // process.kill(-pid) targets a POSIX process GROUP and throws on Windows, so the forward
+    // would outlive the command and hold the port for the next run. taskkill /T kills the tree.
+    if (process.platform === "win32") {
+      try {
+        execFileSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore" });
+      } catch {
+        /* already gone */
+      }
+      return;
+    }
+    try {
+      process.kill(-child.pid, "SIGKILL");
+    } catch {
+      /* already gone */
+    }
+  };
+}
+
 async function main(): Promise<number> {
   const artifactsDir = join(ROOT, "scripts/sandbox-vendor");
   const forwardPort = Number(process.env.FORWARD_PORT ?? 18082);
@@ -96,6 +154,10 @@ async function main(): Promise<number> {
     exec,
     reachSandbox,
     runVaultProof,
+    // Without this the core's `if (options.startForward)` is false, so it skips forwarding
+    // entirely and probes a dead port. Found by running for real — the unit tests inject
+    // their own startForward, so they never caught the omission.
+    startForward,
   });
 
   if (!result.ok) {

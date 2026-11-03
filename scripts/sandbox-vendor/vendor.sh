@@ -24,8 +24,12 @@ LOCK="$HERE/artifacts.lock.json"
 CACHE="$HERE/cache"
 FORCE="${1:-}"
 
-# Native path form for docker (a native Windows binary).
+# Native path form for docker AND python: both are native Windows binaries and neither
+# translates MSYS paths (/c/Users/...), so a file path handed to them must be mixed form
+# (C:/Users/...). Found by running this script for real - python reported the lock as missing
+# while it sat right there, because it was handed the MSYS form.
 CACHE_NATIVE="$(cygpath -m "$CACHE" 2>/dev/null || echo "$CACHE")"
+LOCK_NATIVE="$(cygpath -m "$LOCK" 2>/dev/null || echo "$LOCK")"
 
 if [ ! -f "$LOCK" ]; then
   echo "ERROR: lock file not found: $LOCK" >&2
@@ -43,12 +47,20 @@ mkdir -p "$CACHE"
 
 # Read the lock with python: the repo already depends on python for the vault proof, and a
 # JSON parser in bash would be a liability. Emits "ref<TAB>digest" per image.
-IMAGES=$(python - "$LOCK" <<'PY'
+# WINDOWS CARRIAGE RETURN: python's print emits \r\n here, and the read loop below leaves that
+# \r attached to the digest. That made every comparison fail while both digests printed
+# identically - the mismatch was invisible whitespace. Writing through sys.stdout with an
+# explicit \n removes the character at the source instead of sanitising every consumer.
+IMAGES=$(python - "$LOCK_NATIVE" <<'PY'
 import json, sys
+# Windows text-mode stdout translates \n to \r\n regardless of how the string is written, so
+# the digest arrived with a trailing \r and every comparison failed on invisible whitespace.
+# Binary mode is the only way to emit a bare \n here.
+out = sys.stdout.buffer
 with open(sys.argv[1], "r", encoding="utf-8") as handle:
     lock = json.load(handle)
 for image in lock["images"]:
-    print(f"{image['ref']}\t{image['digest']}")
+    out.write(f"{image['ref']}\t{image['digest']}\n".encode("utf-8"))
 PY
 )
 
@@ -72,7 +84,9 @@ while IFS=$'\t' read -r REF DIGEST; do
   docker pull "$REF" >/dev/null
 
   # AC6: refuse loudly, naming the image, if what arrived is not the locked digest.
-  ACTUAL=$(docker image inspect --format '{{index .RepoDigests 0}}' "$REF" 2>/dev/null | sed 's/.*@//')
+  # tr -d '\r' on this side too: docker's output is also CRLF on Windows. Sanitising only one
+  # side of the comparison would just move the bug.
+  ACTUAL=$(docker image inspect --format '{{index .RepoDigests 0}}' "$REF" 2>/dev/null | sed 's/.*@//' | tr -d '\r')
   if [ -z "$ACTUAL" ]; then
     echo "ERROR: could not read a digest for $REF after pulling it." >&2
     exit 1
