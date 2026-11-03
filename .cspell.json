@@ -1,4 +1,4 @@
-{
+﻿{
   "version": "0.2",
   "language": "en",
   "words": [
@@ -158,6 +158,7 @@
     "prettier",
     "reactmarkdown",
     "realpath",
+    "recognise",
     "recognises",
     "redirections",
     "releasenotes",
@@ -165,6 +166,7 @@
     "retryable",
     "revertable",
     "ricardoblackskye",
+    "Rolldown",
     "sandboxed",
     "sanitisation",
     "sanitised",
