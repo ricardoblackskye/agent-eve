@@ -17,3 +17,7 @@ coverage/
 
 # #501: the local Dark Factory run clones the target here, inside the checkout.
 df-workspaces/
+
+# #553: image blobs for the local sandbox are vendored into a cache, never committed.
+# The chart itself IS committed (vendor/opensandbox-charts); only the blobs are ignored.
+scripts/sandbox-vendor/cache/
