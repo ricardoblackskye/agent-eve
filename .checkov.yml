@@ -1,2 +1,7 @@
 skip-path:
   - release-manager.config.json
+  # Vendored OpenSandbox charts (#553) are third-party upstream Helm/CFN templates regenerated
+  # by scripts/sandbox-vendor/vendor.sh. Checkov scans --directory ., so the MegaLinter
+  # FILTER_REGEX_EXCLUDE does not reach it; skip the path here instead. Its 101 helm findings
+  # and one CloudFormation parse error are all upstream code we must not mutate.
+  - vendor

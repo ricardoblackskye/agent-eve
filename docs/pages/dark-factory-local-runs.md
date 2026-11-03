@@ -14,6 +14,11 @@ is expected: the run posts a plan and waits for approval ([ADR 0041](../../docs/
 [`local-run-preflight.ts`](../../agent/lib/dark-factory/local-run-preflight.ts),
 [`local-run-checkout.ts`](../../agent/lib/dark-factory/local-run-checkout.ts)
 
+The sandbox seam (#553) lives in [`scripts/sandbox-up.ts`](../../scripts/sandbox-up.ts) — the CLI that
+wires the core to real processes — and [`agent/lib/dark-factory/sandbox-provisioning.ts`](../../agent/lib/dark-factory/sandbox-provisioning.ts)
+— the provisioning core itself. The chart, CRDs and digest lock are vendored under
+[`scripts/sandbox-vendor/`](../../scripts/sandbox-vendor/).
+
 ## The command
 
 ```bash
@@ -76,15 +81,58 @@ export DF_CONTROL_DRIVER=postgres
 export DF_CONTROL_DATABASE_URL="postgres://postgres@localhost:5432/darkfactory?sslmode=disable"
 
 # 2. The sandbox seam (reuse the repo's own helpers — it already knows the cluster).
-npm run df:sandbox-up          # bootstrap.sh: minikube + Helm control plane (vault-capable)
-npm run df:sandbox-forward     # port-forward :18082 into this host (the endpoint below)
-npm run df:sandbox-smoke       # proves the vault substitution, not just reachability
+npm run df:sandbox-vendor      # populate the image cache from the committed digest lock
+npm run df:sandbox-up          # deploy + port-forward + vault proof, in one command
+
 
 export DF_SANDBOX_DRIVER=opensandbox
 export DF_SANDBOX_ENDPOINT="http://127.0.0.1:18082"
 export DF_SANDBOX_PROTOCOL=http
 export DF_SANDBOX_IMAGE="df-sandbox-webfeedpoc:4"
 ```
+
+### The sandbox lifecycle commands (#553)
+
+| Command | What it does | Exit |
+|---------|--------------|------|
+| `npm run df:sandbox-vendor` | Populate the gitignored image cache from `artifacts.lock.json`, verifying each digest. Refuses if the registry serves different bits. | `0` cached, `1` refused |
+| `npm run df:sandbox-up` | Provision **and** prove: `helm dependency build`, deploy, wait for rollout, port-forward, run the vault proof, tear the forward down. | `0` proven, `1` refused/failed |
+| `npm run df:sandbox-up-shell` | The raw `bootstrap.sh`, kept as an escape hatch for debugging the executor. | `0`/`1` |
+| `npm run df:sandbox-down` | Surgical teardown: uninstall the release, delete both namespaces, stop the forward. **Leaves minikube running** so a re-run is warm. | `0` torn down |
+| `npm run df:sandbox-down -- --delete-cluster` | The full reset: the above, then `minikube delete`. | `0` |
+| `npm run df:sandbox-smoke` | The vault substitution proof alone, against an endpoint that is already up. | `0` proven |
+| `npm run df:sandbox-forward` | Manual port-forward, for when you want to poke the API by hand. | — |
+
+`df:sandbox-up` **is the proof**. It does not print "now run the proof in another terminal" — it runs
+`vault-proof.py` itself and exits non-zero unless a placeholder became the real secret upstream. A shell
+script that hands the proof back to you as a follow-up step is not the supported path; use
+`df:sandbox-up-shell` only when you are debugging the executor.
+
+### Pointing at an existing cluster instead of minikube (#553 AC4)
+
+```bash
+KUBE_CONTEXT=prod-east npm run df:sandbox-up
+```
+
+`KUBE_CONTEXT` selects an existing kube context and **skips `minikube start`**. `KUBE_KUBECONFIG` supplies a
+non-default kubeconfig. `HELM`, `KUBECTL`, `MINIKUBE` and `DOCKER` override binary discovery when those tools
+are installed somewhere PATH does not reach — this repository's own Windows setup keeps helm in a temp
+directory, so the override is the normal case rather than an edge case.
+
+`FORWARD_PORT` changes the local port (default `18082`); `DF_SANDBOX_ENDPOINT` must name the same port.
+
+### Tearing down (#553 AC5)
+
+```bash
+npm run df:sandbox-down                     # release the sandbox, keep the cluster
+npm run df:sandbox-down -- --delete-cluster # full reset, ~12 minutes to cold-start again
+```
+
+Teardown is **surgical by default**. It uninstalls the Helm release, removes the control-plane and workload
+namespaces, and stops the port-forward — then leaves minikube running so the next `df:sandbox-up` is a warm
+`helm upgrade --install` rather than a cold four-CPU start. It fails if the port is still listening after
+teardown, because a forward that outlived its run is what makes the next run die with "address already in use"
+and no clue why.
 
 ### Secrets at runtime, never on the command line
 
@@ -272,3 +320,38 @@ The `uvx opensandbox-server` Docker runtime hard-rejects `secure_access` and nev
 push path - requires the Kubernetes runtime above. A sandbox that starts and answers `/health`
 is not evidence that it can do the job: the assertion that counts is a real
 placeholder-to-secret substitution.
+
+### `vendor.sh` refuses a digest that looks identical (#553)
+
+```text
+ERROR: digest mismatch for .../execd:release-1.1.1
+  lock:   sha256:cda2bc35eded
+  actual: sha256:cda2bc35eded
+```
+
+**Cause:** invisible whitespace. Two mechanisms produce it on Windows. First, python's text-mode
+stdout turns every newline into a carriage-return plus newline, so the digest read from the lock
+arrived with a trailing carriage return. Second, `core.autocrlf=true` checks
+`artifacts.lock.json` out with CRLF in the first place. The comparison therefore failed while
+both digests printed the same, because the difference was a character you cannot see.
+**Fix:** the script emits through `sys.stdout.buffer` and strips the carriage return on both
+sides, and `.gitattributes` pins LF for the lock file so the checkout cannot reintroduce it.
+If you see this, run `npm run df:sandbox-vendor` again after
+`git checkout -- scripts/sandbox-vendor/artifacts.lock.json`.
+
+### `helm upgrade` fails with `Error: repo not found` (#553)
+
+**Cause:** the umbrella chart declares its subcharts as `file://` dependencies. `helm upgrade` cannot
+resolve those unless `helm dependency build` has populated `charts/` first. `bootstrap.sh` did this;
+the TypeScript core path that replaced it did not.
+**Fix:** the core runs `helm dependency build` before `upgrade --install`. If you see this from the
+shell escape hatch, run `helm dependency build vendor/opensandbox-charts/opensandbox` first.
+
+### A second `df:sandbox-up` fails with "address already in use" (#553)
+
+**Cause:** a port-forward from a previous run outlived it. On Windows the teardown used
+`process.kill(-pid)`, which targets a POSIX process *group* and throws — so the child survived and kept
+port 18082. The next run's own forward then failed to bind, and the reachability probe hit the stale
+listener, reporting "not reachable" for a cluster that was actually fine.
+**Fix:** teardown uses `taskkill /PID <pid> /T /F` on Windows. If you hit this before the fix,
+`netstat -ano | grep :18082` names the holder; `taskkill /PID <pid> /T /F` clears it.

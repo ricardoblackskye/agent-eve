@@ -1,0 +1,27 @@
+{
+  "$comment": "Committed lock for #553 AC2. The chart is committed in-tree (vendor/) so no run-time fetch happens. Image BLOBS are not committed - only these digests. Run `npm run df:sandbox-vendor` to populate the gitignored cache; `df:sandbox-up` refuses when the cache is empty.",
+  "chart": {
+    "source": "https://github.com/opensandbox-group/OpenSandbox",
+    "path": "vendor/opensandbox-charts/opensandbox",
+    "version": "1.2.0",
+    "appVersion": "1.2.0",
+    "upstreamSubdir": "manifests/charts",
+    "vendoredAt": "2026-11-03"
+  },
+  "crds": {
+    "path": "vendor/opensandbox-crds",
+    "upstreamSubdir": "kubernetes/config/crd/bases"
+  },
+  "images": [
+    {
+      "ref": "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:release-1.1.1",
+      "digest": "sha256:cda2bc35409bbf57561599b316cafb899598f7dce671332e7ceda14eb1cfeded",
+      "role": "execd"
+    },
+    {
+      "ref": "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:release-1.1.1",
+      "digest": "sha256:bce2cc2e4dc3a3594678b91ac29efb0669fccebfdfc137727018d3b087fbb13a",
+      "role": "egress"
+    }
+  ]
+}

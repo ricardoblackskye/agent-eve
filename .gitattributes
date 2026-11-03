@@ -1,0 +1,19 @@
+# #553 — the vendoring lock must keep LF endings.
+#
+# Why: `core.autocrlf=true` is the default on Windows, and it checked
+# scripts/sandbox-vendor/artifacts.lock.json out with CRLF. The digest comparison then failed
+# on a trailing \r while both digests printed identically — invisible whitespace, and the
+# script refused to vendor a perfectly good image. Pinning eol=lf on that one path makes the
+# checkout independent of the operator's git config.
+#
+# Deliberately NOT a global `* text=auto eol=lf`. This repository has files committed WITH
+# CRLF in their blobs (e.g. .github/workflows/ci.yml and three scripts/ shell scripts). A
+# global text/eol rule makes git renormalise every one of them on checkout, so each \r becomes
+# the "trailing whitespace" that `git diff --check` reports — failing REPOSITORY_GIT_DIFF on
+# files the PR never touched. Pin only the file that actually needs it.
+
+scripts/sandbox-vendor/artifacts.lock.json text eol=lf
+
+# Image tarballs are binary; never touch them.
+*.tar binary
+*.tgz binary
