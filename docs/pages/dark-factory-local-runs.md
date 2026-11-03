@@ -325,8 +325,8 @@ placeholder-to-secret substitution.
 
 ```text
 ERROR: digest mismatch for .../execd:release-1.1.1
-  lock:   sha256:cda2bc35...eded
-  actual: sha256:cda2bc35...eded
+  lock:   sha256:cda2bc35eded
+  actual: sha256:cda2bc35eded
 ```
 
 **Cause:** invisible whitespace. Two mechanisms produce it on Windows. First, python's text-mode
