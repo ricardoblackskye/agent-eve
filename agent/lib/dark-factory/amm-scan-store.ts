@@ -11,7 +11,15 @@
  * is MEASURED, not what is STORED.
  */
 import { createHash } from "node:crypto";
-import { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
+
+// #578: `node:sqlite` is a Node builtin that Vite 8 / Rolldown does not recognise in its
+// builtin list, so a STATIC import makes the bundler try to bundle it into the jsdom/client
+// module graph and fail with "Cannot bundle Node.js built-in". Resolving it at runtime keeps
+// it out of the static graph while still loading the real driver, because jsdom runs in Node.
+const { DatabaseSync } = process.getBuiltinModule("node:sqlite") as {
+  DatabaseSync: typeof DatabaseSyncType;
+};
 
 import { normalizeRepo, type AmmScan } from "./amm-readiness";
 import { catalogueVersion } from "./amm-signals";
@@ -150,7 +158,7 @@ function parseRows(rows: readonly Row[]): StoredAmmScan[] {
  */
 export class SqliteAmmScanStore implements AmmScanStore {
   readonly id = "sqlite";
-  private readonly database: DatabaseSync;
+  private readonly database: DatabaseSyncType;
 
   constructor(path: string) {
     this.database = new DatabaseSync(path);
