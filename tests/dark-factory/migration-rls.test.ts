@@ -73,3 +73,45 @@ describe("RLS coverage (#211)", () => {
     }
   });
 });
+
+/**
+ * View security (#591). The Supabase linter flagged `df_plan_estimate_accuracy`
+ * as SECURITY DEFINER: a PostgreSQL view runs with the view owner's permissions
+ * and RLS unless `security_invoker = true` is set. The adapter recreates this
+ * view at runtime, so the option must live in the adapter's DDL — a one-off
+ * `ALTER VIEW` on the hosted database is reverted by the next run.
+ *
+ * This guard makes reverting that DDL option fail CI, so the durable fix cannot
+ * be quietly undone. It reads source text rather than connecting to a database,
+ * matching the rest of this suite.
+ */
+const CREATE_REPLACE_VIEW =
+  /CREATE OR REPLACE VIEW\s+([a-z_][a-z0-9_]*)([\s\S]*?)AS\s/gi;
+
+function replacedViews(): Map<string, string> {
+  const found = new Map<string, string>();
+  for (const file of readdirSync(LIB)) {
+    if (!file.endsWith(".ts")) continue;
+    const text = readFileSync(join(LIB, file), "utf8");
+    for (const match of text.matchAll(CREATE_REPLACE_VIEW)) {
+      found.set(match[1].toLowerCase(), match[2]);
+    }
+  }
+  return found;
+}
+
+describe("view security (#591)", () => {
+  it("finds the adapter-replaced views (non-vacuous)", () => {
+    const views = replacedViews();
+    expect(views.size).toBeGreaterThan(0);
+    expect(views.has("df_plan_estimate_accuracy")).toBe(true);
+  });
+
+  it("every view the Postgres adapter replaces enforces the querying user's RLS", () => {
+    const missing = [...replacedViews().entries()]
+      .filter(([, options]) => !/security_invoker\s*=\s*true/i.test(options))
+      .map(([name]) => name)
+      .sort();
+    expect(missing).toEqual([]);
+  });
+});

@@ -112,6 +112,16 @@ describe("#409 every pg suite declares its own variable", () => {
   const DSN_REF = /process\.env\.(DF_[A-Z0-9_]*DATABASE_URL)/g;
   const SELF = "pg-suite-isolation.test.ts";
 
+  /**
+   * A live-only suite reads its database from an explicit `DF_LIVE_*` variable and is READ-ONLY against a
+   * real database. It is deliberately NOT in PG_SUITES, because PG_SUITES drives the global setup, which
+   * drops and recreates schemas and truncates tables — running that against a live database would be
+   * catastrophic. The exemption is an allowlist, not a pattern: adding a new live suite must be reviewed
+   * here rather than slipping into the destructive registry.
+   */
+  const LIVE_DSN = /^DF_LIVE_[A-Z0-9_]*DATABASE_URL$/;
+  const LIVE_ONLY_FILES = ["view-security-live.test.ts"] as const;
+
   function pgSuiteFiles(): { file: string; vars: string[] }[] {
     const dir = join(process.cwd(), "tests", "dark-factory");
     return readdirSync(dir)
@@ -123,17 +133,37 @@ describe("#409 every pg suite declares its own variable", () => {
       .filter((entry) => entry.vars.length > 0);
   }
 
+  function isLiveOnly(entry: { vars: string[] }): boolean {
+    return entry.vars.length > 0 && entry.vars.every((variable) => LIVE_DSN.test(variable));
+  }
+
   it("finds the Postgres suites by scanning, so a new one cannot be forgotten", () => {
     const files = pgSuiteFiles().map((entry) => entry.file);
     expect(files.length).toBeGreaterThanOrEqual(7);
     expect(files).toContain("control-postgres.test.ts");
   });
 
-  it("registers every suite file, and each declares only its own variable", () => {
-    for (const { file, vars } of pgSuiteFiles()) {
+  it("registers every hermetic suite file, and each declares only its own variable", () => {
+    for (const { file, vars } of pgSuiteFiles().filter((entry) => !isLiveOnly(entry))) {
       const entry = PG_SUITES.find((suite) => suite.file === file);
       expect(entry, `${file} must be registered in PG_SUITES`).toBeDefined();
       expect(vars, `${file} must read exactly one database variable: its own`).toEqual([entry!.dsnVar]);
+    }
+  });
+
+  it("keeps live-only suites OUT of the destructive registry", () => {
+    const liveOnly = pgSuiteFiles().filter(isLiveOnly).map((entry) => entry.file).sort();
+    // The allowlist must match reality: a new live suite has to be added here deliberately, so it cannot
+    // be registered for truncation without a reviewer noticing.
+    expect(liveOnly).toEqual([...LIVE_ONLY_FILES].sort());
+    // Cast to string: PG_SUITES is a literal union that deliberately excludes live-only files, so a
+    // direct comparison against a literal would be a compile-time contradiction. The runtime check is
+    // the point — a live-only file must never appear in the destructive registry.
+    for (const file of LIVE_ONLY_FILES as readonly string[]) {
+      expect(
+        PG_SUITES.find((suite) => suite.file === file),
+        `${file} is live-only and must NOT be in PG_SUITES: the global setup truncates its database`,
+      ).toBeUndefined();
     }
   });
 
