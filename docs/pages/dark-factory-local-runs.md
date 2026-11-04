@@ -134,6 +134,24 @@ namespaces, and stops the port-forward — then leaves minikube running so the n
 teardown, because a forward that outlived its run is what makes the next run die with "address already in use"
 and no clue why.
 
+### What does not survive a disconnect (#383 AC4)
+
+The sandbox is **disposed in the run's `finally`** when the coding phase ends — on success, on
+throw, and on failure. It is not a persistent session.
+
+Consequences for an operator:
+
+- A **network or terminal disconnect does not park the run.** The sandbox is torn down by the
+  runner's cleanup path, and a disconnected run is not resumable.
+- A sandbox that **dies mid-run** fails the run loudly; it is not re-provisioned or resumed.
+  Recovery from a parked or failed run is tracked in #380.
+- "Sessions survive disconnect" in the Pillar 5 whitepaper is **not met by the current local
+  run path.** What *is* met is the lifecycle guarantee: a run cannot leave a sandbox running,
+  however it exits.
+
+If you need a session to outlive a disconnect, keep the sandbox and its port-forward alive
+yourself and run commands against the existing endpoint.
+
 ### Secrets at runtime, never on the command line
 
 `OPENROUTER_API_KEY` is **not** in `.env.local` on this host. Pull it from the deployment, read it into the
