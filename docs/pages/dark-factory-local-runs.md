@@ -152,6 +152,29 @@ Consequences for an operator:
 If you need a session to outlive a disconnect, keep the sandbox and its port-forward alive
 yourself and run commands against the existing endpoint.
 
+### Cold start for the pre-built image (#383 AC3)
+
+**Cold start = time from `SandboxSync.create()` until the sandbox reports ready.** A second metric,
+first-command latency, captures time until the sandbox is actually usable. Measured against the live local
+cluster (minikube, `opensandbox-server` on port-forward 18082) with image `df-sandbox-agent-eve:358`
+(3.12 GB, pre-built and pre-loaded):
+
+| Run | create-to-ready | first-command | Notes |
+| --- | --- | --- | --- |
+| 1 | 3.02s | 0.33s | health check skipped |
+| 2 | 2.63s | 0.28s | health check skipped |
+| 3 | 2.41s | 0.28s | health check enabled (default) |
+
+**Median ≈ 2.63s, range 2.41–3.02s.** Enabling the health check added no measurable time.
+
+The Pillar 5 bar is **cold start under 10 minutes**. A per-sandbox start is roughly 200× under it. Even
+counting the first-ever `minikube image load` (4m32s once), total first-run cold start is ≈ 4m35s — still
+under the bar. That image load is a **one-time** provisioning cost, not a per-run cost.
+
+**Conditions this figure holds under:** a warm cluster with the image already in containerd, so pod
+scheduling and container start only — no registry pull. A cold *cluster* adds the image load; both figures
+are stated so neither is hidden. The measurement is reproducible via the timing script tracked in #589.
+
 ### Secrets at runtime, never on the command line
 
 `OPENROUTER_API_KEY` is **not** in `.env.local` on this host. Pull it from the deployment, read it into the
