@@ -77,7 +77,7 @@ JSON at `.data/sandbox-provision-state.json` (`.data/` is already gitignored —
 completed stages, artifact digests used, cluster/context, forward port, timestamps. **No secrets.**
 
 Resume semantics: a re-run skips a completed stage **only if its inputs still match** (digest, context,
-port); otherwise it redoes that stage and its dependants. Skips emit `phase:"skip"`, so the GUI can show
+port); otherwise it redoes that stage and its dependents. Skips emit `phase:"skip"`, so the GUI can show
 "already provisioned" rather than replaying. This is consistent with #553's decision that teardown leaves
 minikube running.
 
