@@ -29,6 +29,27 @@ import sys
 PLACEHOLDER = "__VAULT_SECRET__"
 REAL = "REALVAULT-9f3a2b"
 HOST = "httpbin.org"
+# Printed in place of the secret. The proof's evidence is that the placeholder was
+# SUBSTITUTED, which a masked value still shows. The literal value is not needed on
+# stdout.
+REDACTED = "<redacted>"
+
+
+def redact(text: str, secret: str) -> str:
+    """Mask every occurrence of ``secret`` in ``text``.
+
+    A successful proof echoes the real vault secret back from the upstream. Printing
+    that body would write the secret to CI workflow logs, terminal scrollback and any
+    redirected file, so only a masked view is printed. The assertion still runs against
+    the RAW buffer: redacting what is PRINTED must never weaken what is PROVEN.
+
+    An empty or ``None`` secret is returned untouched — ``str.replace`` with an empty
+    argument inserts the replacement between every character and would corrupt the
+    output it is meant to protect.
+    """
+    if not secret:
+        return text
+    return text.replace(secret, REDACTED)
 
 
 def main() -> int:
@@ -131,7 +152,10 @@ def main() -> int:
     completed = subprocess.run(  # nosec B603
         command, check=False, capture_output=True, text=True
     )
-    print(completed.stdout.strip()[:500])
+    # Redact BEFORE truncating: a [:500] cut on the raw body can split the secret, so
+    # the slice applies to redact()'s result rather than its argument. A fragment of
+    # the secret would otherwise survive redaction.
+    print(redact(completed.stdout.strip(), REAL)[:500])
 
     proven = f"Bearer {REAL}" in completed.stdout
     verdict = (

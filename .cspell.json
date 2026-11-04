@@ -2,6 +2,11 @@
   "version": "0.2",
   "language": "en",
   "words": [
+    "scrollback",
+    "pycache",
+    "dont",
+    "REALVAULT",
+    "hasattr",
     "AUTOINCREMENT",
     "Authorisation",
     "batchsandbox",
