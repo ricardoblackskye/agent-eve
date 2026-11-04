@@ -211,6 +211,56 @@ set to the root, and Node reports a missing `cwd` as `spawn git ENOENT` — an e
 you to PATH for an answer that is not there. Three local attempts went that way before the real cause was found.
 Creating the directory means a clean checkout can no longer fail that way.
 
+## Applying database migrations
+
+`db/migrations/*.sql` enable RLS and set the view's `security_invoker` option. They are **not** applied
+automatically. Run them deliberately:
+
+```bash
+npm run db:migrate -- --status   # read-only: prints applied and pending, changes nothing
+npm run db:migrate -- --apply    # applies pending files in filename order
+```
+
+**DSN resolution order** (first one set wins):
+
+1. `--database-url <url>`
+2. `DF_MIGRATE_DATABASE_URL`
+3. `DF_RUN_HISTORY_DATABASE_URL`
+
+**Exit codes:** `0` applied or nothing pending; `1` drift or a failed migration (and `--status` when work is
+pending); `2` usage error — no action, no DSN, or an unknown flag.
+
+**Drift is a refusal.** If an applied file's checksum changed, or the database records a version with no file
+in the checkout, the runner stops and names what disagrees. Do not edit an applied migration; add a new one.
+The checksum is CRLF-normalised, so a Windows checkout and a Linux deploy agree on the same file.
+
+**Baseline caveat — read this before applying to a truly empty database.** The migrations are differential:
+they `ALTER` tables the application creates at runtime (`ensureSchema`). On a completely empty database the
+first migration that alters a runtime-created table fails with `relation ... does not exist`. The ordered
+bootstrap is therefore **two steps**: start the application once so its runtime DDL creates the base tables,
+then `npm run db:migrate -- --apply`. A one-command bootstrap is not built yet; that gap is tracked in #594.
+
+**Before the first production run**, take a snapshot and run `--status` first — it changes nothing. Every
+migration is idempotent, but "should be safe" is not "is safe".
+
+Verification after applying `011`:
+
+```sql
+-- Tables in public still without RLS (should be empty)
+SELECT c.relname
+FROM pg_class c
+JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE n.nspname = 'public' AND c.relkind = 'r' AND NOT c.relrowsecurity
+  AND c.relname LIKE 'df\_%' ESCAPE '\';
+
+-- Views in public without security_invoker (should be empty)
+SELECT c.relname, c.reloptions
+FROM pg_class c
+JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE n.nspname = 'public' AND c.relkind = 'v'
+  AND (c.reloptions IS NULL OR NOT ('security_invoker=true' = ANY(c.reloptions)));
+```
+
 ## Failure shapes
 
 - **Parked at the end?** Expected — the plan is on the issue awaiting approval (ADR 0041). Re-run after approving

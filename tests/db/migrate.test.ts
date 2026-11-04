@@ -7,7 +7,9 @@ import {
   checksumOf,
   computePlan,
   parseApplied,
+  parseArgs,
   readMigrations,
+  resolveDsn,
   type MigrationFile,
 } from "../../scripts/db-migrate";
 
@@ -145,5 +147,83 @@ describe("computePlan", () => {
     const plan = computePlan(files, new Map([["001_a.sql", "x"], ["099_gone.sql", "z"]]));
     expect(plan.ok).toBe(false);
     if (!plan.ok) expect(plan.drift).toHaveLength(2);
+  });
+});
+
+describe("parseArgs", () => {
+  it("requires an action", () => {
+    const parsed = parseArgs([]);
+    expect(parsed.ok).toBe(false);
+  });
+
+  it("accepts --status and --apply", () => {
+    expect(parseArgs(["--status"])).toEqual({
+      ok: true,
+      args: { action: "status", help: false, databaseUrl: undefined },
+    });
+    expect(parseArgs(["--apply"])).toEqual({
+      ok: true,
+      args: { action: "apply", help: false, databaseUrl: undefined },
+    });
+  });
+
+  it("refuses both actions at once", () => {
+    const parsed = parseArgs(["--status", "--apply"]);
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.message).toMatch(/exactly one/i);
+  });
+
+  it("accepts --database-url as a separate value and as =value", () => {
+    expect(parseArgs(["--status", "--database-url", "postgres://x"])).toEqual({
+      ok: true,
+      args: { action: "status", help: false, databaseUrl: "postgres://x" },
+    });
+    expect(parseArgs(["--apply", "--database-url=postgres://y"])).toEqual({
+      ok: true,
+      args: { action: "apply", help: false, databaseUrl: "postgres://y" },
+    });
+  });
+
+  it("refuses a missing --database-url value", () => {
+    const parsed = parseArgs(["--status", "--database-url"]);
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.message).toMatch(/needs a value/i);
+  });
+
+  it("refuses an unknown flag", () => {
+    const parsed = parseArgs(["--status", "--wat"]);
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.message).toMatch(/unknown argument/i);
+  });
+
+  it("allows --help without an action", () => {
+    const parsed = parseArgs(["--help"]);
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.args.help).toBe(true);
+  });
+});
+
+describe("resolveDsn", () => {
+  it("prefers the flag over both env vars", () => {
+    expect(
+      resolveDsn(
+        { databaseUrl: "postgres://flag" },
+        { DF_MIGRATE_DATABASE_URL: "postgres://migrate", DF_RUN_HISTORY_DATABASE_URL: "postgres://run" },
+      ),
+    ).toBe("postgres://flag");
+  });
+
+  it("prefers DF_MIGRATE_DATABASE_URL over DF_RUN_HISTORY_DATABASE_URL", () => {
+    expect(
+      resolveDsn({}, { DF_MIGRATE_DATABASE_URL: "postgres://migrate", DF_RUN_HISTORY_DATABASE_URL: "postgres://run" }),
+    ).toBe("postgres://migrate");
+  });
+
+  it("falls back to DF_RUN_HISTORY_DATABASE_URL", () => {
+    expect(resolveDsn({}, { DF_RUN_HISTORY_DATABASE_URL: "postgres://run" })).toBe("postgres://run");
+  });
+
+  it("returns undefined when nothing is set", () => {
+    expect(resolveDsn({}, {})).toBeUndefined();
   });
 });
