@@ -6,20 +6,32 @@ import {
 } from "../../agent/lib/dark-factory/sandbox-provider";
 
 /**
- * #280 T2 — the toggle is OFF by default and fail-closed.
+ * #280 T2 — there is deliberately no boolean "enable" flag: a boolean can default open, while a
+ * driver NAME cannot.
  *
- * There is deliberately no boolean "enable" flag: a boolean can default open, while a driver NAME
- * cannot. Absence means today's behaviour.
+ * #383 — absence REFUSES. The original default returned the local provider for an unset driver,
+ * which meant a run that never mentioned a driver wrote code, committed and pushed on the real
+ * filesystem. That was fail-closed against misconfiguration but not against isolation. The host
+ * tree now requires an explicit `DF_SANDBOX_DRIVER=local`.
  */
-describe("#280 createSandboxProvider", () => {
-  it("defaults to local when DF_SANDBOX_DRIVER is unset", () => {
-    expect(createSandboxProvider({}).driver).toBe("local");
+describe("#383 the host tree requires an explicit flag", () => {
+  it("refuses when DF_SANDBOX_DRIVER is unset", () => {
+    expect(() => createSandboxProvider({})).toThrow(SandboxConfigError);
   });
 
-  it("treats an empty or whitespace value as unset", () => {
-    expect(createSandboxProvider({ DF_SANDBOX_DRIVER: "" }).driver).toBe("local");
-    expect(createSandboxProvider({ DF_SANDBOX_DRIVER: "   " }).driver).toBe("local");
+  it("refuses on an empty or whitespace value", () => {
+    expect(() => createSandboxProvider({ DF_SANDBOX_DRIVER: "" })).toThrow(SandboxConfigError);
+    expect(() => createSandboxProvider({ DF_SANDBOX_DRIVER: "   " })).toThrow(SandboxConfigError);
   });
+
+  it("names both ways out in the refusal, so the message is actionable", () => {
+    // A refusal that only says "not set" leaves the operator guessing between host and sandbox.
+    expect(() => createSandboxProvider({})).toThrow(/DF_SANDBOX_DRIVER=local/);
+    expect(() => createSandboxProvider({})).toThrow(/DF_SANDBOX_DRIVER=opensandbox/);
+  });
+});
+
+describe("#280 createSandboxProvider", () => {
 
   it("selects local explicitly", () => {
     expect(createSandboxProvider({ DF_SANDBOX_DRIVER: "local" }).driver).toBe("local");
