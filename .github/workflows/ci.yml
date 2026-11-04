@@ -114,6 +114,42 @@ jobs:
           path: coverage/
           if-no-files-found: warn
 
+  windows-sandbox:
+    name: Windows Sandbox Tests
+    runs-on: windows-latest
+    # #585 T7 (AC7) - DEVIATION TO FLAG: a second OS matrix for a subset of tests, which costs
+    # CI minutes. The sandbox CLI is developed on Windows but CI ran Ubuntu-only, so a path
+    # separator or a taskkill-vs-process.kill(-pid) branch could pass on Linux and fail on the
+    # machine the tool is actually used from. This job closes that blind spot.
+    #
+    # These suites inject their exec function, so they need NO Docker and NO Postgres. That is
+    # why there is no services: block here - a service would fail on windows-latest and the job
+    # would never go green.
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Setup Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - name: Run the sandbox tests on Windows
+        # sandbox-state, sandbox-check, sandbox-flags and sandbox-provisioning are the core
+        # #585 suites. The events, exit-code, wiring and doc guards run too because they are
+        # static and cheap. Deliberately NOT the full suite: the gated Postgres integration
+        # tests need a service this runner does not have, and the point here is the sandbox.
+        run: >-
+          npx vitest run
+          tests/dark-factory/sandbox-state.test.ts
+          tests/dark-factory/sandbox-check.test.ts
+          tests/dark-factory/sandbox-flags.test.ts
+          tests/dark-factory/sandbox-provisioning.test.ts
+          tests/dark-factory/sandbox-provisioning-events.test.ts
+          tests/dark-factory/sandbox-exit-codes.test.ts
+          tests/dark-factory/sandbox-up-wiring.test.ts
+          tests/dark-factory/sandbox-cli-docs.test.ts
+          tests/dark-factory/windows-ci.test.ts
+
   build:
     name: Eve Build
     runs-on: ubuntu-latest
