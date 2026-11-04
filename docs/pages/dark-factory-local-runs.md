@@ -16,7 +16,9 @@ is expected: the run posts a plan and waits for approval ([ADR 0041](../../docs/
 
 The sandbox seam (#553) lives in [`scripts/sandbox-up.ts`](../../scripts/sandbox-up.ts) — the CLI that
 wires the core to real processes — and [`agent/lib/dark-factory/sandbox-provisioning.ts`](../../agent/lib/dark-factory/sandbox-provisioning.ts)
-— the provisioning core itself. The chart, CRDs and digest lock are vendored under
+— the provisioning core itself. Progress events (#585 T2) are defined in
+[`agent/lib/dark-factory/sandbox-events.ts`](../../agent/lib/dark-factory/sandbox-events.ts): one JSON
+object per line on stdout, with human prose on stderr. The chart, CRDs and digest lock are vendored under
 [`scripts/sandbox-vendor/`](../../scripts/sandbox-vendor/).
 
 ## The command
