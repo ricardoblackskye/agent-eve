@@ -8,7 +8,7 @@
  *
  * The fix is a small JSON file that records, per stage, the inputs that produced the last
  * success. A re-run skips a stage only when those inputs still match reality. A changed
- * digest, context or port invalidates that stage AND its dependants, so a stale skip cannot
+ * digest, context or port invalidates that stage AND its dependents, so a stale skip cannot
  * masquerade as a successful provision — the failure mode the plan calls out explicitly.
  *
  * No secrets are written: the recorded inputs are digests, context names and port numbers.
@@ -29,8 +29,14 @@ export type ProvisionStage = (typeof STAGES)[number];
  * Which stages a change to one stage invalidates. A changed artifact digest invalidates the
  * deploy that consumed it; a changed cluster invalidates everything that talks to that
  * cluster. Kept as data so the cascade is reviewable rather than buried in conditionals.
+ *
+ * The cascade is applied TRANSITIVELY: invalidating a stage also invalidates its dependents'
+ * dependents. Listing only direct dependents here would leave `forward` and `proof` recorded
+ * as completed after a vendor change — a stale skip that would report a provision as proven
+ * against bits that were never deployed. That is the exact failure this module exists to
+ * prevent, so the transitive walk is the invariant, not an optimisation.
  */
-export const DEPENDANTS: Record<ProvisionStage, ProvisionStage[]> = {
+export const DEPENDENTS: Record<ProvisionStage, ProvisionStage[]> = {
   vendor: ["deploy"],
   cluster: ["deploy", "forward", "proof"],
   deploy: ["forward", "proof"],
@@ -85,6 +91,26 @@ export async function saveState(stateFile: string, state: SandboxState): Promise
   await writeFile(stateFile, `${JSON.stringify(state, null, 2)}\n`, "utf8");
 }
 
+/**
+ * Every stage invalidated by a change to `stage`, including indirect dependents. The walk is
+ * depth-first with a visited set so the data table cannot introduce a cycle into an infinite
+ * loop. Order is not significant — callers only delete the entries.
+ */
+export function invalidatedBy(stage: ProvisionStage): ProvisionStage[] {
+  const affected: ProvisionStage[] = [];
+  const seen = new Set<ProvisionStage>();
+  const walk = (current: ProvisionStage): void => {
+    for (const dependant of DEPENDENTS[current]) {
+      if (seen.has(dependant)) continue;
+      seen.add(dependant);
+      affected.push(dependant);
+      walk(dependant);
+    }
+  };
+  walk(stage);
+  return affected;
+}
+
 /** True when the stage completed before AND its recorded inputs equal the current ones. */
 export function canSkipStage(
   state: SandboxState,
@@ -97,7 +123,7 @@ export function canSkipStage(
 }
 
 /**
- * Record a stage success. Also clears any dependants whose recorded inputs were produced
+ * Record a stage success. Also clears any dependents whose recorded inputs were produced
  * from the previous version of this stage — they must re-run against the new reality.
  */
 export function recordStageSuccess(
@@ -115,13 +141,13 @@ export function recordStageSuccess(
     inputs,
     timestamp: now.toISOString(),
   };
-  for (const dependant of DEPENDANTS[stage]) {
+  for (const dependant of invalidatedBy(stage)) {
     delete next.stages[dependant];
   }
   return next;
 }
 
-/** Clear a stage and its dependants after a failure or an input mismatch. */
+/** Clear a stage and its dependents after a failure or an input mismatch. */
 export function invalidateStage(
   state: SandboxState,
   stage: ProvisionStage,
@@ -131,7 +157,7 @@ export function invalidateStage(
     stages: { ...state.stages },
   };
   delete next.stages[stage];
-  for (const dependant of DEPENDANTS[stage]) {
+  for (const dependant of invalidatedBy(stage)) {
     delete next.stages[dependant];
   }
   return next;

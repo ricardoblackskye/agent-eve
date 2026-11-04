@@ -128,6 +128,7 @@ describe("the provisioning core emits stage events (#585 T2)", () => {
     const result = await provisionSandbox({
       artifactsDir,
       workspaceDir: process.cwd(),
+      stateFile: join(artifactsDir, "state.json"),
       cluster: "minikube",
       forwardPort: 18082,
       exec: recorder(),
@@ -167,6 +168,7 @@ describe("the provisioning core emits stage events (#585 T2)", () => {
     const result = await provisionSandbox({
       artifactsDir,
       workspaceDir: process.cwd(),
+      stateFile: join(artifactsDir, "state.json"),
       cluster: "minikube",
       forwardPort: 18082,
       exec: recorder(),
@@ -190,6 +192,7 @@ describe("the provisioning core emits stage events (#585 T2)", () => {
     const result = await provisionSandbox({
       artifactsDir,
       workspaceDir: process.cwd(),
+      stateFile: join(artifactsDir, "state.json"),
       cluster: "minikube",
       forwardPort: 18082,
       exec: recorder(),

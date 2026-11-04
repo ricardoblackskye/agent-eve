@@ -20,6 +20,7 @@ wires the core to real processes — and [`agent/lib/dark-factory/sandbox-provis
 [`agent/lib/dark-factory/sandbox-events.ts`](../../agent/lib/dark-factory/sandbox-events.ts): one JSON
 object per line on stdout, with human prose on stderr. The exit-code table (#585 T3) lives in
 [`agent/lib/dark-factory/sandbox-exit-codes.ts`](../../agent/lib/dark-factory/sandbox-exit-codes.ts).
+Idempotent resume (#585 T4) is owned by [`agent/lib/dark-factory/sandbox-state.ts`](../../agent/lib/dark-factory/sandbox-state.ts): it records each completed stage and the inputs that produced it in `.data/sandbox-provision-state.json`, so a second run skips a stage only while its inputs still match and a changed digest invalidates that stage and everything downstream of it.
 The chart, CRDs and digest lock are vendored under
 [`scripts/sandbox-vendor/`](../../scripts/sandbox-vendor/).
 

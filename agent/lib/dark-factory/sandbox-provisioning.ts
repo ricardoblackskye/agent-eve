@@ -34,6 +34,7 @@ import {
   loadState,
   recordStageSuccess,
   saveState,
+  STAGES,
   type ProvisionStage,
   type SandboxState,
 } from "./sandbox-state";
@@ -342,34 +343,80 @@ export async function provisionSandbox(
     if (canSkipStage(state, "forward", forwardInputs)) {
       emit({ step: "forward", phase: "skip", message: "port-forward already listening" });
     } else {
-      if (options.startForward) stopForward = await options.startForward();
-      emit({ step: "forward", phase: "success", message: "port-forward listening" });
-      state = recordStageSuccess(state, "forward", forwardInputs);
+      // A forwarding callback spawns a real process, so it can throw (no port, no binary).
+      // Convert that into a refusal with an actionable message instead of letting the error
+      // escape past the `done` event: a caller that only reads the result would otherwise
+      // see an exception where every other failure is a structured refusal.
+      try {
+        if (options.startForward) stopForward = await options.startForward();
+        emit({ step: "forward", phase: "success", message: "port-forward listening" });
+        state = recordStageSuccess(state, "forward", forwardInputs);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return refuse("forward", "the port-forward could not be started", [
+          {
+            code: "internal",
+            subject: `the port-forward could not be started: ${message}`,
+            fix: "Check that the port is free and that kubectl is on PATH.",
+          },
+        ]);
+      }
     }
 
     emit({ step: "proof", phase: "start", message: "running reachability and vault proof" });
-    const reachable = await options.reachSandbox(endpoint);
-    if (!reachable) {
-      return refuse("proof", "the sandbox endpoint is not reachable", [
-        {
-          code: "cluster-unreachable",
-          subject: `the sandbox endpoint is not reachable at ${endpoint}`,
-          fix: "The deploy completed but the control plane did not answer.",
-        },
-      ]);
-    }
+    const proofInputs = { endpoint };
+    if (canSkipStage(state, "proof", proofInputs)) {
+      emit({ step: "proof", phase: "skip", message: "reachability and vault proof already passed" });
+    } else {
+      // A probe can throw as well as return false; both mean "not proven".
+      let reachable = false;
+      try {
+        reachable = await options.reachSandbox(endpoint);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return refuse("proof", "the sandbox endpoint could not be reached", [
+          {
+            code: "cluster-unreachable",
+            subject: `the sandbox endpoint could not be reached at ${endpoint}: ${message}`,
+            fix: "The deploy completed but the control plane did not answer.",
+          },
+        ]);
+      }
+      if (!reachable) {
+        return refuse("proof", "the sandbox endpoint is not reachable", [
+          {
+            code: "cluster-unreachable",
+            subject: `the sandbox endpoint is not reachable at ${endpoint}`,
+            fix: "The deploy completed but the control plane did not answer.",
+          },
+        ]);
+      }
 
-    const proven = await options.runVaultProof(endpoint);
-    if (!proven) {
-      return refuse("proof", "the vault proof failed", [
-        {
-          code: "proof-failed",
-          subject: "the vault proof failed: credential substitution was not demonstrated",
-          fix: "The control plane is up but its vault behaviour is unverified.",
-        },
-      ]);
+      let proven = false;
+      try {
+        proven = await options.runVaultProof(endpoint);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return refuse("proof", "the vault proof could not be run", [
+          {
+            code: "proof-failed",
+            subject: `the vault proof could not be run: ${message}`,
+            fix: "The control plane is up but its vault behaviour is unverified.",
+          },
+        ]);
+      }
+      if (!proven) {
+        return refuse("proof", "the vault proof failed", [
+          {
+            code: "proof-failed",
+            subject: "the vault proof failed: credential substitution was not demonstrated",
+            fix: "The control plane is up but its vault behaviour is unverified.",
+          },
+        ]);
+      }
+      emit({ step: "proof", phase: "success", message: "reachability and vault proof passed" });
+      state = recordStageSuccess(state, "proof", proofInputs);
     }
-    emit({ step: "proof", phase: "success", message: "reachability and vault proof passed" });
 
     return { ok: true, endpoint, problems: [] };
   } finally {
@@ -380,6 +427,15 @@ export async function provisionSandbox(
       emit({ step: "teardown", phase: "start", message: "stopping port-forward" });
       await stopForward();
       emit({ step: "teardown", phase: "success", message: "port-forward stopped" });
+    }
+    // Persist the state AFTER teardown, so a failed teardown is not recorded as a clean
+    // resume point. A corrupt or unwritable file must not mask the provisioning result, so
+    // a save failure is reported but does not change the outcome.
+    try {
+      await saveState(stateFile, state);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      emit({ step: "teardown", phase: "failure", message: `could not save state: ${message}` });
     }
     emit({
       step: "done",
