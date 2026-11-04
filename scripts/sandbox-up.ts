@@ -26,6 +26,7 @@ import {
   type ExecResult,
   type SandboxCluster,
 } from "../agent/lib/dark-factory/sandbox-provisioning";
+import { createNdjsonEmitter } from "../agent/lib/dark-factory/sandbox-events";
 
 const execFileAsync = promisify(execFile);
 
@@ -147,6 +148,10 @@ async function main(): Promise<number> {
   const artifactsDir = join(ROOT, "scripts/sandbox-vendor");
   const forwardPort = Number(process.env.FORWARD_PORT ?? 18082);
 
+  // #585 T2: stdout is NDJSON only. Human prose goes to stderr, so a GUI or CI consumer
+  // can read events line-wise without stripping text.
+  const emit = createNdjsonEmitter({ write: (line) => process.stdout.write(line) });
+
   const result = await provisionSandbox({
     artifactsDir,
     workspaceDir: ROOT,
@@ -159,6 +164,7 @@ async function main(): Promise<number> {
     // entirely and probes a dead port. Found by running for real — the unit tests inject
     // their own startForward, so they never caught the omission.
     startForward,
+    onEvent: emit,
   });
 
   if (!result.ok) {
@@ -170,7 +176,7 @@ async function main(): Promise<number> {
     return 1;
   }
 
-  process.stdout.write(`sandbox provisioned and proven at ${result.endpoint}\n`);
+  process.stderr.write(`sandbox provisioned and proven at ${result.endpoint}\n`);
   return 0;
 }
 
