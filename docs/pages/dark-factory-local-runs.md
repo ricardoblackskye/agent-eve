@@ -103,7 +103,7 @@ export DF_SANDBOX_IMAGE="df-sandbox-webfeedpoc:4"
 | Command | What it does | Exit |
 |---------|--------------|------|
 | `npm run df:sandbox-vendor` | Populate the gitignored image cache from `artifacts.lock.json`, verifying each digest. Refuses if the registry serves different bits. | `0` cached, `1` refused |
-| `npm run df:sandbox-up` | Provision **and** prove: `helm dependency build`, deploy, wait for rollout, port-forward, run the vault proof, tear the forward down. | `0` proven, `1` refused/failed |
+| `npm run df:sandbox-up` | Provision **and** prove: `helm dependency build`, deploy, wait for rollout, port-forward, run the vault proof, tear the forward down. | `0` proven, otherwise the table below |
 | `npm run df:sandbox-up-shell` | The raw `bootstrap.sh`, kept as an escape hatch for debugging the executor. | `0`/`1` |
 | `npm run df:sandbox-down` | Surgical teardown: uninstall the release, delete both namespaces, stop the forward. **Leaves minikube running** so a re-run is warm. | `0` torn down |
 | `npm run df:sandbox-down -- --delete-cluster` | The full reset: the above, then `minikube delete`. | `0` |
@@ -114,6 +114,81 @@ export DF_SANDBOX_IMAGE="df-sandbox-webfeedpoc:4"
 `vault-proof.py` itself and exits non-zero unless a placeholder became the real secret upstream. A shell
 script that hands the proof back to you as a follow-up step is not the supported path; use
 `df:sandbox-up-shell` only when you are debugging the executor.
+
+### Exit codes (#585 T3)
+
+Every failure used to exit `1`, so on Windows a helm cache failure and a vault failure looked
+identical. The table is stable and lives in
+[`sandbox-exit-codes.ts`](../../agent/lib/dark-factory/sandbox-exit-codes.ts); a caller branches on the
+number instead of parsing English. The terminal `done` event carries the same code, so a GUI consumer
+reads it without inspecting the process exit.
+
+| Problem code | Exit | Meaning |
+|--------------|------|---------|
+| `internal` | `1` | Unclassified internal failure. Also the crash path when `main()` throws. |
+| `prerequisites-missing` | `10` | A prerequisite is missing or unusable (docker, kubectl, helm, python, minikube for a local cluster). The message names the binary and the fix. |
+| `artifact-unresolvable` | `11` | An artifact is unresolvable: the lock is absent or malformed, the cache is empty, or a locked image is not in the local store. |
+| `cluster-unreachable` | `12` | The cluster is unreachable: `minikube start` failed or the kube context does not answer. |
+| `proof-failed` | `13` | The proof failed: the endpoint could not be reached, or the vault proof did not substitute the placeholder. |
+| `teardown-failed` | `14` | Teardown failed: the port-forward or the release cleanup did not complete. |
+
+Two codes sit outside this table. `0` means provisioned and proven. `2` means a usage error: an
+unknown flag or a refused secret. Both are raised outside the provisioning core — `0` on success and
+`2` by flag parsing before provisioning starts — so neither is a `ProvisionProblemCode`.
+
+`--check` uses the same numbers without mutating anything: `10` for a missing prerequisite and `11`
+for an artifact problem. A preflight refusal is never `0`, so a script that runs `--check` first can
+gate on it directly.
+
+### The NDJSON event stream (#585 T2)
+
+Progress is one JSON object per line on **stdout**, and nothing else. Human prose goes to **stderr**,
+so a consumer can read events line-wise without stripping text and an operator still gets readable
+errors. The schema is defined in
+[`sandbox-events.ts`](../../agent/lib/dark-factory/sandbox-events.ts).
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `ts` | string | ISO-8601 UTC. Lets a consumer render ordering without guessing. |
+| `step` | string | One of `check`, `vendor`, `cluster`, `deploy`, `forward`, `proof`, `teardown`, `done`. |
+| `phase` | string | One of `start`, `success`, `failure`, `skip`. |
+| `message` | string | Short and human-readable. Structured detail goes in optional extra keys. |
+| `exitCode` | number | Present on the terminal `done` event only. |
+
+The terminal event is always `step: "done"` and carries the exit code, so a consumer stops on one
+line instead of inferring completion from silence. A `phase: "skip"` event means the stage was
+resumed from the state file and its commands were not re-run. A consumer should treat a skipped
+stage as already satisfied, not as a missing one.
+
+### The state file (#585 T4)
+
+A second run against an unchanged workspace does not redo the work. Completed stages and the inputs
+that produced them are recorded in `.data/sandbox-provision-state.json`; a stage is skipped only
+while its recorded inputs still match the current ones. A changed artifact digest or cluster context
+invalidates that stage and everything downstream of it, so a re-run never reports "skipped" for bits
+that no longer match reality. The file carries no secrets: digests, paths and the cluster context
+only. The logic lives in
+[`sandbox-state.ts`](../../agent/lib/dark-factory/sandbox-state.ts).
+
+### Flags (#585 T6)
+
+Flags configure the single entry point; the environment stays as a fallback so existing invocations
+keep working. `--check` runs the preflight and stops. `--forward-port` sets the local port (default
+`18082`). `--cluster minikube` starts or reuses a local cluster. `--kube-context` targets an existing
+cluster by context and takes precedence over `--cluster`; `--kubeconfig` supplies its kubeconfig.
+`--artifacts-dir` and `--workspace-dir` override the default locations. `--help` prints the usage
+text to stderr and exits `0`, keeping stdout NDJSON-only.
+
+Secrets are **refused on argv**, not redacted: `--token`, `--password`, `--api-key` and `--secret`
+exit `2` with a message pointing at stdin or a vault handle. A token on the command line is visible
+in the process table and lands in shell history and CI logs, so accepting one and cleaning it up
+later would already be too late. The parser lives in
+[`sandbox-flags.ts`](../../agent/lib/dark-factory/sandbox-flags.ts).
+
+> Note: when invoked through `npm run` or `npx`, the wrapper echoes the full command line to stderr
+> before this parser runs. The application never prints the value, but the wrapper's echo means a
+> secret passed on argv still reaches CI logs. The refusal stops the run; rotate the secret if one
+> was passed.
 
 ### Pointing at an existing cluster instead of minikube (#553 AC4)
 
