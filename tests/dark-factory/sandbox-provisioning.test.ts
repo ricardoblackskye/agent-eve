@@ -22,6 +22,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   provisionSandbox,
+  renderProblems,
   type ExecFn,
   type ExecResult,
 } from "../../agent/lib/dark-factory/sandbox-provisioning";
@@ -105,7 +106,7 @@ describe("the sandbox provisioning core (#553)", () => {
 
     expect(result.ok).toBe(false);
     // The operator must be told exactly what to run, not left guessing.
-    expect(result.problems.join("\n")).toContain("df:sandbox-vendor");
+    expect(renderProblems(result.problems).join("\n")).toContain("df:sandbox-vendor");
     // And it must NOT have gone on to deploy from an unpopulated cache.
     expect(calls.some((call) => call.args.join(" ").includes("upgrade"))).toBe(false);
   });
@@ -127,7 +128,7 @@ describe("the sandbox provisioning core (#553)", () => {
     });
 
     expect(result.ok).toBe(false);
-    const problems = result.problems.join("\n");
+    const problems = renderProblems(result.problems).join("\n");
     // Naming the image is the whole point: "something failed" is not actionable.
     expect(problems).toContain(IMAGE_A);
   });
@@ -203,7 +204,7 @@ describe("the sandbox provisioning core (#553)", () => {
     });
 
     expect(result.ok).toBe(false);
-    expect(result.problems.join("\n")).toContain("vault proof");
+    expect(renderProblems(result.problems).join("\n")).toContain("vault proof");
     // A dangling port-forward is the failure mode this catches.
     expect(stops.length).toBe(1);
     expect(calls.length).toBeGreaterThan(0);

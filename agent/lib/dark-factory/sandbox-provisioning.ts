@@ -48,10 +48,40 @@ export interface ProvisionOptions {
   startForward?: () => Promise<() => Promise<void>>;
 }
 
+/**
+ * Stable failure classes (#585 T1). A caller maps a code to a distinct exit code without
+ * parsing prose — the gap that made a helm cache failure indistinguishable from a vault failure
+ * on Windows, since both exited 1. Prose stays for operators via `renderProblems`.
+ */
+export type ProvisionProblemCode =
+  | "prerequisites-missing"
+  | "artifact-unresolvable"
+  | "cluster-unreachable"
+  | "proof-failed"
+  | "teardown-failed"
+  | "internal";
+
+export interface ProvisionProblem {
+  /** Stable, so callers and tests never match on prose. */
+  code: ProvisionProblemCode;
+  /** What failed, in one line. Names the object, never a secret value. */
+  subject: string;
+  /** What to do about it, in one line. */
+  fix: string;
+}
+
 export interface ProvisionResult {
   ok: boolean;
   endpoint: string;
-  problems: string[];
+  problems: ProvisionProblem[];
+}
+
+/**
+ * Human-readable rendering of classified problems. Keeps the prose output callers already
+ * print: the code is for machines, these lines are for operators.
+ */
+export function renderProblems(problems: ProvisionProblem[]): string[] {
+  return problems.flatMap((problem) => [problem.subject, problem.fix]);
 }
 
 interface LockImage {
@@ -67,7 +97,7 @@ interface Lock {
 const NS_CP = "opensandbox-system";
 const VENDOR_HINT = "run: npm run df:sandbox-vendor";
 
-function fail(endpoint: string, problems: string[]): ProvisionResult {
+function fail(endpoint: string, problems: ProvisionProblem[]): ProvisionResult {
   return { ok: false, endpoint, problems };
 }
 
@@ -80,7 +110,13 @@ export async function provisionSandbox(
   // --- 1. the committed lock and a populated cache -------------------------
   const lockPath = join(options.artifactsDir, "artifacts.lock.json");
   if (!existsSync(lockPath)) {
-    return fail(endpoint, [`the vendor lock is missing: ${lockPath}. ${VENDOR_HINT}`]);
+    return fail(endpoint, [
+      {
+        code: "artifact-unresolvable",
+        subject: `the vendor lock is missing: ${lockPath}`,
+        fix: VENDOR_HINT,
+      },
+    ]);
   }
 
   let lock: Lock;
@@ -88,7 +124,13 @@ export async function provisionSandbox(
     lock = JSON.parse(readFileSync(lockPath, "utf8")) as Lock;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    return fail(endpoint, [`the vendor lock is not valid JSON (${lockPath}): ${message}`]);
+    return fail(endpoint, [
+      {
+        code: "artifact-unresolvable",
+        subject: `the vendor lock is not valid JSON (${lockPath})`,
+        fix: message,
+      },
+    ]);
   }
 
   const cacheDir = join(options.artifactsDir, "cache");
@@ -98,8 +140,11 @@ export async function provisionSandbox(
   if (cached.length < lock.images.length) {
     // AC2/AC6: refuse, name the command, do not fetch.
     return fail(endpoint, [
-      `the image cache is not populated (${cached.length} of ${lock.images.length} images in ${cacheDir}).`,
-      `Nothing was deployed. ${VENDOR_HINT}`,
+      {
+        code: "artifact-unresolvable",
+        subject: `the image cache is not populated (${cached.length} of ${lock.images.length} images in ${cacheDir})`,
+        fix: `Nothing was deployed. ${VENDOR_HINT}`,
+      },
     ]);
   }
 
@@ -109,8 +154,11 @@ export async function provisionSandbox(
     if (inspected.code !== 0) {
       // AC6: naming the image is the actionable part.
       return fail(endpoint, [
-        `image not present in the local store: ${image.ref}`,
-        `Nothing was deployed. ${VENDOR_HINT}`,
+        {
+          code: "artifact-unresolvable",
+          subject: `image not present in the local store: ${image.ref}`,
+          fix: `Nothing was deployed. ${VENDOR_HINT}`,
+        },
       ]);
     }
   }
@@ -126,7 +174,13 @@ export async function provisionSandbox(
     if (status.code !== 0) {
       const started = await exec("minikube", ["start", "--driver=docker"]);
       if (started.code !== 0) {
-        return fail(endpoint, ["minikube could not be started; see its output above."]);
+        return fail(endpoint, [
+          {
+            code: "cluster-unreachable",
+            subject: "minikube could not be started",
+            fix: "see its output above",
+          },
+        ]);
       }
     }
   }
@@ -135,7 +189,11 @@ export async function provisionSandbox(
   const chartPath = join(options.workspaceDir, lock.chart.path);
   if (!existsSync(chartPath)) {
     return fail(endpoint, [
-      `the committed chart is missing: ${chartPath}. The checkout is incomplete.`,
+      {
+        code: "artifact-unresolvable",
+        subject: `the committed chart is missing: ${chartPath}`,
+        fix: "The checkout is incomplete.",
+      },
     ]);
   }
 
@@ -145,8 +203,11 @@ export async function provisionSandbox(
   const build = await exec("helm", ["dependency", "build", chartPath], { env: process.env });
   if (build.code !== 0) {
     return fail(endpoint, [
-      "helm dependency build failed; the vendored chart could not resolve its subcharts. " +
-      "Run: npm run df:sandbox-vendor",
+      {
+        code: "artifact-unresolvable",
+        subject: "helm dependency build failed; the vendored chart could not resolve its subcharts",
+        fix: "Run: npm run df:sandbox-vendor",
+      },
     ]);
   }
 
@@ -165,7 +226,13 @@ export async function provisionSandbox(
     { env: process.env },
   );
   if (deploy.code !== 0) {
-    return fail(endpoint, ["helm upgrade --install failed; see its output above."]);
+    return fail(endpoint, [
+      {
+        code: "internal",
+        subject: "helm upgrade --install failed",
+        fix: "see its output above",
+      },
+    ]);
   }
 
   // The chart does a spec-driven rollout on upgrade; the server pod is not Ready the instant
@@ -175,8 +242,11 @@ export async function provisionSandbox(
     const wait = await exec("kubectl", ["rollout", "status", target, "-n", NS_CP, "--timeout=240s"]);
     if (wait.code !== 0) {
       return fail(endpoint, [
-        `the control plane did not become ready: ${target} timed out.`,
-        wait.stderr.trim() || "check: kubectl -n opensandbox-system get pods",
+        {
+          code: "cluster-unreachable",
+          subject: `the control plane did not become ready: ${target} timed out`,
+          fix: wait.stderr.trim() || "check: kubectl -n opensandbox-system get pods",
+        },
       ]);
     }
   }
@@ -189,16 +259,22 @@ export async function provisionSandbox(
     const reachable = await options.reachSandbox(endpoint);
     if (!reachable) {
       return fail(endpoint, [
-        `the sandbox endpoint is not reachable at ${endpoint}.`,
-        "The deploy completed but the control plane did not answer.",
+        {
+          code: "cluster-unreachable",
+          subject: `the sandbox endpoint is not reachable at ${endpoint}`,
+          fix: "The deploy completed but the control plane did not answer.",
+        },
       ]);
     }
 
     const proven = await options.runVaultProof(endpoint);
     if (!proven) {
       return fail(endpoint, [
-        "the vault proof failed: credential substitution was not demonstrated.",
-        "The control plane is up but its vault behaviour is unverified.",
+        {
+          code: "proof-failed",
+          subject: "the vault proof failed: credential substitution was not demonstrated",
+          fix: "The control plane is up but its vault behaviour is unverified.",
+        },
       ]);
     }
 
