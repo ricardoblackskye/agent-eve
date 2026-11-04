@@ -21,6 +21,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import {
   provisionSandbox,
+  renderProblems,
   type ExecFn,
   type ExecResult,
   type SandboxCluster,
@@ -161,8 +162,10 @@ async function main(): Promise<number> {
   });
 
   if (!result.ok) {
-    for (const problem of result.problems) {
-      process.stderr.write(`ERROR: ${problem}\n`);
+    // #585 T1: problems are classified objects now. Render the prose lines so the operator
+    // still gets the actionable text; the code is for the caller (#582) to branch on.
+    for (const line of renderProblems(result.problems)) {
+      process.stderr.write(`ERROR: ${line}\n`);
     }
     return 1;
   }
