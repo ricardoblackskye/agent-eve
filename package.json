@@ -33,7 +33,8 @@
     "df:cost-budget": "tsx scripts/df-cost-budget.ts",
     "models:verify": "tsx scripts/openrouter-verify-models.ts",
     "prices:check": "tsx scripts/openrouter-check-prices.ts",
-    "df:calibration-report": "tsx scripts/df-calibration-report.ts"
+    "df:calibration-report": "tsx scripts/df-calibration-report.ts",
+    "db:migrate": "tsx scripts/db-migrate.ts"
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.45",
