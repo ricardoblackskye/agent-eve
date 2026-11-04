@@ -25,6 +25,7 @@ import {
   type ProvisionEventInput,
   type ProvisionStep,
 } from "./sandbox-events";
+import { exitCodeForProblem } from "./sandbox-exit-codes";
 
 export interface ExecResult {
   code: number;
@@ -124,6 +125,7 @@ export async function provisionSandbox(
    * must not miss the teardown that follows it.
    */
   let failedStep: ProvisionStep | undefined;
+  let failedCode: ProvisionProblemCode | undefined;
   let stopForward: (() => Promise<void>) | undefined;
 
   const refuse = (
@@ -132,6 +134,7 @@ export async function provisionSandbox(
     problems: ProvisionProblem[],
   ): ProvisionResult => {
     failedStep = step;
+    failedCode = problems[0]?.code;
     emit({ step, phase: "failure", message });
     return fail(endpoint, problems);
   };
@@ -330,7 +333,7 @@ export async function provisionSandbox(
       step: "done",
       phase: failedStep ? "failure" : "success",
       message: failedStep ? "provisioning refused" : "sandbox provisioned and proven",
-      exitCode: failedStep ? 1 : 0,
+      exitCode: failedCode ? exitCodeForProblem(failedCode) : 0,
     });
   }
 }

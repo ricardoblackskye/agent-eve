@@ -27,6 +27,7 @@ import {
   type SandboxCluster,
 } from "../agent/lib/dark-factory/sandbox-provisioning";
 import { createNdjsonEmitter } from "../agent/lib/dark-factory/sandbox-events";
+import { exitCodeForResult } from "../agent/lib/dark-factory/sandbox-exit-codes";
 
 const execFileAsync = promisify(execFile);
 
@@ -173,11 +174,11 @@ async function main(): Promise<number> {
     for (const line of renderProblems(result.problems)) {
       process.stderr.write(`ERROR: ${line}\n`);
     }
-    return 1;
+    return exitCodeForResult(result);
   }
 
   process.stderr.write(`sandbox provisioned and proven at ${result.endpoint}\n`);
-  return 0;
+  return exitCodeForResult(result);
 }
 
 main()
