@@ -27,7 +27,8 @@ import {
   type SandboxCluster,
 } from "../agent/lib/dark-factory/sandbox-provisioning";
 import { createNdjsonEmitter } from "../agent/lib/dark-factory/sandbox-events";
-import { exitCodeForResult } from "../agent/lib/dark-factory/sandbox-exit-codes";
+import { checkPrerequisites, renderCheck } from "../agent/lib/dark-factory/sandbox-check";
+import { exitCodeForProblem, exitCodeForResult } from "../agent/lib/dark-factory/sandbox-exit-codes";
 
 const execFileAsync = promisify(execFile);
 
@@ -152,6 +153,32 @@ async function main(): Promise<number> {
   // #585 T2: stdout is NDJSON only. Human prose goes to stderr, so a GUI or CI consumer
   // can read events line-wise without stripping text.
   const emit = createNdjsonEmitter({ write: (line) => process.stdout.write(line) });
+
+  // #585 T5 (AC5): `--check` answers "would this work?" and mutates nothing. It runs the
+  // read-only preflight and returns before the provisioning core, so a failing check cannot
+  // start a cluster, pull an image or write the state file. Exit code 10 is the documented
+  // "prerequisite missing" signal; artifact problems map to 11 via the same table.
+  if (process.argv.includes("--check")) {
+    emit({ step: "check", phase: "start", message: "checking prerequisites" });
+    const checked = await checkPrerequisites({
+      artifactsDir,
+      cluster: resolveCluster(),
+      exec,
+    });
+    if (!checked.ok) {
+      for (const line of renderCheck(checked.problems)) {
+        process.stderr.write(`ERROR: ${line}\n`);
+      }
+      emit({ step: "check", phase: "failure", message: "prerequisites are not satisfied" });
+      const code = exitCodeForProblem(checked.problems[0]?.code ?? "prerequisites-missing");
+      emit({ step: "done", phase: "failure", message: "preflight refused", exitCode: code });
+      return code;
+    }
+    emit({ step: "check", phase: "success", message: "prerequisites are satisfied" });
+    process.stderr.write("prerequisites satisfied; nothing was changed\n");
+    emit({ step: "done", phase: "success", message: "preflight passed", exitCode: 0 });
+    return 0;
+  }
 
   const result = await provisionSandbox({
     artifactsDir,

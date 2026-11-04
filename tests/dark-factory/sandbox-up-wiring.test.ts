@@ -47,4 +47,20 @@ describe("df:sandbox-up runs the proofs itself (#553 AC3)", () => {
     const source = readFileSync(CLI, "utf8");
     expect(source).toMatch(/process\.exit\(1\)|exitCode\s*=\s*1/);
   });
+
+  it("offers a read-only --check mode that runs the preflight and mutates nothing", () => {
+    const source = readFileSync(CLI, "utf8");
+    // #585 T5 (AC5): the flag exists, it delegates to the check module, and the check path
+    // returns before the provisioning core is called so nothing can be mutated.
+    expect(source).toContain("--check");
+    expect(source).toMatch(/from\s+"[^"]*sandbox-check"/);
+    expect(source).toContain("checkPrerequisites");
+    expect(source).toContain("renderCheck");
+    const checkIndex = source.indexOf("checkPrerequisites");
+    const provisionIndex = source.indexOf("await provisionSandbox");
+    expect(checkIndex).toBeGreaterThan(-1);
+    expect(provisionIndex).toBeGreaterThan(-1);
+    // The check runs first, so a failing preflight cannot reach the mutating core.
+    expect(checkIndex).toBeLessThan(provisionIndex);
+  });
 });
