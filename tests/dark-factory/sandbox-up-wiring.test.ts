@@ -48,6 +48,19 @@ describe("df:sandbox-up runs the proofs itself (#553 AC3)", () => {
     expect(source).toMatch(/process\.exit\(1\)|exitCode\s*=\s*1/);
   });
 
+  it("delegates flag parsing to the flags module and refuses secrets there", () => {
+    const source = readFileSync(CLI, "utf8");
+    // #585 T6 (AC1/AC6): one parser owns the flags. Inlining argv handling in the CLI is how
+    // the secret refusal would get bypassed, so the delegation itself is the assertion.
+    expect(source).toMatch(/from\s+"[^"]*sandbox-flags"/);
+    expect(source).toContain("parseFlags");
+    expect(source).toContain("renderFlagErrors");
+    expect(source).toContain("USAGE");
+    // A usage error exits 2, which only works because the final handler no longer collapses
+    // every non-zero code to 1.
+    expect(source).toContain("process.exitCode = code");
+  });
+
   it("offers a read-only --check mode that runs the preflight and mutates nothing", () => {
     const source = readFileSync(CLI, "utf8");
     // #585 T5 (AC5): the flag exists, it delegates to the check module, and the check path

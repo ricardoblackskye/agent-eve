@@ -28,6 +28,12 @@ import {
 } from "../agent/lib/dark-factory/sandbox-provisioning";
 import { createNdjsonEmitter } from "../agent/lib/dark-factory/sandbox-events";
 import { checkPrerequisites, renderCheck } from "../agent/lib/dark-factory/sandbox-check";
+import {
+  parseFlags,
+  renderFlagErrors,
+  USAGE,
+  USAGE_EXIT_CODE,
+} from "../agent/lib/dark-factory/sandbox-flags";
 import { exitCodeForProblem, exitCodeForResult } from "../agent/lib/dark-factory/sandbox-exit-codes";
 
 const execFileAsync = promisify(execFile);
@@ -147,22 +153,51 @@ async function startForward(): Promise<() => Promise<void>> {
 }
 
 async function main(): Promise<number> {
-  const artifactsDir = join(ROOT, "scripts/sandbox-vendor");
-  const forwardPort = Number(process.env.FORWARD_PORT ?? 18082);
+  // #585 T6 (AC1/AC6): one parser owns the flags. Usage errors and secret refusal are caught
+  // here, before anything runs, so a bad invocation cannot reach the mutating core. Exit 2 is
+  // outside the provisioning table because a bad flag is not a provisioning failure.
+  const { flags, errors } = parseFlags(process.argv.slice(2));
 
   // #585 T2: stdout is NDJSON only. Human prose goes to stderr, so a GUI or CI consumer
   // can read events line-wise without stripping text.
   const emit = createNdjsonEmitter({ write: (line) => process.stdout.write(line) });
 
+  if (errors.length > 0) {
+    for (const line of renderFlagErrors(errors)) {
+      process.stderr.write(`ERROR: ${line}
+`);
+    }
+    process.stderr.write(USAGE);
+    emit({
+      step: "done",
+      phase: "failure",
+      message: "invalid invocation",
+      exitCode: USAGE_EXIT_CODE,
+    });
+    return USAGE_EXIT_CODE;
+  }
+
+  if (flags.help) {
+    process.stderr.write(USAGE);
+    return 0;
+  }
+
+  // Flags override the environment; the environment stays the fallback so existing invocations
+  // (`KUBE_CONTEXT=prod-east npm run df:sandbox-up`) keep working unchanged.
+  const artifactsDir = flags.artifactsDir ?? join(ROOT, "scripts/sandbox-vendor");
+  const workspaceDir = flags.workspaceDir ?? ROOT;
+  const forwardPort = flags.forwardPort ?? Number(process.env.FORWARD_PORT ?? 18082);
+  const cluster = flags.cluster ?? resolveCluster();
+
   // #585 T5 (AC5): `--check` answers "would this work?" and mutates nothing. It runs the
   // read-only preflight and returns before the provisioning core, so a failing check cannot
   // start a cluster, pull an image or write the state file. Exit code 10 is the documented
   // "prerequisite missing" signal; artifact problems map to 11 via the same table.
-  if (process.argv.includes("--check")) {
+  if (flags.check) {
     emit({ step: "check", phase: "start", message: "checking prerequisites" });
     const checked = await checkPrerequisites({
       artifactsDir,
-      cluster: resolveCluster(),
+      cluster,
       exec,
     });
     if (!checked.ok) {
@@ -182,8 +217,8 @@ async function main(): Promise<number> {
 
   const result = await provisionSandbox({
     artifactsDir,
-    workspaceDir: ROOT,
-    cluster: resolveCluster(),
+    workspaceDir,
+    cluster,
     forwardPort,
     exec,
     reachSandbox,
@@ -210,8 +245,9 @@ async function main(): Promise<number> {
 
 main()
   .then((code) => {
+    // Preserve the documented code. Collapsing every failure to 1 here would defeat the exit
+    // table (#585 T3) and turn a usage error's 2 into a 1.
     process.exitCode = code;
-    if (code !== 0) process.exit(1);
   })
   .catch((error) => {
     process.stderr.write(`ERROR: ${error instanceof Error ? error.message : String(error)}\n`);
