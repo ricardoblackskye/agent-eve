@@ -209,7 +209,9 @@ const POSTGRES_SCHEMA = `
     ON df_plan_estimates (run_id);
   CREATE INDEX IF NOT EXISTS df_plan_estimates_tenant_idx
     ON df_plan_estimates (tenant_id, period);
-  CREATE OR REPLACE VIEW df_plan_estimate_accuracy AS
+  -- #591 — security_invoker makes the view run with the QUERYING user's permissions and RLS, not the
+  -- view owner's. Without it a view over tenant-scoped cost data bypasses the base tables' policies.
+  CREATE OR REPLACE VIEW df_plan_estimate_accuracy WITH (security_invoker = true) AS
     SELECT e.period AS period, e.cost_class AS cost_class,
            e.confidence AS confidence, e.estimator_version AS estimator_version,
            e.expected_usd AS expected_usd, s.cost_usd AS actual_usd,
