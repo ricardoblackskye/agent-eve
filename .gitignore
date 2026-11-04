@@ -21,3 +21,13 @@ df-workspaces/
 # #553: image blobs for the local sandbox are vendored into a cache, never committed.
 # The chart itself IS committed (vendor/opensandbox-charts); only the blobs are ignored.
 scripts/sandbox-vendor/cache/
+
+# #586: Python bytecode from the sandbox proof scripts, regenerated on every run.
+__pycache__/
+*.pyc
+
+# #586: local Dark Factory run state. The sqlite db is runtime data, not source.
+.data/
+
+# #586: one-off review-run output written to the repo root.
+result.json
