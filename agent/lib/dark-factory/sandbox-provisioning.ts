@@ -26,6 +26,18 @@ import {
   type ProvisionStep,
 } from "./sandbox-events";
 import { exitCodeForProblem } from "./sandbox-exit-codes";
+import {
+  canSkipStage,
+  defaultStateFile,
+  digestOfFile,
+  invalidateStage,
+  loadState,
+  recordStageSuccess,
+  saveState,
+  STAGES,
+  type ProvisionStage,
+  type SandboxState,
+} from "./sandbox-state";
 
 export interface ExecResult {
   code: number;
@@ -57,6 +69,11 @@ export interface ProvisionOptions {
    * that only wants the result passes nothing and gets the same behaviour as before.
    */
   onEvent?: (event: ProvisionEventInput) => void;
+  /**
+   * #585 T4 (AC4): the state file that records completed stages so a re-run can skip them.
+   * Defaults to `.data/sandbox-provision-state.json` under workspaceDir.
+   */
+  stateFile?: string;
 }
 
 /**
@@ -118,6 +135,10 @@ export async function provisionSandbox(
   const endpoint = `http://localhost:${options.forwardPort}`;
   const { exec } = options;
   const emit = options.onEvent ?? noopEmitter;
+  const stateFile = options.stateFile ?? defaultStateFile(options.workspaceDir);
+  let state: SandboxState = loadState(stateFile);
+  const clusterContext =
+    typeof options.cluster === "string" ? options.cluster : options.cluster.context;
 
   /**
    * The step that refused, or undefined on success. The `finally` block reads it to
@@ -135,6 +156,11 @@ export async function provisionSandbox(
   ): ProvisionResult => {
     failedStep = step;
     failedCode = problems[0]?.code;
+    // A failure means this stage's previous success is no longer trustworthy, and neither
+    // is anything downstream of it. The `finally` block persists the invalidated state.
+    if ((STAGES as readonly string[]).includes(step)) {
+      state = invalidateStage(state, step as ProvisionStage);
+    }
     emit({ step, phase: "failure", message });
     return fail(endpoint, problems);
   };
@@ -167,36 +193,44 @@ export async function provisionSandbox(
       ]);
     }
 
-    const cacheDir = join(options.artifactsDir, "cache");
-    const cached = existsSync(cacheDir)
-      ? readdirSync(cacheDir).filter((entry) => entry.endsWith(".tar"))
-      : [];
-    if (cached.length < lock.images.length) {
-      // AC2/AC6: refuse, name the command, do not fetch.
-      return refuse("vendor", "the image cache is not populated", [
-        {
-          code: "artifact-unresolvable",
-          subject: `the image cache is not populated (${cached.length} of ${lock.images.length} images in ${cacheDir})`,
-          fix: `Nothing was deployed. ${VENDOR_HINT}`,
-        },
-      ]);
-    }
+    const lockDigest = digestOfFile(lockPath);
+    const vendorInputs = { lockDigest };
 
-    // --- 2. every locked image is actually present locally -----------------
-    for (const image of lock.images) {
-      const inspected = await exec("docker", ["image", "inspect", image.ref]);
-      if (inspected.code !== 0) {
-        // AC6: naming the image is the actionable part.
-        return refuse("vendor", "image not present in the local store", [
+    if (canSkipStage(state, "vendor", vendorInputs)) {
+      emit({ step: "vendor", phase: "skip", message: "artifact cache already complete" });
+    } else {
+      const cacheDir = join(options.artifactsDir, "cache");
+      const cached = existsSync(cacheDir)
+        ? readdirSync(cacheDir).filter((entry) => entry.endsWith(".tar"))
+        : [];
+      if (cached.length < lock.images.length) {
+        // AC2/AC6: refuse, name the command, do not fetch.
+        return refuse("vendor", "the image cache is not populated", [
           {
             code: "artifact-unresolvable",
-            subject: `image not present in the local store: ${image.ref}`,
+            subject: `the image cache is not populated (${cached.length} of ${lock.images.length} images in ${cacheDir})`,
             fix: `Nothing was deployed. ${VENDOR_HINT}`,
           },
         ]);
       }
+
+      // --- 2. every locked image is actually present locally -----------------
+      for (const image of lock.images) {
+        const inspected = await exec("docker", ["image", "inspect", image.ref]);
+        if (inspected.code !== 0) {
+          // AC6: naming the image is the actionable part.
+          return refuse("vendor", "image not present in the local store", [
+            {
+              code: "artifact-unresolvable",
+              subject: `image not present in the local store: ${image.ref}`,
+              fix: `Nothing was deployed. ${VENDOR_HINT}`,
+            },
+          ]);
+        }
+      }
+      emit({ step: "vendor", phase: "success", message: "artifact cache complete" });
+      state = recordStageSuccess(state, "vendor", vendorInputs);
     }
-    emit({ step: "vendor", phase: "success", message: "artifact cache complete" });
 
     // --- 3. cluster: one parameter, minikube or an existing context --------
     emit({ step: "cluster", phase: "start", message: "resolving cluster" });
@@ -205,119 +239,184 @@ export async function provisionSandbox(
     if (remote) {
       contextArgs.push("--kube-context", remote.context);
       if (remote.kubeconfig) contextArgs.push("--kubeconfig", remote.kubeconfig);
+    }
+    const clusterInputs = { context: clusterContext };
+    if (canSkipStage(state, "cluster", clusterInputs)) {
+      emit({ step: "cluster", phase: "skip", message: "cluster already ready" });
     } else {
-      const status = await exec("minikube", ["status"]);
-      if (status.code !== 0) {
-        const started = await exec("minikube", ["start", "--driver=docker"]);
-        if (started.code !== 0) {
-          return refuse("cluster", "minikube could not be started", [
+      if (!remote) {
+        const status = await exec("minikube", ["status"]);
+        if (status.code !== 0) {
+          const started = await exec("minikube", ["start", "--driver=docker"]);
+          if (started.code !== 0) {
+            return refuse("cluster", "minikube could not be started", [
+              {
+                code: "cluster-unreachable",
+                subject: "minikube could not be started",
+                fix: "see its output above",
+              },
+            ]);
+          }
+        }
+      }
+      emit({ step: "cluster", phase: "success", message: "cluster ready" });
+      state = recordStageSuccess(state, "cluster", clusterInputs);
+    }
+
+    // --- 4. deploy the committed chart -------------------------------------
+    emit({ step: "deploy", phase: "start", message: "deploying the committed chart" });
+    const deployInputs = { lockDigest, context: clusterContext };
+    if (canSkipStage(state, "deploy", deployInputs)) {
+      emit({ step: "deploy", phase: "skip", message: "chart already deployed and rolled out" });
+    } else {
+      const chartPath = join(options.workspaceDir, lock.chart.path);
+      if (!existsSync(chartPath)) {
+        return refuse("deploy", "the committed chart is missing", [
+          {
+            code: "artifact-unresolvable",
+            subject: `the committed chart is missing: ${chartPath}`,
+            fix: "The checkout is incomplete.",
+          },
+        ]);
+      }
+
+      // The chart declares its subcharts as file:// dependencies; helm needs `dependency build`
+      // to resolve them into charts/ before `upgrade --install`, or it fails with "repo not found".
+      // (bootstrap.sh does this too, but this core path runs instead of the shell.)
+      const build = await exec("helm", ["dependency", "build", chartPath], { env: process.env });
+      if (build.code !== 0) {
+        return refuse("deploy", "helm dependency build failed", [
+          {
+            code: "artifact-unresolvable",
+            subject: "helm dependency build failed; the vendored chart could not resolve its subcharts",
+            fix: "Run: npm run df:sandbox-vendor",
+          },
+        ]);
+      }
+
+      const deploy = await exec(
+        "helm",
+        [
+          "upgrade",
+          "--install",
+          "opensandbox",
+          chartPath,
+          "-n",
+          NS_CP,
+          "--create-namespace",
+          ...contextArgs,
+        ],
+        { env: process.env },
+      );
+      if (deploy.code !== 0) {
+        return refuse("deploy", "helm upgrade --install failed", [
+          {
+            code: "internal",
+            subject: "helm upgrade --install failed",
+            fix: "see its output above",
+          },
+        ]);
+      }
+
+      // The chart does a spec-driven rollout on upgrade; the server pod is not Ready the instant
+      // helm returns. Wait for it (bounded) before probing, or the reachability check fires early.
+      // This is the same wait bootstrap.sh runs — the core path replaces the shell but must keep it.
+      for (const target of ["deployment/opensandbox-server", "deployment/opensandbox-controller-manager"]) {
+        const wait = await exec("kubectl", ["rollout", "status", target, "-n", NS_CP, "--timeout=240s"]);
+        if (wait.code !== 0) {
+          return refuse("deploy", "the control plane did not become ready", [
             {
               code: "cluster-unreachable",
-              subject: "minikube could not be started",
-              fix: "see its output above",
+              subject: `the control plane did not become ready: ${target} timed out`,
+              fix: wait.stderr.trim() || "check: kubectl -n opensandbox-system get pods",
             },
           ]);
         }
       }
-    }
-    emit({ step: "cluster", phase: "success", message: "cluster ready" });
-
-    // --- 4. deploy the committed chart -------------------------------------
-    emit({ step: "deploy", phase: "start", message: "deploying the committed chart" });
-    const chartPath = join(options.workspaceDir, lock.chart.path);
-    if (!existsSync(chartPath)) {
-      return refuse("deploy", "the committed chart is missing", [
-        {
-          code: "artifact-unresolvable",
-          subject: `the committed chart is missing: ${chartPath}`,
-          fix: "The checkout is incomplete.",
-        },
-      ]);
+      emit({ step: "deploy", phase: "success", message: "chart deployed and rolled out" });
+      state = recordStageSuccess(state, "deploy", deployInputs);
     }
 
-    // The chart declares its subcharts as file:// dependencies; helm needs `dependency build`
-    // to resolve them into charts/ before `upgrade --install`, or it fails with "repo not found".
-    // (bootstrap.sh does this too, but this core path runs instead of the shell.)
-    const build = await exec("helm", ["dependency", "build", chartPath], { env: process.env });
-    if (build.code !== 0) {
-      return refuse("deploy", "helm dependency build failed", [
-        {
-          code: "artifact-unresolvable",
-          subject: "helm dependency build failed; the vendored chart could not resolve its subcharts",
-          fix: "Run: npm run df:sandbox-vendor",
-        },
-      ]);
-    }
-
-    const deploy = await exec(
-      "helm",
-      [
-        "upgrade",
-        "--install",
-        "opensandbox",
-        chartPath,
-        "-n",
-        NS_CP,
-        "--create-namespace",
-        ...contextArgs,
-      ],
-      { env: process.env },
-    );
-    if (deploy.code !== 0) {
-      return refuse("deploy", "helm upgrade --install failed", [
-        {
-          code: "internal",
-          subject: "helm upgrade --install failed",
-          fix: "see its output above",
-        },
-      ]);
-    }
-
-    // The chart does a spec-driven rollout on upgrade; the server pod is not Ready the instant
-    // helm returns. Wait for it (bounded) before probing, or the reachability check fires early.
-    // This is the same wait bootstrap.sh runs — the core path replaces the shell but must keep it.
-    for (const target of ["deployment/opensandbox-server", "deployment/opensandbox-controller-manager"]) {
-      const wait = await exec("kubectl", ["rollout", "status", target, "-n", NS_CP, "--timeout=240s"]);
-      if (wait.code !== 0) {
-        return refuse("deploy", "the control plane did not become ready", [
+    // --- 5. the proofs run HERE, not in the operator's other terminal ------
+    emit({ step: "forward", phase: "start", message: "starting port-forward" });
+    const forwardInputs = { port: options.forwardPort, context: clusterContext };
+    if (canSkipStage(state, "forward", forwardInputs)) {
+      emit({ step: "forward", phase: "skip", message: "port-forward already listening" });
+    } else {
+      // A forwarding callback spawns a real process, so it can throw (no port, no binary).
+      // Convert that into a refusal with an actionable message instead of letting the error
+      // escape past the `done` event: a caller that only reads the result would otherwise
+      // see an exception where every other failure is a structured refusal.
+      try {
+        if (options.startForward) stopForward = await options.startForward();
+        emit({ step: "forward", phase: "success", message: "port-forward listening" });
+        state = recordStageSuccess(state, "forward", forwardInputs);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return refuse("forward", "the port-forward could not be started", [
           {
-            code: "cluster-unreachable",
-            subject: `the control plane did not become ready: ${target} timed out`,
-            fix: wait.stderr.trim() || "check: kubectl -n opensandbox-system get pods",
+            code: "internal",
+            subject: `the port-forward could not be started: ${message}`,
+            fix: "Check that the port is free and that kubectl is on PATH.",
           },
         ]);
       }
     }
-    emit({ step: "deploy", phase: "success", message: "chart deployed and rolled out" });
-
-    // --- 5. the proofs run HERE, not in the operator's other terminal ------
-    emit({ step: "forward", phase: "start", message: "starting port-forward" });
-    if (options.startForward) stopForward = await options.startForward();
-    emit({ step: "forward", phase: "success", message: "port-forward listening" });
 
     emit({ step: "proof", phase: "start", message: "running reachability and vault proof" });
-    const reachable = await options.reachSandbox(endpoint);
-    if (!reachable) {
-      return refuse("proof", "the sandbox endpoint is not reachable", [
-        {
-          code: "cluster-unreachable",
-          subject: `the sandbox endpoint is not reachable at ${endpoint}`,
-          fix: "The deploy completed but the control plane did not answer.",
-        },
-      ]);
-    }
+    const proofInputs = { endpoint };
+    if (canSkipStage(state, "proof", proofInputs)) {
+      emit({ step: "proof", phase: "skip", message: "reachability and vault proof already passed" });
+    } else {
+      // A probe can throw as well as return false; both mean "not proven".
+      let reachable = false;
+      try {
+        reachable = await options.reachSandbox(endpoint);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return refuse("proof", "the sandbox endpoint could not be reached", [
+          {
+            code: "cluster-unreachable",
+            subject: `the sandbox endpoint could not be reached at ${endpoint}: ${message}`,
+            fix: "The deploy completed but the control plane did not answer.",
+          },
+        ]);
+      }
+      if (!reachable) {
+        return refuse("proof", "the sandbox endpoint is not reachable", [
+          {
+            code: "cluster-unreachable",
+            subject: `the sandbox endpoint is not reachable at ${endpoint}`,
+            fix: "The deploy completed but the control plane did not answer.",
+          },
+        ]);
+      }
 
-    const proven = await options.runVaultProof(endpoint);
-    if (!proven) {
-      return refuse("proof", "the vault proof failed", [
-        {
-          code: "proof-failed",
-          subject: "the vault proof failed: credential substitution was not demonstrated",
-          fix: "The control plane is up but its vault behaviour is unverified.",
-        },
-      ]);
+      let proven = false;
+      try {
+        proven = await options.runVaultProof(endpoint);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return refuse("proof", "the vault proof could not be run", [
+          {
+            code: "proof-failed",
+            subject: `the vault proof could not be run: ${message}`,
+            fix: "The control plane is up but its vault behaviour is unverified.",
+          },
+        ]);
+      }
+      if (!proven) {
+        return refuse("proof", "the vault proof failed", [
+          {
+            code: "proof-failed",
+            subject: "the vault proof failed: credential substitution was not demonstrated",
+            fix: "The control plane is up but its vault behaviour is unverified.",
+          },
+        ]);
+      }
+      emit({ step: "proof", phase: "success", message: "reachability and vault proof passed" });
+      state = recordStageSuccess(state, "proof", proofInputs);
     }
-    emit({ step: "proof", phase: "success", message: "reachability and vault proof passed" });
 
     return { ok: true, endpoint, problems: [] };
   } finally {
@@ -328,6 +427,15 @@ export async function provisionSandbox(
       emit({ step: "teardown", phase: "start", message: "stopping port-forward" });
       await stopForward();
       emit({ step: "teardown", phase: "success", message: "port-forward stopped" });
+    }
+    // Persist the state AFTER teardown, so a failed teardown is not recorded as a clean
+    // resume point. A corrupt or unwritable file must not mask the provisioning result, so
+    // a save failure is reported but does not change the outcome.
+    try {
+      await saveState(stateFile, state);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      emit({ step: "teardown", phase: "failure", message: `could not save state: ${message}` });
     }
     emit({
       step: "done",
