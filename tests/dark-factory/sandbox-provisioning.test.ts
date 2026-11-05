@@ -67,6 +67,13 @@ function makeArtifacts(options: { tars: number }): string {
         { ref: IMAGE_A, digest: `sha256:${"a".repeat(64)}` },
         { ref: IMAGE_B, digest: `sha256:${"b".repeat(64)}` },
       ],
+      binaries: [
+        { name: "docker", versionConstraint: ">=20.10.0", required: true, acquiredBy: "operator", probe: { command: "docker", args: ["version"] }, fix: "Start Docker Desktop." },
+        { name: "kubectl", versionConstraint: ">=1.28.0", required: true, acquiredBy: "operator", probe: { command: "kubectl", args: ["version", "--client"] }, fix: "Install kubectl." },
+        { name: "helm", versionConstraint: ">=3.14.0", required: true, acquiredBy: "operator", probe: { command: "helm", args: ["version", "--short"] }, fix: "Install helm." },
+        { name: "python", versionConstraint: ">=3.10.0", required: true, acquiredBy: "operator", probe: { command: "python", args: ["--version"] }, fix: "Install Python 3." },
+        { name: "minikube", versionConstraint: ">=1.30.0", required: false, requiredFor: "minikube", acquiredBy: "operator", probe: { command: "minikube", args: ["version"] }, fix: "Install minikube." },
+      ],
     }),
   );
   return dir;
@@ -83,12 +90,12 @@ function recorder(overrides: Record<string, ExecResult> = {}) {
     for (const [match, result] of Object.entries(overrides)) {
       if (key.includes(match)) return result;
     }
-    return { code: 0, stdout: "", stderr: "" };
+    return { code: 0, stdout: "v99.99.99", stderr: "" };
   };
   return { calls, exec };
 }
 
-const ok = (): ExecResult => ({ code: 0, stdout: "", stderr: "" });
+const ok = (): ExecResult => ({ code: 0, stdout: "v99.99.99", stderr: "" });
 
 describe("the sandbox provisioning core (#553)", () => {
   it("refuses an empty image cache and names the vendor command (AC2/AC6)", async () => {
@@ -520,7 +527,18 @@ describe("resume and invalidation (#585 T4)", () => {
       "proof",
       "vendor",
     ]);
-    expect(state.calls).toEqual([]);
+    // The gate probes binaries and inspects images on every run, so calls is not empty.
+    // What must NOT run on a repeat run is any provisioning-stage command - the five stages
+    // are all skipped.
+    const deployCalls = state.calls.filter((c) => {
+      const key = [c.command, ...c.args].join(" ");
+      return (
+        (c.command === "minikube" && c.args.includes("start")) ||
+        (c.command === "helm" && (c.args.includes("dependency") || c.args.includes("upgrade") || c.args.includes("install"))) ||
+        (c.command === "kubectl" && (c.args.includes("rollout") || c.args.includes("port-forward") || c.args.includes("apply")))
+      );
+    });
+    expect(deployCalls).toEqual([]);
     expect(state.forwardStarts).toBe(0);
     expect(state.reachCalls).toBe(0);
     expect(state.proofCalls).toBe(0);

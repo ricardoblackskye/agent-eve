@@ -52,10 +52,12 @@ Provisions the local OpenSandbox control plane and proves it works. stdout carri
 progress events; human prose goes to stderr. Exits non-zero on any failure.
 
 Flags:
-  --check                  Run the read-only preflight and stop. Probes the required binaries,
-                           the artifact lock, the image cache and the local image store. Starts
-                           no cluster, pulls no image and writes no state. Exits 10 when a
-                           prerequisite is missing and 11 when an artifact is unresolvable.
+  --check                  Run the read-only preflight and stop. Probes the required binaries
+                           (verified against scripts/sandbox-vendor/artifacts.lock.json), the
+                           artifact lock, the image cache and the local image store. Starts no
+                           cluster, pulls no image and writes no state. Exits 10 when a
+                           prerequisite is missing, 15 when a binary version or digest mismatches
+                           the manifest, and 11 when an artifact is unresolvable.
   --help                   Print this text and stop.
   --forward-port <port>    Local port to forward the control plane to. Default 18082.
   --cluster <name>         Cluster target. "minikube" starts or reuses a local minikube.

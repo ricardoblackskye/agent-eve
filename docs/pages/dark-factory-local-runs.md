@@ -22,6 +22,7 @@ object per line on stdout, with human prose on stderr. The exit-code table (#585
 [`agent/lib/dark-factory/sandbox-exit-codes.ts`](../../agent/lib/dark-factory/sandbox-exit-codes.ts).
 Idempotent resume (#585 T4) is owned by [`agent/lib/dark-factory/sandbox-state.ts`](../../agent/lib/dark-factory/sandbox-state.ts): it records each completed stage and the inputs that produced it in `.data/sandbox-provision-state.json`, so a second run skips a stage only while its inputs still match and a changed digest invalidates that stage and everything downstream of it.
 A read-only preflight (#585 T5) lives in [`agent/lib/dark-factory/sandbox-check.ts`](../../agent/lib/dark-factory/sandbox-check.ts): `--check` probes the required binaries, the artifact lock, the image cache and the local image store without starting a cluster, pulling an image or writing state, so `npm run df:sandbox-up -- --check` answers whether a run could work and exits 10 when a prerequisite is missing.
+Binary acquisition ownership (#603) is owned by [`agent/lib/dark-factory/sandbox-manifest.ts`](../../agent/lib/dark-factory/sandbox-manifest.ts): the manifest schema (the `binaries` array in [`scripts/sandbox-vendor/artifacts.lock.json`](../../scripts/sandbox-vendor/artifacts.lock.json)) records each required binary's minimum version and its probe command, and both `--check` and a real run verify every installed binary against it — refusing with exit 10 when a binary is missing and exit 15 when an installed version mismatches the manifest, before any stage mutates the machine.
 Flag parsing and secret refusal (#585 T6) live in [`agent/lib/dark-factory/sandbox-flags.ts`](../../agent/lib/dark-factory/sandbox-flags.ts): one parser owns the flags, unknown flags exit 2, and `--token` (with `--password`, `--api-key` and `--secret`) is refused outright because a secret on argv is visible in the process table and in shell history - pass it on stdin or use a vault handle instead.
 The chart, CRDs and digest lock are vendored under
 [`scripts/sandbox-vendor/`](../../scripts/sandbox-vendor/).
@@ -127,6 +128,7 @@ reads it without inspecting the process exit.
 |--------------|------|---------|
 | `internal` | `1` | Unclassified internal failure. Also the crash path when `main()` throws. |
 | `prerequisites-missing` | `10` | A prerequisite is missing or unusable (docker, kubectl, helm, python, minikube for a local cluster). The message names the binary and the fix. |
+| `prerequisites-mismatch` | `15` | A prerequisite is present but its version or digest does not match the manifest (`scripts/sandbox-vendor/artifacts.lock.json`). The message shows the expected vs actual version. Owned by #603. |
 | `artifact-unresolvable` | `11` | An artifact is unresolvable: the lock is absent or malformed, the cache is empty, or a locked image is not in the local store. |
 | `cluster-unreachable` | `12` | The cluster is unreachable: `minikube start` failed or the kube context does not answer. |
 | `proof-failed` | `13` | The proof failed: the endpoint could not be reached, or the vault proof did not substitute the placeholder. |
