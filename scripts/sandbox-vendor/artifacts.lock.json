@@ -23,5 +23,77 @@
       "digest": "sha256:bce2cc2e4dc3a3594678b91ac29efb0669fccebfdfc137727018d3b087fbb13a",
       "role": "egress"
     }
+  ],
+  "binaries": [
+    {
+      "name": "docker",
+      "versionConstraint": ">=20.10.0",
+      "required": true,
+      "acquiredBy": "operator",
+      "probe": {
+        "command": "docker",
+        "args": [
+          "version",
+          "--format",
+          "{{.Server.Version}}"
+        ]
+      },
+      "fix": "Start Docker Desktop (the daemon must be running, not just installed)."
+    },
+    {
+      "name": "kubectl",
+      "versionConstraint": ">=1.28.0",
+      "required": true,
+      "acquiredBy": "operator",
+      "probe": {
+        "command": "kubectl",
+        "args": [
+          "version",
+          "--client"
+        ]
+      },
+      "fix": "Install kubectl and put it on PATH, or set KUBECTL to its full path."
+    },
+    {
+      "name": "helm",
+      "versionConstraint": ">=3.14.0",
+      "required": true,
+      "acquiredBy": "operator",
+      "probe": {
+        "command": "helm",
+        "args": [
+          "version",
+          "--short"
+        ]
+      },
+      "fix": "Install helm and put it on PATH, or set HELM to its full path."
+    },
+    {
+      "name": "python",
+      "versionConstraint": ">=3.10.0",
+      "required": true,
+      "acquiredBy": "operator",
+      "probe": {
+        "command": "python",
+        "args": [
+          "--version"
+        ]
+      },
+      "fix": "Install Python 3; the vault proof runs scripts/k8s-vault-proof/vault-proof.py."
+    },
+    {
+      "name": "minikube",
+      "versionConstraint": ">=1.30.0",
+      "required": false,
+      "requiredFor": "minikube",
+      "acquiredBy": "operator",
+      "probe": {
+        "command": "minikube",
+        "args": [
+          "version"
+        ]
+      },
+      "fix": "Install minikube and put it on PATH, or set MINIKUBE to its full path."
+    }
   ]
 }
