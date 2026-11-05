@@ -53,6 +53,13 @@ function makeArtifacts(options: { tars: number }): string {
         { ref: IMAGE_A, digest: `sha256:${"a".repeat(64)}` },
         { ref: IMAGE_B, digest: `sha256:${"b".repeat(64)}` },
       ],
+      binaries: [
+        { name: "docker", versionConstraint: ">=20.10.0", required: true, acquiredBy: "operator", probe: { command: "docker", args: ["version"] }, fix: "Start Docker Desktop." },
+        { name: "kubectl", versionConstraint: ">=1.28.0", required: true, acquiredBy: "operator", probe: { command: "kubectl", args: ["version", "--client"] }, fix: "Install kubectl." },
+        { name: "helm", versionConstraint: ">=3.14.0", required: true, acquiredBy: "operator", probe: { command: "helm", args: ["version", "--short"] }, fix: "Install helm." },
+        { name: "python", versionConstraint: ">=3.10.0", required: true, acquiredBy: "operator", probe: { command: "python", args: ["--version"] }, fix: "Install Python 3." },
+        { name: "minikube", versionConstraint: ">=1.30.0", required: false, requiredFor: "minikube", acquiredBy: "operator", probe: { command: "minikube", args: ["version"] }, fix: "Install minikube." },
+      ],
     }),
   );
   return dir;
@@ -72,7 +79,7 @@ function recorder(overrides: Record<string, ExecResult> = {}) {
     for (const [match, result] of Object.entries(overrides)) {
       if (key.includes(match)) return result;
     }
-    return { code: 0, stdout: "", stderr: "" };
+    return { code: 0, stdout: "v99.99.99", stderr: "" };
   };
   return exec;
 }
@@ -131,7 +138,12 @@ describe("#585 T1 — provisioning failures carry stable codes", () => {
       overrides: { "image inspect": { code: 1, stdout: "", stderr: "No such image" } },
     });
     expect(result.ok).toBe(false);
-    expect(codes(result.problems)).toEqual(["artifact-unresolvable"]);
+    // The preflight inspects every locked image, so multiple absent images all surface; the
+    // classification is what matters, not the exact count.
+    expect(result.problems.length).toBeGreaterThan(0);
+    for (const problem of result.problems) {
+      expect(problem.code).toBe("artifact-unresolvable");
+    }
   });
 
   it("classifies a missing committed chart as artifact-unresolvable", async () => {
@@ -188,7 +200,7 @@ describe("#585 T1 — provisioning failures carry stable codes", () => {
   });
 
   it("gives each of the five named failure classes a distinct code", async () => {
-    // The plan names these five as the contract: a caller must be able to branch on them.
+    // The plan names these six as the contract: a caller must be able to branch on them.
     const cache = await provision({ artifactsDir: makeArtifacts({ tars: 0 }) });
     const image = await provision({
       overrides: { "image inspect": { code: 1, stdout: "", stderr: "No such image" } },
@@ -201,6 +213,9 @@ describe("#585 T1 — provisioning failures carry stable codes", () => {
     });
     const proof = await provision({ runVaultProof: async () => false });
     const reach = await provision({ reachSandbox: async () => false });
+    const mismatch = await provision({
+      overrides: { "helm version": { code: 0, stdout: "v2.0.0", stderr: "" } },
+    });
 
     const distinct = new Set([
       codes(cache.problems)[0],
@@ -208,6 +223,7 @@ describe("#585 T1 — provisioning failures carry stable codes", () => {
       codes(cluster.problems)[0],
       codes(proof.problems)[0],
       codes(reach.problems)[0],
+      codes(mismatch.problems)[0],
     ]);
     // Non-vacuity: five results must actually yield codes, or a set of undefined values "passes".
     for (const result of [cache, image, cluster, proof, reach]) {

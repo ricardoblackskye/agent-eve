@@ -49,7 +49,7 @@ const REQUIRED_FIELDS: (keyof BinaryManifestEntry)[] = [
 
 /**
  * Pull the first `x.y.z` (optionally `v`-prefixed) out of noisy CLI output such as
- * `Client Version: v1.29.0`, `v3.14.4+gabc123` or `Python 3.11.15`. Returns null when no version
+ * `Client Version: v1.29.0`, `v3.14.4+abc1234` or `Python 3.11.15`. Returns null when no version
  * is present - the caller then treats the probe as a failure.
  */
 export function extractVersion(raw: string): string | null {

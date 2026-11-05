@@ -38,6 +38,7 @@ import {
   type ProvisionStage,
   type SandboxState,
 } from "./sandbox-state";
+import { checkPrerequisites } from "./sandbox-check";
 
 export interface ExecResult {
   code: number;
@@ -167,6 +168,24 @@ export async function provisionSandbox(
   };
 
   try {
+    // --- 0. prerequisite gate (#603 T4, D1): refuse before any mutation -----------
+    // A missing or mismatched binary must fail HERE - named, with its fix - instead of
+    // partway through a deploy. This is the concrete fix for the epic's mid-deploy failure
+    // mode: --check and real runs now share one verify path, so a refusal cannot slip past
+    // the gate into a half-built cluster.
+    emit({ step: "check", phase: "start", message: "checking prerequisites" });
+    const preflightResult = await checkPrerequisites({
+      artifactsDir: options.artifactsDir,
+      cluster: options.cluster,
+      exec,
+    });
+    if (!preflightResult.ok) {
+      // Refuse through the shared path so the terminal `done` event also carries the failure
+      // phase (failedStep is set), and "check" is not a real stage so nothing is invalidated.
+      return refuse("check", "prerequisites are not satisfied", preflightResult.problems);
+    }
+    emit({ step: "check", phase: "success", message: "prerequisites are satisfied" });
+
     // --- 1. the committed lock and a populated cache -----------------------
     emit({ step: "vendor", phase: "start", message: "checking artifact cache" });
     const lockPath = join(options.artifactsDir, "artifacts.lock.json");

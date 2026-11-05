@@ -62,13 +62,20 @@ function makeArtifacts(options: { tars: number }): string {
         { ref: IMAGE_A, digest: `sha256:${"a".repeat(64)}` },
         { ref: IMAGE_B, digest: `sha256:${"b".repeat(64)}` },
       ],
+      binaries: [
+        { name: "docker", versionConstraint: ">=20.10.0", required: true, acquiredBy: "operator", probe: { command: "docker", args: ["version"] }, fix: "Start Docker Desktop." },
+        { name: "kubectl", versionConstraint: ">=1.28.0", required: true, acquiredBy: "operator", probe: { command: "kubectl", args: ["version", "--client"] }, fix: "Install kubectl." },
+        { name: "helm", versionConstraint: ">=3.14.0", required: true, acquiredBy: "operator", probe: { command: "helm", args: ["version", "--short"] }, fix: "Install helm." },
+        { name: "python", versionConstraint: ">=3.10.0", required: true, acquiredBy: "operator", probe: { command: "python", args: ["--version"] }, fix: "Install Python 3." },
+        { name: "minikube", versionConstraint: ">=1.30.0", required: false, requiredFor: "minikube", acquiredBy: "operator", probe: { command: "minikube", args: ["version"] }, fix: "Install minikube." },
+      ],
     }),
   );
   return dir;
 }
 
 /** Every process call succeeds; the event sequence is what this test inspects. */
-const recorder = (): ExecFn => async () => ({ code: 0, stdout: "", stderr: "" });
+const recorder = (): ExecFn => async () => ({ code: 0, stdout: "v99.99.99", stderr: "" });
 
 const PHASES: ProvisionPhase[] = ["start", "success", "failure", "skip"];
 const STEPS: ProvisionStep[] = [
@@ -180,7 +187,8 @@ describe("the provisioning core emits stage events (#585 T2)", () => {
     expect(result.ok).toBe(false);
     const failure = events.find((event) => event.phase === "failure");
     expect(failure).toBeDefined();
-    expect(failure?.step).toBe("vendor");
+    // The prerequisite gate now intercepts an empty cache before the vendor stage runs.
+    expect(failure?.step).toBe("check");
     // The refusal is a terminal event too, carrying the code the CLI maps to an exit code.
     const last = events.at(-1) as ProvisionEventInput;
     expect(last.step).toBe("done");

@@ -24,6 +24,7 @@ describe("the exit-code table (#585 T3 / AC2)", () => {
   // the doc-drift guard catches it — that is why the numbers live in one exported const.
   const cases: [ProvisionProblemCode, ExitCode][] = [
     ["prerequisites-missing", 10],
+    ["prerequisites-mismatch", 15],
     ["artifact-unresolvable", 11],
     ["cluster-unreachable", 12],
     ["proof-failed", 13],
@@ -38,6 +39,7 @@ describe("the exit-code table (#585 T3 / AC2)", () => {
   it("covers every ProvisionProblemCode: no code falls through to the default", () => {
     const codes: ProvisionProblemCode[] = [
       "prerequisites-missing",
+      "prerequisites-mismatch",
       "artifact-unresolvable",
       "cluster-unreachable",
       "proof-failed",
@@ -88,7 +90,7 @@ describe("the exit-code table (#585 T3 / AC2)", () => {
   });
 
   it("uses only the documented numbers", () => {
-    const documented = new Set([1, 10, 11, 12, 13, 14]);
+    const documented = new Set([1, 10, 11, 12, 13, 14, 15]);
     for (const code of Object.values(EXIT_CODES)) {
       expect(documented.has(code)).toBe(true);
     }
