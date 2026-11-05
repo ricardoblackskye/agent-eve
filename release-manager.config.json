@@ -21,7 +21,7 @@
       "release_notes_path": "releasenotes.md"
     },
     "ricardoblackskye/dark-factory-installer": {
-      "webhook_secret_env": "GH_WEBHOOK_SECRET",
+      "webhook_secret_env": "GH_WEBHOOK_SECRET_DF_INSTALLER",
       "token_env": "GH_RELEASE_TOKEN",
       "release_notes_path": "releasenotes.md"
     }
