@@ -98,6 +98,12 @@ describe("the NDJSON contract is documented (#585 T8)", () => {
   });
 });
 
+describe("the Windows program integration is documented (#582)", () => {
+  it("documents the program-to-CLI contract", () => {
+    expect(docs.toLowerCase()).toContain("for the windows program");
+  });
+});
+
 describe("the state file is documented (#585 T8)", () => {
   it("names the state-file path and its invalidation rule", () => {
     expect(docs).toContain(".data/sandbox-provision-state.json");

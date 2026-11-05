@@ -35,6 +35,7 @@ import {
   USAGE_EXIT_CODE,
 } from "../agent/lib/dark-factory/sandbox-flags";
 import { exitCodeForProblem, exitCodeForResult } from "../agent/lib/dark-factory/sandbox-exit-codes";
+import { getCliVersion } from "../agent/lib/dark-factory/sandbox-version";
 
 const execFileAsync = promisify(execFile);
 
@@ -179,6 +180,14 @@ async function main(): Promise<number> {
 
   if (flags.help) {
     process.stderr.write(USAGE);
+    return 0;
+  }
+
+  // #582 (version coupling): the Windows program reads this before launching a provision, so it
+  // can refuse a checkout this CLI does not support. Printed to stdout (NDJSON-safe: a single
+  // line, no event framing needed) so the program captures it directly.
+  if (flags.version) {
+    process.stdout.write(`${getCliVersion()}\n`);
     return 0;
   }
 

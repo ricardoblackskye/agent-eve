@@ -27,6 +27,29 @@ Flag parsing and secret refusal (#585 T6) live in [`agent/lib/dark-factory/sandb
 The chart, CRDs and digest lock are vendored under
 [`scripts/sandbox-vendor/`](../../scripts/sandbox-vendor/).
 
+## For the Windows program (#582)
+
+The Windows installer lives in a separate repository (per the #584 boundary): it owns prerequisite
+detection, binary acquisition, orchestration UX, state and retry, and the GUI. It drives this CLI -
+it does not re-implement provisioning. The CLI is the contract between the two repos.
+
+- **Version check first.** Before launching a provision, the program calls
+  `npm run df:sandbox-up -- --version` and reads the semver from stdout. It must refuse a checkout
+  whose CLI version it does not support (the #584 version-coupling rule); this CLI does not enforce
+  a minimum program version itself. The version is exposed by
+  [`agent/lib/dark-factory/sandbox-version.ts`](../../agent/lib/dark-factory/sandbox-version.ts).
+- **Invoke headless.** Every run is flags-only, e.g. `npm run df:sandbox-up -- --check` for the
+  preflight and `npm run df:sandbox-up -- [flags]` for the real provision. No prompts are emitted.
+- **Read stdout as NDJSON, stderr as prose.** Each line on stdout is one JSON event (the schema is
+  pinned by the gui-contract suite); human prose goes to stderr. Render the step list from the
+  events and never parse the prose.
+- **Branch on the exit code and problem `code`.** The exit-code table above maps each failure class
+  to a distinct code; when a check or provision fails, the terminal `done` event also carries
+  `exitCode`, and each `problems[]` entry carries a `code` (e.g. `prerequisites-missing`,
+  `prerequisites-mismatch`) the program can switch on.
+- **Never pass a secret on argv.** `--token` / `--password` / `--api-key` / `--secret` are refused
+  (exit 2). Supply the vault secret on stdin or via a vault handle.
+
 ## The command
 
 ```bash
