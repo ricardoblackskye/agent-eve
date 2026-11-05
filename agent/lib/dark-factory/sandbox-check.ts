@@ -31,6 +31,7 @@ import {
   satisfiesRange,
   type SandboxManifest,
 } from "./sandbox-manifest";
+import { digestOfFile as defaultDigestOfFile } from "./sandbox-state";
 
 export interface CheckOptions {
   /** Directory holding artifacts.lock.json and cache/ (scripts/sandbox-vendor). */
@@ -39,6 +40,18 @@ export interface CheckOptions {
   cluster: SandboxCluster;
   /** Injected so the checks stay testable without Docker, a cluster or a network. */
   exec: ExecFn;
+  /**
+   * Resolve a binary command name to its on-disk path. Injected for tests; defaults to `where`
+   * (Windows) / `which` (POSIX) so digest verification can read the actual file. Optional because
+   * digest verification is opt-in per manifest entry (`expectedDigest`); when absent, this is never
+   * called.
+   */
+  resolveBinaryPath?: (command: string) => Promise<string | null>;
+  /**
+   * Compute a file's sha256. Injected for tests; defaults to the real `digestOfFile`. Only invoked
+   * for manifest entries that record an `expectedDigest`.
+   */
+  digestOfFile?: (path: string) => string;
 }
 
 export interface CheckResult {
@@ -65,6 +78,8 @@ async function verifyBinaries(
   manifest: SandboxManifest,
   cluster: SandboxCluster,
   exec: ExecFn,
+  resolveBinaryPath: (command: string) => Promise<string | null>,
+  digestOfFile: (path: string) => string,
 ): Promise<ProvisionProblem[]> {
   const problems: ProvisionProblem[] = [];
   for (const bin of manifest.binaries) {
@@ -89,9 +104,47 @@ async function verifyBinaries(
         subject: `binary version mismatch: ${bin.name} is ${actual} but the manifest requires ${bin.versionConstraint}`,
         fix: bin.fix,
       });
+      continue;
+    }
+
+    // Version is good. When the manifest records a digest, verify the actual binary file against
+    // it (D3: refuse on digest mismatch too). Skip silently if the path cannot be resolved - the
+    // version probe already proved the binary is present and runnable.
+    if (bin.expectedDigest) {
+      const path = await resolveBinaryPath(bin.probe.command);
+      if (path) {
+        const actual = normalizeDigest(digestOfFile(path));
+        const expected = normalizeDigest(bin.expectedDigest);
+        if (actual !== expected) {
+          problems.push({
+            code: "prerequisites-mismatch",
+            subject: `binary digest mismatch: ${bin.name} (${actual}) does not match the manifest (${expected})`,
+            fix: bin.fix,
+          });
+        }
+      }
     }
   }
   return problems;
+}
+
+/** Compare digests regardless of a `sha256:` prefix or hex casing. */
+function normalizeDigest(digest: string): string {
+  return digest.replace(/^sha256:/i, "").toLowerCase();
+}
+
+/**
+ * Best-effort path resolution for a command name. `where` on Windows, `which` elsewhere. Returns
+ * null when the binary cannot be located, in which case digest verification is skipped.
+ */
+async function defaultResolveBinaryPath(
+  command: string,
+  exec: ExecFn,
+): Promise<string | null> {
+  const finder = process.platform === "win32" ? "where" : "which";
+  const res = await exec(finder, [command]);
+  if (res.code !== 0 || !res.stdout.trim()) return null;
+  return res.stdout.trim().split(/\r?\n/)[0] ?? null;
 }
 
 export async function checkPrerequisites(options: CheckOptions): Promise<CheckResult> {
@@ -135,7 +188,15 @@ export async function checkPrerequisites(options: CheckOptions): Promise<CheckRe
     return { ok: false, problems };
   }
 
-  problems.push(...(await verifyBinaries(manifest, options.cluster, options.exec)));
+  problems.push(
+    ...(await verifyBinaries(
+      manifest,
+      options.cluster,
+      options.exec,
+      options.resolveBinaryPath ?? ((cmd) => defaultResolveBinaryPath(cmd, options.exec)),
+      options.digestOfFile ?? defaultDigestOfFile,
+    )),
+  );
 
   // Read-only: inspect only. A missing image is named so the operator knows which one.
   let lock: Lock;

@@ -47,7 +47,7 @@ interface Recorded {
 }
 
 /** A workspace with the committed-shape lock (chart, crds, images AND binaries) and a cache. */
-function makeArtifacts(options: { tars: number }): string {
+function makeArtifacts(options: { tars: number; helmDigest?: string }): string {
   const dir = mkdtempSync(join(tmpdir(), "df-check-"));
   dirs.push(dir);
   const cache = join(dir, "cache");
@@ -92,6 +92,7 @@ function makeArtifacts(options: { tars: number }): string {
           acquiredBy: "operator",
           probe: { command: "helm", args: ["version", "--short"] },
           fix: "Install helm.",
+          ...(options.helmDigest ? { expectedDigest: options.helmDigest } : {}),
         },
         {
           name: "python",
@@ -212,6 +213,56 @@ describe("the read-only preflight check (#585 T5 / #603 T2)", () => {
 
   it("maps a version mismatch to exit code 15", () => {
     expect(exitCodeForProblem("prerequisites-mismatch")).toBe(15);
+  });
+
+  // #603 T5 (D3): when a manifest entry records an expectedDigest, the actual binary file is
+  // verified against it and a mismatch refuses before any mutating stage runs. Digest verification
+  // is opt-in per entry - entries without expectedDigest are never read from disk.
+  describe("binary digest verification (T5 / D3)", () => {
+    it("refuses when the actual binary digest does not match the manifest", async () => {
+      const artifactsDir = makeArtifacts({ tars: 2, helmDigest: "sha256:abc123" });
+      const { exec } = recorder();
+      const result = await checkPrerequisites({
+        artifactsDir,
+        cluster: "minikube",
+        exec,
+        resolveBinaryPath: async () => "C:/fake/helm.exe",
+        digestOfFile: () => "sha256:deadbeef",
+      });
+      expect(result.ok).toBe(false);
+      const mismatch = result.problems.find((p) => p.code === "prerequisites-mismatch");
+      expect(mismatch?.subject).toContain("digest mismatch");
+      expect(mismatch?.subject).toContain("helm");
+    });
+
+    it("accepts the binary when its digest matches the manifest", async () => {
+      const artifactsDir = makeArtifacts({ tars: 2, helmDigest: "sha256:abc123" });
+      const { exec } = recorder();
+      const result = await checkPrerequisites({
+        artifactsDir,
+        cluster: "minikube",
+        exec,
+        resolveBinaryPath: async () => "C:/fake/helm.exe",
+        digestOfFile: () => "sha256:abc123",
+      });
+      expect(result.ok).toBe(true);
+      expect(result.problems).toEqual([]);
+    });
+
+    it("skips digest verification when the binary path cannot be resolved", async () => {
+      const artifactsDir = makeArtifacts({ tars: 2, helmDigest: "sha256:abc123" });
+      const { exec } = recorder();
+      const result = await checkPrerequisites({
+        artifactsDir,
+        cluster: "minikube",
+        exec,
+        resolveBinaryPath: async () => null,
+        digestOfFile: () => "sha256:deadbeef",
+      });
+      // No path -> nothing to compare against -> the (present, matching-version) binary passes.
+      expect(result.ok).toBe(true);
+      expect(result.problems).toEqual([]);
+    });
   });
 
   it("uses the probe command/args declared in the manifest (data-driven)", async () => {
