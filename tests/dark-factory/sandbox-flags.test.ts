@@ -29,6 +29,7 @@ describe("flag parsing (#585 T6 / AC1)", () => {
     expect(flags).toEqual({
       check: false,
       help: false,
+      version: false,
       forwardPort: undefined,
       cluster: undefined,
       artifactsDir: undefined,
@@ -45,6 +46,12 @@ describe("flag parsing (#585 T6 / AC1)", () => {
   it("recognises --help", () => {
     const { flags } = parseFlags(["--help"]);
     expect(flags.help).toBe(true);
+  });
+
+  it("recognises --version", () => {
+    const { flags, errors } = parseFlags(["--version"]);
+    expect(errors).toEqual([]);
+    expect(flags.version).toBe(true);
   });
 
   it("parses a numeric --forward-port", () => {
@@ -135,6 +142,7 @@ describe("documented flags (#585 T6 / AC1)", () => {
     for (const flag of [
       "--check",
       "--help",
+      "--version",
       "--forward-port",
       "--cluster",
       "--kube-context",

@@ -29,6 +29,8 @@ export interface ParsedFlags {
   check: boolean;
   /** Print the usage text and stop. */
   help: boolean;
+  /** Print the CLI version and stop. */
+  version: boolean;
   forwardPort?: number;
   cluster?: SandboxCluster;
   artifactsDir?: string;
@@ -59,6 +61,7 @@ Flags:
                            prerequisite is missing, 15 when a binary version or digest mismatches
                            the manifest, and 11 when an artifact is unresolvable.
   --help                   Print this text and stop.
+  --version                Print the CLI version and stop.
   --forward-port <port>    Local port to forward the control plane to. Default 18082.
   --cluster <name>         Cluster target. "minikube" starts or reuses a local minikube.
   --kube-context <name>    Target an EXISTING cluster by context instead of minikube. Takes
@@ -116,6 +119,7 @@ export function parseFlags(argv: readonly string[]): ParseResult {
   const raw = new Map<string, string>();
   let check = false;
   let help = false;
+  let version = false;
 
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
@@ -127,6 +131,10 @@ export function parseFlags(argv: readonly string[]): ParseResult {
     }
     if (token === "--help" || token === "-h") {
       help = true;
+      continue;
+    }
+    if (token === "--version") {
+      version = true;
       continue;
     }
 
@@ -167,7 +175,7 @@ export function parseFlags(argv: readonly string[]): ParseResult {
     raw.set(flagName, value);
   }
 
-  const flags: ParsedFlags = { check, help };
+  const flags: ParsedFlags = { check, help, version };
 
   const artifactsDir = raw.get("--artifacts-dir");
   if (artifactsDir !== undefined) flags.artifactsDir = artifactsDir;
