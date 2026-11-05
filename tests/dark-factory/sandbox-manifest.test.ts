@@ -49,7 +49,7 @@ describe("satisfiesRange", () => {
 describe("extractVersion", () => {
   it("pulls a semver out of noisy CLI output", () => {
     expect(extractVersion("Client Version: v1.29.0")).toBe("1.29.0");
-    expect(extractVersion("v3.14.4+gabc123")).toBe("3.14.4");
+    expect(extractVersion("v3.14.4+abc123")).toBe("3.14.4");
     expect(extractVersion("Python 3.11.15")).toBe("3.11.15");
   });
 
