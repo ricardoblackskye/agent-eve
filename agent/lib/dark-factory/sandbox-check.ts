@@ -1,20 +1,22 @@
 /**
- * #585 T5 (AC5) - the read-only preflight check.
+ * #585 T5 (AC5) + #603 T2 (D2/D3) - the read-only preflight check.
  *
- * WHY THIS EXISTS: the only way to learn whether a sandbox run could work was to start one.
- * A missing helm or a stopped Docker daemon surfaced only after minikube had already been
- * started, and the operator discovered the second missing prerequisite only after fixing the
- * first. `--check` answers "would this work?" up front and mutates nothing.
+ * WHY THIS EXISTS: the only way to learn whether a sandbox run could work was to start one. A
+ * missing helm or a stopped Docker daemon surfaced only after minikube had already been started,
+ * and the operator discovered the second missing prerequisite only after fixing the first.
+ * `--check` answers "would this work?" up front and mutates nothing.
  *
- * THE RULE THAT MATTERS: this module issues READ-ONLY probes only. It never starts a cluster,
- * runs an upgrade, pulls an image or writes the state file. A check that mutates is not a
- * check - it makes a "dry" run expensive and non-idempotent, and it would defeat the point of
- * asking first. Every command below is a version query or an inspect.
+ * #603 D2/D3: the binary prerequisites are now MANIFEST-DRIVEN. The check reads
+ * scripts/sandbox-vendor/artifacts.lock.json, probes each required binary's version using the
+ * probe command declared in the manifest, and refuses before any state-changing stage runs:
+ *   - a binary that will not execute at all  -> `prerequisites-missing` (exit 10)
+ *   - a binary present but wrong version/digest -> `prerequisites-mismatch` (exit 15)
+ * The manifest is the single source for what is required and how to probe it, so the list is data,
+ * not code. A malformed manifest fails closed (artifact-unresolvable) rather than running blind.
  *
- * It deliberately duplicates a few reads from the provisioning core rather than calling it:
- * the core's job is to change the world, so reusing it here would drag the mutations in. The
- * duplicate is two version probes and one cache count, and the shared types keep the two
- * honest.
+ * THE RULE THAT MATTERS: this module issues READ-ONLY probes only. Every command below is a
+ * version query or an inspect. It never starts a cluster, runs an upgrade, pulls an image or
+ * writes the state file.
  */
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
@@ -23,6 +25,12 @@ import type {
   ProvisionProblem,
   SandboxCluster,
 } from "./sandbox-provisioning";
+import {
+  extractVersion,
+  parseManifest,
+  satisfiesRange,
+  type SandboxManifest,
+} from "./sandbox-manifest";
 
 export interface CheckOptions {
   /** Directory holding artifacts.lock.json and cache/ (scripts/sandbox-vendor). */
@@ -45,83 +53,49 @@ interface LockImage {
   digest: string;
 }
 interface Lock {
-  chart: { path: string; version: string; source: string };
-  crds: { path: string };
   images: LockImage[];
 }
 
-/** A binary probe and the advice to give when it fails. */
-interface BinaryCheck {
-  command: string;
-  args: string[];
-  /** How the operator should recognise this prerequisite in the message. */
-  label: string;
-  fix: string;
-}
-
 /**
- * The prerequisites, each probed with a read-only command. Version queries only: none of
- * these starts, installs or pulls anything.
+ * Probe every required binary from the manifest and collect ALL failures in one pass. A binary that
+ * will not execute is `prerequisites-missing`; one present but outside its version constraint is
+ * `prerequisites-mismatch`. Reporting one at a time would make the operator loop over installs.
  */
-function binaryChecks(cluster: SandboxCluster): BinaryCheck[] {
-  const checks: BinaryCheck[] = [
-    {
-      command: "docker",
-      args: ["version", "--format", "{{.Server.Version}}"],
-      label: "docker",
-      fix: "Start Docker Desktop (the daemon must be running, not just installed).",
-    },
-    {
-      command: "kubectl",
-      args: ["version", "--client"],
-      label: "kubectl",
-      fix: "Install kubectl and put it on PATH, or set KUBECTL to its full path.",
-    },
-    {
-      command: "helm",
-      args: ["version", "--short"],
-      label: "helm",
-      fix: "Install helm and put it on PATH, or set HELM to its full path.",
-    },
-    {
-      command: "python",
-      args: ["--version"],
-      label: "python",
-      fix: "Install Python 3; the vault proof runs scripts/k8s-vault-proof/vault-proof.py.",
-    },
-  ];
-
-  // A remote context targets an existing cluster, so minikube is irrelevant there. Asking for
-  // it would refuse a perfectly valid remote run.
-  if (cluster === "minikube") {
-    checks.push({
-      command: "minikube",
-      args: ["version"],
-      label: "minikube",
-      fix: "Install minikube and put it on PATH, or set MINIKUBE to its full path.",
-    });
-  }
-
-  return checks;
-}
-
-/**
- * Probe every prerequisite and collect ALL failures in one pass. Reporting one at a time makes
- * the operator loop over installs; the whole point of a preflight is one answer.
- */
-export async function checkPrerequisites(options: CheckOptions): Promise<CheckResult> {
+async function verifyBinaries(
+  manifest: SandboxManifest,
+  cluster: SandboxCluster,
+  exec: ExecFn,
+): Promise<ProvisionProblem[]> {
   const problems: ProvisionProblem[] = [];
+  for (const bin of manifest.binaries) {
+    const required = bin.required || bin.requiredFor === cluster;
+    if (!required) continue;
 
-  for (const check of binaryChecks(options.cluster)) {
-    const result = await options.exec(check.command, check.args);
+    const result = await exec(bin.probe.command, bin.probe.args);
     if (result.code !== 0) {
       problems.push({
         code: "prerequisites-missing",
-        subject: `missing prerequisite: ${check.label} is not usable`,
-        fix: check.fix,
+        subject: `missing prerequisite: ${bin.name} is not usable`,
+        fix: bin.fix,
+      });
+      continue;
+    }
+
+    const version = extractVersion(result.stdout);
+    if (version === null || !satisfiesRange(version, bin.versionConstraint)) {
+      const actual = version ?? "(unknown version)";
+      problems.push({
+        code: "prerequisites-mismatch",
+        subject: `binary version mismatch: ${bin.name} is ${actual} but the manifest requires ${bin.versionConstraint}`,
+        fix: bin.fix,
       });
     }
   }
+  return problems;
+}
+
+export async function checkPrerequisites(options: CheckOptions): Promise<CheckResult> {
+  const problems: ProvisionProblem[] = [];
 
   const lockPath = join(options.artifactsDir, "artifacts.lock.json");
   if (!existsSync(lockPath)) {
@@ -133,17 +107,42 @@ export async function checkPrerequisites(options: CheckOptions): Promise<CheckRe
     return { ok: problems.length === 0, problems };
   }
 
-  let lock: Lock;
+  let raw: string;
   try {
-    lock = JSON.parse(readFileSync(lockPath, "utf8")) as Lock;
+    raw = readFileSync(lockPath, "utf8");
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     problems.push({
       code: "artifact-unresolvable",
-      subject: `the vendor lock is not valid JSON (${lockPath})`,
+      subject: `the vendor lock is not readable (${lockPath})`,
       fix: message,
     });
-    return { ok: problems.length === 0, problems };
+    return { ok: false, problems };
+  }
+
+  // The manifest owns the binary contract. A malformed one is an unresolvable artifact, never a
+  // silent pass - we must not provision against a lock we cannot trust.
+  let manifest: SandboxManifest;
+  try {
+    manifest = parseManifest(raw);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    problems.push({
+      code: "artifact-unresolvable",
+      subject: `the vendor lock is malformed: ${lockPath}`,
+      fix: message,
+    });
+    return { ok: false, problems };
+  }
+
+  problems.push(...(await verifyBinaries(manifest, options.cluster, options.exec)));
+
+  // Read-only: inspect only. A missing image is named so the operator knows which one.
+  let lock: Lock;
+  try {
+    lock = JSON.parse(raw) as Lock;
+  } catch {
+    lock = { images: [] };
   }
 
   const cacheDir = join(options.artifactsDir, "cache");
@@ -158,7 +157,6 @@ export async function checkPrerequisites(options: CheckOptions): Promise<CheckRe
     });
   }
 
-  // Read-only: inspect only. A missing image is named so the operator knows which one.
   for (const image of lock.images) {
     const inspected = await options.exec("docker", ["image", "inspect", image.ref]);
     if (inspected.code !== 0) {

@@ -1,5 +1,5 @@
 /**
- * #585 T5 (AC5) - the read-only preflight check.
+ * #585 T5 (AC5) + #603 T2 (D2/D3) - the read-only preflight check.
  *
  * The defect this closes: the only way to find out whether a sandbox run could work was to
  * START one. A missing helm or a stopped Docker daemon surfaced after minikube had already
@@ -7,13 +7,18 @@
  * prerequisite only after fixing the first. A `--check` mode answers "would this work?" and
  * mutates nothing.
  *
+ * #603 D2/D3: the binary prerequisites are now manifest-driven. The check reads
+ * scripts/sandbox-vendor/artifacts.lock.json, probes each required binary's version using the
+ * probe command declared in the manifest, and refuses (prerequisites-missing when absent,
+ * prerequisites-mismatch when present but wrong) before any state-changing stage runs.
+ *
  * The hard requirement is the negative one: check mode must issue ONLY read-only probes. A
- * check that starts a cluster or runs an upgrade is not a check, and it would make a
- * "dry" run expensive and non-idempotent.
+ * check that starts a cluster or runs an upgrade is not a check, and it would make a "dry" run
+ * expensive and non-idempotent.
  *
  * These are unit tests over an injected exec: no Docker, no cluster, no network.
  */
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -33,12 +38,15 @@ afterEach(() => {
 const IMAGE_A = "registry.example/opensandbox/execd:release-1.1.1";
 const IMAGE_B = "registry.example/opensandbox/egress:release-1.1.1";
 
+/** A version that satisfies every >= constraint in the fixtures below. */
+const PRESENT_VERSION = "v99.99.99";
+
 interface Recorded {
   command: string;
   args: string[];
 }
 
-/** A workspace with the committed lock and an optionally populated cache. */
+/** A workspace with the committed-shape lock (chart, crds, images AND binaries) and a cache. */
 function makeArtifacts(options: { tars: number }): string {
   const dir = mkdtempSync(join(tmpdir(), "df-check-"));
   dirs.push(dir);
@@ -60,6 +68,49 @@ function makeArtifacts(options: { tars: number }): string {
         { ref: IMAGE_A, digest: `sha256:${"a".repeat(64)}` },
         { ref: IMAGE_B, digest: `sha256:${"b".repeat(64)}` },
       ],
+      binaries: [
+        {
+          name: "docker",
+          versionConstraint: ">=20.10.0",
+          required: true,
+          acquiredBy: "operator",
+          probe: { command: "docker", args: ["version", "--format", "{{.Server.Version}}"] },
+          fix: "Start Docker Desktop.",
+        },
+        {
+          name: "kubectl",
+          versionConstraint: ">=1.28.0",
+          required: true,
+          acquiredBy: "operator",
+          probe: { command: "kubectl", args: ["version", "--client"] },
+          fix: "Install kubectl.",
+        },
+        {
+          name: "helm",
+          versionConstraint: ">=3.14.0",
+          required: true,
+          acquiredBy: "operator",
+          probe: { command: "helm", args: ["version", "--short"] },
+          fix: "Install helm.",
+        },
+        {
+          name: "python",
+          versionConstraint: ">=3.10.0",
+          required: true,
+          acquiredBy: "operator",
+          probe: { command: "python", args: ["--version"] },
+          fix: "Install Python 3.",
+        },
+        {
+          name: "minikube",
+          versionConstraint: ">=1.30.0",
+          required: false,
+          requiredFor: "minikube",
+          acquiredBy: "operator",
+          probe: { command: "minikube", args: ["version"] },
+          fix: "Install minikube.",
+        },
+      ],
     }),
   );
   return dir;
@@ -73,12 +124,12 @@ function recorder(overrides: Record<string, ExecResult> = {}) {
     for (const [match, result] of Object.entries(overrides)) {
       if (key.includes(match)) return result;
     }
-    return { code: 0, stdout: "", stderr: "" };
+    // Default: every binary is present at a version that satisfies the manifest.
+    return { code: 0, stdout: PRESENT_VERSION, stderr: "" };
   };
   return { calls, exec };
 }
 
-const ok = (): ExecResult => ({ code: 0, stdout: "", stderr: "" });
 const missing = (): ExecResult => ({ code: 1, stdout: "", stderr: "not found" });
 
 /** Commands that would change state; a check must never issue one. */
@@ -90,16 +141,12 @@ function mutatingCalls(calls: Recorded[]): string[] {
     .filter((line) => MUTATING.some((verb) => line.split(" ").includes(verb)));
 }
 
-describe("the read-only preflight check (#585 T5)", () => {
-  it("passes when every prerequisite is present", async () => {
+describe("the read-only preflight check (#585 T5 / #603 T2)", () => {
+  it("passes when every prerequisite is present and matching", async () => {
     const artifactsDir = makeArtifacts({ tars: 2 });
     const { calls, exec } = recorder();
 
-    const result = await checkPrerequisites({
-      artifactsDir,
-      cluster: "minikube",
-      exec,
-    });
+    const result = await checkPrerequisites({ artifactsDir, cluster: "minikube", exec });
 
     expect(result.ok).toBe(true);
     expect(result.problems).toEqual([]);
@@ -107,21 +154,16 @@ describe("the read-only preflight check (#585 T5)", () => {
     expect(calls.length).toBeGreaterThan(0);
   });
 
-  it("names a missing binary and reports prerequisites-missing", async () => {
+  it("names a missing binary and reports prerequisites-missing (D1)", async () => {
     const artifactsDir = makeArtifacts({ tars: 2 });
     const { exec } = recorder({ "helm version": missing() });
 
-    const result = await checkPrerequisites({
-      artifactsDir,
-      cluster: "minikube",
-      exec,
-    });
+    const result = await checkPrerequisites({ artifactsDir, cluster: "minikube", exec });
 
     expect(result.ok).toBe(false);
-    expect(result.problems[0]?.code).toBe("prerequisites-missing");
-    expect(result.problems[0]?.subject).toContain("helm");
-    // The fix must tell the operator what to do, not just that something failed.
-    expect(result.problems[0]?.fix.length).toBeGreaterThan(0);
+    const missingProblem = result.problems.find((p) => p.code === "prerequisites-missing");
+    expect(missingProblem?.subject).toContain("helm");
+    expect(missingProblem?.fix.length).toBeGreaterThan(0);
   });
 
   it("maps a missing prerequisite to exit code 10", () => {
@@ -135,16 +177,53 @@ describe("the read-only preflight check (#585 T5)", () => {
       "kubectl version": missing(),
     });
 
-    const result = await checkPrerequisites({
-      artifactsDir,
-      cluster: "minikube",
-      exec,
-    });
+    const result = await checkPrerequisites({ artifactsDir, cluster: "minikube", exec });
 
     expect(result.ok).toBe(false);
     const subjects = result.problems.map((problem) => problem.subject).join("\n");
     expect(subjects).toContain("helm");
     expect(subjects).toContain("kubectl");
+  });
+
+  it("reports a version mismatch as prerequisites-mismatch (D3)", async () => {
+    const artifactsDir = makeArtifacts({ tars: 2 });
+    // helm is present but far too old for the manifest's >=3.14.0.
+    const { exec } = recorder({ "helm version": { code: 0, stdout: "v2.0.0", stderr: "" } });
+
+    const result = await checkPrerequisites({ artifactsDir, cluster: "minikube", exec });
+
+    expect(result.ok).toBe(false);
+    const mismatch = result.problems.find((p) => p.code === "prerequisites-mismatch");
+    expect(mismatch).toBeDefined();
+    expect(mismatch?.subject).toContain("helm");
+    expect(mismatch?.subject).toContain("2.0.0");
+    expect(mismatch?.subject).toContain(">=3.14.0");
+  });
+
+  it("refuses when the installed version cannot be parsed", async () => {
+    const artifactsDir = makeArtifacts({ tars: 2 });
+    const { exec } = recorder({ "helm version": { code: 0, stdout: "garbage", stderr: "" } });
+
+    const result = await checkPrerequisites({ artifactsDir, cluster: "minikube", exec });
+
+    expect(result.ok).toBe(false);
+    expect(result.problems.some((p) => p.code === "prerequisites-mismatch")).toBe(true);
+  });
+
+  it("maps a version mismatch to exit code 15", () => {
+    expect(exitCodeForProblem("prerequisites-mismatch")).toBe(15);
+  });
+
+  it("uses the probe command/args declared in the manifest (data-driven)", async () => {
+    const artifactsDir = makeArtifacts({ tars: 2 });
+    const { calls, exec } = recorder();
+
+    await checkPrerequisites({ artifactsDir, cluster: "minikube", exec });
+
+    const helmProbe = calls.find((c) => c.command === "helm");
+    expect(helmProbe?.args).toEqual(["version", "--short"]);
+    const dockerProbe = calls.find((c) => c.command === "docker");
+    expect(dockerProbe?.args).toEqual(["version", "--format", "{{.Server.Version}}"]);
   });
 
   it("requires minikube for a local cluster but not for an existing one", async () => {
@@ -171,11 +250,7 @@ describe("the read-only preflight check (#585 T5)", () => {
     const artifactsDir = makeArtifacts({ tars: 0 });
     const { exec } = recorder();
 
-    const result = await checkPrerequisites({
-      artifactsDir,
-      cluster: "minikube",
-      exec,
-    });
+    const result = await checkPrerequisites({ artifactsDir, cluster: "minikube", exec });
 
     expect(result.ok).toBe(false);
     expect(result.problems.map((problem) => problem.subject).join("\n")).toContain(
@@ -188,11 +263,7 @@ describe("the read-only preflight check (#585 T5)", () => {
     const artifactsDir = makeArtifacts({ tars: 2 });
     const { exec } = recorder({ "image inspect": missing() });
 
-    const result = await checkPrerequisites({
-      artifactsDir,
-      cluster: "minikube",
-      exec,
-    });
+    const result = await checkPrerequisites({ artifactsDir, cluster: "minikube", exec });
 
     expect(result.ok).toBe(false);
     expect(result.problems.map((problem) => problem.subject).join("\n")).toContain(IMAGE_A);
@@ -225,5 +296,19 @@ describe("the read-only preflight check (#585 T5)", () => {
 
     expect(result.ok).toBe(false);
     expect(renderCheck(result.problems).join("\n")).toContain("df:sandbox-vendor");
+  });
+
+  it("refuses when the lock's binaries section is malformed (fail closed)", async () => {
+    const artifactsDir = makeArtifacts({ tars: 2 });
+    // Strip the binaries section so parseManifest throws.
+    const lockPath = join(artifactsDir, "artifacts.lock.json");
+    const lock = JSON.parse(readFileSync(lockPath, "utf8"));
+    delete lock.binaries;
+    writeFileSync(lockPath, JSON.stringify(lock));
+
+    const result = await checkPrerequisites({ artifactsDir, cluster: "minikube", exec: recorder().exec });
+
+    expect(result.ok).toBe(false);
+    expect(result.problems[0]?.code).toBe("artifact-unresolvable");
   });
 });
