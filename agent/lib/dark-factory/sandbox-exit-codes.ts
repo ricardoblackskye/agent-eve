@@ -15,11 +15,12 @@
 import type { ProvisionProblemCode, ProvisionResult } from "./sandbox-provisioning";
 
 /** Every process exit code the sandbox command may return. */
-export type ExitCode = 0 | 1 | 10 | 11 | 12 | 13 | 14;
+export type ExitCode = 0 | 1 | 10 | 11 | 12 | 13 | 14 | 15;
 
 /** Stable mapping. Exported so the doc-drift guard can compare the docs to the table. */
 export const EXIT_CODES: Record<ProvisionProblemCode, ExitCode> = {
   "prerequisites-missing": 10,
+  "prerequisites-mismatch": 15,
   "artifact-unresolvable": 11,
   "cluster-unreachable": 12,
   "proof-failed": 13,

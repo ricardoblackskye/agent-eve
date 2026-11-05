@@ -83,6 +83,7 @@ export interface ProvisionOptions {
  */
 export type ProvisionProblemCode =
   | "prerequisites-missing"
+  | "prerequisites-mismatch"
   | "artifact-unresolvable"
   | "cluster-unreachable"
   | "proof-failed"

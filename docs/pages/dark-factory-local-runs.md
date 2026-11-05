@@ -127,6 +127,7 @@ reads it without inspecting the process exit.
 |--------------|------|---------|
 | `internal` | `1` | Unclassified internal failure. Also the crash path when `main()` throws. |
 | `prerequisites-missing` | `10` | A prerequisite is missing or unusable (docker, kubectl, helm, python, minikube for a local cluster). The message names the binary and the fix. |
+| `prerequisites-mismatch` | `15` | A prerequisite is present but its version or digest does not match the manifest (`scripts/sandbox-vendor/artifacts.lock.json`). The message shows the expected vs actual version. Owned by #603. |
 | `artifact-unresolvable` | `11` | An artifact is unresolvable: the lock is absent or malformed, the cache is empty, or a locked image is not in the local store. |
 | `cluster-unreachable` | `12` | The cluster is unreachable: `minikube start` failed or the kube context does not answer. |
 | `proof-failed` | `13` | The proof failed: the endpoint could not be reached, or the vault proof did not substitute the placeholder. |
