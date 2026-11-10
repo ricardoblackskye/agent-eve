@@ -9,25 +9,30 @@ import {
  * #280 T2 — there is deliberately no boolean "enable" flag: a boolean can default open, while a
  * driver NAME cannot.
  *
- * #383 — absence REFUSES. The original default returned the local provider for an unset driver,
- * which meant a run that never mentioned a driver wrote code, committed and pushed on the real
- * filesystem. That was fail-closed against misconfiguration but not against isolation. The host
- * tree now requires an explicit `DF_SANDBOX_DRIVER=local`.
+ * #383 / #620 — an UNCONFIGURED run is now ISOLATED by default. An unset/blank DF_SANDBOX_DRIVER
+ * resolves to opensandbox (see sandbox-provider.ts). The host tree still requires an explicit
+ * `DF_SANDBOX_DRIVER=local` to opt out; an unknown value still refuses (naming the supported values).
  */
-describe("#383 the host tree requires an explicit flag", () => {
-  it("refuses when DF_SANDBOX_DRIVER is unset", () => {
-    expect(() => createSandboxProvider({})).toThrow(SandboxConfigError);
+describe("#383 the host tree requires an explicit flag (unconfigured run is isolated by default)", () => {
+  it("isolates by default when DF_SANDBOX_DRIVER is unset", () => {
+    const provider = createSandboxProvider({});
+    expect(provider.driver).toBe("opensandbox");
+    expect(provider.isolated).toBe(true);
   });
 
-  it("refuses on an empty or whitespace value", () => {
-    expect(() => createSandboxProvider({ DF_SANDBOX_DRIVER: "" })).toThrow(SandboxConfigError);
-    expect(() => createSandboxProvider({ DF_SANDBOX_DRIVER: "   " })).toThrow(SandboxConfigError);
+  it("isolates by default on an empty or whitespace value", () => {
+    const empty = createSandboxProvider({ DF_SANDBOX_DRIVER: "" });
+    expect(empty.driver).toBe("opensandbox");
+    expect(empty.isolated).toBe(true);
+    const ws = createSandboxProvider({ DF_SANDBOX_DRIVER: "   " });
+    expect(ws.driver).toBe("opensandbox");
+    expect(ws.isolated).toBe(true);
   });
 
-  it("names both ways out in the refusal, so the message is actionable", () => {
-    // A refusal that only says "not set" leaves the operator guessing between host and sandbox.
-    expect(() => createSandboxProvider({})).toThrow(/DF_SANDBOX_DRIVER=local/);
-    expect(() => createSandboxProvider({})).toThrow(/DF_SANDBOX_DRIVER=opensandbox/);
+  it("host tree still requires an explicit flag (local selects the host)", () => {
+    const provider = createSandboxProvider({ DF_SANDBOX_DRIVER: "local" });
+    expect(provider.driver).toBe("local");
+    expect(provider.isolated).toBe(false);
   });
 });
 
@@ -87,10 +92,9 @@ describe("#282 R3 vault gate is fail-closed", () => {
     ).toThrow(SandboxConfigError);
   });
 
-  it("refuses when the gate is set with no driver configured", () => {
-    expect(() =>
-      createSandboxProvider({ DF_SANDBOX_VAULT_ENABLED: "1" }),
-    ).toThrow(/vault/i);
+  it("resolves to opensandbox when the gate is set with no explicit driver (default isolation satisfies the gate)", () => {
+    const provider = createSandboxProvider({ DF_SANDBOX_VAULT_ENABLED: "1" });
+    expect(provider.driver).toBe("opensandbox");
   });
 
   it("treats a blank gate value as off (no accidental refusal)", () => {

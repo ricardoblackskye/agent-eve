@@ -13,16 +13,17 @@ import { createDryRunSandboxProvider, type SandboxProvider } from "./sandbox";
  * NAME cannot. An unknown value throws BEFORE any side effect rather than falling back to something
  * permissive.
  *
- * #383 — the host tree now requires an EXPLICIT flag. An unset or blank `DF_SANDBOX_DRIVER` REFUSES
- * rather than defaulting to the local filesystem. The old default was fail-closed against
- * misconfiguration but not against isolation: a run that never mentioned a driver silently wrote
- * generated code, committed and pushed on a real filesystem. Say `DF_SANDBOX_DRIVER=local` to opt
- * out, or `DF_SANDBOX_DRIVER=opensandbox` to isolate. Refusing is the honest default when we cannot
- * tell whether the operator meant to run on the host.
+ * #383 / #620 — an UNCONFIGURED run is now ISOLATED by default. An unset or blank `DF_SANDBOX_DRIVER`
+ * resolves to `opensandbox` rather than defaulting to the local filesystem, so a run that never
+ * mentions a driver is contained instead of silently writing generated code, committing and pushing on
+ * a real filesystem. Say `DF_SANDBOX_DRIVER=local` to opt out onto the host tree, or
+ * `DF_SANDBOX_DRIVER=opensandbox` to isolate explicitly. The explicit host-tree flag is retained
+ * (#383): `local` is honoured below and an unknown value still refuses.
  *
- * Still outstanding from #383's AC1: "isolated by default" in the sense that an UNCONFIGURED run
- * automatically reaches a sandbox. That needs provisioning to be callable without a manually placed
- * helm binary, which is #585. Until then an unconfigured run refuses loudly instead of guessing.
+ * The "isolated by default" half of #383's AC1 shipped in #620. It was blocked on #585 (CLI contract)
+ * and #603 (binary acquisition), both now closed, so provisioning is callable without a manually placed
+ * helm binary. Fail-closed is preserved downstream: opensandbox creation refuses when no sandbox is
+ * reachable, so an operator is never silently placed on the host.
  */
 
 /** The drivers this release can select. Not the same as the `SandboxDriver` union, which also
@@ -63,8 +64,14 @@ export function createSandboxProvider(
   } = {},
   runId?: string | undefined,
 ): SandboxProvider {
-  const requested = (env.DF_SANDBOX_DRIVER ?? "").trim();
+  let requested = (env.DF_SANDBOX_DRIVER ?? "").trim();
   const vaultRequested = (env.DF_SANDBOX_VAULT_ENABLED ?? "").trim().length > 0;
+
+  // #383 / #620 — ISOLATE BY DEFAULT. An unset/blank driver reaches a sandbox (opensandbox) instead
+  // of refusing. The host tree still requires an explicit `=local` opt-out (honoured below); an
+  // unknown value still refuses. Fail-closed happens downstream: opensandbox creation is lazy and
+  // refuses when no sandbox is reachable, so an operator is never silently placed on the host.
+  if (requested === "") requested = "opensandbox";
 
   // #282 (R3) — FAIL-CLOSED: vault-backed wiring needs a vault-capable backend. Asking for the gate
   // while the resolved driver cannot honour it REFUSES before any selection, rather than silently
@@ -74,18 +81,6 @@ export function createSandboxProvider(
       `DF_SANDBOX_VAULT_ENABLED requires DF_SANDBOX_DRIVER=opensandbox (` +
         `${requested === "" ? "no driver is set" : `received '${requested}'`}). Refusing to fall ` +
         `back to a non-vault sandbox: the push token would not be vault-injected.`,
-    );
-  }
-
-  // #383 — REFUSE on absence. The previous line returned the local provider for an unset driver,
-  // which meant a run that never mentioned a driver quietly wrote code, committed and pushed on the
-  // real filesystem. That is closed against misconfiguration but not against isolation. An explicit
-  // `local` is still honoured below; only the silent fallback is removed.
-  if (requested === "") {
-    throw new SandboxConfigError(
-      "DF_SANDBOX_DRIVER is not set. An unconfigured run must not default to the host tree (#383): " +
-        "set DF_SANDBOX_DRIVER=local to run on the host filesystem, or " +
-        "DF_SANDBOX_DRIVER=opensandbox to run isolated in a sandbox.",
     );
   }
   if (requested === "local") return createLocalSandboxProvider();
