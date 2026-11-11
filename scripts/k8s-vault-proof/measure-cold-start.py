@@ -137,7 +137,8 @@ def main() -> int:
     print(f"       first-command: {first_command:.2f}s")
 
     print("[3/3] summary")
-    print(f"       create-to-ready: {create_to_ready:.2f}s (threshold {args.threshold:.2f}s)")
+    print(f"       create-to-ready: {create_to_ready:.2f}s "
+          f"(threshold {args.threshold:.2f}s)")
     print(f"       first-command:   {first_command:.2f}s")
 
     _destroy(sandbox)
