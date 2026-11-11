@@ -1,3 +1,32 @@
+# K8s Vault Proof
+
+## Overview
+Local Kubernetes dev harness and end-to-end verification scripts for OpenSandbox Credential Vault transparent secret injection and cold-start latency measurements.
+
+## Interface
+- `bootstrap.sh` - Bash deploy script provisioning local minikube, CRDs, and OpenSandbox umbrella chart without network fetches (flags/env: KUBE_CONTEXT, CHART_DIR, CACHE_DIR, MINIKUBE, HELM, NS_CP, NS_SB, FORWARD_PORT, KEYID)
+- `vault-proof.py` - CLI end-to-end assertion testing transparent credential substitution (flags: --port)
+- `vault-proof.py:redact(text: str, secret: str) -> str` - Secret masking helper preventing credential leaks to logs
+- `measure-cold-start.py` - CLI measuring create-to-ready and first-command latencies against local cluster (flags: --port)
+
+## Invariants
+- [bootstrap.sh] Fetches nothing from the network at runtime; requires pre-cached artifacts in vendor/ and scripts/sandbox-vendor/cache
+- [vault-proof.py] Sandbox created with credentialProxy.enabled=true never receives the real secret; egress sidecar MITMs outbound traffic and substitutes placeholder
+- [vault-proof.py:redact] Never writes literal secret to stdout or log buffers
+- [measure-cold-start.py] create-to-ready latency must remain below 15.0s (REGRESSION_THRESHOLD_S)
+
+## Side Effects
+- [bootstrap.sh] Starts and configures minikube cluster, installs CRDs, deploys Helm release, configures namespaces and egress MITM injection
+- [vault-proof.py] Connects to OpenSandbox server, creates/deletes sandboxes, issues outbound HTTPS requests to httpbin.org
+- [measure-cold-start.py] Creates and deletes test sandboxes in OpenSandbox cluster
+
+## Verification
+- Run: `npm test`
+
+---
+
+## Historical Notes
+
 # Local-K8s Credential Vault proof harness
 
 Dev tooling that reproduces a vault-capable OpenSandbox cluster and proves the property the
