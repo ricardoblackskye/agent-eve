@@ -65,7 +65,7 @@ describe("smoke reply verdict (#444 -> #624 -> #626)", () => {
   describe("failure messages stay diagnosable", () => {
     it("C8 distinguishes empty, refusal, short and no-capability replies", () => {
       expect(evaluateSmokeReply("").message).toMatch(/nothing/i);
-      expect(evaluateSmokeReply("I'm sorry, I can't help with that.").message).toMatch(/declin|refus/i);
+      expect(evaluateSmokeReply("I'm sorry, I can't help with that.").message).toMatch(/declined/i);
       expect(evaluateSmokeReply("Hello there!").message).toMatch(/short/i);
       expect(evaluateSmokeReply("Hi! I'm Eve Agent. How are you today my friend?").message).toMatch(
         /does not say what the agent/i,
