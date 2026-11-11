@@ -2,53 +2,74 @@ import { describe, expect, it } from "vitest";
 
 import { evaluateSmokeReply } from "../evals/helpers/smoke-reply";
 
-// The exact reply that failed in Production. It is a good answer: the smoke test exists to prove
-// the agent boots and says what it can do, and this does that.
-const productionReply = `Hi! I'm Eve Agent - here's what I can actually help with:
+// Three production greetings, captured verbatim from three separate runs. Each one is a good
+// answer: the smoke test exists to prove the agent boots and says what it can do. The first two
+// already broke earlier iterations of the check, which is why the verdict must be structural rather
+// than a keyword allow-list (#444 -> #624 -> #626).
+const reply444 = `Hi! I'm Eve Agent - here's what I can actually help with:
 
 **General work**
 - Answer questions, analyze information, and search the web (with sources cited)`;
 
-// The exact reply observed in Production after #478's budget fix let the run reach the agent
-// again. It is also a good answer, phrased "what I can do" instead of "what I can help with", so
-// the acceptance set must not be coupled to one sampled wording (#624).
-const liveReply = `Hi! I'm Eve Agent. Here's what I can do:
+const reply624 = `Hi! I'm Eve Agent. Here's what I can do:
 
 **General work**
 - Answer questions, analyze information, and search the web (with sources cited)`;
 
-describe("smoke reply verdict (#444)", () => {
-  it("C1 passes for the real Production reply that failed the old assertion", () => {
-    expect(evaluateSmokeReply(productionReply).ok).toBe(true);
+const reply626 = `Hi! I'm Eve Agent — I can dig into code and files, run commands, search the web,
+and read what I find. What would you like me to look at?`;
+
+describe("smoke reply verdict (#444 -> #624 -> #626)", () => {
+  describe("passes for the greetings observed in production", () => {
+    it("C1 passes for the original #444 production reply", () => {
+      expect(evaluateSmokeReply(reply444).ok).toBe(true);
+    });
+
+    it("C2 passes for the #624 production reply", () => {
+      expect(evaluateSmokeReply(reply624).ok).toBe(true);
+    });
+
+    it("C3 passes for the live #626 production reply", () => {
+      // The regression #625 failed to fix: "I can dig into code and files" contains none of
+      // help|assist|support|can do|can help, so the widened allow-list still rejected a good reply.
+      expect(evaluateSmokeReply(reply626).ok).toBe(true);
+    });
+
+    it("C4 passes for a simple helpful greeting reply", () => {
+      expect(evaluateSmokeReply("Hello! I can help you with questions and research.").ok).toBe(true);
+    });
   });
 
-  it("C2 passes for a simple helpful greeting reply", () => {
-    const verdict = evaluateSmokeReply("Hello! I can help you with questions and research.");
-    expect(verdict.ok).toBe(true);
+  describe("fails for replies that do not claim a capability", () => {
+    it("C5 fails for empty, whitespace-only, null and undefined, and never throws", () => {
+      for (const reply of ["", "   ", null, undefined]) {
+        expect(() => evaluateSmokeReply(reply)).not.toThrow();
+        expect(evaluateSmokeReply(reply).ok).toBe(false);
+      }
+    });
+
+    it("C6 fails for a bare greeting (anti-vacuity guard)", () => {
+      // Without this the verdict would pass for any sufficiently long string.
+      expect(evaluateSmokeReply("Hi! I'm Eve Agent.").ok).toBe(false);
+      expect(evaluateSmokeReply("Hello there!").ok).toBe(false);
+      expect(evaluateSmokeReply("Hi! I'm Eve Agent. How are you?").ok).toBe(false);
+    });
+
+    it("C7 fails for a refusal, so a decline is never read as a capability claim", () => {
+      // "I can't help with that" contains "help", which the old keyword check accepted.
+      expect(evaluateSmokeReply("I'm sorry, I can't help with that.").ok).toBe(false);
+      expect(evaluateSmokeReply("I am unable to assist with this request.").ok).toBe(false);
+    });
   });
 
-  it("C3 fails for an empty reply, and never throws", () => {
-    for (const reply of ["", "   ", null, undefined]) {
-      expect(() => evaluateSmokeReply(reply)).not.toThrow();
-      expect(evaluateSmokeReply(reply).ok).toBe(false);
-    }
-  });
-
-  it("C4 fails for a reply that does not say what the agent can help with", () => {
-    // Anti-vacuity: without this the verdict would pass for any non-empty string.
-    const verdict = evaluateSmokeReply("Hi! I'm Eve Agent.");
-    expect(verdict.ok).toBe(false);
-  });
-
-  it("C5 passes for the live Production reply phrased \"what I can do\" (#624)", () => {
-    // The regression this issue fixes: the live greeting used "can do" and the acceptance set
-    // only knew help|assist|support, so a good reply failed the gate in Production.
-    expect(evaluateSmokeReply(liveReply).ok).toBe(true);
-  });
-
-  it("C6 still fails for a bare greeting, so C5 did not weaken the anti-vacuity guard (#624)", () => {
-    for (const reply of ["Hi! I'm Eve Agent.", "Hello there!", "Hi! I'm Eve Agent. How are you?"]) {
-      expect(evaluateSmokeReply(reply).ok).toBe(false);
-    }
+  describe("failure messages stay diagnosable", () => {
+    it("C8 distinguishes empty, refusal, short and no-capability replies", () => {
+      expect(evaluateSmokeReply("").message).toMatch(/nothing/i);
+      expect(evaluateSmokeReply("I'm sorry, I can't help with that.").message).toMatch(/declin|refus/i);
+      expect(evaluateSmokeReply("Hello there!").message).toMatch(/short/i);
+      expect(evaluateSmokeReply("Hi! I'm Eve Agent. How are you today my friend?").message).toMatch(
+        /does not say what the agent/i,
+      );
+    });
   });
 });
