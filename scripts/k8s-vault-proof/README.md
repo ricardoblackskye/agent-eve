@@ -25,6 +25,7 @@ runtime-agnostic.
 | ---------------- | ---------------------------------------------------------------------- |
 | `bootstrap.sh`   | Idempotent local deploy, including the non-obvious configuration fixes |
 | `vault-proof.py` | End-to-end assertion; exits 0 when substitution is proven              |
+| `measure-cold-start.py` | Cold-start latency measurement; exits 2 if `create-to-ready` exceeds the 15s regression threshold |
 
 ## Run it
 
@@ -36,6 +37,21 @@ python scripts/k8s-vault-proof/vault-proof.py --port 18082
 
 Expected: a PASS line, with the upstream echoing the real secret even though the sandbox sent only
 the placeholder.
+
+### Measure cold start
+
+Timed against the same live local cluster as the vault proof (see #589):
+
+```bash
+kubectl -n opensandbox-system port-forward svc/opensandbox-server 18082:80
+python scripts/k8s-vault-proof/measure-cold-start.py --port 18082
+```
+
+Prints `create-to-ready` and `first-command` latencies and exits **2** if
+`create-to-ready` exceeds the 15s regression threshold (~5× the 2.63s median).
+This is a **manual/periodic check**, not a CI gate: cold start needs a live
+cluster, which CI does not have. Baseline figures and the measurement conditions
+live in the script's docstring.
 
 ## The five non-obvious fixes
 
