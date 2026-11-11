@@ -24,14 +24,6 @@ No drift detected.
 
 No drift detected.
 
-## agent/lib/dark-factory/README.md
-
-No drift detected.
-
-## agent/lib/README.md
-
-No drift detected.
-
 ## agent/README.md
 
 No drift detected.

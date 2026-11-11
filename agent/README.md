@@ -15,7 +15,7 @@ Root agent package implementing the Dark Factory orchestrator agent using the Ev
 - `DEFAULT_MODEL_ID = 'deepseek/deepseek-v4.1-flash'` [model-config.ts:DEFAULT_MODEL_ID]
 - `FALLBACK_MODEL_ID = 'deepseek/deepseek-v4-pro'` [model-config.ts:FALLBACK_MODEL_ID]
 - `ORCHESTRATOR_CONTEXT_WINDOW_TOKENS = 1_048_576` [orchestrator-model.ts:ORCHESTRATOR_CONTEXT_WINDOW_TOKENS]
-- [lib](./lib/README.md) - Intermediate architectural grouping for agent support libraries and Dark Factory subsystem.
+- `lib/dark-factory`: Core Dark Factory subsystem implementing sandboxed development, testing, cost budgeting, and autonomous self-improvement. Note: Markdown contract files are omitted from `agent/lib/` because the Eve compiler treats all files in `lib/` as authored code modules.
 
 ## Invariants
 - [agent.ts:definition] Opt-in policy: when neither LLM policy nor cost gate is configured, agent evaluates byte-identical static model without dynamic wrapper.
