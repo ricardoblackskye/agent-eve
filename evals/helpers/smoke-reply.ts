@@ -12,7 +12,10 @@
  */
 export type ReplyVerdict = { ok: boolean; message: string };
 
-const SAYS_WHAT_IT_CAN_DO = /help|assist|support/i;
+// The agent's own phrasing varies between "what I can help with" and "what I can do", and nothing
+// pins it in agent/instructions.md - so the acceptance set covers both rather than one sampled
+// wording. A bare greeting matches none of these, which keeps the anti-vacuity guard intact (#624).
+const SAYS_WHAT_IT_CAN_DO = /help|assist|support|can do|can help/i;
 
 export function evaluateSmokeReply(reply: unknown): ReplyVerdict {
   const text = typeof reply === "string" ? reply.trim() : "";
