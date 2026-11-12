@@ -54,6 +54,31 @@ agent-eve/
 └── README.md
 ```
 
+## System Overview
+agent-eve is an autonomous software engineering agent built with the Eve framework. It orchestrates a software development factory (the Dark Factory) capable of developer loops, automated tester checks, cost budgeting and governance, tenant-attributed execution runs, and self-improvement cycles.
+
+## Subdirectories & System Boundaries
+- `agent`: [./agent/README.md](./agent/README.md) - Compiled Eve orchestrator agent with dynamic LLM policy, cost gate, and core Dark Factory subsystem
+- `app`: [./app/README.md](./app/README.md) - Web application root package providing Next.js layout, chat UI, auth gates, session cookies, and Dark Factory operations dashboard
+- `db`: [./db/README.md](./db/README.md) - PostgreSQL schema migrations, indexes, tenant attribution columns, and row-level security policies
+- `evals`: [./evals/README.md](./evals/README.md) - Deterministic agent smoke tests, eval runner configuration, and greeting verdict helpers
+- `scripts`: [./scripts/README.md](./scripts/README.md) - Developer CLI tools, database migration runners, test data seeding harnesses, coverage ratchet gates, and OpenSandbox lifecycle automation
+
+## Global Invariants
+- **Fail-Closed Governance**: When optional security, tenant attribution, or budget stores are unconfigured, operations fail closed by default (e.g. unpriced models throw `CostRefusedError`, unassigned tenant repos refuse actions).
+- **Session Authentication & CSRF/SSRF Protection**: Protected web routes enforce HS256-signed `eve_session` cookies; reverse proxies validate upstream target origins and sanitize request headers.
+- **Transactional & Advisory Locking**: PostgreSQL schema migrations require session advisory lock `db-migrate-#593`; run history updates and cost budget reservations execute under row-level or transactional constraints.
+- **Coverage Ratchet**: Every code addition or refactor must meet or exceed the committed test coverage floor in `coverage-baseline.json`.
+
+## Global Side Effects
+- **PostgreSQL / SQLite**: Stores execution events, run summaries, cost budgets, tenant memberships, and RLS policies.
+- **GitHub API**: Posts issue comments, opens pull requests, manages labels, and triggers webhook workflows.
+- **OpenRouter / LLM Providers**: Outbound HTTPS calls to model endpoints for completions and reasoning steps.
+- **Local Kubernetes / OpenSandbox**: Minikube cluster lifecycle, container sandbox provisioning, and MITM credential proxying.
+
+## System Verification
+- Run: `npm test`
+
 ## Configuration
 
 ### Model Provider

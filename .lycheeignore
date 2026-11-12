@@ -12,3 +12,6 @@ http://localhost:3000/.*
 
 # Funding metadata in package-lock.json blocks link checkers (403)
 .*patreon\.com.*
+
+# OpenRouter API base endpoint returns 404 on GET without path
+^https://openrouter\.ai/api/v1/?.*

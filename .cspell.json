@@ -236,7 +236,8 @@
     "MAE",
     "Minimise",
     "npipe",
-    "MSYS"
+    "MSYS",
+    "KEYID"
   ],
   "ignorePaths": [
     "node_modules/**",
