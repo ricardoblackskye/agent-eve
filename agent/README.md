@@ -25,7 +25,7 @@ Root agent package implementing the Dark Factory orchestrator agent using the Ev
 - [orchestrator-gate.ts:createOrchestratorGate] Pre-call gate reserves against orchestrator category; any budget refusal immediately throws to abort the turn before invoking LLM provider.
 
 ## Side Effects
-- [chat-model.ts:openrouter] Initiates outbound HTTPS requests to https://openrouter.ai/api/v1 when OPENROUTER_API_KEY is provided.
+- [chat-model.ts:openrouter] Initiates outbound HTTPS requests to `https://openrouter.ai/api/v1` when OPENROUTER_API_KEY is provided.
 - [orchestrator-gate.ts:createOrchestratorGate] Interacts with cost governor store (SQLite or PostgreSQL) to record and reserve token budget allocations.
 
 ## Verification
