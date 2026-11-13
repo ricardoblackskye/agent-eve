@@ -59,8 +59,10 @@ export interface OrchestratorGate {
    *
    * Returns the reservation so the caller can settle it (#443); a gate with
    * nothing to reconcile may return nothing.
+   *
+   * `inputTokensOverride` carries the per-call INPUT bound (#637).
    */
-  admit(): Promise<CostAdmission | void>;
+  admit(inputTokensOverride?: number): Promise<CostAdmission | void>;
 }
 
 export interface OrchestratorBuildInput {
@@ -131,5 +133,6 @@ export function buildDynamicOrchestratorModel(input: OrchestratorBuildInput) {
     chatModel: input.chatModel,
     contextWindowTokens: ORCHESTRATOR_CONTEXT_WINDOW_TOKENS,
     gate: input.gate,
+    env: input.env,
   });
 }

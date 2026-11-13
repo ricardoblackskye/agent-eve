@@ -48,8 +48,15 @@ export interface CostAdmission {
 }
 
 export interface CostGate {
-  /** Admit a model call. Throws to refuse it before the provider call. */
-  admit(): Promise<CostAdmission | void>;
+  /**
+   * Admit a model call. Throws to refuse it before the provider call.
+   *
+   * `inputTokensOverride` is the per-call INPUT bound (#637): reserve against the
+   * conversation actually being sent rather than the model's whole context window. A value
+   * that is not a finite, non-negative number keeps the bound this gate was built with, so a
+   * caller cannot accidentally reserve nothing.
+   */
+  admit(inputTokensOverride?: number): Promise<CostAdmission | void>;
 }
 
 export interface CostGateInput {
@@ -94,11 +101,20 @@ export function createCostGate(input: CostGateInput): CostGate | null {
   if (!governor) return null;
 
   return {
-    async admit(): Promise<CostAdmission> {
+    async admit(inputTokensOverride?: number): Promise<CostAdmission> {
+      // #637: the caller knows the conversation it is about to send, so it can hand in a
+      // bound that tracks the call. The constructed `inputTokens` is the model's whole
+      // context window and stays as the fail-closed fallback.
+      const bound =
+        typeof inputTokensOverride === "number" &&
+        Number.isFinite(inputTokensOverride) &&
+        inputTokensOverride >= 0
+          ? inputTokensOverride
+          : inputTokens;
       const decision = await governor.admit({
         category,
         model,
-        inputTokens,
+        inputTokens: bound,
         outputTokens,
         ...(input.tenantId ? { tenantId: input.tenantId } : {}),
       });
