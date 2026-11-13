@@ -14,7 +14,7 @@ import { join } from "node:path";
 const ROOT = process.cwd();
 
 // Subagent directories that should resolve the shared Eve default.
-const SUBAGENTS = ["product-owner", "sprint-reporter", "release-manager"];
+const SUBAGENTS = ["product-owner", "sprint-reporter", "release-manager", "orchestrator"];
 
 describe("subagent model source (no hardcoded old default)", () => {
   for (const name of SUBAGENTS) {
