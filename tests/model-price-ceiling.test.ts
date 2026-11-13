@@ -35,8 +35,11 @@ const EXPECTED_CEILINGS: Record<
   // provider has since left the catalog, so 0.02 was reserving 8.3x what any reachable provider charges. The
   // refresh path now adopts at most 3 x p90, and the ceiling sits at that cap x 1.25 (0.0045): above what the rule
   // can adopt, so it does not bind the reservation, with a margin for a rise between verifications.
+  // #635: the INPUT pin moved with the table on 2026-11-13, when the daily Price Drift check found the dearest
+  // observed input rate (0.0009) above the 0.0007 that had been shipped. This pin exists to catch a SILENT table
+  // edit; a deliberate one moves it in the same commit, which is why this change is visible in the diff.
   "deepseek/deepseek-v4.1-flash": {
-    inputUsdPer1k: 0.0007,
+    inputUsdPer1k: 0.001125,
     outputUsdPer1k: 0.0045,
   },
   "deepseek/deepseek-v4-pro": {

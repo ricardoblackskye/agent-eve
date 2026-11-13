@@ -39,25 +39,25 @@ describe("#498 the observed-dearest floor", () => {
   it("records the adopted rate and the distribution behind it, for the default model", () => {
     const floor = floorFor("deepseek/deepseek-v4.1-flash");
     expect(floor).toBeDefined();
-    expect(floor?.inputUsdPer1k).toBe(0.0006);
-    // #499: this held the raw maximum (0.015863057 from a single endpoint). It holds the ADOPTED rate now -
-    // refreshed 2026-10-29, when the dearest of 41 providers was 0.0024 against a p90 of 0.0012, so the
-    // 3 x p90 cap (0.0036) did not bind and nothing was declined.
-    expect(floor?.outputUsdPer1k).toBe(0.0024);
-    expect(floor?.providers).toBe(41);
+    // Refreshed 2026-11-13 (37 providers). The #499 cap BINDS on this reading, which is why
+    // declinedDearestUsdPer1k is recorded for the first time: a single endpoint quoting 0.003 in /
+    // 0.012 out sits above 3 x p90, so the peers set the adopted rate rather than that provider.
+    expect(floor?.inputUsdPer1k).toBe(0.0009);
+    expect(floor?.outputUsdPer1k).toBe(0.0036);
+    expect(floor?.providers).toBe(37);
     expect(floor?.distribution?.input).toEqual({
-      median: 0.0002,
+      median: 0.000195,
       p90: 0.0003,
       secondDearest: 0.00045,
-      providers: 41,
+      providers: 37,
     });
     expect(floor?.distribution?.output).toEqual({
-      median: 0.00084,
+      median: 0.00075,
       p90: 0.0012,
       secondDearest: 0.0018,
-      providers: 41,
+      providers: 37,
     });
-    expect(floor?.declinedDearestUsdPer1k).toBeUndefined();
+    expect(floor?.declinedDearestUsdPer1k).toEqual({ input: 0.003, output: 0.012 });
   });
 
   it("normalises the lookup the same way resolvePrice does", () => {

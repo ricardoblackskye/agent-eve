@@ -17,20 +17,21 @@
 
 import type { PriceFloorRecord } from "./model-price-floor";
 export const priceFloorRecord: PriceFloorRecord = {
-  verifiedAt: "2026-10-29",
+  verifiedAt: "2026-11-13",
   source: "https://openrouter.ai/api/v1/models/<id>/endpoints",
   observedDearest: {
     "deepseek/deepseek-v4-pro": {
       inputUsdPer1k: 0.00191,
       outputUsdPer1k: 0.0038299999999999996,
-      providers: 15,
-      distribution: { input: { median: 0.0013, p90: 0.00174, secondDearest: 0.00174, providers: 15 }, output: { median: 0.002832, p90: 0.00348, secondDearest: 0.00348, providers: 15 } },
+      providers: 13,
+      distribution: { input: { median: 0.0013, p90: 0.00168, secondDearest: 0.00168, providers: 13 }, output: { median: 0.0026, p90: 0.00338, secondDearest: 0.00338, providers: 13 } },
     },
     "deepseek/deepseek-v4.1-flash": {
-      inputUsdPer1k: 0.0006,
-      outputUsdPer1k: 0.0024,
-      providers: 41,
-      distribution: { input: { median: 0.0002, p90: 0.0003, secondDearest: 0.00045, providers: 41 }, output: { median: 0.00084, p90: 0.0012, secondDearest: 0.0018, providers: 41 } },
+      inputUsdPer1k: 0.0009,
+      outputUsdPer1k: 0.0036,
+      providers: 37,
+      distribution: { input: { median: 0.000195, p90: 0.0003, secondDearest: 0.00045, providers: 37 }, output: { median: 0.00075, p90: 0.0012, secondDearest: 0.0018, providers: 37 } },
+      declinedDearestUsdPer1k: {"input":0.003,"output":0.012},
     },
   },
 };
