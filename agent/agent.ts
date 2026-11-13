@@ -60,6 +60,11 @@ const gate = createOrchestratorGate({
  * neither. Only the selected branch is evaluated, so the unconfigured path
  * stays byte-identical to the previous definition.
  */
+
+// agent/instructions.md is the Orchestrator persona and is loaded by Eve's discovery
+// convention — it is NOT imported here. Edit that file to change the agent's identity;
+// deleting it boots the agent with an empty persona and fails silently.
+// See tests/orchestrator-instructions.test.ts.
 const definition =
   policy === null && gate === null
     ? defineAgent({
