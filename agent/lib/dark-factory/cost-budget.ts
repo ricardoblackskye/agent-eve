@@ -119,8 +119,12 @@ export const modelPriceTable: Record<string, ModelPrice> = {
   // reservation. This ceiling sits at that cap x 1.25 = 0.0045: above what the rule can adopt, so it never binds
   // the reservation, with a margin for a rise that occurs between verifications. ADR 0027 still holds -
   // over-reserving is transient, under-reserving is not.
+  // #635: the INPUT axis, by the same rule, from the same measurement. The 2026-11-13 check adopted an input
+  // rate of 0.0009 (the dearest observed; an endpoint quoting 0.003 was declined as an outlier), which sat above
+  // the 0.0007 that stood here - the drift the daily Price Drift check reported. Raised to 0.0009 x 1.25 =
+  // 0.001125. Input and output are independent axes (see applyPriceFloor below), so this one moves alone.
   "deepseek/deepseek-v4.1-flash": {
-    inputUsdPer1k: 0.0007,
+    inputUsdPer1k: 0.001125,
     outputUsdPer1k: 0.0045,
   },
   "deepseek/deepseek-v4-pro": {
