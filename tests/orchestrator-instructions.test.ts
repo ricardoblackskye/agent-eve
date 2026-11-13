@@ -14,6 +14,14 @@ describe("orchestrator persona source", () => {
     expect(text).toContain("# Identity");
   });
 
+  it("is the orchestrator's own persona, not the stock Eve template", () => {
+    const text = readFileSync(INSTRUCTIONS, "utf8");
+    // The role must be named: a persona that does not say what it is is not a persona.
+    expect(text).toMatch(/Orchestrator/);
+    // The generic Eve demo template must not remain — it means the role has no persona of its own.
+    expect(text).not.toMatch(/an intelligent AI assistant built with the Eve framework/i);
+  });
+
   it("declares instructions.md as the orchestrator persona at the defineAgent call", () => {
     const agentTs = readFileSync(AGENT_TS, "utf8");
     // The defineAgent call must state the persona comes from instructions.md via discovery.
