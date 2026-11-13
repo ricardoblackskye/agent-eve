@@ -61,9 +61,10 @@ const gate = createOrchestratorGate({
  * stays byte-identical to the previous definition.
  */
 
-// agent/instructions.md is the Orchestrator persona and is loaded by Eve's discovery
-// convention — it is NOT imported here. Edit that file to change the agent's identity;
-// deleting it boots the agent with an empty persona and fails silently.
+// agent/instructions.md is the ROOT chat agent's persona — the default Eve assistant — and is
+// loaded by Eve's discovery convention, NOT imported here. The Dark Factory Orchestrator is a
+// SEPARATE agent (agent/subagents/orchestrator); do not put its persona in this file, or the
+// front page starts talking as the Orchestrator instead of Eve.
 // See tests/orchestrator-instructions.test.ts.
 const definition =
   policy === null && gate === null
