@@ -52,6 +52,16 @@ Dark Factory — the Architect's target contract (#381 R2 Task 8). The part of t
 
 **Exports:** `TargetContractInput`, `buildTargetContract`
 
+## architect-identity
+
+Dark Factory — the Architect's persona, owned here instead of inlined (#630). This module plays the role `agent/subagents/<name>/instructions.md` plays for an eve subagent (#629): the identity line and the untrusted-data instruction live in one place, so the three prompt builders interpolate them rather than each carrying a private copy. It is a TypeScript module rather than markdown because eve's discovery validates the `agent/lib/` tree and rejects a bare `.md` there ("Expected ... to be a supported authored module within lib/") — measured with a build probe, not assumed. Its text is byte-identical to what the builders emitted before the move, and committed fixtures pin that.
+
+**Source:** [`agent/lib/dark-factory/architect-identity.ts`](../../agent/lib/dark-factory/architect-identity.ts)
+
+**Exports:** `ARCHITECT_IDENTITY_PROSE`, `architectSecurityInstruction`
+
+**Decisions:** [ADR 0049](../../docs/adr/0049-df-architect-prompt-is-a-contract.md)
+
 ## breaker-trip-recorder
 
 Dark Factory — record a circuit-breaker trip on a run (#313). A trip halts the coding loop (#312), and an operator reading the ticket must be able to see WHY it stopped and what bound was exceeded — not just find it in a log. The trip is stored machine-readably (a closed vocabulary of reasons plus the numeric bound), never free text, and the breaker itself stays a pure in-memory guard: it is never taught about the ledger. Mirrors `cost-refusal-recorder.ts` (#270) deliberately — same shape, same idempotency, same honest failure reporting.

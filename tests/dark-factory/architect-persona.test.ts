@@ -20,6 +20,10 @@ import { ArchitectAgent } from "../../agent/lib/dark-factory/architect-agent";
  * The fixtures are the reason the move can be trusted. Everything below the persona line - the story
  * block, the repo list, the evidence, the target contract, the JSON schema, `planningGuidanceForPrompt()`
  * - is pinned by them too.
+ *
+ * They are excluded from the spell check (`.cspell.json` -> `ignorePaths`), like the other captured
+ * files: they are verbatim copies of shipped prompt prose, so a dictionary entry would only mask the
+ * source's own vocabulary. The equality assertions below are what guard their contents.
  */
 
 const ROOT = process.cwd();
