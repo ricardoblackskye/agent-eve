@@ -1,60 +1,82 @@
-# Orchestrator persona: author the Orchestrator's own persona in instructions.md (#629)
+# Orchestrator persona: a SEPARATE Orchestrator agent; the root chat stays default Eve (#629)
 
 > **For Hermes:** Use the `ai-sdlc-workflow` + `test-driven-development` skills. First child of epic #628.
 
-**Goal:** Give the Orchestrator its **own** persona. The requirement behind #628 is that *every* Dark Factory role has a
-persona — an identity that states what that agent is and how it behaves — in that role's own `instructions.md`. The
-Orchestrator's location is already correct (`agent/instructions.md`, loaded by Eve discovery), but its **content is
-the stock Eve demo template**, so today the Orchestrator has no persona of its own. This plan authors it and pins it.
+**Goal:** Give the Dark Factory **Orchestrator its own persona**, inside its **own agent**, so the **ROOT chat agent
+stays the original default Eve** assistant. Every role owns its persona, and the Orchestrator must never be adopted
+by the root chat.
 
-**Parent:** #628 (standardise Dark Factory personas on the `instructions.md` convention).
+**Parent:** #628.
 
 ---
 
+## Corrected intent
+
+- **ROOT chat agent** (`agent/agent.ts` + `agent/instructions.md`) = the **default Eve** assistant. It is what the
+  front page talks to (`app/chat.tsx` -> `/api/eve/v1` -> `/eve/v1`), and it is the agent that will later be able to
+  ask the other agents where they are.
+- **Orchestrator** = a **distinct agent** with its own persona — never the root.
+
+## Delivered in this PR — the revert
+
+Writing the Orchestrator persona into `agent/instructions.md` made the ROOT chat adopt the Orchestrator identity, so
+the front page began talking as the Orchestrator. Reverted:
+
+- `agent/instructions.md` restored to the original default Eve persona (byte-identical to `origin/main`);
+- the `agent/agent.ts` call-site comment corrected (it had declared the file the *Orchestrator* persona);
+- `tests/orchestrator-instructions.test.ts` flipped: it pins the ROOT persona as default Eve and asserts it does
+  **not** contain the Orchestrator.
+
 ## Verified context (read before planning)
 
-- **The file is the loaded source (confirmed).** `GET /eve/v1/info` on a running dev server reports the static system
-  instruction with `sourceId: "instructions.md"`, `sourceKind: "markdown"`, `role: "system"`. Eve discovery loads it
-  next to `agent/agent.ts`; nothing imports it.
-- **The content is the stock template (the gap).** `agent/instructions.md` is 19 lines / 656 bytes: `# Identity` →
-  "You are Eve Agent, an intelligent AI assistant built with the Eve framework by Vercel…" → `## Capabilities` →
-  `## Guidelines`. Unchanged since the scaffold — `git log --follow -- agent/instructions.md` shows only `b3fa060`
-  scaffold, `69cca08` OpenRouter config, `1f08478` prettier — and it is identical on `origin/main` and on this branch.
-- **Every other role has its own persona, which is the whole point.**
-
-  | Role | Persona file | Opening line |
-  | --- | --- | --- |
-  | Product Owner (subagent) | `agent/subagents/product-owner/instructions.md` | "You are the Product Owner subagent for the Agent Eve project…" |
-  | Release Manager (subagent) | `agent/subagents/release-manager/instructions.md` | "You are the Release Manager subagent for the Agent Eve project…" |
-  | Architect | inline in `architect-agent.ts` (→ #630) | "You are Eve's autonomous Architect Agent." |
-  | Developer | inline in `code-author.ts` (→ #631) | "You are Eve's Developer Agent." |
-  | Tester | none, by design (→ #632) | n/a |
-  | Orchestrator | `agent/instructions.md` | "You are Eve Agent, an intelligent AI assistant…" (stock, **not its own**) |
-
-- `agent/instructions.md` is **not** under `agent/lib/dark-factory/`, so it is exempt from the doc-drift guard.
-
-## Already delivered (PR #636) — necessary, not sufficient
-
-The earlier scope was *declare the file at the call site and pin it with a guard*, and that is implemented on
-`docs/orchestrator-persona-629`:
-
-- `agent/agent.ts`: a comment above `defineAgent` stating `instructions.md` is the Orchestrator persona, loaded by
-  discovery, not imported.
-- `tests/orchestrator-instructions.test.ts`: asserts the file exists, is non-empty, contains `# Identity`, and that
-  `agent/agent.ts` declares it.
-
-That work stays. It pins **where** the persona is, not **what it says** — which is what this rework adds.
+- `agent/subagents/` = `product-owner/`, `release-manager/`, `sprint-reporter/` only — **no Orchestrator agent**.
+- The word "orchestrator" in code (`orchestrator-model.ts`, `buildDynamicOrchestratorModel`, `createOrchestratorGate`)
+  is the ROOT agent's **dynamic-model plumbing**, not a separate agent. #628's role table conflated the two.
+- **How subagents are reached: the ROOT agent DELEGATES to them.** The webhook already does this —
+  `app/api/github/webhook/route.ts:664` (*"Please delegate to the Product Owner subagent…"*) and `:515`
+  (*"…the Sprint Metrics Analyst subagent…"*). Child streams exist at
+  `/eve/v1/session/:parentSessionId/subagents/:callId/:childSessionId/stream`.
+- The Dark Factory handoff POSTs `{ message: renderHandoffMessage(intent), runId, resume }` to `/eve/v1/session`
+  (`agent/lib/dark-factory/entry.ts`), and `renderHandoffMessage` names no persona — so today the **ROOT** agent
+  receives it.
+- Subagent file pattern (from `agent/subagents/product-owner/`): `instructions.md` (persona prose) + `agent.ts`
+  (`defineAgent` with a `description`, and TWO complete model branches — static or governed dynamic — because a
+  spread-built object widens the union and matches neither; a dynamic model forbids `modelContextWindowTokens` as a
+  sibling).
 
 ## The changes needed
 
-### 1. Author the Orchestrator persona (replace the stock template)
+### 1. Create the Orchestrator subagent
 
-Rewrite `agent/instructions.md` with the Orchestrator's own identity, in the voice of the other roles. Draft to review:
+- `agent/subagents/orchestrator/instructions.md` — the Orchestrator persona (draft below).
+- `agent/subagents/orchestrator/agent.ts` — mirror `product-owner/agent.ts`: a `description`, the two-branch
+  `defineAgent`, and a cost gate with category **`orchestrator`** so it shares the existing budget
+  (`DF_COST_BUDGET_ORCHESTRATOR_USD`).
+
+### 2. Wire the Dark Factory handoff to the Orchestrator
+
+Make the handoff instruct delegation, mirroring the established wording, e.g. prefix the message with
+*"Please delegate to the Orchestrator subagent."* — then the ROOT agent (default Eve) stays Eve and hands the run to
+the Orchestrator, exactly as `needs-story` reaches the Product Owner.
+
+### 3. Guards (TDD)
+
+- `agent/subagents/orchestrator/instructions.md` exists, is non-empty, and names the Orchestrator.
+- ROOT `agent/instructions.md` does **not** contain the Orchestrator (delivered).
+- `renderHandoffMessage(intent)` instructs delegation to the Orchestrator subagent.
+- `agent/subagents/orchestrator/agent.ts` exports a definition carrying a `description`.
+
+### 4. Note for #628
+
+This child CREATES an agent, so the handoff path changes **by design** — unlike #630/#631, which are byte-identical
+relocations. #628's constraint should record that distinction.
+
+## Draft persona (needs review before it is written)
 
 ```markdown
 # Identity
 
-You are Eve's Orchestrator Agent for the Agent Eve project — the Dark Factory's entry point.
+You are the Orchestrator subagent for the Agent Eve project — the Dark Factory's entry point.
 You take a GitHub issue, establish what "done" means, and drive it to a reviewed pull request
 by routing work to the Architect, Developer and Tester agents. You are decisive, you verify
 before you claim success, and you stop and ask a human when a decision is genuinely theirs.
@@ -77,79 +99,65 @@ before you claim success, and you stop and ask a human when a decision is genuin
 - Prefer showing working results over describing them.
 ```
 
-### 2. Strengthen the guard so the stock template cannot come back
-
-Extend `tests/orchestrator-instructions.test.ts`:
-
-- keep: exists, non-empty, contains `# Identity`;
-- add: the persona contains `Orchestrator`;
-- add: the persona does **not** contain the stock boilerplate `an intelligent AI assistant built with the Eve framework`.
-
-### 3. Consequence — the assembled prompt WILL change, so the evals must be re-run
-
-#628's hard constraint ("assembled prompt byte-identical") exists because the Architect/Developer children (#630/#631)
-are **relocations** of existing prose. The Orchestrator has **no existing persona prose to relocate**, so authoring one
-**deliberately changes the Orchestrator's assembled prompt** — that is the requirement, not a regression. Therefore:
-
-- the Orchestrator's prompt bytes will differ from `main` **by design** (this child is the exception to #628's
-  byte-identical constraint; record that on #628);
-- the eval suite must be **re-run and its baseline reviewed** (the 9/9 baseline was measured under the stock persona).
-  A changed result is reviewed and intended, never waved through.
-
 ## Tasks (TDD — one behaviour per cycle)
 
-### Task 3 — RED: the guard rejects the stock template
+### Task 6 — RED: the Orchestrator subagent must exist and be named
 
-**Objective:** A test that fails while the persona is still the stock template.
+- Add a guard asserting `agent/subagents/orchestrator/instructions.md` exists, is non-empty, and matches
+  `/Orchestrator/`.
+- Run it: expected RED (the files do not exist yet).
+- Commit: `test(629): RED — the orchestrator needs its own subagent persona`.
 
-**Files:** modify `tests/orchestrator-instructions.test.ts`.
+### Task 7 — GREEN: create the subagent
 
-1. Add the two assertions from Section 2.
-2. `npx vitest run tests/orchestrator-instructions.test.ts` → expected RED (no `Orchestrator`; stock boilerplate still present).
-3. Commit: `test(629): RED — guard that the orchestrator has its own persona`.
+- Write `agent/subagents/orchestrator/instructions.md` (the reviewed draft) and
+  `agent/subagents/orchestrator/agent.ts` (mirroring `product-owner/agent.ts`).
+- Run the guard: expected GREEN.
+- Commit: `feat(629): GREEN — add the orchestrator subagent`.
 
-### Task 4 — GREEN: write the persona
+### Task 8 — RED/GREEN: the handoff delegates to the Orchestrator
 
-**Objective:** Replace the stock template with the persona (Section 1), after the draft is approved.
+- RED: assert `renderHandoffMessage(intent)` instructs delegation to the Orchestrator subagent.
+- GREEN: add the delegation instruction to the handoff message.
+- Commit: `test(629): RED — handoff delegates to the orchestrator subagent`, then
+  `feat(629): GREEN — handoff delegates to the orchestrator subagent`.
 
-**Files:** modify `agent/instructions.md` (only).
+### Task 9 — Verify
 
-1. Write the approved persona. Keep the `# Identity` heading.
-2. `npx vitest run tests/orchestrator-instructions.test.ts` → expected GREEN (both tests pass).
-3. Commit: `docs(629): GREEN — author the orchestrator persona in instructions.md`.
-
-### Task 5 — Verify
-
-1. `npx tsc --noEmit` (clean).
-2. `npx vitest run` (full suite — no regressions).
-3. `npx cspell -c .cspell.json agent/instructions.md tests/orchestrator-instructions.test.ts`
-   (add words to `.cspell.json` only if pre-existing; the persona prose is ordinary English).
-4. markdownlint on this plan file (pinned version per the ai-sdlc-workflow skill).
-5. **Re-run the eval suite**; compare against the 9/9 baseline; update the baseline only for reviewed, intended changes.
-6. Push; update PR #636.
+1. `npx tsc --noEmit`.
+2. `npx vitest run` (full suite).
+3. `npx cspell -c .cspell.json <changed files>`.
+4. **Prove the delegated path locally**: `npm run df:local-run -- --repo <owner/repo> --issue <n> --allow-remote-store`
+   against a fresh issue, and confirm the plan still parks (delegation must not break the run).
+5. `npx eve eval --strict --exclude-tag production --url http://127.0.0.1:3000` with the dev server up, and confirm the
+   front page still answers as **default Eve**.
 
 ## Files likely to change
 
-| File | Change | Risk |
-| --- | --- | --- |
-| `agent/instructions.md` | Stock template → Orchestrator persona | **prompt bytes change → eval re-run** |
-| `tests/orchestrator-instructions.test.ts` | +2 assertions | low |
-| `agent/agent.ts` | (already done) call-site declaration comment | none |
-| `.hermes/plans/2026-11-11_orchestrator-persona-629.md` | this plan | n/a |
+| File | Change |
+| --- | --- |
+| `agent/subagents/orchestrator/instructions.md` | NEW — the Orchestrator persona |
+| `agent/subagents/orchestrator/agent.ts` | NEW — description + two-branch `defineAgent` + cost gate |
+| `agent/lib/dark-factory/entry.ts` | the handoff message instructs delegation |
+| `agent/instructions.md` | REVERTED to default Eve (delivered) |
+| `agent/agent.ts` | call-site comment corrected (delivered) |
+| `tests/orchestrator-instructions.test.ts` | ROOT guard (delivered) + Orchestrator subagent guard |
 
 ## Risks / open questions
 
-- **Persona wording is a product decision** — the draft in Section 1 needs the user's review before it is written.
-- **Byte-identical is intentionally broken for this child.** If #628 wants that recorded, its acceptance criteria
-  should note the Orchestrator exception.
-- **Eval baseline** was measured under the stock persona; the re-run may legitimately differ and must be reviewed.
-- **Source-regex test caveat** (carried over): asserting on the persona text proves the words exist, not that the
-  runtime loads them — the *loading* is Eve's convention (already proven). The test's job is to pin the content.
+- **Extra hop.** Delegation means the ROOT agent runs one turn before the Orchestrator does — the same shape (and
+  cost) as `needs-story` -> Product Owner. Acceptable, but it is a latency/cost change worth stating on the PR.
+- **Cost category.** Use `orchestrator` so the new subagent shares the existing budget row.
+- **Persona wording** is a product decision and needs review before Task 7.
+- The `docs/pages/dark-factory-modules.md` doc-drift guard covers `agent/lib/dark-factory/*.ts` only, so
+  `agent/subagents/orchestrator/` needs no catalog row.
+- **Source-regex caveat** (carried over): asserting on persona TEXT proves the words exist, not that the runtime loads
+  them — the *loading* is Eve's convention (already proven). The guards only pin the content.
 
 ## Commit convention
 
-- RED: `test(629): RED — guard that the orchestrator has its own persona`
-- GREEN: `docs(629): GREEN — author the orchestrator persona in instructions.md`
-- Plan: `plan(629): rework for the orchestrator persona`
+- RED: `test(629): RED — …`
+- GREEN: `feat(629): GREEN — …`
+- Plan: `plan(629): orchestrator subagent + handoff wiring`
 
-PR #636 will continue to reference `Closes #629` and link parent `#628`.
+PR #636 continues to reference `Closes #629` and link parent `#628`.
