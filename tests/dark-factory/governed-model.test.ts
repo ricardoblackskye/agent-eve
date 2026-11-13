@@ -142,4 +142,51 @@ describe("buildGovernedDynamicModel (#270)", () => {
     };
     expect(selection.modelContextWindowTokens).toBe(7);
   });
+
+  it("hands the gate a bound sized from the conversation, not the whole window (#637)", async () => {
+    // The defect: the handler ignored its `ctx`, so `admit()` was called with no bound and
+    // the gate reserved the model's entire context window for every turn.
+    const admit = vi.fn(async (_inputTokensOverride?: number) => {});
+    const built = buildGovernedDynamicModel({
+      chatModel: CHAT_MODEL,
+      contextWindowTokens: 1_048_576,
+      gate: { admit },
+      env: {},
+    });
+
+    await asSentinel(built).events["step.started"](
+      {},
+      { messages: [{ role: "user", content: "ping" }] },
+    );
+
+    const bound = admit.mock.calls[0][0] as unknown as number;
+    expect(bound).toBeGreaterThan(0);
+    expect(bound).toBeLessThan(1_048_576 / 100);
+  });
+
+  it("keeps the whole window as the fail-closed bound when the context is unreadable (#637)", async () => {
+    const admit = vi.fn(async (_inputTokensOverride?: number) => {});
+    const built = buildGovernedDynamicModel({
+      chatModel: CHAT_MODEL,
+      contextWindowTokens: 4242,
+      gate: { admit },
+      env: {},
+    });
+
+    await asSentinel(built).events["step.started"]({}, {});
+    expect(admit.mock.calls[0][0]).toBe(4242);
+  });
+
+  it("honours the reservation overhead override from the env it is given (#637)", async () => {
+    const admit = vi.fn(async (_inputTokensOverride?: number) => {});
+    const built = buildGovernedDynamicModel({
+      chatModel: CHAT_MODEL,
+      contextWindowTokens: 1_048_576,
+      gate: { admit },
+      env: { DF_COST_PROMPT_OVERHEAD_TOKENS: "1500" },
+    });
+
+    await asSentinel(built).events["step.started"]({}, { messages: [] });
+    expect(admit.mock.calls[0][0]).toBe(1500);
+  });
 });

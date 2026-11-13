@@ -32,10 +32,10 @@ Only the evals that RUN A TURN fail. `MODEL_SELECTION_FAILED` is the eve framewo
 
 | reservation | estimated_usd | settled |
 | --- | --- | --- |
-| `res-1794593046785-gxaugchhjfe` | 0.1072576 | true |
-| `res-1794590494151-o3su4bcbgbb` | 0.1072576 | true |
-| `res-1794589611346-a4yaekwnpgj` | 0.1072576 | true |
-| `res-1794589605743-weoub7ghc5q` | 0.1072576 | true |
+| `res-1794593046785-...` | 0.1072576 | true |
+| `res-1794590494151-...` | 0.1072576 | true |
+| `res-1794589611346-...` | 0.1072576 | true |
+| `res-1794589605743-...` | 0.1072576 | true |
 
 A locally reproduced turn (`POST /eve/v1/session`, then read the stream) reported real usage of **3,518 input / 59 output tokens**, and `spent_usd` rose by **exactly `0.1072576`** — the reservation amount, not the measured cost. That turn's real cost at the gate's own prices is about **$0.00037**.
 
@@ -109,3 +109,23 @@ The exact reason usage is not seen must be pinned in Task 1 rather than assumed:
 - **Changing money semantics.** Reservation behaviour is load-bearing for overspend protection; Part B must keep an upper bound and a documented factor, and the fail-closed paths must keep their tests.
 - **Token estimation.** Estimating tokens from message text is approximate. The factor and its direction (always up) must be explicit, and an override must exist so an operator can correct it without a deploy.
 - **A shared store.** Local runs use the same Postgres as production, so a verification turn consumes real budget. Keep verification turns few and report what they cost.
+
+## 9. Decision — what actually shipped
+
+The operator chose **Part B** (the reservation tracks the call). **Part A** — reconciling the reservation with the provider's reported usage — is **DEFERRED to its own issue**: turns are still charged their reserved bound, which is now ~10x a real turn instead of 25-300x, so the budget drains far more slowly but not exactly.
+
+Task 2, and the acceptance criteria about charging the measured cost, therefore do NOT apply to this change. Everything else in section 6 shipped.
+
+Measured on the shared store, the same turn immediately before and after:
+
+| | before | after |
+| --- | --- | --- |
+| outcome | `turn.failed` -> `MODEL_SELECTION_FAILED` -> `budget_exceeded` | `turn.completed`, zero refusals |
+| reservation | `0.1072576` | `0.0032002` |
+| `spent_usd` delta | `+0.1072576` | `+0.0032002` |
+
+`0.0032002` is exactly what the estimator should produce for that turn: `8002 tokens x 0.0001/1k + 8000 x 0.0003/1k` — the 8,000 overhead plus two tokens for the word "ping".
+
+Shipped: `agent/lib/dark-factory/prompt-token-estimate.ts` (new) with its test, the bound threaded through `governed-model.ts` -> `cost-gate.ts` -> `orchestrator-model.ts`, the module-catalogue entry the doc-drift guard requires, and `DF_COST_PROMPT_OVERHEAD_TOKENS` in `.env.example`.
+
+Still NOT restored by this change: the period's already-spent budget.

@@ -14,6 +14,7 @@ import { defineDynamic } from "eve";
 import type { AgentStaticModelDefinition } from "eve";
 
 import type { CostAdmission } from "./cost-gate";
+import { reservationInputTokens } from "./prompt-token-estimate";
 
 export interface GovernedGate {
   /**
@@ -21,8 +22,12 @@ export interface GovernedGate {
    *
    * Returns the reservation so the caller can settle it (#443). A gate that has
    * nothing to reconcile may return nothing.
+   *
+   * `inputTokensOverride` is the per-call INPUT bound (#637): the offer to reserve against
+   * the conversation actually being sent rather than the model's whole context window. A
+   * gate that ignores it keeps reserving the bound it was constructed with.
    */
-  admit(): Promise<CostAdmission | void>;
+  admit(inputTokensOverride?: number): Promise<CostAdmission | void>;
 }
 
 export interface GovernedModelInput {
@@ -32,6 +37,8 @@ export interface GovernedModelInput {
   contextWindowTokens: number;
   /** Cost gate. Throws to refuse the call before it starts. */
   gate?: GovernedGate | null;
+  /** Read for the reservation's operator overrides. Defaults to `process.env`. */
+  env?: Record<string, string | undefined>;
 }
 
 /**
@@ -43,13 +50,26 @@ export interface GovernedModelInput {
  */
 export function buildGovernedDynamicModel(input: GovernedModelInput) {
   const { chatModel, contextWindowTokens, gate } = input;
+  const env = input.env ?? process.env;
 
   return defineDynamic({
     events: {
-      "step.started": async () => {
+      // eve hands the resolver its dynamic context, and `ctx.messages` is the conversation
+      // about to be sent. Ignoring that argument is what made every turn reserve a whole
+      // context window and refuse every call near a cap's ceiling (#637).
+      "step.started": async (_event: unknown, ctx: unknown) => {
         // The gate runs FIRST: a throw here fails the turn before any provider
         // call is made (#217 / #270).
-        const admission = gate != null ? await gate.admit() : undefined;
+        const admission =
+          gate != null
+            ? await gate.admit(
+                reservationInputTokens({
+                  messages: (ctx as { messages?: unknown } | null | undefined)?.messages,
+                  contextWindowTokens,
+                  env,
+                }),
+              )
+            : undefined;
         return {
           // #443: the reservation must travel with the model, so it can be settled
           // once the call it paid for has actually happened (or failed).
