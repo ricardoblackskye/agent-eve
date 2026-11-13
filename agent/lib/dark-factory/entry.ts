@@ -180,6 +180,11 @@ function defuse(text: string): string {
  * explicitly labelled as DATA. This mirrors the webhook route's existing defence, which
  * exists because a malicious issue body is otherwise an instruction channel into an
  * agent — and here that agent goes on to write code.
+ *
+ * The message OPENS by asking the ROOT agent to delegate to the Orchestrator subagent —
+ * the same shape the webhook uses for the Product Owner and the Sprint Metrics Analyst
+ * (app/api/github/webhook/route.ts). Without it the handoff lands on the ROOT chat agent
+ * (the default Eve assistant), which then adopts a dark-factory role it was never given.
  */
 export function renderHandoffMessage(intent: DispatchIntent): string {
   const verb =
@@ -189,6 +194,8 @@ export function renderHandoffMessage(intent: DispatchIntent): string {
         ? "resume the parked run"
         : "start a dark-factory run";
   const lines = [
+    `Please delegate to the Orchestrator subagent to ${verb}.`,
+    "",
     `A GitHub issue event asked the Dark Factory to ${verb}.`,
     "",
     `Repository (verified identifier): ${intent.repo || "(unknown)"}`,
