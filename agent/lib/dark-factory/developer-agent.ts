@@ -30,6 +30,7 @@ import {
 } from "node:fs/promises";
 import { filterChildEnv } from "./child-env";
 import { exec } from "node:child_process";
+import { createHash } from "node:crypto";
 import { promisify } from "node:util";
 import {
   basename,
@@ -878,6 +879,22 @@ export function classifyTestRun(output: string): "ran" | "did-not-start" {
     "is not recognized as",
   ];
   return DID_NOT_START_MARKERS.some((marker) => output.includes(marker)) ? "did-not-start" : "ran";
+}
+
+/**
+ * A stable, opaque identity of what an iteration PRODUCED (#651): a digest over the authored files.
+ *
+ * The Developer's no-op failure mode is re-authoring byte-identical files, so identity is a digest of the
+ * path+content pairs. It is order-independent (a re-ordered map is not a change) and delimiter-safe (a
+ * path/content boundary cannot be mistaken for a different map). It is a hash, never the content itself,
+ * so nothing sensitive leaks if it is logged or stored.
+ */
+export function artefactIdentity(files: Record<string, string>): string {
+  const canonical = Object.keys(files)
+    .sort()
+    .map((path) => `${path}\u0000${files[path]}`)
+    .join("\u0001");
+  return createHash("sha256").update(canonical, "utf8").digest("hex");
 }
 
 export async function runMultiFileCodingLoop(
