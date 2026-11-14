@@ -254,6 +254,7 @@
     "tsconfig.tsbuildinfo",
     "vendor/**",
     "docs/df-progress-board-mockups/**",
-    "docs/df-progress-board-wireframes.html"
+    "docs/df-progress-board-wireframes.html",
+    "tests/dark-factory/__fixtures__/**"
   ]
 }
