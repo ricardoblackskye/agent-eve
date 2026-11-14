@@ -58,6 +58,7 @@ import {
 } from "../agent/lib/dark-factory/git-push";
 import { DEFAULT_SANDBOX_WORKSPACE } from "../agent/lib/dark-factory/opensandbox-driver";
 import {
+  artefactIdentity,
   CircuitTrippedError,
   DeveloperAgent,
   runMultiFileCodingLoop,
@@ -1167,6 +1168,14 @@ async function main(): Promise<void> {
               `     Test result: ${testOutcome.passed ? "PASS" : "FAIL"}`,
             );
 
+            // #651: the failure the model must act on used to be discarded here, so a run could fail
+            // repeatedly with no visible cause. Print a BOUNDED tail of it (the run's own test output,
+            // never user content) so the cause is readable in the log.
+            if (!testOutcome.passed && testOutcome.output) {
+              const tail = testOutcome.output.trim().slice(-1200);
+              if (tail) console.log(`     Test failure (tail):\n${tail}`);
+            }
+
             if (testOutcome.passed) {
               // #503 AC4: record a passing result for each mapped AC. The map is typed as required but a
               // deserialized plan may omit it (the architect returned one without it at STEP 3.5), so
@@ -1174,7 +1183,13 @@ async function main(): Promise<void> {
               recordPassingTestResults(ctx.plan, capturedTestResults);
             }
 
-            return { passed: testOutcome.passed, output: testOutcome.output };
+            // #651: report the identity of what this iteration authored, so the loop can detect a no-op
+            // self-correction (a failing iteration that reproduces the previous failing artefact).
+            return {
+              passed: testOutcome.passed,
+              output: testOutcome.output,
+              artefactHash: authored.artefactHash,
+            };
           },
         });
         // #361 (Task 10): render the plan into the workspace BEFORE either commit path runs, so the
@@ -1414,6 +1429,11 @@ export interface AuthorFilesResult {
   written: string[];
   /** Authored entries that were NOT written, with the reason. */
   skipped: { path: string; reason: string }[];
+  /**
+   * An opaque identity of the authored work (#651), compared across iterations to detect a no-op
+   * self-correction. A digest of `files`, so byte-identical work has an identical identity.
+   */
+  artefactHash: string;
 }
 
 /**
@@ -1533,7 +1553,13 @@ export async function authorFiles(
     await tools.writeFile(filePath, content);
     written.push(filePath);
   }
-  return { files: result.files, raw: result.raw, written, skipped };
+  return {
+    files: result.files,
+    raw: result.raw,
+    written,
+    skipped,
+    artefactHash: artefactIdentity(result.files),
+  };
 }
 
 /**

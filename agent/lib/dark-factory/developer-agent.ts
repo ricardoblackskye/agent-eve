@@ -30,6 +30,7 @@ import {
 } from "node:fs/promises";
 import { filterChildEnv } from "./child-env";
 import { exec } from "node:child_process";
+import { createHash } from "node:crypto";
 import { promisify } from "node:util";
 import {
   basename,
@@ -147,6 +148,15 @@ export interface WorkerResult {
    * unmeasured rather than a failure of the developer's work (#541). Absent means measured.
    */
   unmeasured?: boolean;
+  /**
+   * An opaque identity of what this iteration PRODUCED (#651), e.g. a digest of the authored files.
+   *
+   * The loop cannot see the authored bytes, so the worker reports an identity it can compare. A FAILING
+   * iteration whose identity equals the previous failing iteration's is a no-op self-correction: the loop
+   * can prove it cannot correct and stops, rather than repeating. Absent means there is no identity to
+   * compare, and the loop keeps its previous behaviour.
+   */
+  artefactHash?: string;
 }
 
 /** A single coding iteration step (e.g. write code + run tests in a sandbox). */
@@ -157,6 +167,12 @@ export interface LoopResult {
   status: "success" | "failed";
   iterations: number;
   fixCycles: number;
+  /**
+   * Why the loop stopped early on failure (#651). Absent for the normal stop (a pass, or the iteration
+   * cap). "no-op-self-correction" means a failing iteration reproduced the previous failing artefact, so
+   * further iterations were guaranteed to fail the same way.
+   */
+  stopReason?: "no-op-self-correction";
 }
 
 /**
@@ -865,6 +881,22 @@ export function classifyTestRun(output: string): "ran" | "did-not-start" {
   return DID_NOT_START_MARKERS.some((marker) => output.includes(marker)) ? "did-not-start" : "ran";
 }
 
+/**
+ * A stable, opaque identity of what an iteration PRODUCED (#651): a digest over the authored files.
+ *
+ * The Developer's no-op failure mode is re-authoring byte-identical files, so identity is a digest of the
+ * path+content pairs. It is order-independent (a re-ordered map is not a change) and delimiter-safe (a
+ * path/content boundary cannot be mistaken for a different map). It is a hash, never the content itself,
+ * so nothing sensitive leaks if it is logged or stored.
+ */
+export function artefactIdentity(files: Record<string, string>): string {
+  const canonical = Object.keys(files)
+    .sort()
+    .map((path) => `${path}\u0000${files[path]}`)
+    .join("\u0001");
+  return createHash("sha256").update(canonical, "utf8").digest("hex");
+}
+
 export async function runMultiFileCodingLoop(
   opts: MultiFileCodingLoopOptions,
 ): Promise<LoopResult> {
@@ -873,6 +905,9 @@ export async function runMultiFileCodingLoop(
   // #373: what the last failed iteration said, offered to the next one. Discarding this is what made the
   // loop's self-correction impossible.
   let previousFailure: LoopContext["previousFailure"];
+  // #651: the artefact identity of the last FAILING iteration, so a repeat can be detected.
+  let previousArtefactHash: string | undefined;
+  let stopReason: LoopResult["stopReason"];
 
   for (let i = 0; i < opts.maxIterations; i++) {
     const iteration = i + 1;
@@ -886,9 +921,18 @@ export async function runMultiFileCodingLoop(
       tools: opts.tools,
       ...(previousFailure ? { previousFailure } : {}),
     });
+    // #651: a FAILING iteration that reproduces the previous failing artefact is a no-op self-correction -
+    // it has proof it cannot correct, so repeating is guaranteed to fail the same way. Detect it and stop
+    // (fail fast) rather than consuming the circuit-breaker budget.
+    const noop =
+      !res.passed &&
+      res.artefactHash !== undefined &&
+      res.artefactHash === previousArtefactHash;
+
     if (!res.passed && res.output) {
       previousFailure = { iteration, output: res.output };
     }
+    if (!res.passed) previousArtefactHash = res.artefactHash;
     // Record exactly one unit of activity per completed iteration. The breaker rounds
     // sub-minute work UP to a full minute, so an iteration cannot escape the budget.
     const breaker = opts.breaker;
@@ -905,6 +949,10 @@ export async function runMultiFileCodingLoop(
     }
     passed = res.passed;
     if (passed) break;
+    if (noop) {
+      stopReason = "no-op-self-correction";
+      break;
+    }
   }
 
   // Cooperative control check after the final worker call: a Stop (or Pause)
@@ -916,5 +964,10 @@ export async function runMultiFileCodingLoop(
   assertBreakerClosed(opts.breaker, iterations);
 
   const fixCycles = passed ? iterations - 1 : iterations;
-  return { status: passed ? "success" : "failed", iterations, fixCycles };
+  return {
+    status: passed ? "success" : "failed",
+    iterations,
+    fixCycles,
+    ...(stopReason ? { stopReason } : {}),
+  };
 }
