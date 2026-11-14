@@ -100,3 +100,26 @@ failure, not the model.
   this.
 - The preservation tightening (T6) could refuse legitimate edits - keep it scoped to ADDITIVE plans and
   test the boundary.
+
+## Progress (implementation)
+
+- **T1 (reproduce) - DONE.** `tests/dark-factory/coding-loop-noop.test.ts`. RED observed: the loop ran all
+  10 iterations on a repeated failing artefact (`expected 10 to be 2`).
+- **T3 (detect the no-op) - DONE.** The loop compares a failing iteration's artefact identity
+  (`WorkerResult.artefactHash`) with the previous failing iteration's and stops with
+  `LoopResult.stopReason = "no-op-self-correction"`. Verified end to end: `authorFiles` reports the identity
+  (`AuthorFilesResult.artefactHash = artefactIdentity(files)`) and the runner's coding worker returns it, so
+  the detection is LIVE and not dead code.
+- **T4 (surface the failing test) - DONE.** The runner now prints a bounded tail of a failing iteration's
+  test output; it previously logged only `Test result: FAIL`.
+- **T2 (always carry the failure) - DROPPED, deliberately.** The plan called for synthesizing feedback when a
+  failed iteration produced no output. `coding-loop-feedback.test.ts` PINS the opposite as a deliberate
+  decision ("nothing is invented for a worker that reports only a verdict"), and the reproduction shows the
+  real defect is the no-op, not the missing text. Implementing T2 would reverse a tested decision to fix a
+  cause it does not address.
+- **T5 (report the terminal failure to the ticket) - OUTSTANDING.** `applyTerminalLifecycle` applies labels
+  and carries no reason, so this needs a ticket-comment path; the `roadblock` reporter already used for the
+  unmeasured case is the existing seam.
+- **T6 (preservation for additive plans) - OUTSTANDING.** Tightening `MAX_REMOVED_RATIO` is a POSTURE change,
+  so it wants its own decision rather than riding along here.
+
