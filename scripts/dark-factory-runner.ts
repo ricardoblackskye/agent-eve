@@ -1271,6 +1271,10 @@ async function main(): Promise<void> {
                 if (!lint.ran) continue; // UNMEASURED: the check could not start, so it is not a verdict
                 if (!lint.passed) {
                   console.log(`     Lint result: FAIL (${lintCommand})`);
+                  // Same reasoning as the test path above: a bare "FAIL" is undiagnosable once the
+                  // sandbox is disposed. Print a BOUNDED tail so the cause is readable from the log.
+                  const lintTail = lint.output.trim().slice(-1200);
+                  if (lintTail) console.log(`     Lint failure (tail):\n${lintTail}`);
                   return {
                     passed: false,
                     output:
