@@ -25,6 +25,10 @@ function result(over: Partial<DefinitionOfDoneResult> = {}): DefinitionOfDoneRes
     pr: {
       number: 213,
       url: "https://github.com/ricardoblackskye/WebFeedPOC/pull/213",
+      head: "feat/dark-factory-212",
+      base: "main",
+      title: "feat: #212 Test for DF issue 659",
+      body: "Closes #212",
     },
     roundsExecuted: 1,
     totalFindings: 0,
@@ -79,11 +83,11 @@ describe("#659 the ticket comment follows the DoD verdict", () => {
   it("still reports not-done when there is no PR at all", () => {
     const body = dodOutcomeComment(
       212,
-      result({ ok: false, status: "failed", pr: undefined, reason: "the developer loop gave up" }),
+      result({ ok: false, status: "refused", pr: undefined, reason: "the developer loop gave up" }),
     );
 
     expect(body).toMatch(/not done/i);
-    expect(body).toContain("failed");
+    expect(body).toContain("refused");
     expect(body).not.toContain("pull/");
   });
 });

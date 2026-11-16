@@ -1486,26 +1486,31 @@ async function main(): Promise<void> {
 
   if (dodResult.pr) {
     line("Live PR URL", dodResult.pr.url);
+  }
+
+  if (dodResult.pr) {
     await applyTerminalLifecycle(
       { labelWriter, runHistory },
       {
         repo: targetRepo,
         issue: issueNum,
         runId,
-        terminalStatus: "succeeded",
+        // #659: the lifecycle follows the VERDICT. It used to be "succeeded" whenever a PR existed, so the
+        // record and the ticket comment agreed with each other and disagreed with the DoD.
+        terminalStatus: dodResult.ok ? "succeeded" : "failed",
         dodResult,
       },
     );
-    await issueWriter.postComment(
-      repoOwner,
-      repoName,
-      issueNum,
-      `🤖 **Eve** (Dark Factory) — Story #${issueNum} Completed with Verified Traceability ✅\n\n` +
-        `- **PR**: ${dodResult.pr.url}\n` +
-        `- **Traceability Matrix**:\n\n${dodResult.traceabilityTable ?? "Verified"}\n` +
-        `- **Lifecycle**: \`df:done\``,
-    );
   }
+
+  // #659: posted for BOTH outcomes. A run that refused to finish is exactly the run whose ticket must say
+  // so - silence there is how a blocked run looked like a success.
+  await issueWriter.postComment(
+    repoOwner,
+    repoName,
+    issueNum,
+    dodOutcomeComment(issueNum, dodResult),
+  );
 
   console.log(
     "\n================================================================================",
@@ -1698,12 +1703,41 @@ export function filesToCommitFromRun(
 }
 
 /** #361 (Task 10) - where a run commits its rendered plan. */
-/** RED stub for #659: the comment builder is implemented in the GREEN commit. */
+/**
+ * The comment posted to the ticket after the Definition of Done (#659).
+ *
+ * Gated on the VERDICT, never on a pull request merely existing. A blocked DoD still leaves its PR
+ * behind, and announcing "Completed ✅ / df:done" for it put the lie exactly where a human looks - the
+ * label path already refuses (`isDoneGateSatisfied`), so the comment was the last thing claiming success.
+ * A not-done comment names the status, says so plainly, and carries the findings that stopped the run.
+ */
 export function dodOutcomeComment(
-  _issueNum: number,
-  _dodResult: DefinitionOfDoneResult,
+  issueNum: number,
+  dodResult: DefinitionOfDoneResult,
 ): string {
-  throw new Error("not implemented");
+  if (dodResult.ok && dodResult.pr) {
+    return (
+      `🤖 **Eve** (Dark Factory) — Story #${issueNum} Completed with Verified Traceability ✅\n\n` +
+      `- **PR**: ${dodResult.pr.url}\n` +
+      `- **Traceability Matrix**:\n\n${dodResult.traceabilityTable ?? "Verified"}\n` +
+      `- **Lifecycle**: \`df:done\``
+    );
+  }
+
+  const findings = dodResult.remainingFindings
+    .map((finding) => `- \`${finding.id}\` (${finding.severity}): ${finding.message}`)
+    .join("\n");
+
+  return (
+    `🤖 **Eve** (Dark Factory) — Story #${issueNum} is NOT done ❌\n\n` +
+    `The run stopped with status \`${dodResult.status}\` and did **not** report done.\n` +
+    (dodResult.reason ? `\n- **Reason**: ${dodResult.reason}\n` : "") +
+    (dodResult.pr
+      ? `- **PR** (left open - do not merge until its checks are green): ${dodResult.pr.url}\n`
+      : "") +
+    (findings ? `\n**Outstanding findings**\n\n${findings}\n` : "") +
+    `\n- **Lifecycle**: \`${dodResult.status}\``
+  );
 }
 
 export function planFilePath(issueNum: number): string {
