@@ -30,9 +30,13 @@ describe("#284 runner wires the terminal-lifecycle finalizer", () => {
     );
   });
 
-  it("finalises the run as succeeded exactly once, on the success path", () => {
-    const succeeded = source.match(/terminalStatus:\s*"succeeded"/g) ?? [];
-    expect(succeeded).toHaveLength(1);
+  it("finalises the run exactly once on the DoD path, carrying the verdict", () => {
+    // #659: the status now FOLLOWS the verdict - a blocked Definition of Done still leaves a PR behind,
+    // so asserting "succeeded" unconditionally recorded success for a run that refused to finish. The
+    // guard's purpose is unchanged: finalised ONCE, on the DoD path, and the call carries `dodResult`.
+    const finalised =
+      source.match(/terminalStatus:\s*dodResult\.ok\s*\?\s*"succeeded"\s*:\s*"failed"/g) ?? [];
+    expect(finalised).toHaveLength(1);
     expect(source).toMatch(/dodResult,/);
   });
 
