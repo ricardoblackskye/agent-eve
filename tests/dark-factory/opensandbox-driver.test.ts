@@ -357,3 +357,58 @@ describe("#354 sandbox connection config (server proxy)", () => {
     ).toBe(false);
   });
 });
+
+/**
+ * #659 — a consumer states its own command set at the CALL rather than widening the agent's list (#437).
+ *
+ * The end-to-end run is what caught this: the lint step passed its allowlist, the driver ignored it and
+ * fell back to the agent's shared list, and the run aborted with
+ *
+ *     Command 'npm run lint' is not allowed. Only [npx vitest, npm test, npx tsc] are permitted
+ *
+ * after the tests had already passed. A guard that silently ignores the list it is handed is worse than
+ * no list at all: the caller believes it has authorised something, and the failure arrives later.
+ */
+describe("#659 the driver honours a per-call allowlist", () => {
+  async function toolsFor(over: Parameters<typeof fakeHandle>[0] = {}) {
+    const { handle } = fakeHandle(over);
+    const provider = createOpenSandboxProvider(env, {
+      createSandbox: vi.fn(async (_spec: SandboxCreateSpec) => handle),
+    });
+    return provider.create("/workspace");
+  }
+
+  it("still refuses the target's lint command by DEFAULT, so the agent's blast radius is unchanged", async () => {
+    const tools = await toolsFor();
+    await expect(tools.runTests("npm run lint")).rejects.toThrow(/not allowed/);
+  });
+
+  it("allows it when the call states its own set", async () => {
+    const tools = await toolsFor();
+    const result = await tools.runTests("npm run lint", {
+      allowedCommands: ["npm run lint"],
+    });
+    expect(result.passed).toBe(true);
+  });
+
+  it("runs the command it was authorised to run, and nothing else", async () => {
+    const { handle } = fakeHandle();
+    const provider = createOpenSandboxProvider(env, {
+      createSandbox: vi.fn(async (_spec: SandboxCreateSpec) => handle),
+    });
+    const tools = provider.create("/workspace");
+
+    await tools.runTests("npm run lint", { allowedCommands: ["npm run lint"] });
+    // The per-call list REPLACES the default for that call: an unauthorised command stays refused.
+    await expect(
+      tools.runTests("npm run deploy", { allowedCommands: ["npm run lint"] }),
+    ).rejects.toThrow(/not allowed/);
+  });
+
+  it("refuses a WRITING flag even when the call widens the list", async () => {
+    const tools = await toolsFor();
+    await expect(
+      tools.runTests("npm run lint -- --fix", { allowedCommands: ["npm run lint"] }),
+    ).rejects.toThrow(/not allowed/);
+  });
+});
