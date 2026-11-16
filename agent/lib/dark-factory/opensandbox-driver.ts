@@ -19,6 +19,7 @@ import {
   InvalidTaskError,
   classifyTestRun,
   type WorkspaceTools,
+  combinedCommandOutput,
 } from "./developer-agent";
 import { SandboxRefusedError, type SandboxProvider } from "./sandbox";
 
@@ -440,7 +441,9 @@ export function createOpenSandboxProvider(
           // An unreadable exit code is NOT a pass.
           return {
             exitCode: execution.exitCode ?? 1,
-            output: stdout || stderr,
+            // Same reasoning as runTests (#659): git writes `fatal: ...` to stderr while stdout may hold
+            // progress output, so `stdout || stderr` would report the noise and hide the reason.
+            output: combinedCommandOutput(stdout, stderr),
           };
         },
       }
@@ -521,7 +524,7 @@ export function createOpenSandboxProvider(
             .join("");
           // An unknown exit code is NOT a pass: never report success for a command whose outcome we
           // could not read.
-          const output = stdout || stderr;
+          const output = combinedCommandOutput(stdout, stderr);
           // A command that could not begin is unmeasured, not a failure of the developer's work (#541). The
           // sandbox image is provisioned, so this is rare here, but the signal is shared with the local path.
           return { passed: execution.exitCode === 0, output, ran: classifyTestRun(output) === "ran" };

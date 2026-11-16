@@ -584,6 +584,21 @@ export function workspaceCommandsFor(lintCommands: readonly string[]): readonly 
   return [...ALLOWED_WORKSPACE_COMMAND_PREFIXES, ...lintCommands];
 }
 
+/**
+ * The output to hand a caller when a command finishes (#659).
+ *
+ * `stdout || stderr` keeps whichever stream happens to be non-empty, which loses the DIAGNOSTICS: a
+ * failing `npm run lint` writes npm's banner to stdout and every error to stderr, so the banner won and
+ * the cause vanished - from the run log AND from the model's feedback, which is why a check could fail
+ * repeatedly with no visible reason and never self-correct. Combine both, stdout first.
+ */
+export function combinedCommandOutput(stdout: string, stderr: string): string {
+  return [stdout, stderr]
+    .map((stream) => stream.trim())
+    .filter((stream) => stream.length > 0)
+    .join("\n");
+}
+
 /** The same list under the name it had before #659, kept for the existing importers. */
 export const ALLOWED_TEST_COMMAND_PREFIXES: readonly string[] =
   ALLOWED_WORKSPACE_COMMAND_PREFIXES;
@@ -832,7 +847,7 @@ export function createWorkspaceTools(
 
       if (commandRunner) {
         const res = await commandRunner(testCmd);
-        const output = res.stdout || res.stderr;
+        const output = combinedCommandOutput(res.stdout, res.stderr);
         return {
           passed: res.exitCode === 0,
           output,
@@ -849,9 +864,10 @@ export function createWorkspaceTools(
           // URL. Hand it the same minimal allow-list the tester agent uses.
           env: filterChildEnv(process.env) as NodeJS.ProcessEnv,
         });
-        return { passed: true, output: stdout || stderr, ran: classifyTestRun(stdout || stderr) === "ran" };
+        const output = combinedCommandOutput(stdout, stderr);
+        return { passed: true, output, ran: classifyTestRun(output) === "ran" };
       } catch (err: any) {
-        const output = err.stdout || err.stderr || err.message;
+        const output = combinedCommandOutput(err.stdout ?? "", err.stderr ?? "") || err.message;
         return {
           passed: false,
           output,

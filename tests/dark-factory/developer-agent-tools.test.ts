@@ -294,12 +294,13 @@ describe("#659 the local tools report both streams on failure", () => {
   it("carries the stderr diagnostics even when stdout is non-empty", async () => {
     const dir = await mkdtemp(join(tmpdir(), "df-tools-streams-"));
     try {
-      const runner = async () => {
-        throw Object.assign(new Error("Command failed with exit code 1"), {
-          stdout: "> antiques-microsite@0.0.1 lint\n> eslint .",
-          stderr: "src/pages/HomePage.jsx:12:5  error  'x' is not defined  no-undef",
-        });
-      };
+      // The injected runner returns a RESULT (it does not throw), so this pins the branch that a
+      // configured runner actually takes.
+      const runner = async () => ({
+        stdout: "> antiques-microsite@0.0.1 lint\n> eslint .",
+        stderr: "src/pages/HomePage.jsx:12:5  error  'x' is not defined  no-undef",
+        exitCode: 1,
+      });
       const tools = createWorkspaceTools(dir, runner as never);
 
       const result = await tools.runTests("npm run lint", {
