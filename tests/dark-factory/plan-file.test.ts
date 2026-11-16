@@ -250,7 +250,7 @@ describe("#659 the rendered plan is lint-clean for the target", () => {
     const asLinted = md.replace(/`[^`]*`/g, "").replace(/\]\([^)]*\)/g, "]");
     expect(asLinted).not.toMatch(/https?:\/\//);
 
-    // Neutralised, not deleted: the URL stays readable to a human.
+    // Neutralized, not deleted: the URL stays readable to a human.
     expect(md).toContain("`http://localhost:5173/`");
   });
 
