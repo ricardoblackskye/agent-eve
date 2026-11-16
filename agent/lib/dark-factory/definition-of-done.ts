@@ -53,6 +53,22 @@ export function resolveMaxReviewRounds(
 }
 
 export type FindingSource = "pr-reviewer" | "codeql" | "linter" | "test";
+
+/** One check running on the pull request, as GitHub reports it. */
+export interface PrCheckRun {
+  name: string;
+  /** `queued` | `in_progress` | `completed`. */
+  status: string;
+  /** `success` | `failure` | `neutral` | `skipped` | `cancelled` | `timed_out` | ... , null until completed. */
+  conclusion: string | null;
+  html_url?: string;
+  details_url?: string;
+}
+
+/** RED stub for #659: the mapping is implemented in the GREEN commit. */
+export function checkRunFindings(_checks: readonly PrCheckRun[] | null): ReviewFinding[] {
+  throw new Error("not implemented");
+}
 export type FindingDispositionStatus = "resolved" | "accepted";
 
 export interface ReviewFinding {
