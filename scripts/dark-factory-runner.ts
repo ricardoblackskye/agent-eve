@@ -1076,6 +1076,13 @@ async function main(): Promise<void> {
               `sandbox repository preparation failed: ${prepared.error}`,
             );
           }
+          // #657: name the base the run's branch will be cut from. Without this a stale checkout was
+          // only discoverable from the PR's merge base, after the fact.
+          if (prepared.base) {
+            console.log(
+              `  -> Sandbox checkout synced to ${prepared.base.after.slice(0, 7)} (from ${prepared.base.before.slice(0, 7)})`,
+            );
+          }
         }
         const loopOutcome = await runMultiFileCodingLoop({
           plan: executionPlan,
