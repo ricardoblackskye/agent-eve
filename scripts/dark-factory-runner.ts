@@ -27,6 +27,7 @@ import {
   resolveWorkspaceOverride,
 } from "../agent/lib/dark-factory/plan-workspace";
 import {
+
   runDefinitionOfDone,
   type DefinitionOfDoneDeps,
   type DefinitionOfDoneTask,
@@ -35,6 +36,7 @@ import {
   type PrOpener,
   checkRunFindings,
   settlePullRequestChecks,
+  type DefinitionOfDoneResult,
 } from "../agent/lib/dark-factory/definition-of-done";
 import {
   applyStartLifecycle,
@@ -1696,6 +1698,14 @@ export function filesToCommitFromRun(
 }
 
 /** #361 (Task 10) - where a run commits its rendered plan. */
+/** RED stub for #659: the comment builder is implemented in the GREEN commit. */
+export function dodOutcomeComment(
+  _issueNum: number,
+  _dodResult: DefinitionOfDoneResult,
+): string {
+  throw new Error("not implemented");
+}
+
 export function planFilePath(issueNum: number): string {
   return `.hermes/plans/df-${issueNum}.md`;
 }
