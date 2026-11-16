@@ -109,15 +109,32 @@ export interface SandboxRepoResult {
   ok: boolean;
   /** True when this call performed the clone (the image did not already carry the repo). */
   cloned: boolean;
+  /**
+   * The commit the checkout sat at before the sync, and the default-branch tip it was moved to (#657).
+   *
+   * Absent on the clone path, where the clone already lands on the default tip.
+   */
+  base?: { before: string; after: string };
   error?: string;
 }
 
 /**
- * #354 — make the sandbox workspace a git work tree.
+ * #354 — make the sandbox workspace a git work tree, at the CURRENT default branch.
  *
  * The documented deployment requirement is an image that ALREADY carries the project (repo + deps),
  * so the clone is the absent-repo fallback. It has to run BEFORE the developer loop writes anything:
  * `git clone` refuses a non-empty target directory.
+ *
+ * #657 — a carried-over checkout is only a HEAD, so it must be moved to the current
+ * `origin/<default>` before it is used. The run branch is cut later by `git checkout -B <branch>`,
+ * which starts from HEAD; syncing is what stops the branch being cut from whatever the image was built
+ * with. A real run shipped a merge base of 15f22ed (2026-09-08) against a target whose main was
+ * 9b9e47d (2026-11-02), and a run that passes its tests against a two-month-old tree can reintroduce
+ * code main has already fixed.
+ *
+ * The ORDERING is why this belongs here rather than in `commitAndPushFromSandbox`: the reset DISCARDS
+ * local changes, so running it after the coding loop would destroy the developer's work. It is a fetch
+ * plus a hard reset, never a clean, so the image's untracked build output (`node_modules`) survives.
  */
 export async function ensureSandboxRepo(
   deps: SandboxRepoDeps,
@@ -128,18 +145,89 @@ export async function ensureSandboxRepo(
     "rev-parse",
     "--is-inside-work-tree",
   ]);
-  // The documented image already carries the repo; only clone when it does not.
-  if (inside.exitCode === 0) return { ok: true, cloned: false };
 
-  const clone = await deps.runGit(["clone", deps.remoteUrl, deps.workspaceDir]);
-  if (clone.exitCode !== 0) {
+  // An image without the repo: clone, and the clone already lands on the default tip.
+  if (inside.exitCode !== 0) {
+    const clone = await deps.runGit(["clone", deps.remoteUrl, deps.workspaceDir]);
+    if (clone.exitCode !== 0) {
+      return {
+        ok: false,
+        cloned: false,
+        error: `git clone failed (exit ${clone.exitCode}): ${clone.output}`,
+      };
+    }
+    return { ok: true, cloned: true };
+  }
+
+  // The documented image already carries the repo: take it to the current default branch instead of
+  // coding against the HEAD it shipped with.
+  const before = await deps.runGit(["-C", deps.workspaceDir, "rev-parse", "HEAD"]);
+  if (before.exitCode !== 0) {
     return {
       ok: false,
       cloned: false,
-      error: `git clone failed (exit ${clone.exitCode}): ${clone.output}`,
+      error: `could not read the checkout's current commit (exit ${before.exitCode}): ${before.output}`,
     };
   }
-  return { ok: true, cloned: true };
+
+  const fetched = await deps.runGit(["-C", deps.workspaceDir, "fetch", "origin", "--prune"]);
+  if (fetched.exitCode !== 0) {
+    return {
+      ok: false,
+      cloned: false,
+      error: `git fetch failed (exit ${fetched.exitCode}): ${fetched.output}`,
+    };
+  }
+
+  // An image's origin/HEAD can be stale or absent, so refresh it from the refs just fetched rather
+  // than guessing a branch name.
+  const setHead = await deps.runGit([
+    "-C",
+    deps.workspaceDir,
+    "remote",
+    "set-head",
+    "origin",
+    "--auto",
+  ]);
+  if (setHead.exitCode !== 0) {
+    return {
+      ok: false,
+      cloned: false,
+      error: `could not refresh origin/HEAD (exit ${setHead.exitCode}): ${setHead.output}`,
+    };
+  }
+
+  const head = await deps.runGit([
+    "-C",
+    deps.workspaceDir,
+    "rev-parse",
+    "--abbrev-ref",
+    "refs/remotes/origin/HEAD",
+  ]);
+  const defaultBranch = head.output.trim();
+  if (head.exitCode !== 0 || defaultBranch === "") {
+    return {
+      ok: false,
+      cloned: false,
+      error: `could not resolve the default branch from origin/HEAD (exit ${head.exitCode}): ${head.output}`,
+    };
+  }
+
+  const reset = await deps.runGit(["-C", deps.workspaceDir, "reset", "--hard", defaultBranch]);
+  if (reset.exitCode !== 0) {
+    return {
+      ok: false,
+      cloned: false,
+      error: `git reset to ${defaultBranch} failed (exit ${reset.exitCode}): ${reset.output}`,
+    };
+  }
+
+  const after = await deps.runGit(["-C", deps.workspaceDir, "rev-parse", "HEAD"]);
+  return {
+    ok: true,
+    cloned: false,
+    base: { before: before.output.trim(), after: after.output.trim() },
+  };
 }
 
 export interface SandboxCommitDeps extends SandboxRepoDeps {
