@@ -51,3 +51,17 @@ describe("#284 runner wires the terminal-lifecycle finalizer", () => {
     expect(source).not.toMatch(/removeLabel\([^)]*"df:running"/);
   });
 });
+
+/**
+ * #659 - the DoD's check wait is a single budget, not one per review round.
+ *
+ * `runChecks` is called once per round. Passing the full timeout each time meant a blocked run against a
+ * slow CI spent 10 minutes per round waiting for checks that had already concluded - measured at ~25
+ * minutes of silence on one run. One deadline, consumed across the rounds.
+ */
+describe("#659 the check wait is bounded once across the review rounds", () => {
+  it("derives each round's wait from a single deadline", () => {
+    expect(source).toMatch(/checkWaitDeadline/);
+    expect(source).toMatch(/timeoutMs:\s*Math\.max\(\s*0\s*,\s*checkWaitDeadline\s*-\s*Date\.now\(\)\s*\)/);
+  });
+});

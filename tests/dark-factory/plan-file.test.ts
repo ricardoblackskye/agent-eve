@@ -285,3 +285,39 @@ describe("#659 the rendered plan is lint-clean for the target", () => {
     );
   });
 });
+
+/**
+ * #659 - the generated plan is exempt from the target's spell-checker.
+ *
+ * The plan is machine-authored prose committed into the TARGET repository, so the target's cspell lints
+ * it. Its dictionary is general English, so a model writing domain vocabulary fails it - measured on
+ * WebFeedPOC, where `prerendered` was rejected although that repository's own package.json ships a
+ * `build:prerender` script. The artifact cannot be repaired afterwards either: the plan is rendered after
+ * the coding loop, and the Definition of Done has no fix capability, so a spell failure there meant no
+ * run could ever complete.
+ */
+describe("#659 the plan artifact is not spell-checked", () => {
+  it("carries a cspell:disable directive", () => {
+    const md = renderPlanFile({
+      title: "Add the credit line",
+      storyId: 212,
+      summary: "Adds one italic line to the home page and nothing else.",
+      tasks: [],
+      targetFiles: [{ path: "src/pages/HomePage.jsx", action: "modify" }],
+    } as never);
+
+    expect(md).toContain("<!-- cspell:disable -->");
+  });
+
+  it("keeps the directive ABOVE the h1, so it applies to the whole file", () => {
+    const md = renderPlanFile({
+      title: "Add the credit line",
+      storyId: 212,
+      summary: "x",
+      tasks: [],
+      targetFiles: [],
+    } as never);
+
+    expect(md.indexOf("<!-- cspell:disable -->")).toBeLessThan(md.indexOf("# Plan:"));
+  });
+});
