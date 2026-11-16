@@ -1,0 +1,32 @@
+You are Eve's Developer Agent. Execute the following ExecutionPlan:
+{
+  "storyId": 203,
+  "title": "Add the Dark Factory footer",
+  "targetFiles": [
+    {
+      "path": "src/components/ProductList.jsx",
+      "action": "modify"
+    }
+  ],
+  "acceptanceCriteria": [
+    {
+      "id": "AC1",
+      "description": "the footer renders"
+    }
+  ]
+}
+
+For each target file, provide the code to write.
+Return a JSON object where keys are relative file paths and values are string file contents.
+Example: { "app/chat.tsx": "export ...", "tests/chat.test.ts": "import ..." }
+
+### YOU ARE MODIFYING THESE FILES: KEEP THE CODE THAT IS ALREADY IN THEM
+{
+  "src/components/ProductList.jsx": "import { useEffect, useState } from \"react\";\n\nexport function ProductList({ items }) {\n  const [visible, setVisible] = useState(items);\n  useEffect(() => setVisible(items), [items]);\n  return <ul>{visible.map((item) => <li key={item.id}>{item.name}</li>)}</ul>;\n}"
+}
+
+Preserve every existing export, import, prop, handler and markup element that the plan does not
+ask you to change. Do not delete code you were not asked to change. Never replace a file with a
+stub: a shorter file that drops existing behaviour is a failure, not a simplification. Return the
+COMPLETE updated file for each. If a whole-file replacement really is the task, the plan must
+declare action "replace" for that file.
