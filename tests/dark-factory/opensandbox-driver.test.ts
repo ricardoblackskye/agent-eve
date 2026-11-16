@@ -13,7 +13,9 @@ import {
  * no credential. What matters here: the guards still fire, the egress policy is deny-by-default, and
  * teardown always happens.
  */
-function fakeHandle(over: Partial<{ exitCode: number | undefined }> = {}) {
+function fakeHandle(
+  over: Partial<{ exitCode: number | undefined; stderr: string }> = {},
+) {
   const calls = { run: [] as string[], write: [] as { path: string; data: string }[], kill: 0, close: 0 };
   const handle: SandboxHandle = {
     id: "sbx-1",
@@ -22,7 +24,10 @@ function fakeHandle(over: Partial<{ exitCode: number | undefined }> = {}) {
         calls.run.push(command);
         return {
           exitCode: "exitCode" in over ? over.exitCode : 0,
-          logs: { stdout: [{ text: "ok" }], stderr: [] },
+          logs: {
+            stdout: [{ text: "ok" }],
+            stderr: over.stderr ? [{ text: over.stderr }] : [],
+          },
         };
       },
     },
@@ -410,5 +415,35 @@ describe("#659 the driver honours a per-call allowlist", () => {
     await expect(
       tools.runTests("npm run lint -- --fix", { allowedCommands: ["npm run lint"] }),
     ).rejects.toThrow(/not allowed/);
+  });
+});
+
+/**
+ * #659 — a failing check's DIAGNOSTICS must reach the caller.
+ *
+ * `stdout || stderr` reports whichever stream is non-empty. A failing `npm run lint` writes npm's banner
+ * to stdout and every eslint error to stderr, so the banner won and the cause was discarded — from the
+ * log AND from the model's feedback. That is why a run could fail the same check three times with no
+ * visible reason and never self-correct.
+ */
+describe("#659 a failing check reports both streams", () => {
+  it("carries the stderr diagnostics even when stdout is non-empty", async () => {
+    const { handle } = fakeHandle({
+      exitCode: 1,
+      stderr: "src/pages/HomePage.jsx:12:5  error  'x' is not defined  no-undef",
+    });
+    const provider = createOpenSandboxProvider(env, {
+      createSandbox: vi.fn(async (_spec: SandboxCreateSpec) => handle),
+    });
+    const tools = provider.create("/workspace");
+
+    const result = await tools.runTests("npm run lint", {
+      allowedCommands: ["npm run lint"],
+    });
+
+    expect(result.passed).toBe(false);
+    expect(result.output).toContain("no-undef");
+    // The banner is still there: this ADDS the diagnostics, it does not swap one stream for the other.
+    expect(result.output).toContain("ok");
   });
 });

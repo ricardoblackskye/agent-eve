@@ -284,3 +284,33 @@ describe("Developer Agent Multi-File Workspace Tools", () => {
     expect(workers).toEqual([1, 2]);
   });
 });
+
+/**
+ * #659 — the LOCAL path has the same defect as the sandbox driver: `err.stdout || err.stderr` keeps the
+ * banner and throws away the diagnostics. Whichever backend runs, a failing check must hand the caller
+ * the reason, or the loop cannot fix what it cannot see.
+ */
+describe("#659 the local tools report both streams on failure", () => {
+  it("carries the stderr diagnostics even when stdout is non-empty", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "df-tools-streams-"));
+    try {
+      const runner = async () => {
+        throw Object.assign(new Error("Command failed with exit code 1"), {
+          stdout: "> antiques-microsite@0.0.1 lint\n> eslint .",
+          stderr: "src/pages/HomePage.jsx:12:5  error  'x' is not defined  no-undef",
+        });
+      };
+      const tools = createWorkspaceTools(dir, runner as never);
+
+      const result = await tools.runTests("npm run lint", {
+        allowedCommands: ["npm run lint"],
+      });
+
+      expect(result.passed).toBe(false);
+      expect(result.output).toContain("no-undef");
+      expect(result.output).toContain("eslint .");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
