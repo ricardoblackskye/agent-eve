@@ -136,3 +136,4 @@ changes, write a new one that supersedes it.
 | [0080](0080-the-plan-comment-is-split-not-truncated.md)                  | The plan comment is split, not truncated                                                            | Accepted           |
 | [0081](0081-a-plan-that-maps-no-criteria-is-refused.md)                  | A plan that maps no acceptance criteria is refused                                                  | Accepted           |
 | [0082](0082-agent-output-is-a-bounded-summary-not-a-transcript.md)       | Captured agent output is a bounded, redacted summary                                                | Accepted           |
+| [0083](0083-persona-prose-is-markdown-shipped-as-a-module.md)            | Persona prose is markdown, shipped as a generated module                                            | Accepted           |
