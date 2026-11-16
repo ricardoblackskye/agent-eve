@@ -4,6 +4,7 @@ import {
   PreservationRefusedError,
 } from "../../scripts/dark-factory-runner";
 import type { CodeAuthorProvider } from "../../agent/lib/dark-factory/code-author";
+import { artefactIdentity } from "../../agent/lib/dark-factory/developer-agent";
 
 /** A workspace whose files may be read and written; a read of a missing file throws, as fs does. */
 function workspace(initial: Record<string, string> = {}) {
@@ -66,6 +67,32 @@ describe("authorFiles", () => {
     await expect(authorFiles(author, {}, ws.tools)).rejects.toThrow(
       "author failed",
     );
+  });
+
+  it("reports an artefact identity for the work it wrote (#651)", async () => {
+    const result = await authorFiles(
+      authorReturning({ "a.ts": "one", "b.ts": "two" }),
+      {},
+      workspace().tools,
+    );
+
+    // The loop compares this to detect a no-op self-correction, so it must be a digest of exactly what was
+    // written and must stay equal for byte-identical work, in any map order.
+    expect(result.artefactHash).toBe(artefactIdentity({ "a.ts": "one", "b.ts": "two" }));
+
+    const reordered = await authorFiles(
+      authorReturning({ "b.ts": "two", "a.ts": "one" }),
+      {},
+      workspace().tools,
+    );
+    expect(reordered.artefactHash).toBe(result.artefactHash);
+
+    const changed = await authorFiles(
+      authorReturning({ "a.ts": "one", "b.ts": "TWO" }),
+      {},
+      workspace().tools,
+    );
+    expect(changed.artefactHash).not.toBe(result.artefactHash);
   });
 });
 
