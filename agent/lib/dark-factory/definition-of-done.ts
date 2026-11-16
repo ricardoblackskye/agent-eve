@@ -76,11 +76,31 @@ export interface PrChecksDeps {
   now?: () => number;
 }
 
-/** RED stub for #659: implemented in the GREEN commit. */
+/**
+ * Read the checks, waiting - but only for a bounded time - for the ones still running (#659).
+ *
+ * `runChecks` is called once per review round, so an unbounded wait would hold the run open on a stalled
+ * CI. When the bound is reached, whatever is still running is handed back AS running, which the mapping
+ * above reports as UNSETTLED and therefore blocks `done`. Returning early with a "pass" would be the
+ * defect again; waiting forever would make the factory unusable against a slow runner.
+ */
 export async function settlePullRequestChecks(
-  _deps: PrChecksDeps,
+  deps: PrChecksDeps,
 ): Promise<PrCheckRun[] | null> {
-  throw new Error("not implemented");
+  const now = deps.now ?? (() => Date.now());
+  const startedAt = now();
+
+  let checks = await deps.fetchChecks();
+  if (checks === null) return null;
+
+  while (checks.some((check) => check.status !== "completed")) {
+    if (now() - startedAt >= deps.timeoutMs) break;
+    await deps.sleep(deps.pollIntervalMs);
+    checks = await deps.fetchChecks();
+    if (checks === null) return null;
+  }
+
+  return checks;
 }
 
 /** Conclusions that do NOT gate a run: a check that passed, or a decision not to gate on it. */

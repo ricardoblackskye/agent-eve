@@ -31,6 +31,10 @@ import {
   type DefinitionOfDoneDeps,
   type DefinitionOfDoneTask,
   type ReviewFinding,
+  type PrCheckRun,
+  type PrOpener,
+  checkRunFindings,
+  settlePullRequestChecks,
 } from "../agent/lib/dark-factory/definition-of-done";
 import {
   applyStartLifecycle,
@@ -257,6 +261,57 @@ export function resolveRunnerRunId(
   return index !== -1 && argv[index + 1]
     ? argv[index + 1]
     : `run-${issueNum}-${now}`;
+}
+
+/** How long a single review round waits for checks that are still running, and how often it looks (#659). */
+const PR_CHECKS_TIMEOUT_MS = Number(process.env.DF_PR_CHECKS_TIMEOUT_MS ?? 300_000);
+const PR_CHECKS_POLL_INTERVAL_MS = 15_000;
+
+/** The pull request the Definition of Done opened, so the check gate can read it (#659). */
+let openedPr: number | undefined;
+
+/**
+ * Read the check runs on a pull request's CURRENT head.
+ *
+ * Returns null rather than throwing when anything goes wrong, because "we could not read the checks" has
+ * to stay distinguishable from "the checks passed" (#659): the mapping turns null into a warning, never
+ * into a silent pass.
+ */
+function makePullRequestCheckFetcher(deps: {
+  token: string;
+  repo: string;
+  prNumber: number;
+}): () => Promise<PrCheckRun[] | null> {
+  const headers = {
+    Authorization: `token ${deps.token}`,
+    Accept: "application/vnd.github+json",
+    "User-Agent": "dark-factory-runner",
+  };
+
+  return async () => {
+    try {
+      const prResponse = await fetch(
+        `https://api.github.com/repos/${deps.repo}/pulls/${deps.prNumber}`,
+        { headers },
+      );
+      if (!prResponse.ok) return null;
+      const pr = (await prResponse.json()) as { head?: { sha?: string } };
+      const sha = pr.head?.sha;
+      if (!sha) return null;
+
+      // By head SHA rather than by PR: a fix pushed during the review loop moves the head, and reading the
+      // older head's verdict would certify code that is no longer there.
+      const checksResponse = await fetch(
+        `https://api.github.com/repos/${deps.repo}/commits/${sha}/check-runs`,
+        { headers },
+      );
+      if (!checksResponse.ok) return null;
+      const body = (await checksResponse.json()) as { check_runs?: PrCheckRun[] };
+      return Array.isArray(body.check_runs) ? body.check_runs : null;
+    } catch {
+      return null;
+    }
+  };
 }
 
 async function main(): Promise<void> {
@@ -1379,30 +1434,38 @@ async function main(): Promise<void> {
     testResults: capturedTestResults,
   };
 
+  // #659: the Definition of Done opens the PR itself, and calls runChecks afterwards, so the gate needs
+  // the pull request it just opened. Capturing it here keeps the DoD's own interface unchanged.
+  const capturingPrWriter: PrOpener = {
+    createPullRequest: async (owner, repoName, options) => {
+      const result = await prWriter.createPullRequest(owner, repoName, options);
+      if (result.ok && result.pr) openedPr = result.pr.number;
+      return result;
+    },
+  };
+
   const dodDeps: DefinitionOfDoneDeps = {
-    prWriter,
+    prWriter: capturingPrWriter,
     commentWriter: {
       postComment: async (owner, repo, prNum, body) => {
         const res = await issueWriter.postComment(owner, repo, prNum, body);
         return { ok: res.ok, error: res.error };
       },
     },
-    runChecks: async () => {
-      try {
-        execSync("npx tsc --noEmit", { stdio: "pipe" });
-        return [];
-      } catch {
-        return [
-          {
-            id: "TYPE-CHECK-FAIL",
-            source: "linter",
-            message:
-              "TypeScript compiler reported type error in generated code",
-            severity: "error",
-          },
-        ];
-      }
-    },
+    // #659: the checks the PULL REQUEST is actually running. What this replaces ran
+    // `npx tsc --noEmit` in THIS process's working directory, which on the vault path is a tree without
+    // the run's changes - a check that could never fail on the thing it claimed to check.
+    runChecks: async () =>
+      checkRunFindings(
+        await settlePullRequestChecks({
+          fetchChecks: openedPr
+            ? makePullRequestCheckFetcher({ token, repo: targetRepo, prNumber: openedPr })
+            : async () => null,
+          sleep: (ms: number) => new Promise((resolve) => setTimeout(resolve, ms)),
+          timeoutMs: PR_CHECKS_TIMEOUT_MS,
+          pollIntervalMs: PR_CHECKS_POLL_INTERVAL_MS,
+        }),
+      ),
   };
 
   const dodResult = await runDefinitionOfDone(dodDeps, dodTask);
