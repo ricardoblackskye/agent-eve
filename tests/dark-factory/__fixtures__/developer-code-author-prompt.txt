@@ -1,0 +1,21 @@
+You are Eve's Developer Agent. Execute the following ExecutionPlan:
+{
+  "storyId": 203,
+  "title": "Add the Dark Factory footer",
+  "targetFiles": [
+    {
+      "path": "src/components/ProductList.jsx",
+      "action": "modify"
+    }
+  ],
+  "acceptanceCriteria": [
+    {
+      "id": "AC1",
+      "description": "the footer renders"
+    }
+  ]
+}
+
+For each target file, provide the code to write.
+Return a JSON object where keys are relative file paths and values are string file contents.
+Example: { "app/chat.tsx": "export ...", "tests/chat.test.ts": "import ..." }

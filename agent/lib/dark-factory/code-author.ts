@@ -10,6 +10,22 @@
  * pure, testable, and leaves the workspace guards on the existing path.
  */
 
+import {
+  DEVELOPER_FEEDBACK_FOOTER,
+  DEVELOPER_FEEDBACK_HEADING,
+  DEVELOPER_PREAMBLE,
+  DEVELOPER_PRESERVE_HEADING,
+  DEVELOPER_TARGET_FILES,
+  PRESERVATION_CONTRACT,
+} from "./developer-identity";
+
+/**
+ * #631: the persona prose now lives in markdown (`docs/dark-factory/developer/instructions.md`) and
+ * ships as the generated `./developer-identity` module. `PRESERVATION_CONTRACT` is re-exported from
+ * here so this module keeps exporting it from the same path.
+ */
+export { PRESERVATION_CONTRACT };
+
 export interface CodeAuthorTask {
   /** The ExecutionPlan to implement (serialized into the prompt exactly as today). */
   plan: unknown;
@@ -55,15 +71,9 @@ export class CodeAuthorRefusedError extends Error {
 
 /**
  * The rule that stops an edit from silently becoming a deletion (#361). Its own export so the test can
- * pin the wording, and so the guard's failure message and the prompt cannot drift apart.
+ * pin the wording, and so the guard's failure message and the prompt cannot drift apart. The text
+ * itself is part of the persona (#631) and is re-exported above from `./developer-identity`.
  */
-export const PRESERVATION_CONTRACT = [
-  "Preserve every existing export, import, prop, handler and markup element that the plan does not",
-  "ask you to change. Do not delete code you were not asked to change. Never replace a file with a",
-  "stub: a shorter file that drops existing behaviour is a failure, not a simplification. Return the",
-  "COMPLETE updated file for each. If a whole-file replacement really is the task, the plan must",
-  'declare action "replace" for that file.',
-].join("\n");
 
 export function buildCodeAuthorPrompt(
   plan: unknown,
@@ -72,18 +82,16 @@ export function buildCodeAuthorPrompt(
 ): string {
   // Byte-for-byte the text the runner sent inline before this seam existed.
   const lines = [
-    `You are Eve's Developer Agent. Execute the following ExecutionPlan:`,
+    DEVELOPER_PREAMBLE,
     JSON.stringify(plan, null, 2),
     ``,
-    `For each target file, provide the code to write.`,
-    `Return a JSON object where keys are relative file paths and values are string file contents.`,
-    `Example: { "app/chat.tsx": "export ...", "tests/chat.test.ts": "import ..." }`,
+    DEVELOPER_TARGET_FILES,
   ];
 
   if (existing && Object.keys(existing).length > 0) {
     lines.push(
       ``,
-      `### YOU ARE MODIFYING THESE FILES: KEEP THE CODE THAT IS ALREADY IN THEM`,
+      DEVELOPER_PRESERVE_HEADING,
       // Rendered as JSON rather than inside a BEGIN/END wrapper: a target may itself be markdown, and
       // prompt-like text inside it would make a hand-rolled delimiter ambiguous.
       JSON.stringify(existing, null, 2),
@@ -95,12 +103,12 @@ export function buildCodeAuthorPrompt(
   if (feedback && feedback.trim() !== "") {
     lines.push(
       ``,
-      `### YOUR PREVIOUS ATTEMPT FAILED - FIX THAT, DO NOT REPEAT IT`,
+      DEVELOPER_FEEDBACK_HEADING,
       // Verbatim, not summarized: this is the test runner's own report, and a paraphrase would drop the
       // assertion names that tell an author what to change.
       feedback,
       ``,
-      `Return the full corrected contents of every target file, as the JSON object described above.`,
+      DEVELOPER_FEEDBACK_FOOTER,
     );
   }
 
