@@ -13,6 +13,8 @@ import {
 
 import {
   ALLOWED_TEST_COMMAND_PREFIXES,
+  ALLOWED_WORKSPACE_COMMAND_PREFIXES,
+  isAllowedWorkspaceCommand,
   ALLOWED_WORKSPACE_EXTENSIONS,
   InvalidTaskError,
   classifyTestRun,
@@ -177,14 +179,13 @@ function assertAllowedExtension(relPath: string): void {
 
 function assertAllowedTestCommand(
   command: string,
-  allowed: readonly string[] = ALLOWED_TEST_COMMAND_PREFIXES,
+  allowed: readonly string[] = ALLOWED_WORKSPACE_COMMAND_PREFIXES,
 ): void {
-  const permitted = allowed.some(
-    (prefix) => command === prefix || command.startsWith(`${prefix} `),
-  );
-  if (!permitted) {
+  // #659: ONE predicate, shared with the in-process backend. Two copies of the matching rule drift -
+  // and the copy that lived here also admitted a writing flag such as `--fix`.
+  if (!isAllowedWorkspaceCommand(command, allowed)) {
     throw new InvalidTaskError(
-      `Command '${command}' is not allowed. Only test commands starting with [${ALLOWED_TEST_COMMAND_PREFIXES.join(", ")}] are permitted.`,
+      `Command '${command}' is not allowed. Only [${allowed.join(", ")}] are permitted, and never with a writing flag such as --fix.`,
     );
   }
 }

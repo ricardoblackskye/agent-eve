@@ -59,6 +59,7 @@ import {
 import { DEFAULT_SANDBOX_WORKSPACE } from "../agent/lib/dark-factory/opensandbox-driver";
 import {
   artefactIdentity,
+  resolveLintCommands,
   CircuitTrippedError,
   DeveloperAgent,
   runMultiFileCodingLoop,
@@ -1084,6 +1085,18 @@ async function main(): Promise<void> {
             );
           }
         }
+        // #659: which checks the TARGET declares, resolved once from its own package.json. An absent or
+        // unreadable manifest resolves to NOTHING, which is UNMEASURED - never reported as lint-clean.
+        const targetLintCommands = await (async (): Promise<string[]> => {
+          try {
+            return resolveLintCommands(
+              JSON.parse(await workspaceTools.readFile("package.json")),
+            );
+          } catch {
+            return [];
+          }
+        })();
+
         const loopOutcome = await runMultiFileCodingLoop({
           plan: executionPlan,
           tools: workspaceTools,
@@ -1188,6 +1201,25 @@ async function main(): Promise<void> {
               // deserialized plan may omit it (the architect returned one without it at STEP 3.5), so
               // iterate the fallback, not the field directly.
               recordPassingTestResults(ctx.plan, capturedTestResults);
+
+              // #659: green tests are not "done" if the target's own checks fail. The PR is what a human
+              // has to get merged, so the run has to satisfy the checks the repository itself runs. A lint
+              // failure is returned as a FAILED ITERATION, so the existing self-correction loop fixes it
+              // exactly as it fixes a failing test - the run cannot reach done while they are red.
+              for (const lintCommand of targetLintCommands) {
+                const lint = await ctx.tools.runTests(lintCommand);
+                if (!lint.ran) continue; // UNMEASURED: the check could not start, so it is not a verdict
+                if (!lint.passed) {
+                  console.log(`     Lint result: FAIL (${lintCommand})`);
+                  return {
+                    passed: false,
+                    output:
+                      `The repository's own check failed: ${lintCommand} (the target's lint is part of ` +
+                      `done)\n\n${lint.output}`,
+                  };
+                }
+                console.log(`     Lint result: PASS (${lintCommand})`);
+              }
             }
 
             // #651: report the identity of what this iteration authored, so the loop can detect a no-op

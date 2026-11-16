@@ -553,32 +553,61 @@ export type CommandRunnerFn = (
 ) => Promise<{ exitCode: number; stdout: string; stderr: string }>;
 
 /**
- * The ONLY test commands either execution backend will run. Exported so the sandbox driver shares this
- * single list: two copies would drift, and drift here means a command becoming runnable on one backend.
+ * The commands either execution backend will run (#659).
+ *
+ * A SECURITY control, so it grows by NAME and never by wildcard: a bare `npm run` entry would make every
+ * package script runnable, including a postinstall that does whatever it likes.
+ *
+ * The lint entries are the TARGET's own checks. The factory runs the repository's lint rather than a list
+ * of linters it invents, so a repository that lints with something other than eslint is still covered.
  */
-export const ALLOWED_TEST_COMMAND_PREFIXES: readonly string[] = [
+export const ALLOWED_WORKSPACE_COMMAND_PREFIXES: readonly string[] = [
   "npx vitest",
   "npm test",
   "npx tsc",
+  "npm run lint",
+  "npm run typecheck",
 ];
 
-/**
- * The commands either execution backend will run (#659).
- *
- * A SECURITY control, so it grows by NAME and never by wildcard. RED stub: the list and the predicate
- * are implemented in the GREEN commit; this alias keeps the existing export working meanwhile.
- */
-export const ALLOWED_WORKSPACE_COMMAND_PREFIXES: readonly string[] =
-  ALLOWED_TEST_COMMAND_PREFIXES;
+/** The same list under the name it had before #659, kept for the existing importers. */
+export const ALLOWED_TEST_COMMAND_PREFIXES: readonly string[] =
+  ALLOWED_WORKSPACE_COMMAND_PREFIXES;
 
-/** Whether a command may run in the workspace. Stub: implemented in the GREEN commit. */
-export function isAllowedWorkspaceCommand(_command: string): boolean {
-  throw new Error("not implemented");
+/**
+ * Flags that turn a CHECK into a WRITE.
+ *
+ * `npm run lint -- --fix` matches the `npm run lint` prefix, and rewriting the tree behind the coding
+ * loop's back would mean the next iteration reads code the check no longer describes.
+ */
+const WRITING_FLAGS = ["--fix", "--write"];
+
+/** Whether a command may run in the workspace. One definition, shared by both execution backends. */
+export function isAllowedWorkspaceCommand(
+  command: string,
+  allowed: readonly string[] = ALLOWED_WORKSPACE_COMMAND_PREFIXES,
+): boolean {
+  if (command.trim().split(/\s+/).some((token) => WRITING_FLAGS.includes(token))) {
+    return false;
+  }
+  return allowed.some(
+    (prefix) => command === prefix || command.startsWith(`${prefix} `),
+  );
 }
 
-/** The lint commands a target declares, from its package.json scripts. Stub for the RED commit. */
-export function resolveLintCommands(_packageJson: unknown): string[] {
-  throw new Error("not implemented");
+/**
+ * The lint commands a target declares, from its own package.json scripts.
+ *
+ * An absent or unreadable package.json resolves to NOTHING, which is UNMEASURED rather than a pass -
+ * the same distinction the coding loop already draws for a test command that could not start (#541). A
+ * target that declares no check must never be reported as lint-clean.
+ */
+export function resolveLintCommands(packageJson: unknown): string[] {
+  const scripts = (packageJson as { scripts?: unknown } | null)?.scripts;
+  if (typeof scripts !== "object" || scripts === null) return [];
+  const named = scripts as Record<string, unknown>;
+  return ["lint", "typecheck"]
+    .filter((name) => typeof named[name] === "string")
+    .map((name) => `npm run ${name}`);
 }
 
 export const ALLOWED_WORKSPACE_EXTENSIONS: ReadonlySet<string> = new Set([
@@ -776,14 +805,10 @@ export function createWorkspaceTools(
         }
       }
 
-      // Security: Allowlist permitted test commands
-      const ALLOWED_TEST_PREFIXES = ALLOWED_TEST_COMMAND_PREFIXES;
-      const isAllowed = ALLOWED_TEST_PREFIXES.some(
-        (prefix) => testCmd === prefix || testCmd.startsWith(`${prefix} `),
-      );
-      if (!isAllowed) {
+      // Security: allowlisted workspace commands, matched by ONE shared predicate (#659).
+      if (!isAllowedWorkspaceCommand(testCmd)) {
         throw new InvalidTaskError(
-          `Command '${testCmd}' is not allowed. Only test commands starting with [${ALLOWED_TEST_PREFIXES.join(", ")}] are permitted.`,
+          `Command '${testCmd}' is not allowed. Only [${ALLOWED_WORKSPACE_COMMAND_PREFIXES.join(", ")}] are permitted, and never with a writing flag such as --fix.`,
         );
       }
 
