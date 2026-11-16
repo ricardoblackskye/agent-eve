@@ -65,6 +65,24 @@ export interface PrCheckRun {
   details_url?: string;
 }
 
+/** How the check gate reads and waits. Injected so no test sleeps in real time. */
+export interface PrChecksDeps {
+  /** The checks on the pull request's current head, or null when they could not be read. */
+  fetchChecks: () => Promise<PrCheckRun[] | null>;
+  sleep: (ms: number) => Promise<void>;
+  /** The most a single read will wait for checks that are still running. */
+  timeoutMs: number;
+  pollIntervalMs: number;
+  now?: () => number;
+}
+
+/** RED stub for #659: implemented in the GREEN commit. */
+export async function settlePullRequestChecks(
+  _deps: PrChecksDeps,
+): Promise<PrCheckRun[] | null> {
+  throw new Error("not implemented");
+}
+
 /** Conclusions that do NOT gate a run: a check that passed, or a decision not to gate on it. */
 const PASSING_CONCLUSIONS = new Set(["success", "neutral", "skipped"]);
 

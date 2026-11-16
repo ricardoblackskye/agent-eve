@@ -15,7 +15,10 @@
  * finding of its own rather than an empty list.
  */
 import { describe, expect, it } from "vitest";
-import { checkRunFindings } from "../../agent/lib/dark-factory/definition-of-done";
+import {
+  checkRunFindings,
+  settlePullRequestChecks,
+} from "../../agent/lib/dark-factory/definition-of-done";
 
 const run = (name: string, status: string, conclusion: string | null) => ({
   name,
@@ -85,5 +88,97 @@ describe("#659 the Definition of Done reads the pull request's checks", () => {
 
     const other = checkRunFindings([run("test", "completed", "failure")]);
     expect(other[0]!.id).not.toBe(first[0]!.id);
+  });
+});
+
+/**
+ * #659 - the checks are read for the PR's CURRENT head, and the wait is BOUNDED.
+ *
+ * `runChecks` is called once per review round, so an unbounded wait would hold the run open on a stalled
+ * CI. A check that never settles has to come back as still-running (which the mapping above reports as
+ * UNSETTLED, blocking done) rather than being waited on forever or, worse, treated as passed.
+ *
+ * The clock and the sleep are injected so these cases do not sleep in real time.
+ */
+describe("#659 settling the pull request's checks", () => {
+  const completed = (name: string, conclusion: string) => ({
+    name,
+    status: "completed",
+    conclusion,
+    html_url: `https://github.com/o/r/runs/${name}`,
+  });
+
+  it("returns the checks as soon as they have all finished, with one read", async () => {
+    let reads = 0;
+    const result = await settlePullRequestChecks({
+      fetchChecks: async () => {
+        reads += 1;
+        return [completed("test", "success")];
+      },
+      sleep: async () => {},
+      timeoutMs: 1000,
+      pollIntervalMs: 10,
+      now: () => 0,
+    });
+
+    expect(result).toHaveLength(1);
+    expect(reads).toBe(1);
+  });
+
+  it("polls while a check is still running, then returns the settled result", async () => {
+    let reads = 0;
+    let clock = 0;
+    const result = await settlePullRequestChecks({
+      fetchChecks: async () => {
+        reads += 1;
+        return reads === 1
+          ? [{ name: "test", status: "in_progress", conclusion: null }]
+          : [completed("test", "success")];
+      },
+      sleep: async (ms: number) => {
+        clock += ms;
+      },
+      timeoutMs: 1000,
+      pollIntervalMs: 10,
+      now: () => clock,
+    });
+
+    expect(reads).toBeGreaterThan(1);
+    expect(result?.[0]?.conclusion).toBe("success");
+  });
+
+  it("STOPS waiting at the bound and reports the check as still running", async () => {
+    let clock = 0;
+    const result = await settlePullRequestChecks({
+      fetchChecks: async () => [{ name: "test", status: "in_progress", conclusion: null }],
+      sleep: async (ms: number) => {
+        clock += ms;
+      },
+      timeoutMs: 50,
+      pollIntervalMs: 10,
+      now: () => clock,
+    });
+
+    // Handed back NOT settled, so the mapping reports UNSETTLED rather than a pass.
+    expect(result?.[0]?.status).toBe("in_progress");
+    expect(checkRunFindings(result)[0]?.severity).toBe("error");
+    expect(clock).toBeLessThanOrEqual(60);
+  });
+
+  it("returns null when the checks cannot be read, and does not keep polling", async () => {
+    let reads = 0;
+    const result = await settlePullRequestChecks({
+      fetchChecks: async () => {
+        reads += 1;
+        return null;
+      },
+      sleep: async () => {},
+      timeoutMs: 1000,
+      pollIntervalMs: 10,
+      now: () => 0,
+    });
+
+    expect(result).toBeNull();
+    expect(reads).toBe(1);
   });
 });
