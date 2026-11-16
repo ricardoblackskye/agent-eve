@@ -500,13 +500,17 @@ export function createOpenSandboxProvider(
         },
         runTests: async (
           cmd?: string,
+          options?: { allowedCommands?: readonly string[] },
         ): Promise<{ passed: boolean; output: string; ran: boolean }> => {
           const command = (
             cmd ??
             ALLOWED_TEST_COMMAND_PREFIXES[0] ??
             "npx vitest"
           ).trim();
-          assertAllowedTestCommand(command, allowedCommands);
+          // #659: a consumer authorises its OWN commands for the call (the lint gate runs the target's
+          // declared checks) instead of widening the agent's shared list (#437). The list captured at
+          // creation stays the default, so every existing caller is unaffected.
+          assertAllowedTestCommand(command, options?.allowedCommands ?? allowedCommands);
           const handle = await sandbox();
           const execution = await handle.commands.run(command);
           const stdout = execution.logs.stdout
