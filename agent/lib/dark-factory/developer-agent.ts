@@ -562,6 +562,25 @@ export const ALLOWED_TEST_COMMAND_PREFIXES: readonly string[] = [
   "npx tsc",
 ];
 
+/**
+ * The commands either execution backend will run (#659).
+ *
+ * A SECURITY control, so it grows by NAME and never by wildcard. RED stub: the list and the predicate
+ * are implemented in the GREEN commit; this alias keeps the existing export working meanwhile.
+ */
+export const ALLOWED_WORKSPACE_COMMAND_PREFIXES: readonly string[] =
+  ALLOWED_TEST_COMMAND_PREFIXES;
+
+/** Whether a command may run in the workspace. Stub: implemented in the GREEN commit. */
+export function isAllowedWorkspaceCommand(_command: string): boolean {
+  throw new Error("not implemented");
+}
+
+/** The lint commands a target declares, from its package.json scripts. Stub for the RED commit. */
+export function resolveLintCommands(_packageJson: unknown): string[] {
+  throw new Error("not implemented");
+}
+
 export const ALLOWED_WORKSPACE_EXTENSIONS: ReadonlySet<string> = new Set([
   ".ts",
   ".tsx",
