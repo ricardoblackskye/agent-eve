@@ -211,6 +211,13 @@ export function renderPlanFile(
   // precedent. The rules this renderer CAN satisfy - MD040, MD024, MD026 - are deliberately left on.
   lines.push("<!-- markdownlint-disable MD013 -->", "");
 
+  // #659: exempt the GENERATED file from the target's spell-checker. cspell reads that repository's
+  // dictionary, which knows general English rather than the model's domain vocabulary - measured on
+  // WebFeedPOC, whose own `build:prerender` script's word `prerendered` it rejected. The artifact is
+  // rendered after the coding loop and the Definition of Done cannot fix it, so a spell failure here
+  // meant no run could ever complete. This applies to this file only; human-authored files stay checked.
+  lines.push("<!-- cspell:disable -->", "");
+
   lines.push(`# Plan: ${headingText(plan.title)}`, "");
   lines.push(`Story: #${plan.storyId}`);
   if (options.issueUrl) {

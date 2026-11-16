@@ -1445,6 +1445,11 @@ async function main(): Promise<void> {
     testResults: capturedTestResults,
   };
 
+  // #659: ONE budget for the DoD's check wait. `runChecks` runs once per review round, and passing the
+  // full timeout each time made a blocked run against a slow CI wait ten minutes per round for checks
+  // that had already concluded (measured: ~25 minutes of silence). Consume a single deadline instead.
+  const checkWaitDeadline = Date.now() + PR_CHECKS_TIMEOUT_MS;
+
   // #659: the Definition of Done opens the PR itself, and calls runChecks afterwards, so the gate needs
   // the pull request it just opened. Capturing it here keeps the DoD's own interface unchanged.
   const capturingPrWriter: PrOpener = {
@@ -1473,7 +1478,7 @@ async function main(): Promise<void> {
             ? makePullRequestCheckFetcher({ token, repo: targetRepo, prNumber: openedPr })
             : async () => null,
           sleep: (ms: number) => new Promise((resolve) => setTimeout(resolve, ms)),
-          timeoutMs: PR_CHECKS_TIMEOUT_MS,
+          timeoutMs: Math.max(0, checkWaitDeadline - Date.now()),
           pollIntervalMs: PR_CHECKS_POLL_INTERVAL_MS,
         }),
       ),

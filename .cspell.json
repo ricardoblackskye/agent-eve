@@ -242,7 +242,9 @@
     "npipe",
     "MSYS",
     "KEYID",
-    "ECONNRESET"
+    "ECONNRESET",
+    "prerender",
+    "prerendered"
   ],
   "ignorePaths": [
     "node_modules/**",
