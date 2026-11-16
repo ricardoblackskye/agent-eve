@@ -10,7 +10,7 @@
 > is [Dark Factory (R1)](dark-factory.md) and the flow walkthroughs in the
 > [flow deep-dives](flow-run-lifecycle.md).
 
-_126 modules._
+_127 modules._
 
 ## agent-cli-author
 
@@ -376,6 +376,15 @@ Dark Factory — Developer Agent (issues #131 / story #133). A sandboxed coding 
 **Source:** [`agent/lib/dark-factory/developer-agent.ts`](../../agent/lib/dark-factory/developer-agent.ts)
 
 **Exports:** `ALLOWED_SKELETON_EXTENSIONS`, `ALLOWED_TOOLS`, `ALLOWED_WORKSPACE_EXTENSIONS`, `CodingLoopOptions`, `CommandRunnerFn`, `DeveloperAgent`, `DeveloperAgentConfig`, `InvalidTaskError`, `IterationRecord`, `LoopContext`, `LoopResult`, `MultiFileCodingLoopOptions`, `SkeletonMap`, `SkeletonMapError`, `TaskAssignment`, `TaskAssignmentInput`, `ToolNotAllowedError`, `WorkerFn`, `WorkerResult`, `WorkerUsageSink`, `WorkspaceTools`, `applySkeletalMap`, `assertToolAllowed`, `createDeveloperAgent`, `createWorkspaceTools`, `runCodingLoop`, `runMultiFileCodingLoop`, `toTaskAssignment`, `toTaskStatus`
+
+## developer-identity
+
+The Developer's static persona prose (#631), generated from
+`docs/dark-factory/developer/instructions.md`. The markdown is the source of truth and the shipped
+module is byte-identical to it, so the prompt builders interpolate the prose rather than each
+carrying a private copy.
+
+**Source:** [`agent/lib/dark-factory/developer-identity.ts`](../../agent/lib/dark-factory/developer-identity.ts)
 
 ## diff-capture
 
