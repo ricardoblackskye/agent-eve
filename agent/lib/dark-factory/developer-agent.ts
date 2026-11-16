@@ -545,7 +545,10 @@ export interface WorkspaceTools {
   readFile(relPath: string): Promise<string>;
   writeFile(relPath: string, content: string): Promise<void>;
   listFiles(pattern?: string): Promise<string[]>;
-  runTests(cmd?: string): Promise<{ passed: boolean; output: string; ran: boolean }>;
+  runTests(
+    cmd?: string,
+    options?: { allowedCommands?: readonly string[] },
+  ): Promise<{ passed: boolean; output: string; ran: boolean }>;
 }
 
 export type CommandRunnerFn = (
@@ -565,9 +568,21 @@ export const ALLOWED_WORKSPACE_COMMAND_PREFIXES: readonly string[] = [
   "npx vitest",
   "npm test",
   "npx tsc",
-  "npm run lint",
-  "npm run typecheck",
 ];
+
+/**
+ * The commands the LINT GATE may run - a set of its own, deliberately NOT folded into the list above.
+ *
+ * #437 settled this: a consumer states its own command set rather than widening the Developer Agent's
+ * blast radius, and its guard fails the moment the scan is "simplified" by sharing the constant. The same
+ * reasoning applies here, and the lint step passes this list at the call site the way the scan does.
+ */
+export const LINT_COMMAND_PREFIXES: readonly string[] = ["npm run lint", "npm run typecheck"];
+
+/** The shared list widened for a run whose target declares lint commands (#659). */
+export function workspaceCommandsFor(lintCommands: readonly string[]): readonly string[] {
+  return [...ALLOWED_WORKSPACE_COMMAND_PREFIXES, ...lintCommands];
+}
 
 /** The same list under the name it had before #659, kept for the existing importers. */
 export const ALLOWED_TEST_COMMAND_PREFIXES: readonly string[] =
@@ -779,7 +794,10 @@ export function createWorkspaceTools(
       return results;
     },
 
-    async runTests(cmd?: string): Promise<{ passed: boolean; output: string; ran: boolean }> {
+    async runTests(
+      cmd?: string,
+      options?: { allowedCommands?: readonly string[] },
+    ): Promise<{ passed: boolean; output: string; ran: boolean }> {
       const testCmd = (cmd ?? "npx vitest run").trim();
 
       // Security: Disallow all shell metacharacters, subshells, substitutions, and redirections
@@ -806,7 +824,7 @@ export function createWorkspaceTools(
       }
 
       // Security: allowlisted workspace commands, matched by ONE shared predicate (#659).
-      if (!isAllowedWorkspaceCommand(testCmd)) {
+      if (!isAllowedWorkspaceCommand(testCmd, options?.allowedCommands)) {
         throw new InvalidTaskError(
           `Command '${testCmd}' is not allowed. Only [${ALLOWED_WORKSPACE_COMMAND_PREFIXES.join(", ")}] are permitted, and never with a writing flag such as --fix.`,
         );

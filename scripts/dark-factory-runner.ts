@@ -69,6 +69,7 @@ import {
   runMultiFileCodingLoop,
   toTaskAssignment,
   type LoopResult,
+  workspaceCommandsFor,
 } from "../agent/lib/dark-factory/developer-agent";
 import {
   createCircuitBreaker,
@@ -1262,7 +1263,11 @@ async function main(): Promise<void> {
               // failure is returned as a FAILED ITERATION, so the existing self-correction loop fixes it
               // exactly as it fixes a failing test - the run cannot reach done while they are red.
               for (const lintCommand of targetLintCommands) {
-                const lint = await ctx.tools.runTests(lintCommand);
+                // The lint set is stated AT THE CALL SITE rather than folded into the agent's shared
+                // list (#437): a consumer names its own commands, exactly as the AMM scan does.
+                const lint = await ctx.tools.runTests(lintCommand, {
+                  allowedCommands: workspaceCommandsFor(targetLintCommands),
+                });
                 if (!lint.ran) continue; // UNMEASURED: the check could not start, so it is not a verdict
                 if (!lint.passed) {
                   console.log(`     Lint result: FAIL (${lintCommand})`);
