@@ -58,7 +58,7 @@ function toText(value: unknown): string {
 
 /** Heading text must not end in punctuation (MD026), and must be a single line. */
 function headingText(text: unknown): string {
-  return toText(text)
+  return neutralizeBareUrls(toText(text))
     .replace(/\s+/g, " ")
     .trim()
     .replace(/[.,;:!?]+$/, "")
@@ -74,7 +74,7 @@ function headingText(text: unknown): string {
  * js/incomplete-sanitization, and it is right to.
  */
 function cell(text: unknown): string {
-  return toText(text)
+  return neutralizeBareUrls(toText(text))
     .replace(/\s+/g, " ")
     .replace(/\\/g, "\\\\")
     .replace(/\|/g, "\\|")
@@ -93,7 +93,7 @@ function cell(text: unknown): string {
  * before the plan comment and the park.
  */
 function text(value: unknown): string {
-  return typeof value === "string" ? value.trim() : "";
+  return typeof value === "string" ? neutralizeBareUrls(value.trim()) : "";
 }
 
 /**
@@ -103,11 +103,11 @@ function text(value: unknown): string {
  * whether the risk is acceptable. An unrecognised shape renders as "" and is skipped.
  */
 function riskText(value: unknown): string {
-  if (typeof value === "string") return value.trim();
+  if (typeof value === "string") return neutralizeBareUrls(value.trim());
   if (typeof value === "object" && value !== null) {
     const { risk, mitigation } = value as { risk?: unknown; mitigation?: unknown };
-    const head = typeof risk === "string" ? risk.trim() : "";
-    const tail = typeof mitigation === "string" ? mitigation.trim() : "";
+    const head = typeof risk === "string" ? neutralizeBareUrls(risk.trim()) : "";
+    const tail = typeof mitigation === "string" ? neutralizeBareUrls(mitigation.trim()) : "";
     if (head && tail) return `${head} (Mitigation: ${tail})`;
     return head || tail;
   }
@@ -139,6 +139,65 @@ function withFenceLanguages(text: string): string {
     .join("\n");
 }
 
+/**
+ * A bare URL becomes an inline code span.
+ *
+ * MegaLinter lints the generated plan, and a URL the MODEL wrote in prose used to be emitted verbatim:
+ * that fails MD034 (no-bare-urls). Wrapping it in an autolink instead would only move the problem, because
+ * a link checker then FOLLOWS it and reports the unreachable ones - a dev-server URL such as
+ * `http://localhost:5173/` is guaranteed to fail. A code span is the one form that is neither a bare URL
+ * nor a link, and it keeps the URL readable.
+ *
+ * Left alone: a URL inside a fenced block or an inline code span (neither is bare, and both are ignored by
+ * the linters), and a URL in a markdown link's target - that is the model's own legitimate link, and
+ * rewriting it would break the link's syntax.
+ */
+const BARE_URL = /(^|[^`<(])(https?:\/\/[^\s`<>]+)/g;
+
+function codeSpanUrls(segment: string): string {
+  return segment.replace(BARE_URL, (_match, lead: string, url: string) => {
+    const trailing = url.match(/[.,;:]+$/)?.[0] ?? "";
+    const bare = trailing === "" ? url : url.slice(0, -trailing.length);
+    return `${lead}\`${bare}\`${trailing}`;
+  });
+}
+
+function neutralizeBareUrls(value: string): string {
+  let inFence = false;
+  return value
+    .split("\n")
+    .map((line) => {
+      if (line.trim().startsWith("```")) {
+        inFence = !inFence;
+        return line;
+      }
+      if (inFence) return line;
+      return line
+        .split(/(`[^`]*`)/)
+        .map((segment) => (segment.startsWith("`") ? segment : codeSpanUrls(segment)))
+        .join("");
+    })
+    .join("\n");
+}
+
+/**
+ * Render a table in the pinned markdown-table-formatter shape.
+ *
+ * MegaLinter runs markdown-table-formatter over changed markdown, and it rewrites a `| --- |` separator
+ * into dashes padded to each column's width. A renderer that emits the form that is not padded is therefore flagged
+ * on EVERY run - which is exactly what happened to a real plan artifact. Widths are measured on the
+ * ESCAPED, NEUTRALIZED cell text, because that is what ends up in the line.
+ */
+function renderTable(header: string[], rows: string[][]): string[] {
+  const widths = header.map((cell, column) =>
+    Math.max(cell.length, ...rows.map((row) => (row[column] ?? "").length)),
+  );
+  const render = (cells: string[]): string =>
+    `| ${cells.map((cell, column) => cell.padEnd(widths[column] ?? 0)).join(" | ")} |`;
+  const separator = `|${widths.map((width) => "-".repeat(width + 2)).join("|")}|`;
+  return [render(header), separator, ...rows.map(render)];
+}
+
 /** Render a plan as a reviewable markdown file. */
 export function renderPlanFile(
   plan: PlanFileInput,
@@ -151,6 +210,13 @@ export function renderPlanFile(
   // generated catalogue (docs/pages/dark-factory-modules.md), so the generated plan follows the same
   // precedent. The rules this renderer CAN satisfy - MD040, MD024, MD026 - are deliberately left on.
   lines.push("<!-- markdownlint-disable MD013 -->", "");
+
+  // #659: exempt the GENERATED file from the target's spell-checker. cspell reads that repository's
+  // dictionary, which knows general English rather than the model's domain vocabulary - measured on
+  // WebFeedPOC, whose own `build:prerender` script's word `prerendered` it rejected. The artifact is
+  // rendered after the coding loop and the Definition of Done cannot fix it, so a spell failure here
+  // meant no run could ever complete. This applies to this file only; human-authored files stay checked.
+  lines.push("<!-- cspell:disable -->", "");
 
   lines.push(`# Plan: ${headingText(plan.title)}`, "");
   lines.push(`Story: #${plan.storyId}`);
@@ -195,23 +261,31 @@ export function renderPlanFile(
   }
 
   lines.push("## Files to change", "");
-  lines.push("| File | Action | Rationale |", "| --- | --- | --- |");
-  for (const file of plan.targetFiles) {
-    lines.push(
-      `| \`${cell(file.path)}\` | ${cell(file.action)} | ${cell(file.rationale)} |`,
-    );
-  }
+  lines.push(
+    ...renderTable(
+      ["File", "Action", "Rationale"],
+      plan.targetFiles.map((file) => [
+        `\`${cell(file.path)}\``,
+        cell(file.action),
+        cell(file.rationale),
+      ]),
+    ),
+  );
   lines.push("");
 
   const acceptanceCriteria = plan.acceptanceCriteriaMap ?? [];
   if (acceptanceCriteria.length > 0) {
     lines.push("## Acceptance criteria", "");
-    lines.push("| AC | Test | Case |", "| --- | --- | --- |");
-    for (const ac of acceptanceCriteria) {
-      lines.push(
-        `| ${cell(ac.acId)} | \`${cell(ac.testFile)}\` | ${cell(ac.testCaseName)} |`,
-      );
-    }
+    lines.push(
+      ...renderTable(
+        ["AC", "Test", "Case"],
+        acceptanceCriteria.map((ac) => [
+          cell(ac.acId),
+          `\`${cell(ac.testFile)}\``,
+          cell(ac.testCaseName),
+        ]),
+      ),
+    );
     lines.push("");
   }
 

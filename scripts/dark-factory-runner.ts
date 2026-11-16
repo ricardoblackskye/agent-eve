@@ -27,10 +27,16 @@ import {
   resolveWorkspaceOverride,
 } from "../agent/lib/dark-factory/plan-workspace";
 import {
+
   runDefinitionOfDone,
   type DefinitionOfDoneDeps,
   type DefinitionOfDoneTask,
   type ReviewFinding,
+  type PrCheckRun,
+  type PrOpener,
+  checkRunFindings,
+  settlePullRequestChecks,
+  type DefinitionOfDoneResult,
 } from "../agent/lib/dark-factory/definition-of-done";
 import {
   applyStartLifecycle,
@@ -59,11 +65,13 @@ import {
 import { DEFAULT_SANDBOX_WORKSPACE } from "../agent/lib/dark-factory/opensandbox-driver";
 import {
   artefactIdentity,
+  resolveLintCommands,
   CircuitTrippedError,
   DeveloperAgent,
   runMultiFileCodingLoop,
   toTaskAssignment,
   type LoopResult,
+  workspaceCommandsFor,
 } from "../agent/lib/dark-factory/developer-agent";
 import {
   createCircuitBreaker,
@@ -256,6 +264,57 @@ export function resolveRunnerRunId(
   return index !== -1 && argv[index + 1]
     ? argv[index + 1]
     : `run-${issueNum}-${now}`;
+}
+
+/** How long a single review round waits for checks that are still running, and how often it looks (#659). */
+const PR_CHECKS_TIMEOUT_MS = Number(process.env.DF_PR_CHECKS_TIMEOUT_MS ?? 300_000);
+const PR_CHECKS_POLL_INTERVAL_MS = 15_000;
+
+/** The pull request the Definition of Done opened, so the check gate can read it (#659). */
+let openedPr: number | undefined;
+
+/**
+ * Read the check runs on a pull request's CURRENT head.
+ *
+ * Returns null rather than throwing when anything goes wrong, because "we could not read the checks" has
+ * to stay distinguishable from "the checks passed" (#659): the mapping turns null into a warning, never
+ * into a silent pass.
+ */
+function makePullRequestCheckFetcher(deps: {
+  token: string;
+  repo: string;
+  prNumber: number;
+}): () => Promise<PrCheckRun[] | null> {
+  const headers = {
+    Authorization: `token ${deps.token}`,
+    Accept: "application/vnd.github+json",
+    "User-Agent": "dark-factory-runner",
+  };
+
+  return async () => {
+    try {
+      const prResponse = await fetch(
+        `https://api.github.com/repos/${deps.repo}/pulls/${deps.prNumber}`,
+        { headers },
+      );
+      if (!prResponse.ok) return null;
+      const pr = (await prResponse.json()) as { head?: { sha?: string } };
+      const sha = pr.head?.sha;
+      if (!sha) return null;
+
+      // By head SHA rather than by PR: a fix pushed during the review loop moves the head, and reading the
+      // older head's verdict would certify code that is no longer there.
+      const checksResponse = await fetch(
+        `https://api.github.com/repos/${deps.repo}/commits/${sha}/check-runs`,
+        { headers },
+      );
+      if (!checksResponse.ok) return null;
+      const body = (await checksResponse.json()) as { check_runs?: PrCheckRun[] };
+      return Array.isArray(body.check_runs) ? body.check_runs : null;
+    } catch {
+      return null;
+    }
+  };
 }
 
 async function main(): Promise<void> {
@@ -1084,6 +1143,18 @@ async function main(): Promise<void> {
             );
           }
         }
+        // #659: which checks the TARGET declares, resolved once from its own package.json. An absent or
+        // unreadable manifest resolves to NOTHING, which is UNMEASURED - never reported as lint-clean.
+        const targetLintCommands = await (async (): Promise<string[]> => {
+          try {
+            return resolveLintCommands(
+              JSON.parse(await workspaceTools.readFile("package.json")),
+            );
+          } catch {
+            return [];
+          }
+        })();
+
         const loopOutcome = await runMultiFileCodingLoop({
           plan: executionPlan,
           tools: workspaceTools,
@@ -1188,6 +1259,33 @@ async function main(): Promise<void> {
               // deserialized plan may omit it (the architect returned one without it at STEP 3.5), so
               // iterate the fallback, not the field directly.
               recordPassingTestResults(ctx.plan, capturedTestResults);
+
+              // #659: green tests are not "done" if the target's own checks fail. The PR is what a human
+              // has to get merged, so the run has to satisfy the checks the repository itself runs. A lint
+              // failure is returned as a FAILED ITERATION, so the existing self-correction loop fixes it
+              // exactly as it fixes a failing test - the run cannot reach done while they are red.
+              for (const lintCommand of targetLintCommands) {
+                // The lint set is stated AT THE CALL SITE rather than folded into the agent's shared
+                // list (#437): a consumer names its own commands, exactly as the AMM scan does.
+                const lint = await ctx.tools.runTests(lintCommand, {
+                  allowedCommands: workspaceCommandsFor(targetLintCommands),
+                });
+                if (!lint.ran) continue; // UNMEASURED: the check could not start, so it is not a verdict
+                if (!lint.passed) {
+                  console.log(`     Lint result: FAIL (${lintCommand})`);
+                  // Same reasoning as the test path above: a bare "FAIL" is undiagnosable once the
+                  // sandbox is disposed. Print a BOUNDED tail so the cause is readable from the log.
+                  const lintTail = lint.output.trim().slice(-1200);
+                  if (lintTail) console.log(`     Lint failure (tail):\n${lintTail}`);
+                  return {
+                    passed: false,
+                    output:
+                      `The repository's own check failed: ${lintCommand} (the target's lint is part of ` +
+                      `done)\n\n${lint.output}`,
+                  };
+                }
+                console.log(`     Lint result: PASS (${lintCommand})`);
+              }
             }
 
             // #651: report the identity of what this iteration authored, so the loop can detect a no-op
@@ -1347,30 +1445,43 @@ async function main(): Promise<void> {
     testResults: capturedTestResults,
   };
 
+  // #659: ONE budget for the DoD's check wait. `runChecks` runs once per review round, and passing the
+  // full timeout each time made a blocked run against a slow CI wait ten minutes per round for checks
+  // that had already concluded (measured: ~25 minutes of silence). Consume a single deadline instead.
+  const checkWaitDeadline = Date.now() + PR_CHECKS_TIMEOUT_MS;
+
+  // #659: the Definition of Done opens the PR itself, and calls runChecks afterwards, so the gate needs
+  // the pull request it just opened. Capturing it here keeps the DoD's own interface unchanged.
+  const capturingPrWriter: PrOpener = {
+    createPullRequest: async (owner, repoName, options) => {
+      const result = await prWriter.createPullRequest(owner, repoName, options);
+      if (result.ok && result.pr) openedPr = result.pr.number;
+      return result;
+    },
+  };
+
   const dodDeps: DefinitionOfDoneDeps = {
-    prWriter,
+    prWriter: capturingPrWriter,
     commentWriter: {
       postComment: async (owner, repo, prNum, body) => {
         const res = await issueWriter.postComment(owner, repo, prNum, body);
         return { ok: res.ok, error: res.error };
       },
     },
-    runChecks: async () => {
-      try {
-        execSync("npx tsc --noEmit", { stdio: "pipe" });
-        return [];
-      } catch {
-        return [
-          {
-            id: "TYPE-CHECK-FAIL",
-            source: "linter",
-            message:
-              "TypeScript compiler reported type error in generated code",
-            severity: "error",
-          },
-        ];
-      }
-    },
+    // #659: the checks the PULL REQUEST is actually running. What this replaces ran
+    // `npx tsc --noEmit` in THIS process's working directory, which on the vault path is a tree without
+    // the run's changes - a check that could never fail on the thing it claimed to check.
+    runChecks: async () =>
+      checkRunFindings(
+        await settlePullRequestChecks({
+          fetchChecks: openedPr
+            ? makePullRequestCheckFetcher({ token, repo: targetRepo, prNumber: openedPr })
+            : async () => null,
+          sleep: (ms: number) => new Promise((resolve) => setTimeout(resolve, ms)),
+          timeoutMs: Math.max(0, checkWaitDeadline - Date.now()),
+          pollIntervalMs: PR_CHECKS_POLL_INTERVAL_MS,
+        }),
+      ),
   };
 
   const dodResult = await runDefinitionOfDone(dodDeps, dodTask);
@@ -1380,26 +1491,31 @@ async function main(): Promise<void> {
 
   if (dodResult.pr) {
     line("Live PR URL", dodResult.pr.url);
+  }
+
+  if (dodResult.pr) {
     await applyTerminalLifecycle(
       { labelWriter, runHistory },
       {
         repo: targetRepo,
         issue: issueNum,
         runId,
-        terminalStatus: "succeeded",
+        // #659: the lifecycle follows the VERDICT. It used to be "succeeded" whenever a PR existed, so the
+        // record and the ticket comment agreed with each other and disagreed with the DoD.
+        terminalStatus: dodResult.ok ? "succeeded" : "failed",
         dodResult,
       },
     );
-    await issueWriter.postComment(
-      repoOwner,
-      repoName,
-      issueNum,
-      `🤖 **Eve** (Dark Factory) — Story #${issueNum} Completed with Verified Traceability ✅\n\n` +
-        `- **PR**: ${dodResult.pr.url}\n` +
-        `- **Traceability Matrix**:\n\n${dodResult.traceabilityTable ?? "Verified"}\n` +
-        `- **Lifecycle**: \`df:done\``,
-    );
   }
+
+  // #659: posted for BOTH outcomes. A run that refused to finish is exactly the run whose ticket must say
+  // so - silence there is how a blocked run looked like a success.
+  await issueWriter.postComment(
+    repoOwner,
+    repoName,
+    issueNum,
+    dodOutcomeComment(issueNum, dodResult),
+  );
 
   console.log(
     "\n================================================================================",
@@ -1592,6 +1708,43 @@ export function filesToCommitFromRun(
 }
 
 /** #361 (Task 10) - where a run commits its rendered plan. */
+/**
+ * The comment posted to the ticket after the Definition of Done (#659).
+ *
+ * Gated on the VERDICT, never on a pull request merely existing. A blocked DoD still leaves its PR
+ * behind, and announcing "Completed ✅ / df:done" for it put the lie exactly where a human looks - the
+ * label path already refuses (`isDoneGateSatisfied`), so the comment was the last thing claiming success.
+ * A not-done comment names the status, says so plainly, and carries the findings that stopped the run.
+ */
+export function dodOutcomeComment(
+  issueNum: number,
+  dodResult: DefinitionOfDoneResult,
+): string {
+  if (dodResult.ok && dodResult.pr) {
+    return (
+      `🤖 **Eve** (Dark Factory) — Story #${issueNum} Completed with Verified Traceability ✅\n\n` +
+      `- **PR**: ${dodResult.pr.url}\n` +
+      `- **Traceability Matrix**:\n\n${dodResult.traceabilityTable ?? "Verified"}\n` +
+      `- **Lifecycle**: \`df:done\``
+    );
+  }
+
+  const findings = dodResult.remainingFindings
+    .map((finding) => `- \`${finding.id}\` (${finding.severity}): ${finding.message}`)
+    .join("\n");
+
+  return (
+    `🤖 **Eve** (Dark Factory) — Story #${issueNum} is NOT done ❌\n\n` +
+    `The run stopped with status \`${dodResult.status}\` and did **not** report done.\n` +
+    (dodResult.reason ? `\n- **Reason**: ${dodResult.reason}\n` : "") +
+    (dodResult.pr
+      ? `- **PR** (left open - do not merge until its checks are green): ${dodResult.pr.url}\n`
+      : "") +
+    (findings ? `\n**Outstanding findings**\n\n${findings}\n` : "") +
+    `\n- **Lifecycle**: \`${dodResult.status}\``
+  );
+}
+
 export function planFilePath(issueNum: number): string {
   return `.hermes/plans/df-${issueNum}.md`;
 }

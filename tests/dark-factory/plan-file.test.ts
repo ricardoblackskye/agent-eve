@@ -208,3 +208,116 @@ describe("renderPlanFile", () => {
     expect(firstLine).not.toContain("MD026");
   });
 });
+
+/**
+ * #659 - the artifact must survive the TARGET repository's linting.
+ *
+ * A real run reported `DoD Status: done` and opened a PR whose MegaLinter job FAILED, with every
+ * run-caused finding inside THIS file: `.hermes/plans/df-208.md`. Two of them are properties of this
+ * renderer rather than of the model's prose, and both reproduce on a fresh render:
+ *
+ *   markdown-table-formatter  the tables are emitted as `| --- |`, which the pinned formatter rewrites
+ *                             on every run - so EVERY generated plan is flagged.
+ *   MD034 + lychee            model prose is embedded verbatim, so a URL the model writes in a summary
+ *                             or an objective becomes a bare URL (and a link a checker then follows).
+ *
+ * The renderer already constrains its OWN lines (MD013, MD040, MD024, MD026, MD034 on the Issue line).
+ * These tests extend that to the prose it embeds.
+ */
+describe("#659 the rendered plan is lint-clean for the target", () => {
+  it("emits no BARE URL, even when the model writes one in prose", () => {
+    const md = renderPlanFile({
+      storyId: 208,
+      title: "Artifact lint contract",
+      summary: "See http://localhost:5173/ for the dev server.",
+      approach: "Use https://example.com/docs for reference.",
+      tasks: [
+        {
+          title: "Do it",
+          objective: "Open http://localhost:5173/ and check.",
+          steps: ["Visit http://localhost:5173/"],
+          verification: "Confirm http://localhost:5173/ loads",
+        },
+      ],
+      targetFiles: [
+        { path: "src/a.jsx", action: "modify", rationale: "see http://localhost:5173/" },
+      ],
+      risks: ["http://localhost:5173/ may be unreachable"],
+    } as never);
+
+    // MD034 is satisfied by an inline code span or by a markdown link's TARGET; a bare URL is neither.
+    // Stripping both leaves only the URLs that markdownlint and lychee would see.
+    const asLinted = md.replace(/`[^`]*`/g, "").replace(/\]\([^)]*\)/g, "]");
+    expect(asLinted).not.toMatch(/https?:\/\//);
+
+    // Neutralized, not deleted: the URL stays readable to a human.
+    expect(md).toContain("`http://localhost:5173/`");
+  });
+
+  it("emits its tables in the pinned formatter's shape, so every plan is not flagged", () => {
+    const md = renderPlanFile({
+      storyId: 659,
+      title: "Tables",
+      summary: "s",
+      targetFiles: [
+        { path: "src/a.jsx", action: "modify", rationale: "because reasons" },
+      ],
+      acceptanceCriteriaMap: [
+        { acId: "AC1", description: "works", testFile: "src/a.test.jsx", testCaseName: "renders" },
+      ],
+    } as never);
+
+    // Byte-for-byte what `markdown-table-formatter@1.6.1` produces for this content: each cell padded to
+    // its column's widest entry, and separators as dashes of that width plus the two cell spaces.
+    expect(md).toContain(
+      [
+        "| File        | Action | Rationale       |",
+        "|-------------|--------|-----------------|",
+        "| `src/a.jsx` | modify | because reasons |",
+      ].join("\n"),
+    );
+    expect(md).toContain(
+      [
+        "| AC  | Test             | Case    |",
+        "|-----|------------------|---------|",
+        "| AC1 | `src/a.test.jsx` | renders |",
+      ].join("\n"),
+    );
+  });
+});
+
+/**
+ * #659 - the generated plan is exempt from the target's spell-checker.
+ *
+ * The plan is machine-authored prose committed into the TARGET repository, so the target's cspell lints
+ * it. Its dictionary is general English, so a model writing domain vocabulary fails it - measured on
+ * WebFeedPOC, where `prerendered` was rejected although that repository's own package.json ships a
+ * `build:prerender` script. The artifact cannot be repaired afterwards either: the plan is rendered after
+ * the coding loop, and the Definition of Done has no fix capability, so a spell failure there meant no
+ * run could ever complete.
+ */
+describe("#659 the plan artifact is not spell-checked", () => {
+  it("carries a cspell:disable directive", () => {
+    const md = renderPlanFile({
+      title: "Add the credit line",
+      storyId: 212,
+      summary: "Adds one italic line to the home page and nothing else.",
+      tasks: [],
+      targetFiles: [{ path: "src/pages/HomePage.jsx", action: "modify" }],
+    } as never);
+
+    expect(md).toContain("<!-- cspell:disable -->");
+  });
+
+  it("keeps the directive ABOVE the h1, so it applies to the whole file", () => {
+    const md = renderPlanFile({
+      title: "Add the credit line",
+      storyId: 212,
+      summary: "x",
+      tasks: [],
+      targetFiles: [],
+    } as never);
+
+    expect(md.indexOf("<!-- cspell:disable -->")).toBeLessThan(md.indexOf("# Plan:"));
+  });
+});

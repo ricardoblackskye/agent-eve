@@ -13,7 +13,9 @@ import {
  * no credential. What matters here: the guards still fire, the egress policy is deny-by-default, and
  * teardown always happens.
  */
-function fakeHandle(over: Partial<{ exitCode: number | undefined }> = {}) {
+function fakeHandle(
+  over: Partial<{ exitCode: number | undefined; stderr: string }> = {},
+) {
   const calls = { run: [] as string[], write: [] as { path: string; data: string }[], kill: 0, close: 0 };
   const handle: SandboxHandle = {
     id: "sbx-1",
@@ -22,7 +24,10 @@ function fakeHandle(over: Partial<{ exitCode: number | undefined }> = {}) {
         calls.run.push(command);
         return {
           exitCode: "exitCode" in over ? over.exitCode : 0,
-          logs: { stdout: [{ text: "ok" }], stderr: [] },
+          logs: {
+            stdout: [{ text: "ok" }],
+            stderr: over.stderr ? [{ text: over.stderr }] : [],
+          },
         };
       },
     },
@@ -355,5 +360,90 @@ describe("#354 sandbox connection config (server proxy)", () => {
     expect(
       sandboxConnectionConfig({ DF_SANDBOX_USE_SERVER_PROXY: "   " }).useServerProxy,
     ).toBe(false);
+  });
+});
+
+/**
+ * #659 — a consumer states its own command set at the CALL rather than widening the agent's list (#437).
+ *
+ * The end-to-end run is what caught this: the lint step passed its allowlist, the driver ignored it and
+ * fell back to the agent's shared list, and the run aborted with
+ *
+ *     Command 'npm run lint' is not allowed. Only [npx vitest, npm test, npx tsc] are permitted
+ *
+ * after the tests had already passed. A guard that silently ignores the list it is handed is worse than
+ * no list at all: the caller believes it has authorized something, and the failure arrives later.
+ */
+describe("#659 the driver honours a per-call allowlist", () => {
+  async function toolsFor(over: Parameters<typeof fakeHandle>[0] = {}) {
+    const { handle } = fakeHandle(over);
+    const provider = createOpenSandboxProvider(env, {
+      createSandbox: vi.fn(async (_spec: SandboxCreateSpec) => handle),
+    });
+    return provider.create("/workspace");
+  }
+
+  it("still refuses the target's lint command by DEFAULT, so the agent's blast radius is unchanged", async () => {
+    const tools = await toolsFor();
+    await expect(tools.runTests("npm run lint")).rejects.toThrow(/not allowed/);
+  });
+
+  it("allows it when the call states its own set", async () => {
+    const tools = await toolsFor();
+    const result = await tools.runTests("npm run lint", {
+      allowedCommands: ["npm run lint"],
+    });
+    expect(result.passed).toBe(true);
+  });
+
+  it("runs the command it was authorized to run, and nothing else", async () => {
+    const { handle } = fakeHandle();
+    const provider = createOpenSandboxProvider(env, {
+      createSandbox: vi.fn(async (_spec: SandboxCreateSpec) => handle),
+    });
+    const tools = provider.create("/workspace");
+
+    await tools.runTests("npm run lint", { allowedCommands: ["npm run lint"] });
+    // The per-call list REPLACES the default for that call: an unauthorized command stays refused.
+    await expect(
+      tools.runTests("npm run deploy", { allowedCommands: ["npm run lint"] }),
+    ).rejects.toThrow(/not allowed/);
+  });
+
+  it("refuses a WRITING flag even when the call widens the list", async () => {
+    const tools = await toolsFor();
+    await expect(
+      tools.runTests("npm run lint -- --fix", { allowedCommands: ["npm run lint"] }),
+    ).rejects.toThrow(/not allowed/);
+  });
+});
+
+/**
+ * #659 — a failing check's DIAGNOSTICS must reach the caller.
+ *
+ * `stdout || stderr` reports whichever stream is non-empty. A failing `npm run lint` writes npm's banner
+ * to stdout and every eslint error to stderr, so the banner won and the cause was discarded — from the
+ * log AND from the model's feedback. That is why a run could fail the same check three times with no
+ * visible reason and never self-correct.
+ */
+describe("#659 a failing check reports both streams", () => {
+  it("carries the stderr diagnostics even when stdout is non-empty", async () => {
+    const { handle } = fakeHandle({
+      exitCode: 1,
+      stderr: "src/pages/HomePage.jsx:12:5  error  'x' is not defined  no-undef",
+    });
+    const provider = createOpenSandboxProvider(env, {
+      createSandbox: vi.fn(async (_spec: SandboxCreateSpec) => handle),
+    });
+    const tools = provider.create("/workspace");
+
+    const result = await tools.runTests("npm run lint", {
+      allowedCommands: ["npm run lint"],
+    });
+
+    expect(result.passed).toBe(false);
+    expect(result.output).toContain("no-undef");
+    // The banner is still there: this ADDS the diagnostics, it does not swap one stream for the other.
+    expect(result.output).toContain("ok");
   });
 });

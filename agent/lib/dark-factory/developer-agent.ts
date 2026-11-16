@@ -545,7 +545,10 @@ export interface WorkspaceTools {
   readFile(relPath: string): Promise<string>;
   writeFile(relPath: string, content: string): Promise<void>;
   listFiles(pattern?: string): Promise<string[]>;
-  runTests(cmd?: string): Promise<{ passed: boolean; output: string; ran: boolean }>;
+  runTests(
+    cmd?: string,
+    options?: { allowedCommands?: readonly string[] },
+  ): Promise<{ passed: boolean; output: string; ran: boolean }>;
 }
 
 export type CommandRunnerFn = (
@@ -553,14 +556,89 @@ export type CommandRunnerFn = (
 ) => Promise<{ exitCode: number; stdout: string; stderr: string }>;
 
 /**
- * The ONLY test commands either execution backend will run. Exported so the sandbox driver shares this
- * single list: two copies would drift, and drift here means a command becoming runnable on one backend.
+ * The commands either execution backend will run (#659).
+ *
+ * A SECURITY control, so it grows by NAME and never by wildcard: a bare `npm run` entry would make every
+ * package script runnable, including a postinstall that does whatever it likes.
+ *
+ * The lint entries are the TARGET's own checks. The factory runs the repository's lint rather than a list
+ * of linters it invents, so a repository that lints with something other than eslint is still covered.
  */
-export const ALLOWED_TEST_COMMAND_PREFIXES: readonly string[] = [
+export const ALLOWED_WORKSPACE_COMMAND_PREFIXES: readonly string[] = [
   "npx vitest",
   "npm test",
   "npx tsc",
 ];
+
+/**
+ * The commands the LINT GATE may run - a set of its own, deliberately NOT folded into the list above.
+ *
+ * #437 settled this: a consumer states its own command set rather than widening the Developer Agent's
+ * blast radius, and its guard fails the moment the scan is "simplified" by sharing the constant. The same
+ * reasoning applies here, and the lint step passes this list at the call site the way the scan does.
+ */
+export const LINT_COMMAND_PREFIXES: readonly string[] = ["npm run lint", "npm run typecheck"];
+
+/** The shared list widened for a run whose target declares lint commands (#659). */
+export function workspaceCommandsFor(lintCommands: readonly string[]): readonly string[] {
+  return [...ALLOWED_WORKSPACE_COMMAND_PREFIXES, ...lintCommands];
+}
+
+/**
+ * The output to hand a caller when a command finishes (#659).
+ *
+ * `stdout || stderr` keeps whichever stream happens to be non-empty, which loses the DIAGNOSTICS: a
+ * failing `npm run lint` writes npm's banner to stdout and every error to stderr, so the banner won and
+ * the cause vanished - from the run log AND from the model's feedback, which is why a check could fail
+ * repeatedly with no visible reason and never self-correct. Combine both, stdout first.
+ */
+export function combinedCommandOutput(stdout: string, stderr: string): string {
+  return [stdout, stderr]
+    .map((stream) => stream.trim())
+    .filter((stream) => stream.length > 0)
+    .join("\n");
+}
+
+/** The same list under the name it had before #659, kept for the existing importers. */
+export const ALLOWED_TEST_COMMAND_PREFIXES: readonly string[] =
+  ALLOWED_WORKSPACE_COMMAND_PREFIXES;
+
+/**
+ * Flags that turn a CHECK into a WRITE.
+ *
+ * `npm run lint -- --fix` matches the `npm run lint` prefix, and rewriting the tree behind the coding
+ * loop's back would mean the next iteration reads code the check no longer describes.
+ */
+const WRITING_FLAGS = ["--fix", "--write"];
+
+/** Whether a command may run in the workspace. One definition, shared by both execution backends. */
+export function isAllowedWorkspaceCommand(
+  command: string,
+  allowed: readonly string[] = ALLOWED_WORKSPACE_COMMAND_PREFIXES,
+): boolean {
+  if (command.trim().split(/\s+/).some((token) => WRITING_FLAGS.includes(token))) {
+    return false;
+  }
+  return allowed.some(
+    (prefix) => command === prefix || command.startsWith(`${prefix} `),
+  );
+}
+
+/**
+ * The lint commands a target declares, from its own package.json scripts.
+ *
+ * An absent or unreadable package.json resolves to NOTHING, which is UNMEASURED rather than a pass -
+ * the same distinction the coding loop already draws for a test command that could not start (#541). A
+ * target that declares no check must never be reported as lint-clean.
+ */
+export function resolveLintCommands(packageJson: unknown): string[] {
+  const scripts = (packageJson as { scripts?: unknown } | null)?.scripts;
+  if (typeof scripts !== "object" || scripts === null) return [];
+  const named = scripts as Record<string, unknown>;
+  return ["lint", "typecheck"]
+    .filter((name) => typeof named[name] === "string")
+    .map((name) => `npm run ${name}`);
+}
 
 export const ALLOWED_WORKSPACE_EXTENSIONS: ReadonlySet<string> = new Set([
   ".ts",
@@ -731,7 +809,10 @@ export function createWorkspaceTools(
       return results;
     },
 
-    async runTests(cmd?: string): Promise<{ passed: boolean; output: string; ran: boolean }> {
+    async runTests(
+      cmd?: string,
+      options?: { allowedCommands?: readonly string[] },
+    ): Promise<{ passed: boolean; output: string; ran: boolean }> {
       const testCmd = (cmd ?? "npx vitest run").trim();
 
       // Security: Disallow all shell metacharacters, subshells, substitutions, and redirections
@@ -757,20 +838,16 @@ export function createWorkspaceTools(
         }
       }
 
-      // Security: Allowlist permitted test commands
-      const ALLOWED_TEST_PREFIXES = ALLOWED_TEST_COMMAND_PREFIXES;
-      const isAllowed = ALLOWED_TEST_PREFIXES.some(
-        (prefix) => testCmd === prefix || testCmd.startsWith(`${prefix} `),
-      );
-      if (!isAllowed) {
+      // Security: allowlisted workspace commands, matched by ONE shared predicate (#659).
+      if (!isAllowedWorkspaceCommand(testCmd, options?.allowedCommands)) {
         throw new InvalidTaskError(
-          `Command '${testCmd}' is not allowed. Only test commands starting with [${ALLOWED_TEST_PREFIXES.join(", ")}] are permitted.`,
+          `Command '${testCmd}' is not allowed. Only [${ALLOWED_WORKSPACE_COMMAND_PREFIXES.join(", ")}] are permitted, and never with a writing flag such as --fix.`,
         );
       }
 
       if (commandRunner) {
         const res = await commandRunner(testCmd);
-        const output = res.stdout || res.stderr;
+        const output = combinedCommandOutput(res.stdout, res.stderr);
         return {
           passed: res.exitCode === 0,
           output,
@@ -787,9 +864,10 @@ export function createWorkspaceTools(
           // URL. Hand it the same minimal allow-list the tester agent uses.
           env: filterChildEnv(process.env) as NodeJS.ProcessEnv,
         });
-        return { passed: true, output: stdout || stderr, ran: classifyTestRun(stdout || stderr) === "ran" };
+        const output = combinedCommandOutput(stdout, stderr);
+        return { passed: true, output, ran: classifyTestRun(output) === "ran" };
       } catch (err: any) {
-        const output = err.stdout || err.stderr || err.message;
+        const output = combinedCommandOutput(err.stdout ?? "", err.stderr ?? "") || err.message;
         return {
           passed: false,
           output,

@@ -13,10 +13,13 @@ import {
 
 import {
   ALLOWED_TEST_COMMAND_PREFIXES,
+  ALLOWED_WORKSPACE_COMMAND_PREFIXES,
+  isAllowedWorkspaceCommand,
   ALLOWED_WORKSPACE_EXTENSIONS,
   InvalidTaskError,
   classifyTestRun,
   type WorkspaceTools,
+  combinedCommandOutput,
 } from "./developer-agent";
 import { SandboxRefusedError, type SandboxProvider } from "./sandbox";
 
@@ -177,14 +180,13 @@ function assertAllowedExtension(relPath: string): void {
 
 function assertAllowedTestCommand(
   command: string,
-  allowed: readonly string[] = ALLOWED_TEST_COMMAND_PREFIXES,
+  allowed: readonly string[] = ALLOWED_WORKSPACE_COMMAND_PREFIXES,
 ): void {
-  const permitted = allowed.some(
-    (prefix) => command === prefix || command.startsWith(`${prefix} `),
-  );
-  if (!permitted) {
+  // #659: ONE predicate, shared with the in-process backend. Two copies of the matching rule drift -
+  // and the copy that lived here also admitted a writing flag such as `--fix`.
+  if (!isAllowedWorkspaceCommand(command, allowed)) {
     throw new InvalidTaskError(
-      `Command '${command}' is not allowed. Only test commands starting with [${ALLOWED_TEST_COMMAND_PREFIXES.join(", ")}] are permitted.`,
+      `Command '${command}' is not allowed. Only [${allowed.join(", ")}] are permitted, and never with a writing flag such as --fix.`,
     );
   }
 }
@@ -439,7 +441,9 @@ export function createOpenSandboxProvider(
           // An unreadable exit code is NOT a pass.
           return {
             exitCode: execution.exitCode ?? 1,
-            output: stdout || stderr,
+            // Same reasoning as runTests (#659): git writes `fatal: ...` to stderr while stdout may hold
+            // progress output, so `stdout || stderr` would report the noise and hide the reason.
+            output: combinedCommandOutput(stdout, stderr),
           };
         },
       }
@@ -499,13 +503,17 @@ export function createOpenSandboxProvider(
         },
         runTests: async (
           cmd?: string,
+          options?: { allowedCommands?: readonly string[] },
         ): Promise<{ passed: boolean; output: string; ran: boolean }> => {
           const command = (
             cmd ??
             ALLOWED_TEST_COMMAND_PREFIXES[0] ??
             "npx vitest"
           ).trim();
-          assertAllowedTestCommand(command, allowedCommands);
+          // #659: a consumer authorizes its OWN commands for the call (the lint gate runs the target's
+          // declared checks) instead of widening the agent's shared list (#437). The list captured at
+          // creation stays the default, so every existing caller is unaffected.
+          assertAllowedTestCommand(command, options?.allowedCommands ?? allowedCommands);
           const handle = await sandbox();
           const execution = await handle.commands.run(command);
           const stdout = execution.logs.stdout
@@ -516,7 +524,7 @@ export function createOpenSandboxProvider(
             .join("");
           // An unknown exit code is NOT a pass: never report success for a command whose outcome we
           // could not read.
-          const output = stdout || stderr;
+          const output = combinedCommandOutput(stdout, stderr);
           // A command that could not begin is unmeasured, not a failure of the developer's work (#541). The
           // sandbox image is provisioned, so this is rare here, but the signal is shared with the local path.
           return { passed: execution.exitCode === 0, output, ran: classifyTestRun(output) === "ran" };

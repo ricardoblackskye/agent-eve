@@ -53,6 +53,110 @@ export function resolveMaxReviewRounds(
 }
 
 export type FindingSource = "pr-reviewer" | "codeql" | "linter" | "test";
+
+/** One check running on the pull request, as GitHub reports it. */
+export interface PrCheckRun {
+  name: string;
+  /** `queued` | `in_progress` | `completed`. */
+  status: string;
+  /** `success` | `failure` | `neutral` | `skipped` | `cancelled` | `timed_out` | ... , null until completed. */
+  conclusion: string | null;
+  html_url?: string;
+  details_url?: string;
+}
+
+/** How the check gate reads and waits. Injected so no test sleeps in real time. */
+export interface PrChecksDeps {
+  /** The checks on the pull request's current head, or null when they could not be read. */
+  fetchChecks: () => Promise<PrCheckRun[] | null>;
+  sleep: (ms: number) => Promise<void>;
+  /** The most a single read will wait for checks that are still running. */
+  timeoutMs: number;
+  pollIntervalMs: number;
+  now?: () => number;
+}
+
+/**
+ * Read the checks, waiting - but only for a bounded time - for the ones still running (#659).
+ *
+ * `runChecks` is called once per review round, so an unbounded wait would hold the run open on a stalled
+ * CI. When the bound is reached, whatever is still running is handed back AS running, which the mapping
+ * above reports as UNSETTLED and therefore blocks `done`. Returning early with a "pass" would be the
+ * defect again; waiting forever would make the factory unusable against a slow runner.
+ */
+export async function settlePullRequestChecks(
+  deps: PrChecksDeps,
+): Promise<PrCheckRun[] | null> {
+  const now = deps.now ?? (() => Date.now());
+  const startedAt = now();
+
+  let checks = await deps.fetchChecks();
+  if (checks === null) return null;
+
+  while (checks.some((check) => check.status !== "completed")) {
+    if (now() - startedAt >= deps.timeoutMs) break;
+    await deps.sleep(deps.pollIntervalMs);
+    checks = await deps.fetchChecks();
+    if (checks === null) return null;
+  }
+
+  return checks;
+}
+
+/** Conclusions that do NOT gate a run: a check that passed, or a decision not to gate on it. */
+const PASSING_CONCLUSIONS = new Set(["success", "neutral", "skipped"]);
+
+/**
+ * Turn the pull request's checks into findings (#659).
+ *
+ * Three outcomes, and the third is the one that matters: a check that FAILED blocks `done`; a check that
+ * has not finished blocks `done` too, because a run cannot be certified against a verdict that has not
+ * arrived; and a set that could not be READ produces a non-blocking warning rather than an empty list.
+ * Reporting "we could not look" as "clean" would be the original defect wearing a different hat.
+ *
+ * Ids are derived from the check's name so the review loop's recurrence tracking sees the same finding
+ * across rounds - a re-check that fails the same way counts as a recurrence, not as a new finding.
+ */
+export function checkRunFindings(checks: readonly PrCheckRun[] | null): ReviewFinding[] {
+  if (checks === null) {
+    return [
+      {
+        id: "PR-CHECKS-UNREADABLE",
+        source: "linter",
+        severity: "warning",
+        message:
+          "The pull request's checks could not be read, so this run cannot claim they passed.",
+      },
+    ];
+  }
+
+  const findings: ReviewFinding[] = [];
+  for (const check of checks) {
+    const url = check.html_url ?? check.details_url ?? "";
+    const where = url === "" ? "" : ` (${url})`;
+
+    if (check.status !== "completed") {
+      findings.push({
+        id: `PR-CHECK-UNSETTLED:${check.name}`,
+        source: "linter",
+        severity: "error",
+        message: `The check '${check.name}' has not finished (${check.status})${where}, so this run cannot be certified done against it.`,
+      });
+      continue;
+    }
+
+    if (PASSING_CONCLUSIONS.has(check.conclusion ?? "")) continue;
+
+    findings.push({
+      id: `PR-CHECK-FAILED:${check.name}`,
+      source: "linter",
+      severity: "error",
+      message: `The repository's own check '${check.name}' failed (${check.conclusion ?? "no conclusion"})${where}.`,
+    });
+  }
+
+  return findings;
+}
 export type FindingDispositionStatus = "resolved" | "accepted";
 
 export interface ReviewFinding {

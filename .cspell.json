@@ -241,7 +241,10 @@
     "Minimise",
     "npipe",
     "MSYS",
-    "KEYID"
+    "KEYID",
+    "ECONNRESET",
+    "prerender",
+    "prerendered"
   ],
   "ignorePaths": [
     "node_modules/**",
