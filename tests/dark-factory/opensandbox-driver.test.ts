@@ -367,7 +367,7 @@ describe("#354 sandbox connection config (server proxy)", () => {
  *     Command 'npm run lint' is not allowed. Only [npx vitest, npm test, npx tsc] are permitted
  *
  * after the tests had already passed. A guard that silently ignores the list it is handed is worse than
- * no list at all: the caller believes it has authorised something, and the failure arrives later.
+ * no list at all: the caller believes it has authorized something, and the failure arrives later.
  */
 describe("#659 the driver honours a per-call allowlist", () => {
   async function toolsFor(over: Parameters<typeof fakeHandle>[0] = {}) {
@@ -391,7 +391,7 @@ describe("#659 the driver honours a per-call allowlist", () => {
     expect(result.passed).toBe(true);
   });
 
-  it("runs the command it was authorised to run, and nothing else", async () => {
+  it("runs the command it was authorized to run, and nothing else", async () => {
     const { handle } = fakeHandle();
     const provider = createOpenSandboxProvider(env, {
       createSandbox: vi.fn(async (_spec: SandboxCreateSpec) => handle),
@@ -399,7 +399,7 @@ describe("#659 the driver honours a per-call allowlist", () => {
     const tools = provider.create("/workspace");
 
     await tools.runTests("npm run lint", { allowedCommands: ["npm run lint"] });
-    // The per-call list REPLACES the default for that call: an unauthorised command stays refused.
+    // The per-call list REPLACES the default for that call: an unauthorized command stays refused.
     await expect(
       tools.runTests("npm run deploy", { allowedCommands: ["npm run lint"] }),
     ).rejects.toThrow(/not allowed/);
