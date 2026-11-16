@@ -65,9 +65,59 @@ export interface PrCheckRun {
   details_url?: string;
 }
 
-/** RED stub for #659: the mapping is implemented in the GREEN commit. */
-export function checkRunFindings(_checks: readonly PrCheckRun[] | null): ReviewFinding[] {
-  throw new Error("not implemented");
+/** Conclusions that do NOT gate a run: a check that passed, or a decision not to gate on it. */
+const PASSING_CONCLUSIONS = new Set(["success", "neutral", "skipped"]);
+
+/**
+ * Turn the pull request's checks into findings (#659).
+ *
+ * Three outcomes, and the third is the one that matters: a check that FAILED blocks `done`; a check that
+ * has not finished blocks `done` too, because a run cannot be certified against a verdict that has not
+ * arrived; and a set that could not be READ produces a non-blocking warning rather than an empty list.
+ * Reporting "we could not look" as "clean" would be the original defect wearing a different hat.
+ *
+ * Ids are derived from the check's name so the review loop's recurrence tracking sees the same finding
+ * across rounds - a re-check that fails the same way counts as a recurrence, not as a new finding.
+ */
+export function checkRunFindings(checks: readonly PrCheckRun[] | null): ReviewFinding[] {
+  if (checks === null) {
+    return [
+      {
+        id: "PR-CHECKS-UNREADABLE",
+        source: "linter",
+        severity: "warning",
+        message:
+          "The pull request's checks could not be read, so this run cannot claim they passed.",
+      },
+    ];
+  }
+
+  const findings: ReviewFinding[] = [];
+  for (const check of checks) {
+    const url = check.html_url ?? check.details_url ?? "";
+    const where = url === "" ? "" : ` (${url})`;
+
+    if (check.status !== "completed") {
+      findings.push({
+        id: `PR-CHECK-UNSETTLED:${check.name}`,
+        source: "linter",
+        severity: "error",
+        message: `The check '${check.name}' has not finished (${check.status})${where}, so this run cannot be certified done against it.`,
+      });
+      continue;
+    }
+
+    if (PASSING_CONCLUSIONS.has(check.conclusion ?? "")) continue;
+
+    findings.push({
+      id: `PR-CHECK-FAILED:${check.name}`,
+      source: "linter",
+      severity: "error",
+      message: `The repository's own check '${check.name}' failed (${check.conclusion ?? "no conclusion"})${where}.`,
+    });
+  }
+
+  return findings;
 }
 export type FindingDispositionStatus = "resolved" | "accepted";
 
