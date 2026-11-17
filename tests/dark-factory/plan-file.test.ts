@@ -9,6 +9,19 @@ import { renderPlanFile, type PlanFileInput } from "../../agent/lib/dark-factory
  * (fenced blocks carry a language), MD024 (no duplicate headings) and MD026 (headings do not end in
  * punctuation). Those are asserted here, not assumed.
  */
+/**
+ * What MD033 would report: a tag-shaped token in prose, ignoring fenced blocks, inline code spans and
+ * HTML comments - the three places markdownlint does not report inline HTML.
+ */
+function rawHtmlInProse(markdown: string): string[] {
+  // No comment strip: the plan's directives carry no tags, and stripping them with a regex is what
+  // CodeQL reported as incomplete multi-character sanitization on the first attempt.
+  const stripped = markdown
+    .replace(/^```[\s\S]*?^```/gm, "")
+    .replace(/`[^`]*`/g, "");
+  return stripped.match(/<\/?[A-Za-z][A-Za-z0-9-]*/g) ?? [];
+}
+
 describe("renderPlanFile", () => {
   const base: PlanFileInput = {
     storyId: 361,
@@ -207,6 +220,55 @@ describe("renderPlanFile", () => {
     expect(firstLine).not.toContain("MD024");
     expect(firstLine).not.toContain("MD026");
   });
+
+  it("code-spans a tag the model quoted in prose, so markdownlint MD033 passes", () => {
+    // #666: the architect describes a UI change by quoting the element, and raw inline HTML in prose
+    // fails MD033 in the pull request's MegaLinter run. Measured on WebFeedPOC#226: 12 findings on a
+    // plan whose product change was correct, and the run's own gate could not see it because the
+    // target declares lint and typecheck while markdownlint runs only in CI.
+    const md = renderPlanFile({
+      ...base,
+      summary: "The block gains <p><em>Built by the Dark Factory</em></p> below the list.",
+    });
+    expect(md).toContain("`<p><em>Built by the Dark Factory</em></p>`");
+    expect(rawHtmlInProse(md)).toEqual([]);
+  });
+
+  it("leaves a fenced block's HTML alone, so a code sample is not rewritten", () => {
+    const fence = "```";
+    const md = renderPlanFile({
+      ...base,
+      approach: `The shape is:\n${fence}html\n<p><em>x</em></p>\n${fence}\nThat is all.`,
+    });
+    // Inside a fence MD033 does not fire, and rewriting there would corrupt the sample.
+    expect(md).toContain("<p><em>x</em></p>");
+    expect(md).not.toContain("`<p><em>x</em></p>`");
+  });
+
+  it("does not touch a tag already inside a code span, so backticks cannot nest", () => {
+    const md = renderPlanFile({
+      ...base,
+      summary: "The element is `<p><em>x</em></p>` already.",
+    });
+    expect(md).toContain("`<p><em>x</em></p>`");
+    expect(md).not.toContain("``");
+  });
+
+  it("leaves a bare comparison operator alone", () => {
+    const md = renderPlanFile({
+      ...base,
+      summary: "Refuse the change when removed < kept.",
+    });
+    expect(md).toContain("removed < kept");
+  });
+
+  it("leaves the plan's own HTML comment directives alone", () => {
+    // The directives are comments and carry no tags for the pass to wrap, which is why the renderer
+    // needs no comment handling at all - the property holds without a filter.
+    const md = renderPlanFile(base);
+    expect(md).toContain("<!-- markdownlint-disable MD013 -->");
+    expect(md).toContain("<!-- cspell:disable -->");
+  });
 });
 
 /**
@@ -320,4 +382,5 @@ describe("#659 the plan artifact is not spell-checked", () => {
 
     expect(md.indexOf("<!-- cspell:disable -->")).toBeLessThan(md.indexOf("# Plan:"));
   });
+
 });
