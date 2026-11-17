@@ -1502,8 +1502,10 @@ async function main(): Promise<void> {
         runId,
         // #659: the lifecycle follows the VERDICT. It used to be "succeeded" whenever a PR existed, so the
         // record and the ticket comment agreed with each other and disagreed with the DoD.
-        terminalStatus:
-          dodResult.status === "blocked" ? "blocked" : dodResult.ok ? "succeeded" : "failed",
+        // #672: the EVENT status stays terminal-only (run-history rejects "blocked" - a blocked run is
+        // resumable, not finished). The nuance belongs on the TICKET, derived from the DoD verdict by the
+        // finalizer, which reads dodResult.status directly.
+        terminalStatus: dodResult.ok ? "succeeded" : "failed",
         dodResult,
       },
     );

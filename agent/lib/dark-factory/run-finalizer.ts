@@ -21,13 +21,20 @@ import {
 } from "./definition-of-done";
 import type { RunEvent } from "./run-history";
 import type { RunHistoryStore } from "./run-history-store";
-import { TERMINAL_LABELS, TRIGGER_LABELS } from "./trigger";
+import { OUTCOME_LABELS, TERMINAL_LABELS, TRIGGER_LABELS } from "./trigger";
 
 // One definition of "terminal", owned by the label vocabulary in trigger.ts.
 // Re-exported so existing importers keep one import site.
 export { TERMINAL_LABELS };
 
-export type TerminalStatus = "succeeded" | "blocked" | "failed";
+/**
+ * The status a run.terminal EVENT may carry. Terminal-only, on purpose:
+ * `run-history.ts` enforces the same set (TERMINAL_STATUSES = aborted | succeeded |
+ * failed), because a BLOCKED run is resumable rather than finished. A run whose DoD
+ * did not certify still ends here as "failed" - the TICKET carries the nuance via
+ * df:blocked, derived from the DoD verdict in the decision below (#672).
+ */
+export type TerminalStatus = "succeeded" | "failed";
 
 export interface TerminalFinalizerDeps {
   labelWriter: LabelWriter;
@@ -181,7 +188,7 @@ export async function applyStartLifecycle(
   const cleared: string[] = [];
   const failures: string[] = [];
 
-  for (const label of TERMINAL_LABELS) {
+  for (const label of OUTCOME_LABELS) {
     const removed = await deps.labelWriter.remove(args.repo, args.issue, label);
     if (removed.ok) cleared.push(label);
     else failures.push(`remove ${label}: ${removed.error ?? "unknown error"}`);

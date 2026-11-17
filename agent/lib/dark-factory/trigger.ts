@@ -72,6 +72,24 @@ export const TERMINAL_LABELS: readonly string[] = [
   TRIGGER_LABELS.failed,
 ];
 
+/**
+ * Labels a NEW attempt must not inherit from a previous one (#373, #672).
+ *
+ * A SUPERSET of TERMINAL_LABELS, and the difference is load-bearing:
+ * `df:blocked` is not terminal - a blocked ticket is re-triggerable, which is the
+ * point of the outcome - but it IS a previous attempt's verdict. If it survived into
+ * the next attempt the ticket would advertise `df:running` AND `df:blocked` at once,
+ * which is exactly the contradictory pair #373 removed for `df:failed`.
+ *
+ * So: TERMINAL_LABELS decides whether a re-trigger is REFUSED; OUTCOME_LABELS decides
+ * what a fresh start CLEARS. Do not collapse them.
+ */
+export const OUTCOME_LABELS: readonly string[] = [
+  TRIGGER_LABELS.done,
+  TRIGGER_LABELS.blocked,
+  TRIGGER_LABELS.failed,
+];
+
 /** Bounds, so a hostile payload cannot produce an unbounded reason string. */
 export const MAX_REASON_CHARS = 400;
 const MAX_IDENTIFIER_CHARS = 120;
