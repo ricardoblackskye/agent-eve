@@ -1502,7 +1502,8 @@ async function main(): Promise<void> {
         runId,
         // #659: the lifecycle follows the VERDICT. It used to be "succeeded" whenever a PR existed, so the
         // record and the ticket comment agreed with each other and disagreed with the DoD.
-        terminalStatus: dodResult.ok ? "succeeded" : "failed",
+        terminalStatus:
+          dodResult.status === "blocked" ? "blocked" : dodResult.ok ? "succeeded" : "failed",
         dodResult,
       },
     );

@@ -31,12 +31,16 @@ describe("#284 runner wires the terminal-lifecycle finalizer", () => {
   });
 
   it("finalises the run exactly once on the DoD path, carrying the verdict", () => {
-    // #659: the status now FOLLOWS the verdict - a blocked Definition of Done still leaves a PR behind,
-    // so asserting "succeeded" unconditionally recorded success for a run that refused to finish. The
-    // guard's purpose is unchanged: finalised ONCE, on the DoD path, and the call carries `dodResult`.
-    const finalised =
-      source.match(/terminalStatus:\s*dodResult\.ok\s*\?\s*"succeeded"\s*:\s*"failed"/g) ?? [];
-    expect(finalised).toHaveLength(1);
+    // #659: the status FOLLOWS the verdict - a blocked DoD still leaves a PR behind, so asserting
+    // "succeeded" unconditionally recorded success for a run that refused to finish.
+    // #672: this guard used to pin that exact ternary, so it went red on a legitimate change to the
+    // mapping (adding "blocked") - the shape that gets guards deleted. It now protects the properties
+    // instead: exactly ONE DoD call site, it carries `dodResult`, and its status is DERIVED from the
+    // verdict rather than asserted unconditionally.
+    const dodCallSites = source.match(/terminalStatus:\s*dodResult\.status[^\n]*/g) ?? [];
+    expect(dodCallSites).toHaveLength(1);
+    expect(dodCallSites[0]).toMatch(/dodResult\.status === "blocked"/);
+    expect(dodCallSites[0]).toMatch(/dodResult\.ok/);
     expect(source).toMatch(/dodResult,/);
   });
 

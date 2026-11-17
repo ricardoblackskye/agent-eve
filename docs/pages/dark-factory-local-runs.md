@@ -420,7 +420,7 @@ The launcher reports a held claim in the **same one block** as every other prere
 
 **A live (`running`) holder is refused and nothing is touched**: work in flight is never cut out from under itself.
 A parked holder **is** retired — a park is a wait, and the retirement is what stops it resuming. Retirement applies
-no terminal label (`df:done`/`df:failed` describe an attempt's outcome; retirement is neither). See
+no terminal label (`df:done`/`df:blocked`/`df:failed` describe an attempt's outcome; retirement is neither). See
 [ADR 0051](../../docs/adr/0051-df-retiring-a-stale-claim-is-abandonment.md).
 
 ## When the sandbox setup goes wrong

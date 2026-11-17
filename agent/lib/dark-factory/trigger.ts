@@ -54,9 +54,23 @@ export const TRIGGER_DEFAULTS: DarkFactoryTriggerDefaults = {
 export const TRIGGER_LABELS = {
   running: "df:running",
   done: "df:done",
+  // #672: a run that produced work but the Definition of Done did not certify.
+  // Deliberately absent from TERMINAL_LABELS, so the ticket can be re-triggered.
+  blocked: "df:blocked",
   failed: "df:failed",
   question: "needs-answer",
 } as const;
+
+/**
+ * Labels that describe a FINISHED attempt. A re-trigger is refused for these and
+ * no others (#672) - `df:blocked` is absent on purpose, because "produced work,
+ * awaiting certification" is not finished, so re-applying the trigger label starts
+ * another attempt instead of being refused.
+ */
+export const TERMINAL_LABELS: readonly string[] = [
+  TRIGGER_LABELS.done,
+  TRIGGER_LABELS.failed,
+];
 
 /** Bounds, so a hostile payload cannot produce an unbounded reason string. */
 export const MAX_REASON_CHARS = 400;
@@ -206,7 +220,7 @@ export function decideDarkFactoryTrigger(
 
   // A run that already reached a terminal state is finished: re-applying the label must
   // not start a second one. (Aborting or resuming a finished run is meaningless too.)
-  for (const terminal of [TRIGGER_LABELS.done, TRIGGER_LABELS.failed]) {
+  for (const terminal of TERMINAL_LABELS) {
     if (issueLabels.includes(terminal)) {
       return decide(
         "not-a-trigger",
