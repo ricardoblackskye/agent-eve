@@ -96,6 +96,9 @@ const DOD_DONE = { status: "done" } as unknown as NonNullable<
 const DOD_REFUSED = { status: "refused" } as unknown as NonNullable<
   Parameters<typeof applyTerminalLifecycle>[1]["dodResult"]
 >;
+const DOD_BLOCKED = { status: "blocked" } as unknown as NonNullable<
+  Parameters<typeof applyTerminalLifecycle>[1]["dodResult"]
+>;
 
 describe("#284 terminal lifecycle labels", () => {
   it("a successful run applies df:done and removes df:running", async () => {
@@ -262,5 +265,72 @@ describe("#284 terminal lifecycle labels", () => {
     expect(
       appended.some((e) => e.eventId === `terminal-lifecycle:${RUN_ID}`),
     ).toBe(false);
+  });
+
+  // --- #672: the run outcome vocabulary. The DoD already distinguishes these;
+  // the finalizer used to flatten every non-"done" verdict into df:failed. ---
+
+  it("a blocked DoD applies df:blocked and NOT df:failed (#672)", async () => {
+    const { writer, calls } = labelWriter();
+    const { store, appended } = history();
+
+    const outcome = await applyTerminalLifecycle(deps(writer, store), {
+      repo: REPO,
+      issue: 672,
+      runId: RUN_ID,
+      // What the runner passed before the fix: the verdict was collapsed to a
+      // boolean, so a blocked DoD arrived as "failed".
+      terminalStatus: "failed",
+      dodResult: DOD_BLOCKED,
+      occurredAt: AT,
+    });
+
+    expect(outcome.applied).toBe(true);
+    expect(calls).toContain("add:df:blocked");
+    expect(calls).not.toContain("add:df:failed");
+    expect(calls).not.toContain("add:df:done");
+    // The in-flight labels still clear: the attempt is over either way.
+    expect(calls).toContain("remove:df:running");
+    expect(calls).toContain("remove:needs-answer");
+  });
+
+  it("a refused DoD applies NO terminal label, and is left for review (#271)", async () => {
+    const { writer, calls } = labelWriter();
+    const { store } = history();
+
+    const outcome = await applyTerminalLifecycle(deps(writer, store), {
+      repo: REPO,
+      issue: 672,
+      runId: RUN_ID,
+      terminalStatus: "failed",
+      dodResult: DOD_REFUSED,
+      occurredAt: AT,
+    });
+
+    expect(outcome.applied).toBe(true);
+    expect(calls).not.toContain("add:df:failed");
+    expect(calls).not.toContain("add:df:blocked");
+    expect(calls).not.toContain("add:df:done");
+    expect(calls).toContain("remove:df:running");
+  });
+
+  it("GUARD, not a bug fix: a crash path with no DoD verdict still applies df:failed (#672)", async () => {
+    // This passes before the change and must keep passing after it. Without this
+    // case, an implementation that labelled EVERY outcome df:blocked would
+    // satisfy the two tests above.
+    const { writer, calls } = labelWriter();
+    const { store } = history();
+
+    await applyTerminalLifecycle(deps(writer, store), {
+      repo: REPO,
+      issue: 672,
+      runId: RUN_ID,
+      terminalStatus: "failed",
+      occurredAt: AT,
+    });
+
+    expect(calls).toContain("add:df:failed");
+    expect(calls).not.toContain("add:df:blocked");
+    expect(calls).not.toContain("add:df:done");
   });
 });

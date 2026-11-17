@@ -95,6 +95,35 @@ describe("#163 cycle 3-4: never fire on something that cannot be a fresh run", (
       expect(d.kind).toBe("not-a-trigger");
     }
   });
+
+  it("GUARD, not a bug fix: a ticket carrying df:blocked can be re-triggered, while df:done and df:failed still refuse (#672)", () => {
+    // #672: a run that produced work but was not certified is not finished, so
+    // re-applying the label must start it again rather than be refused. Both
+    // directions are asserted here: the acceptance alone would pass if the guard
+    // were deleted, and the refusals alone would pass if df:blocked were never
+    // added to the vocabulary.
+    //
+    // GUARD, not a bug fix: this passed on the first run, because the guard only
+    // ever consulted df:done/df:failed, so df:blocked was never refused. That is
+    // the property this change depends on rather than one it introduces. Its
+    // non-vacuity is proven by mutation - adding blocked to the terminal set must
+    // turn this case red - and the mutation result is recorded on the PR.
+    const blocked = decideDarkFactoryTrigger(
+      payload({ issue: { number: 672, labels: [{ name: TRIGGER_LABELS.blocked }] } }),
+      ENV,
+    );
+    expect(blocked.kind).toBe("trigger");
+    expect(blocked.issue).toBe(672);
+
+    for (const terminal of [TRIGGER_LABELS.done, TRIGGER_LABELS.failed]) {
+      expect(
+        decideDarkFactoryTrigger(
+          payload({ issue: { number: 672, labels: [{ name: terminal }] } }),
+          ENV,
+        ).kind,
+      ).toBe("not-a-trigger");
+    }
+  });
 });
 
 describe("#163 cycle 5-8: authorisation is fail-closed, and the reason is returned", () => {
