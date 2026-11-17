@@ -156,11 +156,16 @@ function neutralizeInlineHtml(text: string): string {
         return line;
       }
       if (inFence) return line;
-      // Code spans and comments are protected: a tag already inside one must not be wrapped a second
-      // time, and a comment is not something MD033 reports. Splitting with a capture group keeps the
-      // separators, so the odd indices are exactly the protected parts.
+      // Code spans are protected: a tag already inside one must not be wrapped a second time, so the
+      // odd indices of this split - the spans themselves - are returned untouched. Splitting with a
+      // capture group keeps the separators, which is what makes that indexing work.
+      //
+      // Comments are deliberately NOT filtered here. An earlier version stripped them, and CodeQL
+      // flagged it as js/bad-tag-filter: a single-line pattern cannot match a comment spanning lines.
+      // The honest resolution is that the filter was never needed - the plan's own directives carry no
+      // tags to wrap, so nothing inside a comment ever required shielding.
       return line
-        .split(/(`[^`]*`|<!--.*?-->)/)
+        .split(/(`[^`]*`)/)
         .map((part, index) =>
           index % 2 === 1
             ? part

@@ -14,9 +14,10 @@ import { renderPlanFile, type PlanFileInput } from "../../agent/lib/dark-factory
  * HTML comments - the three places markdownlint does not report inline HTML.
  */
 function rawHtmlInProse(markdown: string): string[] {
+  // No comment strip: the plan's directives carry no tags, and stripping them with a regex is what
+  // CodeQL reported as incomplete multi-character sanitization on the first attempt.
   const stripped = markdown
     .replace(/^```[\s\S]*?^```/gm, "")
-    .replace(/<!--[\s\S]*?-->/g, "")
     .replace(/`[^`]*`/g, "");
   return stripped.match(/<\/?[A-Za-z][A-Za-z0-9-]*/g) ?? [];
 }
@@ -262,7 +263,8 @@ describe("renderPlanFile", () => {
   });
 
   it("leaves the plan's own HTML comment directives alone", () => {
-    // MD033 does not report comments, and these are the directives that make the artifact checkable by the linter.
+    // The directives are comments and carry no tags for the pass to wrap, which is why the renderer
+    // needs no comment handling at all - the property holds without a filter.
     const md = renderPlanFile(base);
     expect(md).toContain("<!-- markdownlint-disable MD013 -->");
     expect(md).toContain("<!-- cspell:disable -->");
