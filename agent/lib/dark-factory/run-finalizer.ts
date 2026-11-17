@@ -21,8 +21,19 @@ import {
 } from "./definition-of-done";
 import type { RunEvent } from "./run-history";
 import type { RunHistoryStore } from "./run-history-store";
-import { TRIGGER_LABELS } from "./trigger";
+import { OUTCOME_LABELS, TERMINAL_LABELS, TRIGGER_LABELS } from "./trigger";
 
+// One definition of "terminal", owned by the label vocabulary in trigger.ts.
+// Re-exported so existing importers keep one import site.
+export { TERMINAL_LABELS };
+
+/**
+ * The status a run.terminal EVENT may carry. Terminal-only, on purpose:
+ * `run-history.ts` enforces the same set (TERMINAL_STATUSES = aborted | succeeded |
+ * failed), because a BLOCKED run is resumable rather than finished. A run whose DoD
+ * did not certify still ends here as "failed" - the TICKET carries the nuance via
+ * df:blocked, derived from the DoD verdict in the decision below (#672).
+ */
 export type TerminalStatus = "succeeded" | "failed";
 
 export interface TerminalFinalizerDeps {
@@ -83,10 +94,7 @@ export const CLEARED_LABELS: readonly string[] = [
  * WebFeedPOC#161 carrying df:running AND a stale df:failed from the previous attempt, so the ticket
  * advertised two contradictory outcomes at once.
  */
-export const TERMINAL_LABELS: readonly string[] = [
-  TRIGGER_LABELS.done,
-  TRIGGER_LABELS.failed,
-];
+
 
 /**
  * The statuses that mean a run is FINISHED. Mirrors `RunStatus`'s terminal half, kept as a set so
@@ -180,7 +188,7 @@ export async function applyStartLifecycle(
   const cleared: string[] = [];
   const failures: string[] = [];
 
-  for (const label of TERMINAL_LABELS) {
+  for (const label of OUTCOME_LABELS) {
     const removed = await deps.labelWriter.remove(args.repo, args.issue, label);
     if (removed.ok) cleared.push(label);
     else failures.push(`remove ${label}: ${removed.error ?? "unknown error"}`);
@@ -227,12 +235,18 @@ export async function applyTerminalLifecycle(
   // 2. Which terminal label this run earns. `df:done` requires a PASSING Definition
   //    of Done; a run whose DoD was refused is left for human review (#271) and only
   //    the in-flight labels are cleared.
-  const terminalLabel =
-    terminalStatus === "succeeded"
-      ? isDoneGateSatisfied(dodResult)
-        ? TRIGGER_LABELS.done
-        : null
-      : TRIGGER_LABELS.failed;
+  // #672: follow the DoD's own verdict, which already distinguishes the three
+  // outcomes. `ok` collapsed them to a boolean, so a run that produced a pull
+  // request and merely awaited certification was recorded as a failure.
+  const terminalLabel = dodResult
+    ? dodResult.status === "done"
+      ? TRIGGER_LABELS.done
+      : dodResult.status === "blocked"
+        ? TRIGGER_LABELS.blocked
+        : null // "refused": #271 leaves it for human review, so no terminal label
+    : terminalStatus === "succeeded"
+      ? null // no verdict on a success: a self-report must never produce df:done (#271)
+      : TRIGGER_LABELS.failed; // a genuine crash path
 
   // 3. Apply + clean up, collecting EVERY result so nothing is swallowed.
   const writes: {

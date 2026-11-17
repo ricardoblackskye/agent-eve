@@ -244,7 +244,8 @@
     "KEYID",
     "ECONNRESET",
     "prerender",
-    "prerendered"
+    "prerendered",
+    "triggerable"
   ],
   "ignorePaths": [
     "node_modules/**",
