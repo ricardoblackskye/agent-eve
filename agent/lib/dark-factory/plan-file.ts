@@ -121,6 +121,56 @@ function riskText(value: unknown): string {
  * containing one fails MD040 in the pull request's MegaLinter run. Stateful on purpose: inside a fence a
  * bare ``` is the CLOSER, so tracking whether we are inside one is the only way to tell the two apart.
  */
+/**
+ * Raw inline HTML in prose becomes an inline code span.
+ *
+ * #666: the architect describes a UI change by quoting the element - "the block gains
+ * `<p><em>Built by ...</em></p>`" - and MegaLinter lints the generated plan, where raw inline HTML in
+ * prose fails MD033 (no-inline-html). Measured on WebFeedPOC#226: twelve findings against a plan whose
+ * product change was correct, and the run's own gate could not see them, because the target declares
+ * lint and typecheck while markdownlint runs only in CI. A code span is what MD033 ignores and it keeps
+ * the tag readable - the same reasoning as the bare-URL rule below, and the same rule about fences.
+ */
+/**
+ * A run of markup: a tag, then any number of (text, tag) pairs.
+ *
+ * Wrapping tags INDIVIDUALLY is wrong, and the probe that proved it rendered as
+ * "`<p>``<em>`Built by ...`</em>``</p>`" - adjacent backtick runs, which CommonMark then matches as
+ * different delimiters and displays wrongly. Matching the whole run instead yields one span around
+ * "`<p><em>Built by ...</em></p>`", which is what a reader expects and what the plan describes.
+ *
+ * The trailing group requires ANOTHER tag to continue, so the run stops at the last tag and cannot
+ * swallow the prose that follows it. Text BETWEEN tags is included, which is deliberate: an element's
+ * content belongs to its code span.
+ */
+const MARKUP_RUN =
+  /(?:<\/?[A-Za-z][^<>]*>)(?:[^<>]*<\/?[A-Za-z][^<>]*>)*/g;
+
+function neutralizeInlineHtml(text: string): string {
+  let inFence = false;
+  return text
+    .split("\n")
+    .map((line) => {
+      if (line.trim().startsWith("```")) {
+        inFence = !inFence;
+        return line;
+      }
+      if (inFence) return line;
+      // Code spans and comments are protected: a tag already inside one must not be wrapped a second
+      // time, and a comment is not something MD033 reports. Splitting with a capture group keeps the
+      // separators, so the odd indices are exactly the protected parts.
+      return line
+        .split(/(`[^`]*`|<!--.*?-->)/)
+        .map((part, index) =>
+          index % 2 === 1
+            ? part
+            : part.replace(MARKUP_RUN, (run) => `\`${run}\``),
+        )
+        .join("");
+    })
+    .join("\n");
+}
+
 function withFenceLanguages(text: string): string {
   let inFence = false;
   return text
@@ -309,6 +359,8 @@ export function renderPlanFile(
     lines.push("");
   }
 
-  const body = withFenceLanguages(lines.join("\n")).replace(/\n+$/, "");
+  // Both passes are fence-aware and independent, so their order does not matter; the inline-HTML
+  // pass runs first so the fence pass sees exactly the text the renderer produced.
+  const body = withFenceLanguages(neutralizeInlineHtml(lines.join("\n"))).replace(/\n+$/, "");
   return `${body}\n`;
 }

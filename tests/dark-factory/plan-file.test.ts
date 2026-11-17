@@ -262,7 +262,7 @@ describe("renderPlanFile", () => {
   });
 
   it("leaves the plan's own HTML comment directives alone", () => {
-    // MD033 does not report comments, and these are the directives that make the artifact lintable.
+    // MD033 does not report comments, and these are the directives that make the artifact checkable by the linter.
     const md = renderPlanFile(base);
     expect(md).toContain("<!-- markdownlint-disable MD013 -->");
     expect(md).toContain("<!-- cspell:disable -->");
