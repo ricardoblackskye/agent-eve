@@ -39,9 +39,17 @@ afterEach(async () => {
 });
 
 function recordingPost() {
-  const calls: { url: string; body: string }[] = [];
-  const impl = (async (url: unknown, init: { body?: string } = {}) => {
-    calls.push({ url: String(url), body: String(init.body ?? "") });
+  const calls: { url: string; body: string; headers: Record<string, string> }[] = [];
+  const impl = (async (
+    url: unknown,
+    init: { body?: string; headers?: Record<string, string> } = {},
+  ) => {
+    calls.push({
+      url: String(url),
+      body: String(init.body ?? ""),
+      // #665: the handoff's headers are the subject there, so record them.
+      headers: init.headers ?? {},
+    });
     return { ok: true, status: 200, json: async () => ({ ok: true }) };
   }) as unknown as typeof fetch;
   return { impl, calls };
@@ -1007,5 +1015,48 @@ describe("#378: a revision reply is not an approval", () => {
     expect(res.status).toBe("resumed");
     expect(calls).toHaveLength(1);
     expect(calls[0].body).toMatch(/"resume":true/);
+  });
+});
+
+describe("#665 the session handoff forwards the Vercel protection bypass", () => {
+  const VERCEL_ENV = {
+    ...ENV,
+    DF_PLATFORM_PROVIDER: "vercel",
+    VERCEL_URL: "my-app.vercel.app",
+  };
+
+  it("forwards the bypass when the deployment is protected", async () => {
+    const { calls, deps: d } = deps({
+      env: { ...VERCEL_ENV, VERCEL_PROTECTION_BYPASS: "bypass-secret" },
+    });
+    const res = await runDarkFactoryDispatch(triggerDecision(), d);
+
+    expect(res.status).toBe("dispatched");
+    expect(calls).toHaveLength(1);
+    // Without this header a protected deployment answers the handoff with 401 and no run starts.
+    expect(calls[0].headers["x-vercel-protection-bypass"]).toBe("bypass-secret");
+  });
+
+  it("never sends a Vercel secret to a generic platform", async () => {
+    const { calls, deps: d } = deps({
+      env: {
+        ...ENV,
+        DF_PLATFORM_PROVIDER: "generic",
+        DF_API_BASE_URL: "https://generic.example.test",
+        VERCEL_PROTECTION_BYPASS: "bypass-secret",
+      },
+    });
+    await runDarkFactoryDispatch(triggerDecision(), d);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].headers["x-vercel-protection-bypass"]).toBeUndefined();
+  });
+
+  it("sends no bypass header when none is configured", async () => {
+    const { calls, deps: d } = deps({ env: VERCEL_ENV });
+    await runDarkFactoryDispatch(triggerDecision(), d);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].headers["x-vercel-protection-bypass"]).toBeUndefined();
   });
 });
