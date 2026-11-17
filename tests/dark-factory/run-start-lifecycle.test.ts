@@ -19,6 +19,7 @@
 import { describe, it, expect } from "vitest";
 import { applyStartLifecycle } from "../../agent/lib/dark-factory/run-finalizer";
 import type { LabelWriter } from "../../agent/lib/dark-factory/definition-of-done";
+import { OUTCOME_LABELS, TRIGGER_LABELS } from "../../agent/lib/dark-factory/trigger";
 
 const REPO = "ricardoblackskye/webfeedpoc";
 const ISSUE = 161;
@@ -85,8 +86,15 @@ describe("#373 a new attempt starts from a clean ticket", () => {
     // Non-vacuous: the calls above are the real writes, so this asserts what was written, not that a
     // constant exists somewhere.
     expect(calls.length).toBeGreaterThan(0);
+    // #672: derived from the constants, not a hand-written list. The previous form named the expected
+    // calls as literals, so adding an outcome to the shared definition broke it - while this test's own
+    // NAME claims the labels come from the shared definitions. Building the expectation from the same
+    // constants makes that claim true and cannot drift again.
     expect(new Set(calls)).toEqual(
-      new Set(["remove:df:done", "remove:df:failed", "add:df:running"]),
+      new Set([
+        ...OUTCOME_LABELS.map((label) => `remove:${label}`),
+        `add:${TRIGGER_LABELS.running}`,
+      ]),
     );
   });
 });
