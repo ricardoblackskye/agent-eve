@@ -90,6 +90,21 @@ export const OUTCOME_LABELS: readonly string[] = [
   TRIGGER_LABELS.failed,
 ];
 
+/**
+ * Labels that make a ticket UN-TRIGGERABLE (#677). A strict subset of TERMINAL_LABELS, and
+ * the difference is the whole point: `df:done` means the work is finished and must not
+ * silently be redone, whereas `df:failed` describes a finished ATTEMPT whose ticket a human
+ * may deliberately retry. The run-start clearing (#373, OUTCOME_LABELS) already removes the
+ * stale label, so no other machinery is needed - re-applying the trigger label is enough.
+ *
+ * Three sets, and collapsing any two re-creates a defect already found: merging this with
+ * TERMINAL_LABELS makes a crashed run impossible to retry; merging it with OUTCOME_LABELS leaves a
+ * re-triggered ticket advertising df:running beside a stale outcome label.
+ */
+export const RETRIGGER_REFUSED_LABELS: readonly string[] = [
+  TRIGGER_LABELS.done,
+];
+
 /** Bounds, so a hostile payload cannot produce an unbounded reason string. */
 export const MAX_REASON_CHARS = 400;
 const MAX_IDENTIFIER_CHARS = 120;
@@ -236,13 +251,15 @@ export function decideDarkFactoryTrigger(
     }
   }
 
-  // A run that already reached a terminal state is finished: re-applying the label must
-  // not start a second one. (Aborting or resuming a finished run is meaningless too.)
-  for (const terminal of TERMINAL_LABELS) {
-    if (issueLabels.includes(terminal)) {
+  // A ticket whose work is FINISHED must not be started again (#677). This is deliberately
+  // narrower than "terminal": a crashed run's `df:failed` is terminal for the ATTEMPT, but its
+  // ticket is meant to be retryable - the run-start clearing (#373) drops the stale label, so
+  // re-applying the trigger label is a deliberate retry rather than a duplicate run.
+  for (const refused of RETRIGGER_REFUSED_LABELS) {
+    if (issueLabels.includes(refused)) {
       return decide(
         "not-a-trigger",
-        `the run already reached '${terminal}'; not starting or changing it`,
+        `the run already reached '${refused}'; not starting or changing it`,
       );
     }
   }

@@ -139,3 +139,4 @@ changes, write a new one that supersedes it.
 | [0083](0083-persona-prose-is-markdown-shipped-as-a-module.md)            | Persona prose is markdown, shipped as a generated module                                            | Accepted           |
 | [0084](0084-generated-artifacts-are-exempt-from-spell-check.md)          | Generated artifacts are exempt from spell-check                                                     | Accepted           |
 | [0085](0085-produced-work-is-not-a-failure.md)                           | A run that produced work is not marked as a failure                                                 | Accepted           |
+| [0086](0086-a-failed-attempt-is-retryable.md)                            | A failed attempt is retryable                                                                       | Accepted           |
