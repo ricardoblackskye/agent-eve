@@ -33,14 +33,20 @@ describe("#284 runner wires the terminal-lifecycle finalizer", () => {
   it("finalises the run exactly once on the DoD path, carrying the verdict", () => {
     // #659: the status FOLLOWS the verdict - a blocked DoD still leaves a PR behind, so asserting
     // "succeeded" unconditionally recorded success for a run that refused to finish.
-    // #672: this guard used to pin that exact ternary, so it went red on a legitimate change to the
-    // mapping (adding "blocked") - the shape that gets guards deleted. It now protects the properties
-    // instead: exactly ONE DoD call site, it carries `dodResult`, and its status is DERIVED from the
-    // verdict rather than asserted unconditionally.
-    const dodCallSites = source.match(/terminalStatus:\s*dodResult\.status[^\n]*/g) ?? [];
+    // #672 CORRECTION: this guard previously pinned the exact ternary, and I loosened it to
+    // "derived from the verdict" - which let a real defect through. The event's status vocabulary is
+    // TERMINAL ONLY (run-history.ts: TERMINAL_STATUSES = aborted | succeeded | failed), because a
+    // BLOCKED run is resumable, not finished. Passing the DoD verdict through raw produced `blocked`,
+    // the run-history validator rejected the run.terminal event, and the top-level catch then stacked
+    // df:failed on top of df:blocked on the ticket.
+    //
+    // So it is deliberately not loose here: the status must be derived from the verdict AND must
+    // never carry a non-terminal value. A live run found this; the unit tests did not.
+    const dodCallSites = source.match(/terminalStatus:[^;]*dodResult\.ok[^;]*/g) ?? [];
     expect(dodCallSites).toHaveLength(1);
-    expect(dodCallSites[0]).toMatch(/dodResult\.status === "blocked"/);
-    expect(dodCallSites[0]).toMatch(/dodResult\.ok/);
+    expect(dodCallSites[0]).not.toMatch(/"blocked"/);
+    expect(dodCallSites[0]).toMatch(/"succeeded"/);
+    expect(dodCallSites[0]).toMatch(/"failed"/);
     expect(source).toMatch(/dodResult,/);
   });
 

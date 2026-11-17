@@ -9,6 +9,7 @@
  */
 import { describe, it, expect } from "vitest";
 import {
+  applyStartLifecycle,
   applyTerminalLifecycle,
   LabelWriteError,
   type TerminalFinalizerDeps,
@@ -332,5 +333,24 @@ describe("#284 terminal lifecycle labels", () => {
     expect(calls).toContain("add:df:failed");
     expect(calls).not.toContain("add:df:blocked");
     expect(calls).not.toContain("add:df:done");
+  });
+
+  it("a fresh run clears a previous attempt's df:blocked (#672)", async () => {
+    // #672: df:blocked is NOT terminal - a blocked ticket can be re-triggered, which is the whole
+    // point of the new outcome. But it IS a previous attempt's verdict, so if it survives into the
+    // next attempt the ticket advertises df:running AND df:blocked at once: the contradictory pair
+    // #373 removed for df:failed.
+    const { writer, calls } = labelWriter();
+
+    const outcome = await applyStartLifecycle(
+      { labelWriter: writer },
+      { repo: REPO, issue: 672, runId: RUN_ID, occurredAt: AT } as never,
+    );
+
+    expect(calls).toContain("remove:df:blocked");
+    expect(calls).toContain("remove:df:done");
+    expect(calls).toContain("remove:df:failed");
+    expect(calls).toContain("add:df:running");
+    expect(outcome.cleared).toContain("df:blocked");
   });
 });
