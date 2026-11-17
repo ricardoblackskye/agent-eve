@@ -345,7 +345,8 @@ describe("#269 end-to-end pipeline (issue -> PR)", () => {
 });
 
 describe("#269 the terminal-label guard prevents a second run", () => {
-  for (const terminal of [TRIGGER_LABELS.done, TRIGGER_LABELS.failed]) {
+  // #677: df:failed is retryable now, so only df:done makes a ticket un-triggerable.
+  for (const terminal of [TRIGGER_LABELS.done]) {
     it(`does not start a run when the issue already carries '${terminal}'`, async () => {
       const decision = decideDarkFactoryTrigger(
         triggerPayload({
