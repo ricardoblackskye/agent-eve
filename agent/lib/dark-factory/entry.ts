@@ -974,6 +974,7 @@ async function postHandoff(
   // The handoff URL is resolved through configuration, never straight from the request
   // origin (SSRF: an attacker-controlled Host header must not aim this POST+token elsewhere).
   const env = deps.env ?? process.env;
+  const platform = createPlatformAdapter(env);
   const runner = resolveRunnerMode(env);
   const resolved = resolveApiOrigin(env, deps.origin);
   if (!resolved.origin) {
@@ -994,6 +995,13 @@ async function postHandoff(
       "content-type": "application/json",
     };
     if (deps.apiKey) headers.authorization = `Bearer ${deps.apiKey}`;
+    // #665: a protected deployment answers an unauthenticated request with 401, so this handoff
+    // must forward the bypass every sibling call site already forwards. Gated on the Vercel
+    // adapter, because `.env.example` documents the secret as "forwarded only when
+    // DF_PLATFORM_PROVIDER=vercel" - a Vercel secret must never reach a generic origin.
+    const bypass =
+      platform.id === "vercel" ? (env.VERCEL_PROTECTION_BYPASS ?? "").trim() : "";
+    if (bypass) headers["x-vercel-protection-bypass"] = bypass;
     const res = await post(url, {
       method: "POST",
       headers,
