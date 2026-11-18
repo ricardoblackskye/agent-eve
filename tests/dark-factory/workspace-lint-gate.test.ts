@@ -12,9 +12,12 @@
  *     also admits `npm run lint -- --fix`. A CHECK that writes is not a check: it would mutate the tree
  *     behind the coding loop's back, so a writing flag is refused explicitly.
  */
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   ALLOWED_WORKSPACE_COMMAND_PREFIXES,
+  checkOutcomeLines,
+  checkSetSummary,
   isAllowedWorkspaceCommand,
   LINT_COMMAND_PREFIXES,
   resolveLintCommands,
@@ -94,5 +97,86 @@ describe("#659 resolving a target's lint commands", () => {
 
   it("ignores a script whose name merely contains a check word", () => {
     expect(resolveLintCommands({ scripts: { "lint-staged": "lint-staged", linter: "x" } })).toEqual([]);
+  });
+});
+
+/**
+ * #674 - the loop's log must name every declared check and its outcome.
+ *
+ * The loop iterates the target's declared checks and prints one line per command, but its
+ * `if (!lint.ran) continue` printed NOTHING and discarded the output that held the reason. #230's
+ * loop log consequently showed one lint line for two declared checks, and the parenthesised name
+ * was the LAST command - so the log could not tell anyone that `npm run lint` was attempted and
+ * never started. An unmeasured check is not a verdict in either direction, and it is not silence
+ * either: it is a result the log must report.
+ */
+describe("#674 the loop's log names every declared check", () => {
+  const check = (
+    over: Partial<{ passed: boolean; output: string; ran: boolean }> = {},
+  ): { passed: boolean; output: string; ran: boolean } => ({
+    passed: true,
+    output: "",
+    ran: true,
+    ...over,
+  });
+
+  it("names the command for a check that ran and passed", () => {
+    const lines = checkOutcomeLines("npm run typecheck", check());
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("npm run typecheck");
+    expect(lines[0]).toContain("PASS");
+  });
+
+  it("names the command and carries a tail for a check that ran and failed", () => {
+    const lines = checkOutcomeLines(
+      "npm run lint",
+      check({ passed: false, output: "src/a.ts:1 error no-unused-vars" }),
+    );
+    const joined = lines.join("\n");
+    expect(lines[0]).toContain("npm run lint");
+    expect(lines[0]).toContain("FAIL");
+    expect(joined).toContain("no-unused-vars");
+  });
+
+  it("REPORTS a check that did not run, with the reason it could not start", () => {
+    // THE DEFECT: this case printed nothing at all, which is why one line appeared for two checks.
+    const lines = checkOutcomeLines(
+      "npm run lint",
+      check({ ran: false, passed: false, output: "npm error Failed to load config" }),
+    );
+    const joined = lines.join("\n");
+    expect(joined).toContain("npm run lint");
+    expect(joined).toMatch(/did not run/i);
+    expect(joined).toContain("Failed to load config");
+    // an unmeasured check is not a pass, so it must not be reported as one
+    expect(joined).not.toContain("PASS");
+  });
+
+  it("still reports a check that did not run when it left no output", () => {
+    const lines = checkOutcomeLines(
+      "npm run lint",
+      check({ ran: false, passed: false, output: "" }),
+    );
+    const joined = lines.join("\n");
+    expect(joined).toContain("npm run lint");
+    expect(joined).toMatch(/did not run/i);
+  });
+
+  it("summarises the set, so a check missing from the log is visible as a count", () => {
+    const summary = checkSetSummary([check(), check(), check({ ran: false, passed: false })]);
+    expect(summary).toContain("2");
+    expect(summary).toContain("3");
+    expect(summary).toMatch(/did not run/i);
+  });
+
+  it("the loop cannot silently skip a check that did not run (GUARD)", () => {
+    // The formatter can be perfect and still be bypassed by the one-liner that caused #674, so the
+    // call site is asserted too - the same reasoning as #672's wiring guard.
+    const src = readFileSync(
+      new URL("../../scripts/dark-factory-runner.ts", import.meta.url),
+      "utf8",
+    );
+    expect(src).not.toMatch(/if \(!lint\.ran\)\s*continue;/);
+    expect(src).toMatch(/checkOutcomeLines\(/);
   });
 });

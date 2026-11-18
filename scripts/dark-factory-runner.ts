@@ -65,6 +65,8 @@ import {
 import { DEFAULT_SANDBOX_WORKSPACE } from "../agent/lib/dark-factory/opensandbox-driver";
 import {
   artefactIdentity,
+  checkOutcomeLines,
+  checkSetSummary,
   resolveLintCommands,
   CircuitTrippedError,
   DeveloperAgent,
@@ -1264,19 +1266,24 @@ async function main(): Promise<void> {
               // has to get merged, so the run has to satisfy the checks the repository itself runs. A lint
               // failure is returned as a FAILED ITERATION, so the existing self-correction loop fixes it
               // exactly as it fixes a failing test - the run cannot reach done while they are red.
+              const checkOutcomes: { ran: boolean }[] = [];
               for (const lintCommand of targetLintCommands) {
                 // The lint set is stated AT THE CALL SITE rather than folded into the agent's shared
                 // list (#437): a consumer names its own commands, exactly as the AMM scan does.
                 const lint = await ctx.tools.runTests(lintCommand, {
                   allowedCommands: workspaceCommandsFor(targetLintCommands),
                 });
-                if (!lint.ran) continue; // UNMEASURED: the check could not start, so it is not a verdict
-                if (!lint.passed) {
-                  console.log(`     Lint result: FAIL (${lintCommand})`);
+                // #674: EVERY declared check is reported, including one that could not start. The
+                // silent `continue` that used to stand here printed nothing and threw away the output
+                // holding the reason, so the log could not answer "did the loop run the check that
+                // failed?". An unmeasured check is still not a verdict - it just is not silence either.
+                for (const outcomeLine of checkOutcomeLines(lintCommand, lint)) {
+                  console.log(outcomeLine);
+                }
+                checkOutcomes.push({ ran: lint.ran });
+                if (lint.ran && !lint.passed) {
                   // Same reasoning as the test path above: a bare "FAIL" is undiagnosable once the
-                  // sandbox is disposed. Print a BOUNDED tail so the cause is readable from the log.
-                  const lintTail = lint.output.trim().slice(-1200);
-                  if (lintTail) console.log(`     Lint failure (tail):\n${lintTail}`);
+                  // sandbox is disposed, so the banner above carries a BOUNDED tail of the cause.
                   return {
                     passed: false,
                     output:
@@ -1284,7 +1291,9 @@ async function main(): Promise<void> {
                       `done)\n\n${lint.output}`,
                   };
                 }
-                console.log(`     Lint result: PASS (${lintCommand})`);
+              }
+              if (targetLintCommands.length > 0) {
+                console.log(checkSetSummary(checkOutcomes));
               }
             }
 
