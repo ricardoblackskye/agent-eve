@@ -146,7 +146,10 @@ import {
 import { withNotifications } from "../agent/lib/dark-factory/notifying-run-history";
 import { runGovernedAgentCall } from "../agent/lib/dark-factory/governed-agent-call";
 import { recordRunActualCost } from "../agent/lib/dark-factory/run-cost-recorder";
-import { buildAttemptSummary } from "../agent/lib/dark-factory/run-attempt-summary";
+import {
+  attemptRecordingDecision,
+  buildAttemptSummary,
+} from "../agent/lib/dark-factory/run-attempt-summary";
 import type { RunStatus } from "../agent/lib/dark-factory/run-history";
 import { createUsageStore } from "../agent/lib/dark-factory/usage-store-provider";
 import {
@@ -2019,9 +2022,19 @@ export async function recordRunAttemptSummary(
   active: ActiveRun | null,
   outcome: { status: RunStatus; completedAt: string; iterationCount?: number; prUrl?: string },
 ): Promise<void> {
-  // Fail closed: only an explicit `false` records. An omitted flag means the caller has not said the
-  // ledger is missing a run, and guessing would write a second row for a live run's issue.
-  if (!active || active.ledgerRecorded !== false) return;
+  if (!active) return;
+  // #681: the decision lives in a pure predicate so it can be asserted without a database. It fails
+  // closed, and it refuses to pretend against a store that cannot persist.
+  const decision = attemptRecordingDecision({
+    storeId: active.runHistory.id,
+    ...(active.ledgerRecorded === undefined ? {} : { ledgerRecorded: active.ledgerRecorded }),
+  });
+  if (!decision.record) {
+    if (decision.reason !== undefined) {
+      console.warn(`[WARN] This run will not be persisted: ${decision.reason}.`);
+    }
+    return;
+  }
   try {
     const result = await active.runHistory.recordRunSummary(
       buildAttemptSummary({
