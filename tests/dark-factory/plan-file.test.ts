@@ -384,3 +384,119 @@ describe("#659 the plan artifact is not spell-checked", () => {
   });
 
 });
+
+/**
+ * #679 - the plan's tables are lint-clean, and nothing pinned that.
+ *
+ * The artifact from WebFeedPOC#231 failed the target's own linter on a table the factory wrote:
+ *
+ *   .hermes/plans/df-230.md:175:802 error MD060/table-column-style
+ *     Table column style [Table pipe does not align with header for style "aligned"]
+ *
+ * The cause was exactly two characters: the row's last cell was wider than the header's, so its
+ * trailing pipe landed two columns further right. HEAD's renderer does not reproduce it (measured
+ * against #230's own rationale text), so this is a GUARD, not a RED.
+ *
+ * It is worth having because the suite otherwise pins the rendered BYTES. A renderer that emitted an
+ * unaligned table would be snapshotted as correct and stay that way - which is precisely how this
+ * reached a pull request. The assertion below encodes MD060's `aligned` rule directly rather than
+ * shelling out to markdownlint, so it stays fast and offline. Its proof is the mutation case: a
+ * deliberately misaligned table must be caught, or the guard is decoration.
+ */
+
+/** Every line of every markdown table in a document, in order. */
+function tableLines(markdown: string): string[] {
+  return markdown.split("\n").filter((line) => line.trimStart().startsWith("|"));
+}
+
+/** The character offset of each pipe on a line. */
+function pipeOffsets(line: string): number[] {
+  return [...line].reduce<number[]>((acc, ch, index) => (ch === "|" ? [...acc, index] : acc), []);
+}
+
+/** MD060's `aligned` rule: every line's pipes must sit where the header's do. */
+function misalignedTableLines(markdown: string): string[] {
+  const bad: string[] = [];
+  let header: number[] | null = null;
+  for (const line of markdown.split("\n")) {
+    if (!line.trimStart().startsWith("|")) {
+      header = null;
+      continue;
+    }
+    const offsets = pipeOffsets(line);
+    if (header === null) {
+      header = offsets;
+      continue;
+    }
+    // A local binding: TS does not keep the narrowing above inside this closure.
+    const expected = header;
+    if (offsets.length !== expected.length || offsets.some((at, i) => at !== expected[i])) {
+      bad.push(line);
+    }
+  }
+  return bad;
+}
+
+function renderedPlanWith(rationale: string, testCaseName = "passes"): string {
+  return renderPlanFile({
+    storyId: 679,
+    title: "Pin the plan table alignment",
+    summary: "Render a plan and check its tables.",
+    approach: "Assert the alignment rather than the bytes.",
+    tasks: [
+      {
+        title: "Pin it",
+        objective: "Assert alignment.",
+        files: ["agent/lib/dark-factory/plan-file.ts"],
+        steps: ["Render.", "Assert."],
+        verification: "tests/dark-factory/plan-file.test.ts",
+      },
+    ],
+    targetFiles: [{ path: "src/pages/HomePage.jsx", action: "modify", rationale }],
+    acceptanceCriteriaMap: [
+      { acId: "AC1", testFile: "tests/x.test.ts", testCaseName },
+    ],
+  } as never);
+}
+
+describe("#679 the plan's tables align, the way MD060 requires", () => {
+  it("mutation: a table whose cell is narrower than its header is REPORTED", () => {
+    // Without this case the guard below could pass on a helper that detects nothing at all.
+    const misaligned = [
+      "| File  | Action |",
+      "|-------|--------|",
+      "| `a.ts` | modify |",
+    ].join("\n");
+    expect(misalignedTableLines(misaligned)).toHaveLength(1);
+
+    // ...and the control: the same table, padded, is not reported.
+    const aligned = [
+      "| File   | Action |",
+      "|--------|--------|",
+      "| `a.ts` | modify |",
+    ].join("\n");
+    expect(misalignedTableLines(aligned)).toEqual([]);
+  });
+
+  it("GUARD: a cell longer than its header still aligns, because the header is padded", () => {
+    // The original failure's shape: the rationale is far longer than the word "Rationale".
+    const md = renderedPlanWith("A rationale long enough to exceed its header by a wide margin.");
+    expect(tableLines(md).length).toBeGreaterThanOrEqual(6); // two tables, three lines each
+    expect(misalignedTableLines(md)).toEqual([]);
+  });
+
+  it("GUARD: a BARE url still aligns, after the renderer backticks it", () => {
+    // The width is measured on the escaped text, so a transform applied after that would show here.
+    const md = renderedPlanWith(
+      "See https://example.com/router-contract for the mounting contract, then hydrate it.",
+    );
+    expect(misalignedTableLines(md)).toEqual([]);
+  });
+
+  it("RED: a cell whose inline HTML the renderer code-spans still aligns", () => {
+    const md = renderedPlanWith(
+      "The route table mounts <Route index element={<HomePage />} /> and the client entry hydrates it.",
+    );
+    expect(misalignedTableLines(md)).toEqual([]);
+  });
+});

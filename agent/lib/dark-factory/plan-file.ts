@@ -72,9 +72,18 @@ function headingText(text: unknown): string {
  * backslash able to escape the next character, so a value ending in one swallows the cell separator and
  * the row stops being the table it claims to be. CodeQL flags the reverse order as
  * js/incomplete-sanitization, and it is right to.
+ *
+ * #679 - the inline-HTML pass runs HERE, on the cell text, rather than being left to the body pass that
+ * runs after the whole file is assembled. That pass code-spans a markup run, which ADDS TWO CHARACTERS,
+ * so a cell containing markup grew AFTER `renderTable` had already padded the column to the width it
+ * measured - and the row's trailing pipe landed two columns right of the header's. That is exactly what
+ * the target's linter reported on WebFeedPOC#231 (MD060, "Table pipe does not align with header"), on a
+ * table the factory had written itself. Applying it here means the width is measured on the text that
+ * is rendered, which is what this module already claims to do. The body pass still runs, and is a no-op
+ * for cells because a tag inside a code span is deliberately not wrapped twice.
  */
 function cell(text: unknown): string {
-  return neutralizeBareUrls(toText(text))
+  return neutralizeInlineHtml(neutralizeBareUrls(toText(text)))
     .replace(/\s+/g, " ")
     .replace(/\\/g, "\\\\")
     .replace(/\|/g, "\\|")
