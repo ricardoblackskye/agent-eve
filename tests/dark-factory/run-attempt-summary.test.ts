@@ -3,7 +3,10 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { buildAttemptSummary } from "../../agent/lib/dark-factory/run-attempt-summary";
+import {
+  attemptRecordingDecision,
+  buildAttemptSummary,
+} from "../../agent/lib/dark-factory/run-attempt-summary";
 import { SqliteRunHistoryStore } from "../../agent/lib/dark-factory/run-history-store";
 
 /**
@@ -138,6 +141,40 @@ describe("#681 the attempt row coexists with a live claim", () => {
     // Two rows for one issue: the ledger's run, and the attempt that had to record itself.
     expect(runs.length).toBe(2);
     expect(runs.map((run) => run.status).sort()).toEqual(["queued", "succeeded"]);
+  });
+});
+
+/**
+ * #681 - a run the ledger never minted is recorded, but only where recording can mean something.
+ *
+ * `ledgerRecorded` alone is not enough, and this is the gap the investigation exposed. A
+ * ConsoleRunHistoryStore reports `recorded: true` for every write while persisting nothing, so a run
+ * whose store is the console would record itself into a void and report success. The store's own id is
+ * the honest signal: writing to a console store is theatre, and the operator needs to hear that the run
+ * will not be persisted rather than receive a silent no-op.
+ */
+describe("#681 when a run must record itself", () => {
+  it("records when the ledger minted nothing, and the store can persist", () => {
+    expect(attemptRecordingDecision({ storeId: "postgres", ledgerRecorded: false }))
+      .toEqual({ record: true });
+  });
+
+  it("does NOT record when the ledger already minted the run", () => {
+    expect(attemptRecordingDecision({ storeId: "postgres", ledgerRecorded: true }))
+      .toEqual({ record: false });
+  });
+
+  it("FAILS CLOSED when the caller has not said whether the ledger recorded", () => {
+    // An omitted flag is not a claim that a run is missing; guessing writes a second row for a live issue.
+    expect(attemptRecordingDecision({ storeId: "postgres" })).toEqual({ record: false });
+  });
+
+  it("does NOT pretend to record against a store that cannot persist, and says why", () => {
+    // The console store accepts every write and keeps none: reporting success there is the same class
+    // of defect as an empty matrix reading as a clean result.
+    const decision = attemptRecordingDecision({ storeId: "console", ledgerRecorded: false });
+    expect(decision.record).toBe(false);
+    expect(decision.reason).toContain("console");
   });
 });
 
