@@ -138,7 +138,7 @@ it("refuses the DSN the local launcher writes its live ledger to", () => {
 it("accepts a test database whatever the host is", () => {
   // The host is not the signal: a remote CI service container is disposable, a local ledger is not.
   expect(() => assertDisposableDsn("postgres://postgres@localhost:5432/darkfactory_test")).not.toThrow();
-  expect(() => assertDisposableDsn("postgresql://u:p@db.example.com:5432/df_run_history_test")).not.toThrow();
+  expect(() => assertDisposableDsn("postgresql://u@db.example.com:5432/df_run_history_test")).not.toThrow();
 });
 
 it("refuses a localhost DSN whose DATABASE is not a test database", () => {

@@ -53,6 +53,6 @@ describe("#332 reset safety rail", () => {
       assertDisposableDsn("postgresql://df_test@127.0.0.1:55432/df_run_history_test"),
     ).not.toThrow();
     // A remote host is fine: the database is disposable because of its name, not its address.
-    expect(() => assertDisposableDsn("postgresql://u:p@db.example.com:5432/df_usage_test")).not.toThrow();
+    expect(() => assertDisposableDsn("postgresql://u@db.example.com:5432/df_usage_test")).not.toThrow();
   });
 });
