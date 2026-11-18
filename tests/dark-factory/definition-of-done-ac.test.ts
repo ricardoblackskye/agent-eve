@@ -202,6 +202,48 @@ describe("Definition of Done — Acceptance Criteria Traceability & Anti-Rubber-
     expect(result.reason).toContain("ERR-2: Error two");
   });
 
+  it("still reports the acceptance matrix when the review budget is exhausted (#673)", async () => {
+    // #673: every real local run so far ended on this path and printed `AC Matrix Count 0`,
+    // even though its plan mapped criteria. The matrix is computed BEFORE the review loop and
+    // only the success result carried it, so the outcome that most needs explaining - blocked -
+    // was the one that lost the traceability.
+    const { deps } = createMockDeps();
+    deps.runChecks = vi.fn().mockResolvedValue([
+      { id: "WARN-1", source: "linter", message: "Warning one", severity: "warning" },
+    ]);
+    // No disposition for WARN-1, so it stays unaccepted and the review rounds exhaust rather
+    // than the run succeeding or tripping the anti-rubber-stamp.
+    deps.attemptFixes = vi.fn().mockResolvedValue([]);
+
+    const task: DefinitionOfDoneTask = {
+      runId: "run-budget-matrix",
+      repo: "org/repo",
+      issue: 179,
+      head: "task-branch",
+      title: "Add Google Auth",
+      body: "Closes #179",
+      plan,
+      // the ACs PASS, so this reaches the budget path rather than the AC-verification one
+      testResults: [
+        { testFile: "tests/chat-auth.test.ts", testCaseName: "redirects to login", passed: true },
+        { testFile: "tests/chat-auth.test.ts", testCaseName: "grants access for allowed email", passed: true },
+      ],
+    };
+
+    const result = await runDefinitionOfDone(deps, task);
+
+    // CONTROL: the run must still be blocked. Without this, a fix that turned the case into a
+    // success - where the matrix has always been carried - would satisfy the assertions below.
+    expect(result.ok).toBe(false);
+    expect(result.status).toBe("blocked");
+    expect(result.reason).toContain("Review budget exhausted");
+
+    // THE FIX: the matrix the run computed is on the result the blocked path returns.
+    expect(result.acMatrix).toHaveLength(2);
+    expect(result.acMatrix?.map((a) => a.acId)).toEqual(["AC1", "AC2"]);
+    expect(result.traceabilityTable).toMatch(/AC1/);
+  });
+
 
   it("evaluates AC traceability as a pure component (SRP)", async () => {
     const { evaluateAcTraceability } = await import(

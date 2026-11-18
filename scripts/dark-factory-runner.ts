@@ -1743,6 +1743,12 @@ export function dodOutcomeComment(
     (dodResult.pr
       ? `- **PR** (left open - do not merge until its checks are green): ${dodResult.pr.url}\n`
       : "") +
+    // #673: carry the same traceability the success comment shows. This is the comment a reader
+    // opens to understand why the run did not certify, so it must not be the one that says what
+    // failed while never saying what the ticket asked for.
+    (dodResult.traceabilityTable
+      ? `\n**Acceptance criteria**\n\n${dodResult.traceabilityTable}\n`
+      : "") +
     (findings ? `\n**Outstanding findings**\n\n${findings}\n` : "") +
     `\n- **Lifecycle**: \`${dodResult.status}\``
   );
