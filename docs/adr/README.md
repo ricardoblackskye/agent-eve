@@ -143,3 +143,4 @@ changes, write a new one that supersedes it.
 | [0087](0087-a-check-wait-bound-is-a-safety-cap.md)                       | A check-wait bound is a safety cap, not a latency budget                                            | Accepted           |
 | [0088](0088-a-test-database-is-named-as-one.md)                          | A test database is named as one                                                                     | Accepted           |
 | [0089](0089-a-test-timeout-is-sized-from-measurement.md)                 | A test timeout is sized from measurement                                                            | Accepted           |
+| [0090](0090-an-unfinished-check-is-not-a-failure.md)                     | An unfinished check is not a failure                                                                | Accepted           |

@@ -157,6 +157,43 @@ export function checkRunFindings(checks: readonly PrCheckRun[] | null): ReviewFi
 
   return findings;
 }
+
+/** #691 - the machine-readable reason a run is blocked, when `status: "blocked"` cannot say it. */
+export const CHECKS_NOT_FINISHED = "checks-not-finished";
+export type BlockedReason = typeof CHECKS_NOT_FINISHED;
+
+const UNSETTLED_CHECK_PREFIX = "PR-CHECK-UNSETTLED:";
+
+/**
+ * The checks that had not finished, when they are the ONLY thing holding the run back.
+ *
+ * `checkRunFindings` already distinguishes an unfinished check from a failed one by id; nothing read
+ * it, and `reason` is prose a human reads rather than a field a machine can. This is that field.
+ *
+ * Fail-closed in both directions:
+ * - any OTHER unresolved finding means the run is not merely waiting, so the reason is withheld; and
+ * - a FAILED check is never reported as a wait - it is evidence against the work, and calling it
+ *   "still running" would launder a failure into a delay.
+ */
+export function unfinishedChecks(findings: readonly ReviewFinding[]): {
+  blockedReason?: BlockedReason;
+  pendingChecks: string[];
+} {
+  const pending: string[] = [];
+  let others = 0;
+
+  for (const finding of findings) {
+    if (finding.id.startsWith(UNSETTLED_CHECK_PREFIX)) {
+      pending.push(finding.id.slice(UNSETTLED_CHECK_PREFIX.length));
+    } else {
+      others += 1;
+    }
+  }
+
+  if (pending.length === 0 || others > 0) return { pendingChecks: [] };
+  return { blockedReason: CHECKS_NOT_FINISHED, pendingChecks: pending.sort() };
+}
+
 export type FindingDispositionStatus = "resolved" | "accepted";
 
 export interface ReviewFinding {
@@ -254,6 +291,13 @@ export interface DefinitionOfDoneResult {
   reason: string;
   acMatrix?: AcTraceabilityItem[];
   traceabilityTable?: string;
+  /**
+   * #691: what actually blocked the run, when the status alone cannot say it. Set only when the run
+   * is blocked purely because its checks have not finished - `pendingChecks` names them - so an
+   * operator (or a re-trigger) can tell "wait" from "no" without parsing prose.
+   */
+  blockedReason?: BlockedReason;
+  pendingChecks?: string[];
 }
 
 export interface AcTestResult {
@@ -354,6 +398,9 @@ function buildBudgetExhaustedResult(
     acceptedCount,
     remainingFindings: remaining,
     reason: `Review budget exhausted (${maxRounds} rounds) with ${remaining.length} unresolved finding(s).`,
+    // #691: the run says WAIT rather than leaving the reader to infer it from the finding ids - and
+    // only when an unfinished check is the whole of the obstacle (see `unfinishedChecks`).
+    ...unfinishedChecks(remaining),
     // #673: carry the traceability the run computed. A blocked run is exactly the one a reader
     // opens to understand why it did not certify, so it must not be the outcome that loses the
     // link between the story's criteria and what the change does. Built before the review loop,
@@ -589,12 +636,18 @@ export async function runDefinitionOfDone(
   const blockedByHistory = (
     result: DefinitionOfDoneResult,
     error: string,
-  ): DefinitionOfDoneResult => ({
-    ...result,
-    ok: false,
-    status: "blocked",
-    reason: `Run history persistence failed: ${error}`,
-  });
+  ): DefinitionOfDoneResult => {
+    // #691: the checks are no longer what blocked this run - the ledger is - so the deferral fields
+    // are dropped rather than left behind contradicting the reason below. Destructured rather than
+    // set to `undefined` so `exactOptionalPropertyTypes` keeps the property genuinely absent.
+    const { blockedReason: _deferral, pendingChecks: _pending, ...rest } = result;
+    return {
+      ...rest,
+      ok: false,
+      status: "blocked",
+      reason: `Run history persistence failed: ${error}`,
+    };
+  };
 
   // 1. Open the PR linked to the issue
   const prResult = await deps.prWriter.createPullRequest(owner, repoName, {
