@@ -341,6 +341,8 @@ function buildBudgetExhaustedResult(
   totalDistinctFindings: number,
   acceptedCount: number,
   remaining: ReviewFinding[],
+  acMatrix?: AcTraceabilityItem[],
+  traceabilityTable?: string,
 ): DefinitionOfDoneResult {
   return {
     ok: false,
@@ -352,6 +354,12 @@ function buildBudgetExhaustedResult(
     acceptedCount,
     remainingFindings: remaining,
     reason: `Review budget exhausted (${maxRounds} rounds) with ${remaining.length} unresolved finding(s).`,
+    // #673: carry the traceability the run computed. A blocked run is exactly the one a reader
+    // opens to understand why it did not certify, so it must not be the outcome that loses the
+    // link between the story's criteria and what the change does. Built before the review loop,
+    // so it is available here already.
+    acMatrix,
+    traceabilityTable,
   };
 }
 
@@ -887,6 +895,8 @@ export async function runDefinitionOfDone(
         totalDistinctFindings,
         acceptedIds.size,
         remaining,
+        acMatrix,
+        traceabilityTable,
       );
       const historyError = await recordReviewRound(round, "blocked", roundCounts);
       return historyError ? blockedByHistory(blocked, historyError) : blocked;
