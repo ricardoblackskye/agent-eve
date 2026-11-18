@@ -14,6 +14,11 @@ export default defineConfig({
     // #332: reset the shared Postgres tables ONCE before any test file starts. Per-file resets race,
     // because test files run in parallel and share these tables.
     globalSetup: ["tests/dark-factory/pg-global-setup.ts"],
+    // #690: sized from measurement, not inherited from the framework. The suite's slowest tests sat
+    // at 2.0-2.8s with one AT the 5000ms default (5116ms measured), and a loaded machine stretches a
+    // file ~1.7x (5678ms -> 9863ms) - so the gate went red or green on identical input. The worst
+    // case surviving the cost fix measures 2798ms, so the bar is 7x that. ADR 0089 records why.
+    testTimeout: 20_000,
     // #391: unit test coverage. `include` is what makes an UNTESTED file count as 0% instead of
     // being invisible - without it Vitest reports only the files the tests happened to import, which
     // flatters the number. The gate is a ratchet in `scripts/coverage-ratchet.ts`, not `thresholds`:
