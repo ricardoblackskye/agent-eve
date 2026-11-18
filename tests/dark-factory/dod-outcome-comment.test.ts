@@ -91,3 +91,62 @@ describe("#659 the ticket comment follows the DoD verdict", () => {
     expect(body).not.toContain("pull/");
   });
 });
+
+/**
+ * #673 - the blocked comment must carry the run's acceptance traceability.
+ *
+ * The success comment embeds `traceabilityTable`; the not-done comment named the status, the reason,
+ * the PR and the outstanding findings, and showed no traceability at all. That is the comment a
+ * reader opens to understand why a run did not certify, so it said what failed while never saying
+ * what the ticket asked for - the same class as #502's "an omission must not read as a clean result".
+ */
+describe("#673 the blocked comment carries the acceptance traceability", () => {
+  const TABLE =
+    "| AC | Test | Case |\n| --- | --- | --- |\n| AC1 | tests/x.test.ts | passes |";
+
+  it("renders the traceability table on a blocked run", () => {
+    const body = dodOutcomeComment(
+      673,
+      result({
+        ok: false,
+        status: "blocked",
+        reason: "Review budget exhausted (3 rounds) with 1 unresolved finding(s).",
+        remainingFindings: [
+          { id: "WARN-1", source: "linter", message: "Warning one", severity: "warning" },
+        ],
+        acMatrix: [
+          {
+            acId: "AC1",
+            description: "the credit line renders",
+            testFile: "tests/x.test.ts",
+            testCaseName: "passes",
+            passed: true,
+          },
+        ],
+        traceabilityTable: TABLE,
+      }),
+    );
+
+    // CONTROL: it must still be the not-done comment, naming the reason and the finding. Without
+    // this, the case would pass if the comment started claiming success - #659's defect.
+    expect(body).toContain("is NOT done");
+    expect(body).toContain("Review budget exhausted");
+    expect(body).toContain("WARN-1");
+
+    // THE FIX: the traceability the run computed is rendered.
+    expect(body).toContain("Acceptance criteria");
+    expect(body).toContain("AC1");
+  });
+
+  it("omits the section when the run had nothing to trace", () => {
+    // An unmapped plan has no matrix at all (#502's missingMap). An empty heading would be the
+    // same kind of lie as reporting an empty matrix for a plan that did map.
+    const body = dodOutcomeComment(
+      673,
+      result({ ok: false, status: "blocked", acMatrix: undefined, traceabilityTable: undefined }),
+    );
+
+    expect(body).toContain("is NOT done");
+    expect(body).not.toContain("Acceptance criteria");
+  });
+});
