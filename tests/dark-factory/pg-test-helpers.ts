@@ -32,22 +32,33 @@ function assertIdentifier(table: string): void {
 }
 
 /**
- * Refuse to reset anything that does not look like a disposable test database.
+ * Refuse to reset anything that is not a database named as a test database.
  *
- * This module issues destructive SQL. If a DSN ever points at something real, the right outcome is a
- * loud failure, not a quietly emptied table.
+ * #689 — the previous rule accepted any localhost DSN, and the local run launcher writes its live
+ * ledger to `postgres://postgres@localhost:5432/darkfactory`. The reset therefore TRUNCATEd the rows
+ * a real run had just recorded, which then read as a store fault for several sessions.
+ *
+ * The host is not the signal: a remote CI service container is disposable and a local ledger is not.
+ * The DATABASE NAME is — that is the only part of a DSN that says what the data is for.
+ *
+ * Fails CLOSED: a DSN it cannot parse is refused, never silently accepted.
  */
 export function assertDisposableDsn(connectionString: string): void {
-  const lowered = connectionString.toLowerCase();
-  const disposable =
-    lowered.includes("_test") ||
-    lowered.includes("localhost") ||
-    lowered.includes("127.0.0.1");
-  if (!disposable) {
+  const refuse = (): never => {
     throw new Error(
-      "refusing to reset tables: the DSN does not look like a disposable test database",
+      "refusing to reset tables: the DSN does not look like a disposable test database " +
+        "(its database name must contain _test, for example darkfactory_test)",
     );
+  };
+
+  let database: string;
+  try {
+    // decodeURIComponent can itself throw on a malformed escape, so it belongs inside the guard.
+    database = decodeURIComponent(new URL(connectionString).pathname).replace(/^\/+/, "");
+  } catch {
+    return refuse();
   }
+  if (!database.toLowerCase().includes("_test")) return refuse();
 }
 
 async function withClient<T>(
