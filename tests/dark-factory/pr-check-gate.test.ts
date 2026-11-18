@@ -19,6 +19,10 @@ import {
   checkRunFindings,
   settlePullRequestChecks,
 } from "../../agent/lib/dark-factory/definition-of-done";
+import {
+  DEFAULT_PR_CHECKS_TIMEOUT_MS,
+  resolvePrChecksTimeoutMs,
+} from "../../agent/lib/dark-factory/pr-checks-timeout";
 
 const run = (name: string, status: string, conclusion: string | null) => ({
   name,
@@ -180,5 +184,57 @@ describe("#659 settling the pull request's checks", () => {
 
     expect(result).toBeNull();
     expect(reads).toBe(1);
+  });
+});
+
+/**
+ * #676 - the bound on the DoD's wait is a safety cap, not a latency budget.
+ *
+ * The issue proposed either raising the bound or making it per-repository, and justified the second
+ * with "a bound too generous for a fast repository delays every run's verdict". That premise is
+ * false, and this file's own cases above prove it: `settlePullRequestChecks` returns as soon as
+ * nothing is unsettled ("returns the checks as soon as they have all finished, with one read"), so
+ * the timeout is only ever reached by a check that never settles.
+ *
+ * What the bound is really for, then, is a stuck descriptor - which makes the default a decision to
+ * record rather than a number to tune. It also makes a typo in the override dangerous: `Number()`
+ * yields NaN, and `now - started >= NaN` is false forever, turning a bounded wait into an unbounded
+ * one.
+ */
+describe("#676 the check-wait bound", () => {
+  it("uses the default when the variable is unset or blank", () => {
+    expect(resolvePrChecksTimeoutMs({})).toBe(DEFAULT_PR_CHECKS_TIMEOUT_MS);
+    expect(resolvePrChecksTimeoutMs({ DF_PR_CHECKS_TIMEOUT_MS: "   " })).toBe(
+      DEFAULT_PR_CHECKS_TIMEOUT_MS,
+    );
+  });
+
+  it("honours an explicit override", () => {
+    expect(resolvePrChecksTimeoutMs({ DF_PR_CHECKS_TIMEOUT_MS: "900000" })).toBe(900_000);
+  });
+
+  it("FALLS BACK on a typo rather than yielding NaN, which would wait forever", () => {
+    // The defect: NaN makes the deadline comparison permanently false, so the wait never breaks.
+    for (const typo of ["5m", "abc", "NaN", "null"]) {
+      const resolved = resolvePrChecksTimeoutMs({ DF_PR_CHECKS_TIMEOUT_MS: typo });
+      expect(Number.isFinite(resolved)).toBe(true);
+      expect(resolved).toBe(DEFAULT_PR_CHECKS_TIMEOUT_MS);
+    }
+  });
+
+  it("falls back for a zero or negative bound, which would refuse every run", () => {
+    for (const bad of ["0", "-1", "-600000"]) {
+      expect(resolvePrChecksTimeoutMs({ DF_PR_CHECKS_TIMEOUT_MS: bad })).toBe(
+        DEFAULT_PR_CHECKS_TIMEOUT_MS,
+      );
+    }
+  });
+
+  it("defaults long enough for the slowest checks the whole-project gate must cover", () => {
+    // #659 gates the whole project, so every check is blocking and ONE deadline must cover the pull
+    // request's queue plus its slowest descriptor. Observed: e2e and MegaLinter are each around ten
+    // minutes on WebFeedPOC, and #224 was STILL unsettled with ten minutes configured. Asserting the
+    // floor here records the decision instead of leaving a magic constant.
+    expect(DEFAULT_PR_CHECKS_TIMEOUT_MS).toBeGreaterThanOrEqual(15 * 60_000);
   });
 });
