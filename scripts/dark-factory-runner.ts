@@ -146,6 +146,8 @@ import {
 import { withNotifications } from "../agent/lib/dark-factory/notifying-run-history";
 import { runGovernedAgentCall } from "../agent/lib/dark-factory/governed-agent-call";
 import { recordRunActualCost } from "../agent/lib/dark-factory/run-cost-recorder";
+import { buildAttemptSummary } from "../agent/lib/dark-factory/run-attempt-summary";
+import type { RunStatus } from "../agent/lib/dark-factory/run-history";
 import { createUsageStore } from "../agent/lib/dark-factory/usage-store-provider";
 import {
   FINISHED_RUN_STATUSES,
@@ -239,6 +241,17 @@ type ActiveRun = {
   repo: string;
   issue: number;
   runId: string;
+  /**
+   * #681: explicitly `false` when the ledger never minted a run for this attempt - it was unreachable,
+   * so `beginRunRecord` reported `fellBack` and every later write targets an id the ledger has never
+   * heard of. The run still happened, so it is recorded as its own terminal row at the end.
+   *
+   * Optional on purpose: absent means "do not record", so a caller that does not know cannot cause a
+   * write. Only an explicit `false` does.
+   */
+  ledgerRecorded?: boolean;
+  /** When this attempt began, for the row recorded when the ledger has none (#681). */
+  startedAt?: string;
   runHistory: Parameters<typeof applyTerminalLifecycle>[0]["runHistory"];
   labelWriter?: Parameters<typeof applyTerminalLifecycle>[0]["labelWriter"];
 };
@@ -462,7 +475,14 @@ async function main(): Promise<void> {
   const runId = startDecision.runId;
   // #503 AC5: from here the run owns the issue's claim, so an abort that escapes `main` must release it.
   // Set BEFORE the control store and label writer exist, and filled in as they do.
-  activeRun = { repo: targetRepo, issue: issueNum, runId, runHistory };
+  activeRun = {
+    repo: targetRepo,
+    issue: issueNum,
+    runId,
+    ledgerRecorded: begun.recorded,
+    startedAt: new Date().toISOString(),
+    runHistory,
+  };
 
   const { store: runControlStore, checkpoint } = buildRunControl(env, runId);
   activeControlStore = runControlStore;
@@ -1985,6 +2005,52 @@ export function recordPassingTestResults(
  * every failure — including an unconfigured store — is reported and the run is unaffected. Exported so
  * both entry paths can call it, and so its behaviour is reachable from a test.
  */
+/**
+ * Record a run the LEDGER never minted (#681), so the history can see that it happened.
+ *
+ * A no-op when the ledger has a run for this attempt: that run is already the record, and writing a
+ * second row for the same issue would trip `df_run_active_issue_uidx`. This fires only on the fallback
+ * path, where the runner carried on with the attempt id and did real work nothing could observe.
+ *
+ * Best-effort and never fatal, exactly like the cost recorder beside it: failing to record a run must
+ * not fail the run.
+ */
+export async function recordRunAttemptSummary(
+  active: ActiveRun | null,
+  outcome: { status: RunStatus; completedAt: string; iterationCount?: number; prUrl?: string },
+): Promise<void> {
+  // Fail closed: only an explicit `false` records. An omitted flag means the caller has not said the
+  // ledger is missing a run, and guessing would write a second row for a live run's issue.
+  if (!active || active.ledgerRecorded !== false) return;
+  try {
+    const result = await active.runHistory.recordRunSummary(
+      buildAttemptSummary({
+        runId: active.runId,
+        repo: active.repo,
+        issue: active.issue,
+        status: outcome.status,
+        createdAt: active.startedAt ?? outcome.completedAt,
+        completedAt: outcome.completedAt,
+        ...(active.startedAt === undefined ? {} : { startedAt: active.startedAt }),
+        ...(outcome.iterationCount === undefined ? {} : { iterationCount: outcome.iterationCount }),
+        ...(outcome.prUrl === undefined ? {} : { prUrl: outcome.prUrl }),
+      }),
+    );
+    if (!result.ok) {
+      console.warn(
+        `[WARN] The run could not be recorded in the history (${result.error ?? "no detail"}); ` +
+          "the run itself is unaffected.",
+      );
+    }
+  } catch (error) {
+    console.warn(
+      `[WARN] The run could not be recorded in the history: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+}
+
 export async function recordRunCostForRun(
   active: ActiveRun | null,
   env: Record<string, string | undefined>,
@@ -2104,6 +2170,12 @@ if (isDirectRun) {
     .then(async () => {
       // #531: recorded on the normal path too, so a parked or completed run still carries its cost.
       await recordRunCostForRun(activeRun, process.env);
+      // #681: a run the ledger never minted is recorded here, as its own TERMINAL row. `succeeded`
+      // because the run delivered what it set out to - a run that PARKED delivered its plan.
+      await recordRunAttemptSummary(activeRun, {
+        status: "succeeded",
+        completedAt: new Date().toISOString(),
+      });
     })
     .catch(async (error: unknown) => {
     console.error(
@@ -2111,6 +2183,11 @@ if (isDirectRun) {
     );
     // #531: an aborted run spent money too — before the claim is released and the run is cleared.
     await recordRunCostForRun(activeRun, process.env);
+    // #681: an aborted run happened too, and is recorded before the run is cleared.
+    await recordRunAttemptSummary(activeRun, {
+      status: "aborted",
+      completedAt: new Date().toISOString(),
+    });
     // #503 AC5: an abort that escaped `main` must still END the run, or the issue keeps the claim (and
     // the `df:running` label) with nothing left to release it. Done BEFORE the control store closes, and
     // it never throws, so the original abort stays the visible cause.
