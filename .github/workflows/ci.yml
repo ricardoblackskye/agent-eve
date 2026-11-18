@@ -43,7 +43,11 @@ jobs:
           # Loopback-only, ephemeral container: trust auth avoids putting a
           # password in the workflow (and a kics "password in URL" finding).
           POSTGRES_HOST_AUTH_METHOD: trust
-          POSTGRES_DB: darkfactory
+          # #689: the database is NAMED as a test database, because the suite's global setup
+          # TRUNCATEs the tables it finds. A test run must never be able to empty a database
+          # that holds a real run ledger -- which is what "localhost is disposable" allowed
+          # locally, where the run launcher writes to `darkfactory`.
+          POSTGRES_DB: darkfactory_test
         ports:
           - 5432:5432
         options: >-
@@ -58,14 +62,14 @@ jobs:
       # a missing variable makes its tests SKIP silently rather than fail. Three were
       # missing (#325), which left 13 of the 24 Postgres tests not run in CI -- including
       # run-history, the very suite that would have caught #323.
-      DF_TENANT_TEST_DATABASE_URL: postgres://postgres@localhost:5432/darkfactory?sslmode=disable
-      DF_COST_BUDGET_TEST_DATABASE_URL: postgres://postgres@localhost:5432/darkfactory?sslmode=disable
-      DF_RUN_HISTORY_TEST_DATABASE_URL: postgres://postgres@localhost:5432/darkfactory?sslmode=disable
-      DF_USAGE_TEST_DATABASE_URL: postgres://postgres@localhost:5432/darkfactory?sslmode=disable
+      DF_TENANT_TEST_DATABASE_URL: postgres://postgres@localhost:5432/darkfactory_test?sslmode=disable
+      DF_COST_BUDGET_TEST_DATABASE_URL: postgres://postgres@localhost:5432/darkfactory_test?sslmode=disable
+      DF_RUN_HISTORY_TEST_DATABASE_URL: postgres://postgres@localhost:5432/darkfactory_test?sslmode=disable
+      DF_USAGE_TEST_DATABASE_URL: postgres://postgres@localhost:5432/darkfactory_test?sslmode=disable
       # #409: the control suite gates on its own TEST variable like the other six. It used to
       # read the production-shaped DF_CONTROL_DATABASE_URL, which no local run sets - so it
       # skipped locally and only ran here.
-      DF_CONTROL_TEST_DATABASE_URL: postgres://postgres@localhost:5432/darkfactory?sslmode=disable
+      DF_CONTROL_TEST_DATABASE_URL: postgres://postgres@localhost:5432/darkfactory_test?sslmode=disable
       # #472: the live model-availability check is opt-in so a local run stays
       # hermetic (the offline assertion is the committed receipt). CI has network, so
       # setting the flag here preserves the provider drift detection this check used to
