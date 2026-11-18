@@ -40,6 +40,10 @@ const SKIP_DIRS = new Set([
   "evals", // eval harness
   "dist",
   ".next",
+  // #563: the Dark Factory's scratch area. `df-workspaces/` is gitignored (.gitignore:19) and
+  // holds sandbox checkouts of OTHER repositories - WebFeedPOC among them - whose settings would
+  // otherwise be demanded in THIS repository's .env.example.
+  "df-workspaces",
 ]);
 
 const SOURCE_EXT = new Set([".ts", ".js", ".mjs", ".cjs"]);
