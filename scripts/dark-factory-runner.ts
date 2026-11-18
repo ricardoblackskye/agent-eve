@@ -435,6 +435,7 @@ async function main(): Promise<void> {
   const planWorkspace = workspaceResult.path;
 
   const begun = await beginRunRecord({
+    resuming: isResume,
     history: runHistory,
     attemptId,
     repo: targetRepo,

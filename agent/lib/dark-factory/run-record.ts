@@ -27,6 +27,12 @@ export interface BeginRunRecordInput {
   repo: string;
   issue: number;
   receivedAt?: string;
+  /**
+   * Whether this attempt is a RESUME (#675). The conflict branch needs it: a resume meeting a
+   * `blocked` holder adopts that run, which is the flow working rather than failing, and the log
+   * must not call it a failure before the caller's `decideRunStart` says otherwise.
+   */
+  resuming?: boolean;
   /** Sink for the honest reporting; defaults to `console.error`. */
   log?: (message: string) => void;
 }
@@ -146,14 +152,28 @@ export async function beginRunRecord(
     const conflict =
       `the ledger already holds an active run (${holderRunId}, status '${holderStatus}') for ` +
       `${input.repo}#${input.issue}, so this attempt was not recorded`;
-    log(`[WARN] The run record could not be opened: ${conflict}.`);
-    return {
+    const held: BeginRunRecordResult = {
       runId: attemptId,
       recorded: false,
       fellBack: true,
       error: conflict,
       activeConflict: { runId: holderRunId, status: holderStatus },
     };
+
+    // #675 - the verdict is pronounced BEFORE it is logged, and by the function that holds both facts.
+    // A resume meeting a `blocked` holder ADOPTS it (the flow working), yet this branch warned "this
+    // attempt was not recorded" first - naming the resume's OWN run as the obstacle, and contradicting
+    // the caller's very next line. `decideRunStart` is reused rather than re-testing the status here:
+    // a second copy of the rule is how the log and the decision drift apart again.
+    if (decideRunStart(held, { resuming: input.resuming }).kind === "adopt") {
+      log(
+        `[INFO] The ledger holds run ${holderRunId} (status '${holderStatus}') for ` +
+          `${input.repo}#${input.issue}; resuming it.`,
+      );
+    } else {
+      log(`[WARN] The run record could not be opened: ${conflict}.`);
+    }
+    return held;
   }
 
   if (!accepted.ok || !accepted.value) {
