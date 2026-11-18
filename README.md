@@ -1008,7 +1008,8 @@ so a hook there needs the `defineDynamic` conversion tracked in #217.
 
 Configuration (see `.env.example`): `DF_USAGE_DRIVER`, `DF_USAGE_DATABASE_URL`,
 `DF_USAGE_DB_PATH`, and the optional `DF_USAGE_TEST_DATABASE_URL`, which enables
-the gated Postgres integration tests.
+the gated Postgres integration tests when set to a disposable test database (its
+name must contain `_test`, for example `darkfactory_test`).
 
 ## Dark Factory (R7.2) — LLM call policy (#208)
 
@@ -1107,7 +1108,8 @@ re-running a seed.
 
 Configuration (see `.env.example`): `DF_TENANT_DRIVER` (`console` | `sqlite` |
 `postgres`), `DF_TENANT_DB_PATH`, `DF_TENANT_DATABASE_URL`, and the optional
-`DF_TENANT_TEST_DATABASE_URL`, which gates the Postgres integration tests.
+`DF_TENANT_TEST_DATABASE_URL`, which gates the Postgres integration tests when set
+to a disposable test database (its name must contain `_test`).
 
 ### Test data for local/dev and the Postgres test project
 

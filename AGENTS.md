@@ -91,7 +91,12 @@ locally, start a disposable one first:
 docker run -d --rm --name df-cov-pg -p 5432:5432 \
   -e POSTGRES_HOST_AUTH_METHOD=trust -e POSTGRES_DB=darkfactory postgres:16-alpine
 
-export DF_TENANT_TEST_DATABASE_URL="postgres://postgres@localhost:5432/darkfactory?sslmode=disable"
+# The suites reset (TRUNCATE) the tables they find, so they write to a database NAMED as a test
+# database (#689). `darkfactory` above stays the local run ledger and is deliberately NOT used
+# by the tests: before this, a suite run truncated a real run's newly recorded rows.
+docker exec df-cov-pg psql -U postgres -c 'CREATE DATABASE darkfactory_test'
+
+export DF_TENANT_TEST_DATABASE_URL="postgres://postgres@localhost:5432/darkfactory_test?sslmode=disable"
 export DF_COST_BUDGET_TEST_DATABASE_URL="$DF_TENANT_TEST_DATABASE_URL"
 export DF_RUN_HISTORY_TEST_DATABASE_URL="$DF_TENANT_TEST_DATABASE_URL"
 export DF_USAGE_TEST_DATABASE_URL="$DF_TENANT_TEST_DATABASE_URL"
