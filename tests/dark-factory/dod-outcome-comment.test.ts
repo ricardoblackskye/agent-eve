@@ -149,4 +149,54 @@ describe("#673 the blocked comment carries the acceptance traceability", () => {
     expect(body).toContain("is NOT done");
     expect(body).not.toContain("Acceptance criteria");
   });
+
+  it("says the checks have not finished, names them, and says how to continue (#691)", () => {
+    const body = dodOutcomeComment(
+      232,
+      result({
+        ok: false,
+        status: "blocked",
+        reason: "Review budget exhausted (3 rounds) with 1 unresolved finding(s).",
+        blockedReason: "checks-not-finished",
+        pendingChecks: ["e2e"],
+        remainingFindings: [
+          {
+            id: "PR-CHECK-UNSETTLED:e2e",
+            source: "linter",
+            severity: "error",
+            message: "The pull request check 'e2e' has not finished (in_progress).",
+          },
+        ],
+      }),
+    );
+
+    // Assert ONLY what the new section provides: the finding's own message already contains
+    // "not finished" and "e2e", so those would pass without the change at all.
+    expect(body).toContain("**Checks not finished**");
+    expect(body).toMatch(/had not finished when the wait reached its bound/);
+    expect(body).toContain("e2e");
+    // the documented re-trigger (decision 3), not an implied scheduler
+    expect(body).toMatch(/re-apply the `dark-factory` label/);
+  });
+
+  it("CONTROL: does NOT claim checks are unfinished when a check FAILED (#691)", () => {
+    const body = dodOutcomeComment(
+      232,
+      result({
+        ok: false,
+        status: "blocked",
+        reason: "Review budget exhausted (3 rounds) with 1 unresolved finding(s).",
+        remainingFindings: [
+          {
+            id: "PR-CHECK-FAILED:MegaLinter",
+            source: "linter",
+            severity: "error",
+            message: "The repository's own check 'MegaLinter' failed (failure).",
+          },
+        ],
+      }),
+    );
+
+    expect(body).not.toContain("**Checks not finished**");
+  });
 });
