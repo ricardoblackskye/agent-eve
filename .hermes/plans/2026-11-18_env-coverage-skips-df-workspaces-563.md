@@ -52,6 +52,16 @@ whatever anyone gitignores, needs a parser for the pattern syntax, and makes the
 depend on a file it does not own. The comment in the code answers "why is this skipped?", so **no ADR**
 is proposed; say so if you would rather have one.
 
+## Settled decisions (2026-11-18)
+
+1. **Scope: the named directory only.** `df-workspaces`, not a gitignore-derived skip. The alternative is
+   recorded above and is not taken.
+2. **No ADR.** The comment beside the entry carries the why.
+3. **The fixture lives in a temporary root**, not in the repository's own `df-workspaces/`. The skip
+   matches the directory name at any depth, so a temp tree exercises the same code path without writing
+   into - or depending on - a scratch directory this test does not own. The existing `ROOT`-based test is
+   what proves the real directory, and it is the one that fails on `main` on this machine.
+
 ## Tasks
 
 ### Task 1 - RED: the skip is asserted behaviorally
