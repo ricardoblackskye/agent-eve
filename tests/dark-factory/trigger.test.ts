@@ -86,17 +86,30 @@ describe("#163 cycle 3-4: never fire on something that cannot be a fresh run", (
     }
   });
 
-  it("never re-triggers a run that already reached a terminal label", () => {
-    for (const terminal of [TRIGGER_LABELS.done, TRIGGER_LABELS.failed]) {
-      const d = decideDarkFactoryTrigger(
-        payload({ issue: { number: 163, labels: [{ name: terminal }] } }),
-        ENV,
-      );
-      expect(d.kind).toBe("not-a-trigger");
-    }
+  it("re-triggers a CRASHED run, and refuses only a FINISHED one (#677)", () => {
+    // #677: the guard refuses a re-trigger for RETRIGGER_REFUSED_LABELS, which is df:done
+    // alone. A crashed run's ticket must be retryable without a human removing the label by
+    // hand; the run-start clearing already drops the stale df:failed (#373), so the guard
+    // was the only blocker. This case REPLACES one that asserted the opposite - #677 is
+    // deliberately the inversion of it.
+    const crashed = decideDarkFactoryTrigger(
+      payload({ issue: { number: 163, labels: [{ name: TRIGGER_LABELS.failed }] } }),
+      ENV,
+    );
+    expect(crashed.kind).toBe("trigger");
+    expect(crashed.issue).toBe(163);
+
+    // The refusal must still exist AND name the label it refused: without the reason
+    // assertion, a guard that refused everything would satisfy the acceptance above.
+    const finished = decideDarkFactoryTrigger(
+      payload({ issue: { number: 163, labels: [{ name: TRIGGER_LABELS.done }] } }),
+      ENV,
+    );
+    expect(finished.kind).toBe("not-a-trigger");
+    expect(finished.reason).toMatch(/df:done/);
   });
 
-  it("GUARD, not a bug fix: a ticket carrying df:blocked can be re-triggered, while df:done and df:failed still refuse (#672)", () => {
+  it("GUARD, not a bug fix: a ticket carrying df:blocked can be re-triggered, and df:done still refuses (#672, narrowed by #677)", () => {
     // #672: a run that produced work but was not certified is not finished, so
     // re-applying the label must start it again rather than be refused. Both
     // directions are asserted here: the acceptance alone would pass if the guard
@@ -115,7 +128,8 @@ describe("#163 cycle 3-4: never fire on something that cannot be a fresh run", (
     expect(blocked.kind).toBe("trigger");
     expect(blocked.issue).toBe(672);
 
-    for (const terminal of [TRIGGER_LABELS.done, TRIGGER_LABELS.failed]) {
+    // #677 narrowed this loop: df:failed now re-triggers too, so only df:done refuses.
+    for (const terminal of [TRIGGER_LABELS.done]) {
       expect(
         decideDarkFactoryTrigger(
           payload({ issue: { number: 672, labels: [{ name: terminal }] } }),
