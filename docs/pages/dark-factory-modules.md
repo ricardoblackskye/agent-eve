@@ -321,6 +321,21 @@ Dark Factory — LLM cost governor. Sits between an LLM call site and the budget
 
 **Decisions:** [ADR 0006](../../docs/adr/0006-provider-neutral-seams.md)
 
+## pr-checks-timeout
+
+Bounds the Definition of Done's wait for the pull request's checks (#676). The wait polls and returns
+as soon as nothing is unsettled, so this number is a CEILING reached only by a check that never
+settles, rather than an expected duration - and the default is sized for the slowest descriptor the
+whole-project gate must observe. A malformed override falls back to the default rather than yielding
+NaN, which would make the deadline comparison false forever and turn a bounded wait into an unbounded
+one.
+
+**Source:** [`agent/lib/dark-factory/pr-checks-timeout.ts`](../../agent/lib/dark-factory/pr-checks-timeout.ts)
+
+**Exports:** `DEFAULT_PR_CHECKS_TIMEOUT_MS`, `resolvePrChecksTimeoutMs`
+
+---
+
 ## prompt-token-estimate
 
 Dark Factory — the pre-call reservation's INPUT bound (#637). `admit()` reserves a bounded cost before the provider call and refuses when `spent + reserved + estimate > cap`. That estimate used to be sized from the model's WHOLE context window (`ORCHESTRATOR_CONTEXT_WINDOW_TOKENS` = 1_048_576), which reserved **$1.2156 for every turn** on `deepseek/deepseek-v4.1-flash` — so once a period's headroom fell below that figure every turn was refused before the provider call. `reservationInputTokens` sizes the bound from eve's `ctx.messages` instead. Deliberately pessimistic and an UPPER bound (ADR 0027): a chars-per-token divisor below 4, a flat allowance per attachment, and an explicit overhead for the system prompt, instructions and tool schemas that `ctx.messages` does not carry. An unreadable conversation reserves the full window, which is the fail-closed answer rather than a cheap one.

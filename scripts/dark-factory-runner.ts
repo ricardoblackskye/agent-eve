@@ -63,6 +63,7 @@ import {
   gitPushWithVault,
 } from "../agent/lib/dark-factory/git-push";
 import { DEFAULT_SANDBOX_WORKSPACE } from "../agent/lib/dark-factory/opensandbox-driver";
+import { resolvePrChecksTimeoutMs } from "../agent/lib/dark-factory/pr-checks-timeout";
 import {
   artefactIdentity,
   checkOutcomeLines,
@@ -269,7 +270,7 @@ export function resolveRunnerRunId(
 }
 
 /** How long a single review round waits for checks that are still running, and how often it looks (#659). */
-const PR_CHECKS_TIMEOUT_MS = Number(process.env.DF_PR_CHECKS_TIMEOUT_MS ?? 300_000);
+const PR_CHECKS_TIMEOUT_MS = resolvePrChecksTimeoutMs();
 const PR_CHECKS_POLL_INTERVAL_MS = 15_000;
 
 /** The pull request the Definition of Done opened, so the check gate can read it (#659). */
@@ -1459,6 +1460,10 @@ async function main(): Promise<void> {
   // full timeout each time made a blocked run against a slow CI wait ten minutes per round for checks
   // that had already concluded (measured: ~25 minutes of silence). Consume a single deadline instead.
   const checkWaitDeadline = Date.now() + PR_CHECKS_TIMEOUT_MS;
+  // #676: name the cap. The wait returns as soon as the checks settle, so this is a ceiling on a
+  // stuck check rather than an expected duration - but a run that is waiting should say so, since
+  // the alternative is a silent pause whose length a reader has to guess.
+  line("PR checks wait up to", `${Math.round(PR_CHECKS_TIMEOUT_MS / 60_000)} min`);
 
   // #659: the Definition of Done opens the PR itself, and calls runChecks afterwards, so the gate needs
   // the pull request it just opened. Capturing it here keeps the DoD's own interface unchanged.
