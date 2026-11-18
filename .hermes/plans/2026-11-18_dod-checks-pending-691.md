@@ -70,16 +70,16 @@ not an available lever. A deferral therefore has to be a **re-entry**, not a lon
 1. **Read the distinction the producer already makes.** Make the run's outcome derive from whether the
    blocking finding is `PR-CHECK-UNSETTLED:*` or `PR-CHECK-FAILED:*`, instead of treating every
    blocking finding as one thing.
-2. **A distinct, non-terminal outcome for "not finished".** The ticket must be able to say "the checks
-   have not settled, re-check" rather than "this failed". The ticket stays re-triggerable, so a
-   re-check after the checks settle is the existing re-trigger operation rather than a new mechanism.
-   Reuse the shape of `ParkedRunError` (`dispatch.ts:43`, handled at `:461`): a distinct outcome that
-   consumes no retries and no backoff, which is exactly what #162 uses for a run waiting on something
-   other than itself.
+2. **A MACHINE-READABLE REASON on the blocked outcome, not a new status.** `DoneStatus` keeps its
+   three values and the label vocabulary does not move, so #672's derivation is untouched. The result
+   instead carries a structured field naming what actually blocked the run - the reason kind plus the
+   checks that had not finished - and every consumer that already reads `status` can read it too.
+   Prose in a comment is not machine-readable: a sentence a human reads is invisible to a re-trigger,
+   to the labels and to any future automation, which is why it is a field and not a sentence.
 3. **A failed check stays a failure**, and stays terminal, exactly as today.
-4. **Keep the DoD status vocabulary honest.** `DoneStatus` and the label vocabulary owned by
-   `trigger.ts` move together, as #672 established: the labels are derived from the status, so a new
-   status is a labelling decision as well as an outcome one.
+4. **The deferral is a documented re-trigger, not a schedule.** The ticket is already re-triggerable;
+   the reason field says why a re-trigger is the right next operation. Nothing polls, because nothing
+   can (see the constraint above).
 
 ## Settled decisions
 
@@ -106,9 +106,10 @@ this not just blocked?" about. Short, in the same change.
 `definition-of-done-ac.test.ts` instead if the assertion reads better there)
 
 ```ts
-it("reports checks-pending, not blocked, when the only obstacle is a check that has not finished", () => {
+it("names the checks that had not finished, as a reason the machine can read", () => {
   const result = runDod({ checks: [{ name: "e2e", status: "in_progress", conclusion: null }] });
-  expect(result.status).toBe("checks-pending");
+  expect(result.blockedReason).toBe("checks-not-finished");
+  expect(result.pendingChecks).toEqual(["e2e"]);
 });
 
 it("CONTROL: still refuses `done` while a check is unsettled", () => {
@@ -117,10 +118,20 @@ it("CONTROL: still refuses `done` while a check is unsettled", () => {
   expect(result.status).not.toBe("done");
 });
 
-it("CONTROL: a FAILED check still reports blocked, not checks-pending", () => {
-  // Without this the two cases could collapse in the other direction.
+it("does NOT report checks-not-finished when a check actually failed", () => {
+  // The two cases must not collapse: a failed check is real evidence against the work, and reporting
+  // it as "still running" would launder a failure into a delay.
   const result = runDod({ checks: [{ name: "MegaLinter", status: "completed", conclusion: "failure" }] });
-  expect(result.status).toBe("blocked");
+  expect(result.blockedReason).not.toBe("checks-not-finished");
+  expect(result.pendingChecks ?? []).toEqual([]);
+});
+
+it("CONTROL: a run with BOTH a failed and an unfinished check reports the failure", () => {
+  const result = runDod({ checks: [
+    { name: "e2e", status: "in_progress", conclusion: null },
+    { name: "MegaLinter", status: "completed", conclusion: "failure" },
+  ] });
+  expect(result.blockedReason).not.toBe("checks-not-finished");
 });
 ```
 
@@ -131,7 +142,7 @@ read the tally, and count what passes, not only what fails.
 npx vitest run tests/dark-factory/definition-of-done-checks.test.ts
 ```
 
-### Task 2 - GREEN: derive the outcome from the finding kind
+### Task 2 - GREEN: derive the reason from the finding kind
 
 Whichever path produces `"blocked"` for check findings must ask whether the blocking finding is
 unsettled. Keep the derivation narrow: a run with BOTH kinds present is a failure, not a deferral -
@@ -139,8 +150,9 @@ the failed check is real evidence and must not be laundered into "wait".
 
 ### Task 3 - the ticket comment and the label vocabulary
 
-The comment says what is true: the checks have not finished, here they are with links, re-check after
-they settle. The label must not read as a failure (the vocabulary lives in `trigger.ts`, per #672).
+The comment says what is true: the checks have not finished, here they are with the links, re-trigger
+once they settle. The label vocabulary is **unchanged** - `blocked` already means "not terminal and
+resumable", which is the semantics wanted - so the reason field is what carries the new information.
 
 ### Task 4 - prove the re-entry
 
@@ -163,7 +175,7 @@ Suite, `tsc`, cspell, markdownlint, pinned table formatter, link check, coverage
 | File                                                                           | Change                                                         |
 |--------------------------------------------------------------------------------|----------------------------------------------------------------|
 | `agent/lib/dark-factory/definition-of-done.ts`                                 | the outcome derivation reads UNSETTLED vs FAILED               |
-| `agent/lib/dark-factory/trigger.ts`                                            | the label vocabulary, if a label is added                      |
+| `agent/lib/dark-factory/definition-of-done.ts`                                 | the result type gains the reason field                         |
 | `agent/lib/dark-factory/run-finalizer.ts`                                      | only if the terminal/non-terminal mapping needs the new status |
 | `tests/dark-factory/definition-of-done-checks.test.ts`                         | RED, with both controls                                        |
 | `docs/adr/0090-an-unfinished-check-is-not-a-failure.md` + `docs/adr/README.md` | the decision and its index row                                 |
@@ -181,16 +193,17 @@ Suite, `tsc`, cspell, markdownlint, pinned table formatter, link check, coverage
 - **The deployed path may not reach this code at all today** (668): the answer must say what is proven
   locally and what is not.
 
-**Open questions for the reviewer.**
+**Review decisions (settled).** All three were answered at review:
 
-1. **The repo-level case.** On #232 the failing check was a repo-wide advisory the change provably did
-   not cause (the branch's `package-lock.json` is identical to main's). Options: compare the failing
-   check against the default branch, an operator-declared list of repo-level checks, or leave it out.
-   This plan recommends **leaving it out of this change** and filing it separately.
-2. **A fourth `DoneStatus`, or a machine-readable reason on `blocked`?** A status is visible to every
-   consumer; a reason string is not. This plan assumes the status.
-3. **Should the deferral be automatic?** With no scheduler the honest answer is a documented
-   re-trigger. If you want automatic, that is a scheduling decision, and 668 is where it lives.
+1. **The repo-level case is out of this change.** A check that is red for reasons the change did not
+   cause - on WebFeedPOC#232, a repo-wide advisory with a `package-lock.json` identical to main's - is
+   not modelled here. Feeding it back into the loop would burn the loop's budget on something the agent
+   cannot fix, and deciding how to attribute it is its own piece of work.
+2. **A machine-readable reason, not a fourth `DoneStatus`.** This is the smaller and more honest
+   change: the status vocabulary, and the labels derived from it, stay exactly as #672 left them, and
+   the new information reaches consumers as a field rather than as a state everything must learn.
+3. **A documented re-trigger.** No polling and no scheduler: the reason names the situation, and the
+   re-trigger is the operation, documented where the operator looks.
 
 ## Out of scope
 
