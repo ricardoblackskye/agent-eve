@@ -18,7 +18,7 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 
 const ROOT = join(__dirname, "..", "..");
 const SCRIPT_PATH = join(ROOT, "scripts/k8s-vault-proof/vault-proof.py");
@@ -104,19 +104,31 @@ describe("#581 vault proof output redaction", () => {
   });
 });
 
-/** Locate a python interpreter; the script under test is python, so absence is a real failure. */
+/**
+ * Locate a python interpreter; the script under test is python, so absence is a real failure.
+ *
+ * Resolved ONCE. Probing is a process spawn and the answer cannot change mid-run: the per-test
+ * version spawned three children per test (#690) to obtain a single probe result.
+ */
+let resolvedPython: string | undefined;
 function pythonBin(): string {
-  for (const candidate of ["python3", "python"]) {
-    try {
-      execFileSync(candidate, ["--version"], { stdio: "ignore" });
-      return candidate;
-    } catch {
-      // try the next candidate
+  if (resolvedPython === undefined) {
+    for (const candidate of ["python3", "python"]) {
+      try {
+        execFileSync(candidate, ["--version"], { stdio: "ignore" });
+        resolvedPython = candidate;
+        break;
+      } catch {
+        // try the next candidate
+      }
     }
   }
-  throw new Error(
-    "no python interpreter found — scripts/k8s-vault-proof/vault-proof.py cannot be executed",
-  );
+  if (resolvedPython === undefined) {
+    throw new Error(
+      "no python interpreter found — scripts/k8s-vault-proof/vault-proof.py cannot be executed",
+    );
+  }
+  return resolvedPython;
 }
 
 /** Runs the pure redact() from the real module and returns its reported results. */
@@ -152,8 +164,18 @@ function probeRedact(): Record<string, unknown> {
 }
 
 describe("#581 redact() behaviour", () => {
+  /**
+   * ONE probe for the three assertions below (#690). They read different FIELDS of the same result,
+   * and each probe spawns a python process - so running it per test tripled the cost of the suite's
+   * three slowest tests for no additional evidence.
+   */
+  let probe!: Record<string, unknown>;
+  beforeAll(() => {
+    probe = probeRedact();
+  });
+
   it("masks the secret while keeping the proof's evidence", () => {
-    const result = probeRedact();
+    const result = probe;
     expect(result.error).toBeUndefined();
     expect(result.secret_gone).toBe(true);
     expect(result.evidence_kept).toBe(true);
@@ -163,13 +185,13 @@ describe("#581 redact() behaviour", () => {
   it("leaves text untouched for an empty or absent secret", () => {
     // "abc".replace("", "X") inserts X at every position, so an unguarded redaction would
     // corrupt the output it is meant to protect. Both cases are asserted deliberately.
-    const result = probeRedact();
+    const result = probe;
     expect(result.empty_noop).toBe(true);
     expect(result.none_noop).toBe(true);
   });
 
   it("masks every occurrence, not just the first", () => {
-    const result = probeRedact();
+    const result = probe;
     expect(result.multi).toBe(true);
   });
 });
