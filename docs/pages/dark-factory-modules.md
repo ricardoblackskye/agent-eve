@@ -689,6 +689,24 @@ Resolve the tenant a newly accepted run is attributed to (#213, epic #212 R1). R
 
 **Decisions:** [ADR 0001](../../docs/adr/0001-tenant-attribution-is-write-once.md)
 
+## run-attempt-summary
+
+Builds the summary for a run the LEDGER never minted (#681). `beginRunRecord` can return without a
+ledger run - the store being unreachable is the case seen in practice - and then reports `fellBack`
+with the ATTEMPT id as the run id. The runner carries on regardless and does real work, so every
+later write targets a run the ledger has never heard of and nothing reading the history can see that
+the run happened.
+
+The status is deliberately TERMINAL. `df_run_active_issue_uidx` is a partial unique index over
+`(repo, issue) WHERE status IN ('queued','running','blocked')`, so a non-terminal row for an issue
+that already holds its claim is a violation; this row describes a run that reached an outcome.
+
+**Source:** [`agent/lib/dark-factory/run-attempt-summary.ts`](../../agent/lib/dark-factory/run-attempt-summary.ts)
+
+**Exports:** `buildAttemptSummary`
+
+---
+
 ## run-finalizer
 
 Dark Factory — terminal lifecycle labels at run completion (#284). A finished run must carry a terminal label so it is distinguishable from an abandoned one on the ticket, and so the trigger re-run guard has something to key on for a FINISHED run - as of #677 `df:done` alone is un-triggerable, while a failed attempt's ticket is deliberately retryable (ADR 0086). `applyTerminalLifecycle` is the single seam the runner calls on success and on every terminal-failure path: it applies `df:done` / `df:failed`, clears `df:running` and `needs-answer`, is idempotent (a re-delivery applies nothing) and fail-closed (a label-write failure is recorded on the run and thrown, never swallowed).
