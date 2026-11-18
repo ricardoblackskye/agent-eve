@@ -9,7 +9,7 @@
 The Definition of Done was asked to judge a pull request whose end-to-end suite had not finished. It
 wrote two findings that differ only in their id:
 
-```
+```text
 PR-CHECK-UNSETTLED:e2e          the check has not finished (in_progress)
 PR-CHECK-FAILED:MegaLinter      the repository's own check failed
 ```
