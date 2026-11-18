@@ -173,8 +173,9 @@ npx vitest run tests/dark-factory/vault-proof-redaction.test.ts   # expect 8 pas
 ```ts
     // #690: sized from measurement, not from the framework default. The suite's slowest tests sat at
     // 2.0-2.8s with one AT the 5000ms default (5116ms), and a loaded run stretches a file ~1.7x - so
-    // the gate went red or green on identical input. A per-test bar is a safety net, not a budget: it
-    // is set for the worst case the suite can present, so a real hang still fails, just later.
+    // the gate went red or green on identical input. The worst case that survives Leg 1 measures
+    // 2798ms, so the bar is 7x that. It is a safety net, not a latency budget: a real hang still
+    // fails, just later.
     testTimeout: 20_000,
 ```
 
@@ -241,15 +242,19 @@ npm run test:coverage && npx tsc --noEmit --incremental false && npm run coverag
 - **Measuring under load is imperfect.** The original flake needed a busy machine (minikube was at 43%
   of 8 CPUs). Task 4 states the conditions it measured under rather than implying a worst case.
 
-**Open questions for the reviewer.**
+**Review decisions (settled).** All four were answered at review, so the implementation follows them
+rather than re-opening them:
 
-1. **D2's shape** — one global `testTimeout` (recommended) versus per-file overrides for the slow
-   suites?
-2. **The value.** This plan proposes 20s, ~7x the worst remaining measured test. Is that the right
-   multiple, or would 15s (5x) feel like a tighter net?
-3. **Leg 1's scope.** The four Postgres tests could be attacked next (their per-test cost is
-   unexamined), or left to the raised bar. Which?
-4. Is an ADR warranted for a timeout, or is a comment in `vitest.config.ts` enough?
+1. **One global `testTimeout`**, not per-file overrides - D2 confirmed.
+2. **Seven times the worst remaining measured test.** The worst post-Leg-1 measurement is
+   `run-history-postgres` at 2798ms, so the bar is `testTimeout: 20_000`. The multiple is the point:
+   the value stays tied to a measurement rather than to a round number, and the comment in
+   `vitest.config.ts` quotes the arithmetic.
+3. **The Postgres tests' own cost is left alone for now.** They clear the raised bar; making them
+   cheaper is separate work, not a condition of this one. Recorded so a later reader does not think it
+   was missed.
+4. **The ADR is in scope** - D3 confirmed. It must state that the bar is a safety net rather than a
+   latency target, so a genuinely hung test still fails, only later.
 
 ## Out of scope
 
