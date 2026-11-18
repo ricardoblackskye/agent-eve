@@ -37,7 +37,8 @@ import {
   checkRunFindings,
   settlePullRequestChecks,
   type DefinitionOfDoneResult,
-} from "../agent/lib/dark-factory/definition-of-done";
+
+  CHECKS_NOT_FINISHED,} from "../agent/lib/dark-factory/definition-of-done";
 import {
   applyStartLifecycle,
   applyTerminalLifecycle,
@@ -1786,6 +1787,15 @@ export function dodOutcomeComment(
     // failed while never saying what the ticket asked for.
     (dodResult.traceabilityTable
       ? `\n**Acceptance criteria**\n\n${dodResult.traceabilityTable}\n`
+      : "") +
+    // #691: when an unfinished check is the whole of the obstacle the reader needs words, not just
+    // the finding id. The run is WAITING rather than wrong - say so, and say how to continue.
+    (dodResult.blockedReason === CHECKS_NOT_FINISHED
+      ? `\n**Checks not finished**\n\n` +
+        `${(dodResult.pendingChecks ?? []).map((name) => `- \`${name}\``).join("\n")}\n\n` +
+        `These checks had not finished when the wait reached its bound, so this run cannot certify against\n` +
+        `them yet. They may still pass: once they settle, remove and re-apply the \`dark-factory\` label to\n` +
+        `re-check.\n`
       : "") +
     (findings ? `\n**Outstanding findings**\n\n${findings}\n` : "") +
     `\n- **Lifecycle**: \`${dodResult.status}\``
