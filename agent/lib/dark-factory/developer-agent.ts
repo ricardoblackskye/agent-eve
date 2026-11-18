@@ -959,6 +959,57 @@ export function classifyTestRun(output: string): "ran" | "did-not-start" {
   return DID_NOT_START_MARKERS.some((marker) => output.includes(marker)) ? "did-not-start" : "ran";
 }
 
+/** The bounded tail of a check's output that the loop prints (#659), in characters. */
+const CHECK_TAIL_CHARS = 1200;
+
+/**
+ * The lines the loop prints for ONE declared check (#674).
+ *
+ * There are three outcomes a check can be in, and the log must name all three. The third was the one
+ * it dropped: a check that COULD NOT START printed nothing at all, and its output - which is where the
+ * reason lives - was discarded with it. #230's log therefore showed one `Lint result` line for two
+ * declared checks, and because the parenthesised name is the last command, the missing one was
+ * invisible: a reader could not tell which checks ran, let alone that one had not.
+ *
+ * An unmeasured check is not a verdict in either direction (#541's classifier exists to say so), but
+ * silence is not a report either. A check that did not run is stated, with what it left behind.
+ */
+export function checkOutcomeLines(
+  command: string,
+  result: { passed: boolean; output: string; ran: boolean },
+): string[] {
+  const tail = result.output.trim().slice(-CHECK_TAIL_CHARS);
+  if (!result.ran) {
+    return [
+      `     Lint result: DID NOT RUN (${command})`,
+      tail
+        ? `     Lint reason (tail):\n${tail}`
+        : `     Lint reason: the check did not report anything before it stopped`,
+    ];
+  }
+  if (!result.passed) {
+    return [
+      `     Lint result: FAIL (${command})`,
+      ...(tail ? [`     Lint failure (tail):\n${tail}`] : []),
+    ];
+  }
+  return [`     Lint result: PASS (${command})`];
+}
+
+/**
+ * The line that names the set a target declared (#674).
+ *
+ * Per-command lines say WHICH check ran; only a count says how many were supposed to. A check the log
+ * never mentions is exactly the failure this issue is about, and its signature is arithmetic: fewer
+ * lines than the target declared checks.
+ */
+export function checkSetSummary(outcomes: readonly { ran: boolean }[]): string {
+  const ran = outcomes.filter((outcome) => outcome.ran).length;
+  const didNotRun = outcomes.length - ran;
+  const summary = `${ran} of ${outcomes.length} checks ran`;
+  return `     Checks: ${didNotRun > 0 ? `${summary}, ${didNotRun} did not run` : summary}`;
+}
+
 /**
  * A stable, opaque identity of what an iteration PRODUCED (#651): a digest over the authored files.
  *
