@@ -309,6 +309,18 @@ describe("#164 cycles 3-10: runDefinitionOfDone coordinator", () => {
     expect(prs).toHaveLength(1);
   });
 
+  it("says so when it is given no run history store, instead of discarding silently", async () => {
+    // #702: an absent store was a silent no-op, which is what let the DoD's events (the PR it opened,
+    // its review rounds, the acceptance-criteria matrix and the test results) vanish without a trace.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { deps } = setupTestDeps({ runChecks: async () => [] });
+
+    await runDefinitionOfDone(deps, sampleTask);
+
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("no run history store"));
+    warn.mockRestore();
+  });
+
   it("persists PR, review-round, and terminal lifecycle events", async () => {
     const task = {
       ...sampleTask,
