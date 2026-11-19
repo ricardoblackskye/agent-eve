@@ -612,7 +612,7 @@ export function AgentOutputPanel({
 
   return (
     <section className="df-panel">
-      <PanelHead title="AGENT OUTPUT" badges={["AGENT"]} />
+      <PanelHead title="AGENT TRACE" badges={["AGENT", "OUTPUT"]} />
       <div className="df-panel-body">
         {captured.length === 0 ? (
           <StatePanel state="empty" message="No agent output captured" />
@@ -732,7 +732,7 @@ export function TracePanel({ trace }: { trace?: TraceItem[] }): ReactNode {
   if (!trace || trace.length === 0) {
     return (
       <section className="df-panel">
-        <PanelHead title="AGENT TRACE" badges={["REASONING"]} />
+        <PanelHead title="ACCEPTANCE CRITERIA" badges={["AC"]} />
         <div className="df-panel-body">
           <StatePanel
             state="empty"
@@ -746,19 +746,19 @@ export function TracePanel({ trace }: { trace?: TraceItem[] }): ReactNode {
   const failed = trace.length - passed;
   return (
     <section className="df-panel">
-      <PanelHead title="AGENT TRACE" badges={["AC", "REASONING"]} />
+      <PanelHead title="ACCEPTANCE CRITERIA" badges={["AC"]} />
       <div className="df-panel-body">
-        <p className="df-test-summary" data-testid="agent-trace-summary">
+        <p className="df-test-summary" data-testid="acceptance-matrix-summary">
           <span className="df-test-pass">{passed} verified</span>
           <span className="df-test-sep"> · </span>
           <span className="df-test-fail">{failed} unverified</span>
         </p>
-        <ul className="df-test-list" data-testid="agent-trace">
+        <ul className="df-test-list" data-testid="acceptance-matrix">
           {trace.map((item, index) => (
             <li
               key={`${item.acId}:${index}`}
               className={item.passed ? "df-test-pass" : "df-test-fail"}
-              data-testid={item.passed ? "trace-verified" : "trace-unverified"}
+              data-testid={item.passed ? "criterion-verified" : "criterion-unverified"}
             >
               <span aria-hidden="true">{item.passed ? "✓" : "✗"}</span>{" "}
               <span className="df-test-file">{item.acId}</span>

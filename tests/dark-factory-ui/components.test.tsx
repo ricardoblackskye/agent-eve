@@ -405,7 +405,7 @@ describe("TestOutputPanel", () => {
   });
 });
 
-describe("TracePanel", () => {
+describe("AcceptancePanel (the AC matrix)", () => {
   it("renders the AC traceability matrix with an aggregate summary", () => {
     const { container } = render(
       <TracePanel
@@ -428,15 +428,15 @@ describe("TracePanel", () => {
       />,
     );
     const summary = container.querySelector(
-      '[data-testid="agent-trace-summary"]',
+      '[data-testid="acceptance-matrix-summary"]',
     );
     expect(summary?.textContent).toContain("1 verified");
     expect(summary?.textContent).toContain("1 unverified");
     expect(
-      container.querySelectorAll('[data-testid="trace-verified"]'),
+      container.querySelectorAll('[data-testid="criterion-verified"]'),
     ).toHaveLength(1);
     expect(
-      container.querySelectorAll('[data-testid="trace-unverified"]'),
+      container.querySelectorAll('[data-testid="criterion-unverified"]'),
     ).toHaveLength(1);
     expect(container.textContent).toContain("AC1");
     expect(container.textContent).toContain("throws on null");
