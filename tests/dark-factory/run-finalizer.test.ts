@@ -354,3 +354,55 @@ describe("#284 terminal lifecycle labels", () => {
     expect(outcome.cleared).toContain("df:blocked");
   });
 });
+
+describe("#698 Leg F — a run that opened a PR must carry it to the terminal record", () => {
+  // Measured on WebFeedPOC#235: the run opened and the human merged PR #236, yet the
+  // ledger row held pr_url: NULL and the page showed "No PR opened yet". The DoD emits a
+  // pr.opened event, but applyTerminalLifecycle finalises the run with its OWN run.terminal
+  // event built by terminalEvent(), which dropped prUrl. So the PR never reached the summary
+  // the page reads. This leg threads prUrl through that terminal event.
+  const DOD_WITH_PR = {
+    status: "done",
+    pr: { number: 236, url: "https://github.com/ricardoblackskaye/WebFeedPOC/pull/236" },
+  } as unknown as NonNullable<
+    Parameters<typeof applyTerminalLifecycle>[1]["dodResult"]
+  >;
+
+  it("RED: the finalizer's terminal event carries prUrl when the DoD opened a PR", async () => {
+    const { writer } = labelWriter();
+    const { store, appended } = history();
+
+    await applyTerminalLifecycle(deps(writer, store), {
+      repo: REPO,
+      issue: 235,
+      runId: RUN_ID,
+      terminalStatus: "succeeded",
+      dodResult: DOD_WITH_PR,
+      occurredAt: AT,
+    });
+
+    const terminal = appended.find((e) => e.type === "run.terminal");
+    expect(terminal).toBeDefined();
+    // The defect: terminalEvent() built the event without prUrl.
+    expect((terminal as RunEvent).prUrl).toBe(
+      "https://github.com/ricardoblackskaye/WebFeedPOC/pull/236",
+    );
+  });
+
+  it("CONTROL: a run with no DoD PR leaves prUrl absent (no inferred link)", async () => {
+    const { writer } = labelWriter();
+    const { store, appended } = history();
+
+    await applyTerminalLifecycle(deps(writer, store), {
+      repo: REPO,
+      issue: 235,
+      runId: RUN_ID,
+      terminalStatus: "failed",
+      occurredAt: AT,
+    });
+
+    const terminal = appended.find((e) => e.type === "run.terminal");
+    expect(terminal).toBeDefined();
+    expect((terminal as RunEvent).prUrl).toBeUndefined();
+  });
+});
