@@ -352,16 +352,22 @@ export function toDetailView({
     commentUrl: event.commentReference?.url,
   }));
 
+  // #698: a run's summary row is written early and can reach the page without its terminal facts, so
+  // Started and Elapsed fall back to the run's OWN event stream - which carries the real span. The
+  // fallback only ever fills a gap: a recorded summary timestamp still wins.
+  const startedIso = summary.startedAt ?? ordered[0]?.event.occurredAt;
+  const completedIso = summary.completedAt ?? ordered[ordered.length - 1]?.event.occurredAt;
+
   const summaryTiles: MetricItem[] = [
     {
       key: "started",
       label: "Started",
-      value: summary.startedAt ? formatClockTime(summary.startedAt) : "—",
+      value: startedIso ? formatClockTime(startedIso) : "—",
     },
     {
       key: "elapsed",
       label: "Elapsed",
-      value: formatDuration(summary.startedAt, summary.completedAt),
+      value: formatDuration(startedIso, completedIso),
     },
     {
       key: "attempts",
