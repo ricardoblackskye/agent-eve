@@ -238,10 +238,10 @@ describe("#698 a run the ledger minted still gets its terminal facts", () => {
   });
 
   it("CONTROL: still records a run the ledger never minted (#681 unchanged)", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "df-unminted-"));
+    const dir = mkdtempSync(join(tmpdir(), "df-no-ledger-"));
     dirs.push(dir);
     const store = new SqliteRunHistoryStore(join(dir, "runs.db"), () => `run-${randomUUID()}`);
-    const repo = `owner/unminted-${randomUUID().slice(0, 8)}`;
+    const repo = `owner/no-ledger-${randomUUID().slice(0, 8)}`;
 
     await recordRunAttemptSummary(
       {
