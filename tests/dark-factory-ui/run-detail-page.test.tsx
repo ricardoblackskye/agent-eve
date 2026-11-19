@@ -464,7 +464,7 @@ describe("Dark Factory run detail page", () => {
     const { container } = render(<DarkFactoryRunDetailPage />);
     await waitFor(() =>
       expect(
-        container.querySelector('[data-testid="agent-trace"]'),
+        container.querySelector('[data-testid="acceptance-matrix"]'),
       ).not.toBeNull(),
     );
     expect(container.textContent).toContain("AC1");

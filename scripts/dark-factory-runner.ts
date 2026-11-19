@@ -2042,6 +2042,45 @@ export async function recordRunAttemptSummary(
   if (!decision.record) {
     if (decision.reason !== undefined) {
       console.warn(`[WARN] This run will not be persisted: ${decision.reason}.`);
+      return;
+    }
+    // #698: the ledger DID mint this run, so there is nothing to mint - but that is not a reason to
+    // write nothing. This is the run that most needs its terminal facts: without them the details page
+    // shows dashes for the times, zeros for the counters, and "No PR opened yet" for a run that opened
+    // one. Update THAT row in place; never mint a second, or `df_run_active_issue_uidx` would reject it.
+    try {
+      const existing = await active.runHistory.getRun(active.runId);
+      if (!existing.ok || !existing.value) return;
+      // #699: `main()` returns normally BOTH after successful work and after `parkForApproval()`. The
+      // latter has already recorded a `worker.question` and moved the summary to `blocked`, which is
+      // deliberately NOT terminal: a blocked run is resumable, and it is what holds the active-issue
+      // claim. Overwriting it with a terminal status releases that claim, so an approval resume then
+      // refuses with "a resume continues a run that is holding this issue's claim, and none is" - the
+      // parked run can never be continued. Preserve the parked state: leave `completedAt` unset so the
+      // row stays non-terminal and adoptable by the next delivery.
+      const remainsParked = existing.value.status === "blocked";
+      const updated = await active.runHistory.recordRunSummary({
+        ...existing.value,
+        status: remainsParked ? "blocked" : outcome.status,
+        stage: remainsParked ? existing.value.stage : "terminal",
+        updatedAt: outcome.completedAt,
+        ...(remainsParked ? {} : { completedAt: outcome.completedAt }),
+        ...(active.startedAt === undefined ? {} : { startedAt: active.startedAt }),
+        ...(outcome.iterationCount === undefined ? {} : { iterationCount: outcome.iterationCount }),
+        ...(outcome.prUrl === undefined ? {} : { prUrl: outcome.prUrl }),
+      });
+      if (!updated.ok) {
+        console.warn(
+          `[WARN] The run's terminal facts could not be recorded (${updated.error ?? "no detail"}); ` +
+            "the run itself is unaffected.",
+        );
+      }
+    } catch (error) {
+      console.warn(
+        `[WARN] The run's terminal facts could not be recorded: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
     }
     return;
   }

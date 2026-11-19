@@ -472,7 +472,10 @@ function optionalCommentReference(
  * reporter enforces on a posted message, because a summary the ledger accepts
  * must be one the reporter will post.
  */
-export const MAX_AGENT_OUTPUT_CHARS = 2000;
+// #698: the ledger's copy of a bound it cannot import. `agent-output-summary-recording.test.ts`
+// asserts it equals MAX_QUESTION_CHARS, because a summary the ledger accepts must be one the reporter
+// will post, and worker-reporter imports this module - so an import of that constant would be a cycle.
+export const MAX_AGENT_OUTPUT_CHARS = 8000;
 
 /** The canonical cost-refusal codes (#270); kept in sync with CostGovernorRefusal. */
 const COST_REFUSALS: readonly CostGovernorRefusal[] = [

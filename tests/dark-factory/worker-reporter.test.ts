@@ -16,9 +16,9 @@ import {
   createWorkerReporter,
   renderMessage,
   MAX_ATTEMPT,
-  MAX_QUESTION_CHARS,
   type WorkerMessage,
-} from "../../agent/lib/dark-factory/worker-reporter";
+
+  MAX_QUESTION_CHARS,} from "../../agent/lib/dark-factory/worker-reporter";
 import { ALLOWED_ENV_KEYS } from "../../agent/lib/dark-factory/tester-agent";
 import type {
   StateReadResult,
@@ -192,7 +192,7 @@ describe("#162 cycle 1-2: the payload is canonical and validated", () => {
 
   it("refuses over-long text rather than posting it", () => {
     expect(() =>
-      toWorkerMessage(msg({ kind: "question", question: "x".repeat(5000) })),
+      toWorkerMessage(msg({ kind: "question", question: "x".repeat(MAX_QUESTION_CHARS + 1) })),
     ).toThrow(InvalidWorkerMessageError);
   });
 });

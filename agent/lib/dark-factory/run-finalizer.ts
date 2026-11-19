@@ -147,6 +147,7 @@ function terminalEvent(
   status: TerminalStatus,
   eventId: string,
   occurredAt: string,
+  prUrl?: string,
 ): RunEvent {
   return {
     eventId,
@@ -155,6 +156,12 @@ function terminalEvent(
     stage: "terminal",
     status,
     occurredAt,
+    // #698 (Leg F): a run that opened a PR must carry it to its terminal record. The
+    // Definition of Done emits its own `pr.opened` event, but applyTerminalLifecycle
+    // finalises the run with THIS event, and a terminal event without prUrl never
+    // populates the summary's pr_url — so the page showed "No PR opened yet" on a run
+    // that had plainly produced a PR (measured on WebFeedPOC#235 / PR #236).
+    ...(prUrl !== undefined ? { prUrl } : {}),
   };
 }
 
@@ -285,7 +292,7 @@ export async function applyTerminalLifecycle(
   // reason step 3 checks every label write. A refusal here is not cosmetic: the ledger keeps believing
   // the run is in flight, and a later run for the same repo+issue is refused as a duplicate delivery.
   const marker = await runHistory.appendEvent(
-    terminalEvent(runId, terminalStatus, markerEventId(runId), occurredAt),
+    terminalEvent(runId, terminalStatus, markerEventId(runId), occurredAt, dodResult?.pr?.url),
   );
   if (!marker.ok) {
     // #373: the store refuses a second terminal event for a run that is already terminal, and that refusal

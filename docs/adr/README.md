@@ -144,3 +144,4 @@ changes, write a new one that supersedes it.
 | [0088](0088-a-test-database-is-named-as-one.md)                          | A test database is named as one                                                                     | Accepted           |
 | [0089](0089-a-test-timeout-is-sized-from-measurement.md)                 | A test timeout is sized from measurement                                                            | Accepted           |
 | [0090](0090-an-unfinished-check-is-not-a-failure.md)                     | An unfinished check is not a failure                                                                | Accepted           |
+| [0091](0091-the-agent-output-bound-is-shared.md)                         | The agent-output bound is shared                                                                    | Accepted           |

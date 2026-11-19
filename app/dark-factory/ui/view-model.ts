@@ -317,6 +317,24 @@ export function filterRows(
   });
 }
 
+/**
+ * #698 (leg C) - a counter the run never measured is NOT a zero.
+ *
+ * The ledger stores counters as `NOT NULL DEFAULT 0`, so a bare 0 is ambiguous on its own. Two things
+ * make a counter a MEASUREMENT: the summary carries a value ABOVE zero (someone wrote it), or an event
+ * explicitly recorded the field - including zero, which is a real measurement of nothing. Anything else
+ * renders as an em dash, the same rule `format.ts` applies to every other absent measurement.
+ */
+function measuredCounter(
+  summaryValue: number,
+  ordered: PersistedRunEvent[],
+  field: "attempt" | "reviewRound" | "iterationCount" | "fixCycleCount",
+): string {
+  const measured =
+    summaryValue > 0 || ordered.some(({ event }) => event[field] !== undefined);
+  return measured ? String(summaryValue) : "—";
+}
+
 function summedMetric(
   events: PersistedRunEvent[],
   field: "findingCount" | "resolvedCount" | "acceptedCount",
@@ -352,26 +370,32 @@ export function toDetailView({
     commentUrl: event.commentReference?.url,
   }));
 
+  // #698: a run's summary row is written early and can reach the page without its terminal facts, so
+  // Started and Elapsed fall back to the run's OWN event stream - which carries the real span. The
+  // fallback only ever fills a gap: a recorded summary timestamp still wins.
+  const startedIso = summary.startedAt ?? ordered[0]?.event.occurredAt;
+  const completedIso = summary.completedAt ?? ordered[ordered.length - 1]?.event.occurredAt;
+
   const summaryTiles: MetricItem[] = [
     {
       key: "started",
       label: "Started",
-      value: summary.startedAt ? formatClockTime(summary.startedAt) : "—",
+      value: startedIso ? formatClockTime(startedIso) : "—",
     },
     {
       key: "elapsed",
       label: "Elapsed",
-      value: formatDuration(summary.startedAt, summary.completedAt),
+      value: formatDuration(startedIso, completedIso),
     },
     {
       key: "attempts",
       label: "Attempts",
-      value: String(summary.attemptCount),
+      value: measuredCounter(summary.attemptCount, ordered, "attempt"),
     },
     {
       key: "review",
       label: "Review round",
-      value: String(summary.reviewCount),
+      value: measuredCounter(summary.reviewCount, ordered, "reviewRound"),
     },
     {
       key: "cost",
@@ -396,12 +420,12 @@ export function toDetailView({
   metrics.push({
     key: "iterations",
     label: "Iterations",
-    value: String(summary.iterationCount),
+    value: measuredCounter(summary.iterationCount, ordered, "iterationCount"),
   });
   metrics.push({
     key: "fixCycles",
     label: "Fix cycles",
-    value: String(summary.fixCycleCount),
+    value: measuredCounter(summary.fixCycleCount, ordered, "fixCycleCount"),
   });
   const findings = summedMetric(ordered, "findingCount");
   const resolved = summedMetric(ordered, "resolvedCount");

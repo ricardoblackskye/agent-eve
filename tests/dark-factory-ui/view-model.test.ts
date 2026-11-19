@@ -222,6 +222,74 @@ describe("filterRows", () => {
 });
 
 describe("toDetailView", () => {
+
+  it("derives Started and Elapsed from the events when the summary has neither (#698)", () => {
+    // The exact shape of the real run e626dc1e (WebFeedPOC#200): it SUCCEEDED, and its summary row
+    // carries no start or finish time even though its own events span 16:16:03 to 17:10:14.
+    const view = toDetailView({
+      summary: summary({
+        startedAt: undefined,
+        completedAt: undefined,
+        latencyMs: undefined,
+      }),
+      events: [
+        event({
+          sequence: 1,
+          type: "dispatch.started",
+          stage: "trigger",
+          occurredAt: "2026-11-13T16:16:03.000Z",
+        }),
+        event({
+          sequence: 2,
+          type: "worker.question",
+          stage: "worker",
+          status: "blocked",
+          occurredAt: "2026-11-13T16:16:29.000Z",
+        }),
+        event({
+          sequence: 3,
+          type: "run.terminal",
+          stage: "terminal",
+          status: "succeeded",
+          occurredAt: "2026-11-13T17:10:14.000Z",
+        }),
+      ],
+    });
+
+    const started = view.summaryTiles.find((tile) => tile.key === "started")?.value;
+    const elapsed = view.summaryTiles.find((tile) => tile.key === "elapsed")?.value;
+    expect(started).not.toBe("—");
+    expect(elapsed).toBe("54m 11s");
+  });
+
+  it("CONTROL: prefers the summary's own timestamps when it has them (#698)", () => {
+    const view = toDetailView({
+      summary: summary({
+        startedAt: "2026-09-25T09:14:00.000Z",
+        completedAt: "2026-09-25T09:28:02.000Z",
+      }),
+      events: [
+        event({
+          sequence: 1,
+          type: "dispatch.started",
+          stage: "trigger",
+          occurredAt: "2000-01-01T00:00:00.000Z",
+        }),
+      ],
+    });
+
+    expect(view.summaryTiles.find((tile) => tile.key === "started")?.value).toBe("09:14:00");
+  });
+
+  it("CONTROL: shows a dash when there is nothing to derive from (#698)", () => {
+    const view = toDetailView({
+      summary: summary({ startedAt: undefined, completedAt: undefined, latencyMs: undefined }),
+      events: [],
+    });
+
+    expect(view.summaryTiles.find((tile) => tile.key === "started")?.value).toBe("—");
+    expect(view.summaryTiles.find((tile) => tile.key === "elapsed")?.value).toBe("—");
+  });
   it("builds summary tiles, an ordered timeline, checkpoints and metrics", () => {
     const view = toDetailView({
       summary: summary(),
@@ -372,6 +440,64 @@ describe("toDetailView", () => {
       ],
     });
     expect(view.trace).toEqual(trace);
+  });
+
+  it("renders an em dash, not a zero, for a counter the run never measured (#698 leg C)", () => {
+    // The shape of the real run 30e5e5a7 (WebFeedPOC#239): the summary carries the ledger's
+    // `NOT NULL DEFAULT 0` counters and NOTHING in the event stream ever recorded one, so none was
+    // measured. Rendering 0 claims a measurement that never happened.
+    const view = toDetailView({
+      summary: summary({
+        attemptCount: 0,
+        reviewCount: 0,
+        iterationCount: 0,
+        fixCycleCount: 0,
+      }),
+      events: [
+        event({ sequence: 1, type: "dispatch.started", stage: "dispatch" }),
+        event({ sequence: 2, type: "run.terminal", stage: "terminal", status: "failed" }),
+      ],
+    });
+
+    expect(view.summaryTiles.find((t) => t.key === "attempts")?.value).toBe("—");
+    expect(view.summaryTiles.find((t) => t.key === "review")?.value).toBe("—");
+    expect(view.metrics.find((m) => m.key === "iterations")?.value).toBe("—");
+    expect(view.metrics.find((m) => m.key === "fixCycles")?.value).toBe("—");
+  });
+
+  it("CONTROL: a genuinely measured zero still renders as 0 (#698 leg C)", () => {
+    // The other half of the rule: an event that records the field IS a measurement, even at zero.
+    // Without this case an implementation that dashed EVERY zero would satisfy the test above by
+    // trading one lie for another.
+    const view = toDetailView({
+      summary: summary({
+        attemptCount: 0,
+        reviewCount: 0,
+        iterationCount: 0,
+        fixCycleCount: 0,
+      }),
+      events: [
+        event({
+          sequence: 1,
+          type: "dispatch.started",
+          stage: "dispatch",
+          attempt: 0,
+          iterationCount: 0,
+        }),
+      ],
+    });
+
+    expect(view.summaryTiles.find((t) => t.key === "attempts")?.value).toBe("0");
+    expect(view.metrics.find((m) => m.key === "iterations")?.value).toBe("0");
+  });
+
+  it("CONTROL: a measured non-zero counter still renders its value (#698 leg C)", () => {
+    const view = toDetailView({ summary: summary(), events: [] });
+
+    expect(view.summaryTiles.find((t) => t.key === "attempts")?.value).toBe("3");
+    expect(view.summaryTiles.find((t) => t.key === "review")?.value).toBe("2");
+    expect(view.metrics.find((m) => m.key === "iterations")?.value).toBe("3");
+    expect(view.metrics.find((m) => m.key === "fixCycles")?.value).toBe("1");
   });
 });
 
