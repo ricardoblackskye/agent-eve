@@ -117,9 +117,50 @@ Decouple the cap, keep redaction and the `truncated` flag, and prove a longer ou
 | `scripts/dark-factory-runner.ts`         | record `started_at`/`completed_at` on this path                                  |
 | `docs/adr/NNNN-...md`                    | the widened capture cap                                                          |
 
-## Validation
+## Feedback from the WebFeedPOC#235 e2e (2026-11-19)
 
-- The RED fixture is a real production run's shape, so the fix is provable on this machine without production access.
+The first sandbox e2e on this branch **proved the run worked** — it opened and the human merged
+**WebFeedPOC PR #236** — but the run details page rendered **"No PR opened yet"** and the ledger row
+carried `pr_url: NULL` and a `failed` terminal status, with only three events (`queued`, `blocked`,
+`failed`). The run had plainly produced a PR, so the page was lying by omission.
+
+### Root cause (measured in the ledger)
+
+- The Definition of Done **does** record the PR it opens: `definition-of-done.ts` emits a `pr.opened`
+  event with `prUrl`, and the `succeeded` terminal event it emits there carries `prUrl` too
+  (`run-history.ts` reducer propagates `event.prUrl` onto the summary, and the Postgres/SQLite stores
+  persist `pr_url`).
+- But `applyTerminalLifecycle` finalizes the run with its **own** `run.terminal` event built by
+  `terminalEvent()` in `run-finalizer.ts`, and that builder **only carries `status`** — it drops
+  `prUrl`. So the terminal event actually written to the ledger never reaches the summary's `pr_url`,
+  and the page (which reads `summary.prUrl` via `OutcomeArtifacts`) shows "No PR opened yet".
+- For the #235 run the ledger has **no `pr.opened` event at all** and a `failed` terminal with
+  `pr_url: NULL`. That means the run did **not** go through the DoD success path that emits
+  `pr.opened` — it ended on a `failed` terminal (the DoD most likely refused, or the parked-run
+  resume path recorded the terminal without the PR). Either way, the run that produced PR #236 left
+  no PR fact on its own record. That is the same "the page lost the record of what the run did"
+  defect this issue exists to fix, now measured on a second run.
+
+### Intended fix (Leg F)
+
+- Thread `prUrl` through `applyTerminalLifecycle`: when `dodResult?.pr` exists, the terminal event it
+  writes must carry `prUrl`, and the resulting summary must expose `prUrl`. `terminalEvent()` gains an
+  optional `prUrl` argument; `applyTerminalLifecycle` passes `dodResult?.pr?.url` through.
+- This is the write-side counterpart to the existing read-side `prUrl` plumbing (the page already
+  renders the link from `summary.prUrl` — it just never received one on a terminal event).
+- No new panel; the existing `OutcomeArtifacts` ("No PR opened yet" → link) is the surface.
+
+### Tasks
+
+- **Task F1 — RED:** `applyTerminalLifecycle`, given `dodResult` with a `pr`, writes a terminal event
+  carrying `prUrl` and leaves the summary with `prUrl` set. Test in `tests/dark-factory/run-finalizer.test.ts`.
+- **Task F2 — GREEN:** thread `prUrl` through `terminalEvent()` + `applyTerminalLifecycle`.
+- **Task F3 — prove on the real #235 row:** re-query the ledger; with the fix, a terminal event that
+  carries `prUrl` populates `pr_url`, so the page for `599773ae…` would show the PR #236 link. (The
+  already-merged #236 means the link resolves; the row itself is only fixed by a run produced under
+  the fixed code, so this is validated by the unit test + a fresh e2e, not by mutating history.)
+
+## Validation
 - Unit tests per leg, then the full suite, `tsc --noEmit --incremental false`, and the repo's lint gates on every changed file.
 - **Proof on the user's machine:** the details page for a run whose summary has no timestamps must show a real Started and Elapsed, and its trace panel must show the captured output rather than a dash.
 
@@ -128,3 +169,32 @@ Decouple the cap, keep redaction and the `truncated` flag, and prove a longer ou
 1. **Release split.** This is four work streams in one change. They could ship as two: (a) the data honesty fixes (A, B, C) and (b) the presentation and capture fixes (D, E). Say the word and I will split the branches.
 2. **The widened cap needs its own ADR** - it stays inside ADR 0082's posture (a bounded, redacted summary, never a transcript), but a future reader will ask why the bound is what it is.
 3. **This was first mistaken for a separate lifecycle bug, and that reading is withdrawn.** The run's page said "No PR opened yet" on a run that reached "Definition of Done met", which suggested the DoD had certified work that never happened. The ticket's own timeline disproves it - **PR #201 exists** and the issue is closed as `df:done` - so the defect is the incomplete summary described above, and no separate issue is needed.
+
+## Leg C shipped (2026-11-19)
+
+Leg C - *"Stop rendering unmeasured values as zeros"* - was planned and **was not shipped** with legs A, B+C, D, E and F.
+It is now implemented:
+
+- `measuredCounter()` in `app/dark-factory/ui/view-model.ts` decides whether a counter is a measurement: the
+  summary carries a value ABOVE zero (someone wrote it), or an event explicitly recorded the field (including
+  zero, which is a real measurement of nothing). Anything else renders the em dash `format.ts` already uses for
+  every other absent measurement.
+- Applied to `Attempts` and `Review round` (summary tiles) and `Iterations` and `Fix cycles` (measured metrics),
+  so the panel badge "NO INFERRED ZEROS" is now true.
+- Commits: RED `aeada64`, GREEN `a388517`. The controls pin BOTH halves - an event recording the field at zero
+  still renders `0`, and a non-zero summary counter still renders its value - so the fix does not trade one lie
+  for another.
+- **Proven against real ledger data, not a fixture:** run `30e5e5a7` (WebFeedPOC#239) stores all four counters as
+  `0` and no event records any of them; the detail view now renders `-` for all four instead of `0`, while
+  Started/Elapsed still resolve from the events.
+
+## What this branch does NOT fix (out of scope, tracked separately)
+
+The detail page still has three gaps this branch cannot close. Each has its own cause and its own issue, and a PR
+for this branch must not claim the page is complete.
+
+| panel | cause | where |
+|-------|-------|-------|
+| TEST OUTPUT, ACCEPTANCE CRITERIA | their events (`review.round`, `pr.opened`) are never persisted: the DoD's recorder is unwired AND a resumed run cannot accept work events | #702 |
+| RUN DIFF | the diff is never captured: `recordRunDiff` is called only by `createDispatchHandler`, which has no production caller | #704 |
+| WORKER CHECKPOINTS | lists stage NAMES only (no status/detail) and derives them from the event stream, which is empty for the same reason as #702 | #704 |
