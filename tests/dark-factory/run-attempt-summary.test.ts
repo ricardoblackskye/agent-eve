@@ -259,3 +259,64 @@ describe("#698 a run the ledger minted still gets its terminal facts", () => {
     expect(listed.value?.items.length).toBe(1);
   });
 });
+
+describe("#699 a parked minted run stays resumable after the normal exit", () => {
+  it("keeps a parked minted run blocked and resumable after the normal-exit summary write", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "df-parked-minted-"));
+    dirs.push(dir);
+    const store = new SqliteRunHistoryStore(join(dir, "runs.db"), () => `run-${randomUUID()}`);
+    const repo = `owner/parked-${randomUUID().slice(0, 8)}`;
+    const deliveredAt = "2026-11-19T13:30:00.000Z";
+
+    const accepted = await store.acceptDelivery({
+      deliveryId: `parked-${randomUUID()}`,
+      repo,
+      issue: 234,
+      receivedAt: deliveredAt,
+    });
+    expect(accepted.ok).toBe(true);
+    const runId = accepted.value?.runId ?? "";
+    expect(runId).not.toBe("");
+
+    const parked = await store.appendEvent({
+      eventId: `park:${runId}`,
+      runId,
+      type: "worker.question",
+      stage: "worker",
+      occurredAt: "2026-11-19T13:34:00.000Z",
+      status: "blocked",
+    });
+    expect(parked.ok).toBe(true);
+    expect(parked.value?.status).toBe("blocked");
+
+    // This is the normal-exit write after main() returns from parkForApproval().
+    await recordRunAttemptSummary(
+      {
+        runId,
+        repo,
+        issue: 234,
+        startedAt: "2026-11-19T13:30:00.000Z",
+        runHistory: store,
+        ledgerRecorded: true,
+      } as never,
+      { status: "succeeded", completedAt: "2026-11-19T13:34:01.000Z" },
+    );
+
+    const read = await store.getRun(runId);
+    expect(read.ok).toBe(true);
+    expect(read.value?.status).toBe("blocked");
+    expect(read.value?.stage).toBe("worker");
+    expect(read.value?.completedAt).toBeUndefined();
+
+    // A later delivery can adopt the same blocked claim; it must not create a new run.
+    const resumed = await store.acceptDelivery({
+      deliveryId: `approval-${randomUUID()}`,
+      repo,
+      issue: 234,
+      receivedAt: "2026-11-19T13:35:00.000Z",
+    });
+    expect(resumed.ok).toBe(true);
+    expect(resumed.activeConflict?.runId).toBe(runId);
+    expect(resumed.value).toBeUndefined();
+  });
+});
