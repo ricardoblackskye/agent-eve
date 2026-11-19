@@ -222,6 +222,74 @@ describe("filterRows", () => {
 });
 
 describe("toDetailView", () => {
+
+  it("derives Started and Elapsed from the events when the summary has neither (#698)", () => {
+    // The exact shape of the real run e626dc1e (WebFeedPOC#200): it SUCCEEDED, and its summary row
+    // carries no start or finish time even though its own events span 16:16:03 to 17:10:14.
+    const view = toDetailView({
+      summary: summary({
+        startedAt: undefined,
+        completedAt: undefined,
+        latencyMs: undefined,
+      }),
+      events: [
+        event({
+          sequence: 1,
+          type: "dispatch.started",
+          stage: "trigger",
+          occurredAt: "2026-11-13T16:16:03.000Z",
+        }),
+        event({
+          sequence: 2,
+          type: "worker.question",
+          stage: "worker",
+          status: "blocked",
+          occurredAt: "2026-11-13T16:16:29.000Z",
+        }),
+        event({
+          sequence: 3,
+          type: "run.terminal",
+          stage: "terminal",
+          status: "succeeded",
+          occurredAt: "2026-11-13T17:10:14.000Z",
+        }),
+      ],
+    });
+
+    const started = view.summaryTiles.find((tile) => tile.key === "started")?.value;
+    const elapsed = view.summaryTiles.find((tile) => tile.key === "elapsed")?.value;
+    expect(started).not.toBe("—");
+    expect(elapsed).toBe("54m 11s");
+  });
+
+  it("CONTROL: prefers the summary's own timestamps when it has them (#698)", () => {
+    const view = toDetailView({
+      summary: summary({
+        startedAt: "2026-09-25T09:14:00.000Z",
+        completedAt: "2026-09-25T09:28:02.000Z",
+      }),
+      events: [
+        event({
+          sequence: 1,
+          type: "dispatch.started",
+          stage: "trigger",
+          occurredAt: "2000-01-01T00:00:00.000Z",
+        }),
+      ],
+    });
+
+    expect(view.summaryTiles.find((tile) => tile.key === "started")?.value).toBe("09:14:00");
+  });
+
+  it("CONTROL: shows a dash when there is nothing to derive from (#698)", () => {
+    const view = toDetailView({
+      summary: summary({ startedAt: undefined, completedAt: undefined, latencyMs: undefined }),
+      events: [],
+    });
+
+    expect(view.summaryTiles.find((tile) => tile.key === "started")?.value).toBe("—");
+    expect(view.summaryTiles.find((tile) => tile.key === "elapsed")?.value).toBe("—");
+  });
   it("builds summary tiles, an ordered timeline, checkpoints and metrics", () => {
     const view = toDetailView({
       summary: summary(),
