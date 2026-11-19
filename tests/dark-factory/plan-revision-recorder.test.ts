@@ -130,7 +130,12 @@ describe("readPlanRevisionCount", () => {
         mode: "live",
         providerId: "stub",
         value: {
-          items: [{ sequence: 1, event: { type: "run.resumed" } }],
+          items: [
+            {
+              sequence: 1,
+              event: { type: "run.resumed", eventId: "plan-revision-resume:page-one" },
+            },
+          ],
           nextCursor: { sequence: 1 },
         },
       })
@@ -141,7 +146,10 @@ describe("readPlanRevisionCount", () => {
         value: {
           items: [
             { sequence: 2, event: { type: "run.accepted" } },
-            { sequence: 3, event: { type: "run.resumed" } },
+            {
+              sequence: 3,
+              event: { type: "run.resumed", eventId: "plan-revision-resume:page-two" },
+            },
           ],
         },
       });

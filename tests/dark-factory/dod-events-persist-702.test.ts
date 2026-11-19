@@ -67,9 +67,10 @@ describe("#702 an approval resume marks the run resumed", () => {
       eventId: `pr:${runId}`,
       runId,
       type: "pr.opened",
-      stage: "terminal",
-      occurredAt: "2026-11-19T18:02:00.000Z",
+      stage: "pull-request",
       status: "running",
+      prUrl: "https://github.com/ricardoblackskye/agent-eve/pull/1",
+      occurredAt: "2026-11-19T18:02:00.000Z",
     });
     expect(prOpened.ok, prOpened.error).toBe(true);
   });

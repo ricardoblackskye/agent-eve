@@ -626,10 +626,22 @@ export async function runDefinitionOfDone(
   const env = deps.env ?? process.env;
   const maxRounds = resolveMaxReviewRounds(env);
   const [owner, repoName] = task.repo.split("/");
+  let warnedMissingStore = false;
   const record = async (
     event: Omit<RunEvent, "occurredAt">,
   ): Promise<string | undefined> => {
-    if (!deps.runHistory) return undefined;
+    // #702: an absent store used to be a SILENT no-op, which is what let the DoD's events - the PR it
+    // opened, its review rounds, the acceptance-criteria matrix and the test results - vanish without
+    // a trace. A writer that cannot write must say so. Warned once, because this runs per event.
+    if (!deps.runHistory) {
+      if (!warnedMissingStore) {
+        warnedMissingStore = true;
+        console.warn(
+          "[WARN] The Definition of Done was given no run history store, so its events are being discarded: the run's PR, review rounds, acceptance criteria and test results will not be recorded.",
+        );
+      }
+      return undefined;
+    }
     const result = await persistDODRunEvent(deps.runHistory, event);
     return result.ok ? undefined : result.error ?? "unknown storage error";
   };

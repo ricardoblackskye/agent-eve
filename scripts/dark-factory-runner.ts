@@ -112,6 +112,7 @@ import {
   isPlanRevisionCapReached,
   readPlanRevisionCount,
   recordPlanRevision,
+  recordRunResumed,
 } from "../agent/lib/dark-factory/plan-revision-recorder";
 import { resolveRunnerAnswer } from "../agent/lib/dark-factory/runner-config";
 import { createWorkerReporter } from "../agent/lib/dark-factory/worker-reporter";
@@ -911,6 +912,23 @@ async function main(): Promise<void> {
     }
   }
 
+  // #702: a plain APPROVAL resume must move the run off `blocked` too. The ledger permits only
+  // `run.resumed` or `run.terminal` from that state, so without this the summary stayed
+  // `blocked`/`worker` for the whole coding phase and every later work event was refused - the
+  // Definition of Done's `pr.opened` was the first to hit it, so nothing the run did was recorded.
+  // The revision branch above records its own round; this covers the approval. A different event id,
+  // deliberately: approving a plan must not spend one of the revision rounds.
+  // Logged LOUDLY but does NOT stop the run, matching the revision branch - a ledger outage must not
+  // turn an unrecorded resume into an unreported one.
+  if (isResume && !isRevision) {
+    const marked = await recordRunResumed(runHistory, { runId });
+    if (!marked.ok) {
+      console.warn(
+        `[WARN] The resumed run could not be marked resumed: ${marked.error ?? "unknown error"}`,
+      );
+    }
+  }
+
   // STEP 4: Pre-flight Domain Validation
   console.log(
     `\n[STEP 4] Validating ExecutionPlan against domain constraints...`,
@@ -1500,6 +1518,9 @@ async function main(): Promise<void> {
   };
 
   const dodDeps: DefinitionOfDoneDeps = {
+    // #702: the store was never passed, so EVERY DoD event was discarded silently - the PR it opened,
+    // its review rounds, the acceptance-criteria matrix and the test results never reached the page.
+    runHistory,
     prWriter: capturingPrWriter,
     commentWriter: {
       postComment: async (owner, repo, prNum, body) => {
