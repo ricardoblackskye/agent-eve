@@ -32,8 +32,10 @@ untouched.
 ## Consequences
 
 - The trace panel can hold what an agent actually produced, which is what makes it worth showing.
-- Anyone raising this bound in future must raise it in one place and check both consumers; the comment
-  on the constant says so, and this ADR is why.
+- The bound has THREE consumers, not two: the capture, the reporter's hard limit, and the ledger's own
+  `MAX_AGENT_OUTPUT_CHARS`. The last two cannot import each other without a cycle, so a guard test
+  asserts they are equal - which is how this change was caught when only the first two moved. Anyone
+  raising it must move all three; the comments on the constants say so, and this ADR is why.
 - Question text may now run to 8000 characters before the reporter objects. If that proves too permissive
   for a ticket comment, the fix is to split the two bounds properly - give the capture its own limit and
   teach the reporter to accept it - which is a larger change than this one and is not made here.
