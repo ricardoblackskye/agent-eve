@@ -31,11 +31,24 @@ describe("countPlanRevisions", () => {
     const events = [
       { type: "run.accepted" },
       { type: "worker.question" },
-      { type: "run.resumed" },
+      { type: "run.resumed", eventId: "plan-revision-resume:aaa111" },
       { type: "worker.question" },
-      { type: "run.resumed" },
+      { type: "run.resumed", eventId: "plan-revision-resume:bbb222" },
     ];
     expect(countPlanRevisions(events)).toBe(2);
+  });
+
+  it("does not count an APPROVAL resume as a revision round", () => {
+    // #702: an APPROVAL resume also records `run.resumed` - it is the only transition the ledger
+    // allows out of `blocked` - but it is NOT the operator sending the plan back. Counting it would
+    // spend one of the cap's rounds every time a run is merely approved.
+    const events = [
+      { type: "worker.question", eventId: "park:1" },
+      { type: "run.resumed", eventId: "approval-resume:ccc333" },
+      { type: "worker.question", eventId: "park:2" },
+      { type: "run.resumed", eventId: "plan-revision-resume:ddd444" },
+    ];
+    expect(countPlanRevisions(events)).toBe(1);
   });
 
   it("counts zero when nothing has been revised", () => {
@@ -117,7 +130,12 @@ describe("readPlanRevisionCount", () => {
         mode: "live",
         providerId: "stub",
         value: {
-          items: [{ sequence: 1, event: { type: "run.resumed" } }],
+          items: [
+            {
+              sequence: 1,
+              event: { type: "run.resumed", eventId: "plan-revision-resume:page-one" },
+            },
+          ],
           nextCursor: { sequence: 1 },
         },
       })
@@ -128,7 +146,10 @@ describe("readPlanRevisionCount", () => {
         value: {
           items: [
             { sequence: 2, event: { type: "run.accepted" } },
-            { sequence: 3, event: { type: "run.resumed" } },
+            {
+              sequence: 3,
+              event: { type: "run.resumed", eventId: "plan-revision-resume:page-two" },
+            },
           ],
         },
       });

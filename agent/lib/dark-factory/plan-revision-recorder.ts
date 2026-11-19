@@ -54,9 +54,28 @@ const EVENT_PAGE_SIZE = 100;
 /** A ceiling on paging, so a cursor that never advances cannot spin forever. */
 const MAX_EVENT_PAGES = 50;
 
-/** One revision round is one reply-resume, so the count is the count of those. */
-export function countPlanRevisions(events: readonly { type: string }[]): number {
-  return events.filter((event) => event?.type === "run.resumed").length;
+/** The event-id form that MARKS a revision round. */
+const PLAN_REVISION_RESUME_PREFIX = "plan-revision-resume:";
+
+/** The approval resume's own form, deliberately NOT the revision one. */
+const APPROVAL_RESUME_PREFIX = "approval-resume:";
+
+/**
+ * One revision round is one reply-resume, so the count is the count of those.
+ *
+ * #702: identified by the EVENT ID, not by the type alone. An approval resume records `run.resumed`
+ * too - it is the only transition the ledger allows out of `blocked` - so counting every
+ * `run.resumed` would spend one of the cap's rounds every time a run is merely approved. Only a
+ * reply-resume carries the revision id.
+ */
+export function countPlanRevisions(
+  events: readonly { type: string; eventId?: string }[],
+): number {
+  return events.filter(
+    (event) =>
+      event?.type === "run.resumed" &&
+      (event.eventId ?? "").startsWith(PLAN_REVISION_RESUME_PREFIX),
+  ).length;
 }
 
 /**
@@ -76,7 +95,13 @@ function planRevisionEventId(runId: string, revisionId: string): string {
     .update(`${runId}:${revisionId}`)
     .digest("hex")
     .slice(0, 32);
-  return `plan-revision-resume:${hash}`;
+  return `${PLAN_REVISION_RESUME_PREFIX}${hash}`;
+}
+
+/** Idempotent on the run: adopting the same parked run twice marks it resumed once. */
+function approvalResumeEventId(runId: string): string {
+  const hash = createHash("sha256").update(runId).digest("hex").slice(0, 32);
+  return `${APPROVAL_RESUME_PREFIX}${hash}`;
 }
 
 /**
@@ -106,6 +131,42 @@ export async function recordPlanRevision(
     : {
         ok: false,
         error: written.error ?? "the plan revision could not be persisted",
+      };
+}
+
+export interface RecordRunResumedInput {
+  runId: string;
+  occurredAt?: string;
+}
+
+/**
+ * Record an APPROVAL resume by resuming the parked run.
+ *
+ * #702: the runner adopts a parked run when a human approves the plan, and the ledger permits only
+ * `run.resumed` or `run.terminal` out of `blocked`. Without this the summary stayed `blocked`/`worker`
+ * for the whole coding phase, so every later work event was refused - the Definition of Done's
+ * `pr.opened` was the first to hit it, and the run then blocked with nothing recorded.
+ *
+ * Deliberately a different event id from `recordPlanRevision`, so approving a plan does not spend one
+ * of the plan-revision rounds.
+ */
+export async function recordRunResumed(
+  history: RunHistoryStore,
+  input: RecordRunResumedInput,
+): Promise<PlanRevisionWriteResult> {
+  const written = await history.appendEvent({
+    eventId: approvalResumeEventId(input.runId),
+    runId: input.runId,
+    type: "run.resumed",
+    stage: "dispatch",
+    occurredAt: input.occurredAt ?? new Date().toISOString(),
+    status: "running",
+  });
+  return written.ok
+    ? { ok: true }
+    : {
+        ok: false,
+        error: written.error ?? "the resumed run could not be persisted",
       };
 }
 
