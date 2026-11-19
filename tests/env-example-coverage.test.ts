@@ -9,9 +9,10 @@
  * Vars that are Vercel/CI auto-provided or Playwright-only are whitelisted
  * because they are NOT part of the operator's `.env.example` setup surface.
  */
-import { describe, it, expect } from "vitest";
-import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
+import { afterEach, beforeEach, describe, it, expect } from "vitest";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const ROOT = process.cwd();
 
@@ -39,6 +40,10 @@ const SKIP_DIRS = new Set([
   "evals", // eval harness
   "dist",
   ".next",
+  // #563: the Dark Factory's scratch area. `df-workspaces/` is gitignored (.gitignore:19) and
+  // holds sandbox checkouts of OTHER repositories - WebFeedPOC among them - whose settings would
+  // otherwise be demanded in THIS repository's .env.example.
+  "df-workspaces",
 ]);
 
 const SOURCE_EXT = new Set([".ts", ".js", ".mjs", ".cjs"]);
@@ -59,10 +64,10 @@ function walk(dir: string): string[] {
   return out;
 }
 
-function extractSourceEnvVars(): Set<string> {
+function extractSourceEnvVars(root: string = ROOT): Set<string> {
   const vars = new Set<string>();
   const re = /(?:process\.)?env\.([A-Z][A-Z0-9_]*)/g;
-  for (const file of walk(ROOT)) {
+  for (const file of walk(root)) {
     // skip this test file itself (it references env var names as strings)
     if (file.endsWith("env-example-coverage.test.ts")) continue;
     const text = readFileSync(file, "utf8");
@@ -72,8 +77,8 @@ function extractSourceEnvVars(): Set<string> {
   return vars;
 }
 
-function extractDocumentedVars(): Set<string> {
-  const text = readFileSync(join(ROOT, ".env.example"), "utf8");
+function extractDocumentedVars(root: string = ROOT): Set<string> {
+  const text = readFileSync(join(root, ".env.example"), "utf8");
   const vars = new Set<string>();
   // A documented var is an ACTIVE (uncommented) line `NAME=...`. The file uses
   // CRLF line endings, so allow an optional leading \r after the line break.
@@ -85,20 +90,60 @@ function extractDocumentedVars(): Set<string> {
   return vars;
 }
 
+/** The vars the guard would report as missing, for whatever tree it is pointed at. */
+function missingFromEnvExample(root: string = ROOT): string[] {
+  const documented = extractDocumentedVars(root);
+  return [...extractSourceEnvVars(root)]
+    .filter((v) => !WHITELIST.has(v) && !documented.has(v))
+    .sort();
+}
+
 describe("env.example coverage", () => {
   const sourceVars = extractSourceEnvVars();
-  const documented = extractDocumentedVars();
-
-  const required = [...sourceVars]
-    .filter((v) => !WHITELIST.has(v))
-    .sort();
 
   it("documents every user-settable env var referenced by source code", () => {
-    const missing = required.filter((v) => !documented.has(v));
+    const missing = missingFromEnvExample();
     expect(
       missing,
       `These source-referenced env vars are missing from .env.example: ${missing.join(", ")}`,
     ).toEqual([]);
+  });
+
+  /**
+   * #563 - a Dark Factory sandbox checkout of ANOTHER project must not be scanned. `df-workspaces/`
+   * is gitignored and holds scratch checkouts (webfeedpoc-177, ...) whose settings are not this
+   * repository's, yet every one of them was demanded in `.env.example`.
+   *
+   * The skip matches the directory NAME at any depth, so a temporary tree exercises the same path
+   * without writing into - or depending on - the repo's own scratch directory.
+   */
+  describe("#563 the walker skips df-workspaces sandbox checkouts", () => {
+    let root: string;
+
+    beforeEach(() => {
+      root = mkdtempSync(join(tmpdir(), "env-coverage-"));
+      mkdirSync(join(root, "df-workspaces", "webfeedpoc-177", "src"), { recursive: true });
+      mkdirSync(join(root, "src"), { recursive: true });
+      writeFileSync(
+        join(root, "df-workspaces", "webfeedpoc-177", "src", "sandbox.ts"),
+        "const site = process.env.VITE_WIX_SITE_URL;\n",
+      );
+      writeFileSync(join(root, "src", "real.ts"), "const setting = process.env.UNDOCUMENTED_SETTING;\n");
+      writeFileSync(join(root, ".env.example"), "# nothing is documented in this fixture\n");
+    });
+
+    afterEach(() => {
+      rmSync(root, { recursive: true, force: true });
+    });
+
+    it("does not report a variable read inside a df-workspaces checkout", () => {
+      expect(missingFromEnvExample(root)).not.toContain("VITE_WIX_SITE_URL");
+    });
+
+    it("CONTROL: still reports a real source variable, so the skip cannot be widened to everything", () => {
+      // Without this, adding every directory to SKIP_DIRS would pass the test above.
+      expect(missingFromEnvExample(root)).toContain("UNDOCUMENTED_SETTING");
+    });
   });
 
   it("whitelist contains only vars actually referenced in source", () => {
