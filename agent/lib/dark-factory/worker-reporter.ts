@@ -68,7 +68,10 @@ export class InvalidWorkerMessageError extends Error {
 }
 
 /** Bounds, so a worker cannot post an unbounded wall of text (or a huge number). */
-export const MAX_QUESTION_CHARS = 2000;
+// #698: ONE authority over the same input. The captured agent output - the run's trace - is handed to
+// this reporter, which refuses anything longer, so the capture's bound and this limit move together.
+// Raising only the capture would hand the reporter text it rejects.
+export const MAX_QUESTION_CHARS = 8000;
 export const MAX_TEST_EVIDENCE_LINES = 20;
 export const MAX_TEST_EVIDENCE_CHARS = 300;
 export const MAX_ATTEMPT = 1000;
