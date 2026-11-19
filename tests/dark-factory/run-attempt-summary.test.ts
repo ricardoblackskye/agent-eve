@@ -8,6 +8,7 @@ import {
   buildAttemptSummary,
 } from "../../agent/lib/dark-factory/run-attempt-summary";
 import { SqliteRunHistoryStore } from "../../agent/lib/dark-factory/run-history-store";
+import { recordRunAttemptSummary } from "../../scripts/dark-factory-runner";
 
 /**
  * #681 - a run the LEDGER never minted must still be visible in the run history.
@@ -178,3 +179,83 @@ describe("#681 when a run must record itself", () => {
   });
 });
 
+/**
+ * #698 - the terminal facts must reach a run the ledger DID mint.
+ *
+ * The real run e626dc1e (WebFeedPOC#200) succeeded and opened PR #201, and its row still read
+ * `started_at = NULL`, `attempt_count = 0`, `pr_url = NULL` - because `recordRunAttemptSummary` is the
+ * #681 FALLBACK and a no-op when the ledger minted the run. So the one run that most needs its terminal
+ * update is exactly the one that never gets it, and the page renders dashes and zeros for a run that
+ * did real work.
+ */
+describe("#698 a run the ledger minted still gets its terminal facts", () => {
+  it("updates the minted row in place, and does not mint a second one", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "df-minted-"));
+    dirs.push(dir);
+    const store = new SqliteRunHistoryStore(join(dir, "runs.db"), () => `run-${randomUUID()}`);
+    const repo = `owner/minted-${randomUUID().slice(0, 8)}`;
+    // A sane chronology: the store refuses a record whose completedAt precedes its updatedAt, which is
+    // exactly what a fixture mixing the delivery date with the run's date produces.
+    const deliveredAt = "2026-11-13T16:00:00.000Z";
+
+    const accepted = await store.acceptDelivery({
+      deliveryId: `minted-${randomUUID()}`,
+      repo,
+      issue: 698,
+      receivedAt: deliveredAt,
+    });
+    expect(accepted.ok).toBe(true);
+    const runId = accepted.value?.runId ?? "";
+    expect(runId).not.toBe("");
+
+    await recordRunAttemptSummary(
+      {
+        runId,
+        repo,
+        issue: 698,
+        startedAt: "2026-11-13T16:16:03.000Z",
+        runHistory: store,
+        ledgerRecorded: true,
+      } as never,
+      {
+        status: "succeeded",
+        completedAt: "2026-11-13T17:10:14.000Z",
+        iterationCount: 2,
+        prUrl: "https://github.com/ricardoblackskye/WebFeedPOC/pull/201",
+      },
+    );
+
+    const read = await store.getRun(runId);
+    expect(read.ok).toBe(true);
+    expect(read.value?.startedAt).toBe("2026-11-13T16:16:03.000Z");
+    expect(read.value?.completedAt).toBe("2026-11-13T17:10:14.000Z");
+    expect(read.value?.iterationCount).toBe(2);
+    expect(read.value?.prUrl).toBe("https://github.com/ricardoblackskye/WebFeedPOC/pull/201");
+
+    // CONTROL: the claim is untouched - still ONE row for this issue, and it is terminal.
+    const listed = await store.listRuns({ repo });
+    expect(listed.value?.items.length).toBe(1);
+  });
+
+  it("CONTROL: still records a run the ledger never minted (#681 unchanged)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "df-unminted-"));
+    dirs.push(dir);
+    const store = new SqliteRunHistoryStore(join(dir, "runs.db"), () => `run-${randomUUID()}`);
+    const repo = `owner/unminted-${randomUUID().slice(0, 8)}`;
+
+    await recordRunAttemptSummary(
+      {
+        runId: `attempt-${randomUUID().slice(0, 8)}`,
+        repo,
+        issue: 681,
+        startedAt: at,
+        runHistory: store,
+        ledgerRecorded: false,
+      } as never,
+      { status: "succeeded", completedAt: at },
+    );
+
+    const listed = await store.listRuns({ repo });
+    expect(listed.value?.items.length).toBe(1);
+  });
+});
