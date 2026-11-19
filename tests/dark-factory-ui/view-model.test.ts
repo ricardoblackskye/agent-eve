@@ -441,6 +441,64 @@ describe("toDetailView", () => {
     });
     expect(view.trace).toEqual(trace);
   });
+
+  it("renders an em dash, not a zero, for a counter the run never measured (#698 leg C)", () => {
+    // The shape of the real run 30e5e5a7 (WebFeedPOC#239): the summary carries the ledger's
+    // `NOT NULL DEFAULT 0` counters and NOTHING in the event stream ever recorded one, so none was
+    // measured. Rendering 0 claims a measurement that never happened.
+    const view = toDetailView({
+      summary: summary({
+        attemptCount: 0,
+        reviewCount: 0,
+        iterationCount: 0,
+        fixCycleCount: 0,
+      }),
+      events: [
+        event({ sequence: 1, type: "dispatch.started", stage: "dispatch" }),
+        event({ sequence: 2, type: "run.terminal", stage: "terminal", status: "failed" }),
+      ],
+    });
+
+    expect(view.summaryTiles.find((t) => t.key === "attempts")?.value).toBe("—");
+    expect(view.summaryTiles.find((t) => t.key === "review")?.value).toBe("—");
+    expect(view.metrics.find((m) => m.key === "iterations")?.value).toBe("—");
+    expect(view.metrics.find((m) => m.key === "fixCycles")?.value).toBe("—");
+  });
+
+  it("CONTROL: a genuinely measured zero still renders as 0 (#698 leg C)", () => {
+    // The other half of the rule: an event that records the field IS a measurement, even at zero.
+    // Without this case an implementation that dashed EVERY zero would satisfy the test above by
+    // trading one lie for another.
+    const view = toDetailView({
+      summary: summary({
+        attemptCount: 0,
+        reviewCount: 0,
+        iterationCount: 0,
+        fixCycleCount: 0,
+      }),
+      events: [
+        event({
+          sequence: 1,
+          type: "dispatch.started",
+          stage: "dispatch",
+          attempt: 0,
+          iterationCount: 0,
+        }),
+      ],
+    });
+
+    expect(view.summaryTiles.find((t) => t.key === "attempts")?.value).toBe("0");
+    expect(view.metrics.find((m) => m.key === "iterations")?.value).toBe("0");
+  });
+
+  it("CONTROL: a measured non-zero counter still renders its value (#698 leg C)", () => {
+    const view = toDetailView({ summary: summary(), events: [] });
+
+    expect(view.summaryTiles.find((t) => t.key === "attempts")?.value).toBe("3");
+    expect(view.summaryTiles.find((t) => t.key === "review")?.value).toBe("2");
+    expect(view.metrics.find((m) => m.key === "iterations")?.value).toBe("3");
+    expect(view.metrics.find((m) => m.key === "fixCycles")?.value).toBe("1");
+  });
 });
 
 describe("toQueryParams", () => {
