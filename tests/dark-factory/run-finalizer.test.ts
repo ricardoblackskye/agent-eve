@@ -11,6 +11,7 @@ import { describe, it, expect } from "vitest";
 import {
   applyStartLifecycle,
   applyTerminalLifecycle,
+  isWaitingOnChecks,
   LabelWriteError,
   type TerminalFinalizerDeps,
 } from "../../agent/lib/dark-factory/run-finalizer";
@@ -447,6 +448,36 @@ describe("#703 a run whose DoD is blocked is not finalised", () => {
     // The RUN is left in flight: no terminal event, so the claim is not released.
     expect(appended.filter((e) => e.type === "run.terminal")).toHaveLength(0);
     expect(outcome).toMatchObject({ applied: false, deferred: true });
+  });
+
+  it("tells a checks-wait apart from a plan-park, so a resume can route (#703 leg C)", () => {
+    // A park and a wait both leave the run blocked, but a resume must do different things: a park
+    // re-enters planning, a wait re-enters the Definition of Done. Keyed on structure (the event id),
+    // never on the message text.
+    expect(isWaitingOnChecks([])).toBe(false);
+    // A plan-park is a worker.question - the event the resume path already looks for.
+    expect(
+      isWaitingOnChecks([
+        event({ type: "worker.question", eventId: `${RUN_ID}:plan-approval` }),
+      ]),
+    ).toBe(false);
+    // A checks-wait is the roadblock this module records, recognized by its marker.
+    expect(
+      isWaitingOnChecks([
+        event({ type: "worker.roadblock", eventId: `dod-waiting:${RUN_ID}` }),
+      ]),
+    ).toBe(true);
+    // A roadblock that is NOT ours must not be mistaken for a wait.
+    expect(
+      isWaitingOnChecks([event({ type: "worker.roadblock", eventId: "worker:roadblock" })]),
+    ).toBe(false);
+    // A settled-then-resumed run is no longer waiting.
+    expect(
+      isWaitingOnChecks([
+        event({ type: "worker.roadblock", eventId: `dod-waiting:${RUN_ID}` }),
+        event({ type: "run.resumed", eventId: `approval-resume:${RUN_ID}` }),
+      ]),
+    ).toBe(true);
   });
 
   it("records WHY the run is waiting, on the field the page already renders (#703 leg B)", async () => {
