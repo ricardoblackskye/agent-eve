@@ -287,17 +287,16 @@ describe("#284 terminal lifecycle labels", () => {
       occurredAt: AT,
     });
 
-    // #703: the LABEL still follows the verdict, but the run is deliberately NOT finalised - a blocked
-    // verdict leaves it in flight so that it can be resumed. The label half of #672 is what this test
-    // pins; the record half has its own #703 test below.
-    expect(outcome).toMatchObject({ applied: false, deferred: true });
+    // #703: the LABEL is deliberately unchanged. It describes how workable the TICKET is (`df:blocked`
+    // = produced work, not certified, RE-TRIGGERABLE), which is #672's contract and what a red check
+    // needs. A WAIT is the case #703 changes - see its own test below.
+    expect(outcome.applied).toBe(true);
     expect(calls).toContain("add:df:blocked");
     expect(calls).not.toContain("add:df:failed");
     expect(calls).not.toContain("add:df:done");
     // The in-flight labels still clear: the attempt is over either way.
     expect(calls).toContain("remove:df:running");
     expect(calls).toContain("remove:needs-answer");
-    expect(appended.filter((e) => e.type === "run.terminal")).toHaveLength(0);
   });
 
   it("a refused DoD applies NO terminal label, and is left for review (#271)", async () => {
@@ -480,14 +479,17 @@ describe("#703 a run whose DoD is blocked is not finalised", () => {
     ).toBe(true);
   });
 
-  it("records WHY the run is waiting, on the field the page already renders (#703 leg B)", async () => {
-    // The parked question already carries its human-facing message on `agentOutputSummary`
-    // (worker-reporter.ts), and the AGENT TRACE panel renders any event that carries one - so a waiting
-    // run can say what it is waiting for with no new column and no new UI.
-    const { writer } = labelWriter();
+  it("finalises a REAL blocked judgment as failed - a red check is not a wait (#703)", async () => {
+    // #703's rule: reserve `failed` for a real judgment. A run blocked on unresolved findings - the
+    // shape a FAILED check produces - is exactly that, so it finalises, unlike a WAIT which is left in
+    // flight. Measured on WebFeedPOC#244: the e2e check was red, the DoD blocked, and the first version
+    // of this change wrongly left it non-terminal. The waiting MARKER is written by the DoD, before the
+    // transition (see dod-waiting-703.test.ts) - from `blocked` the ledger permits only `run.resumed` or
+    // `run.terminal`, so it cannot legally be written here.
+    const { writer, calls } = labelWriter();
     const { store, appended } = history();
 
-    await applyTerminalLifecycle(deps(writer, store), {
+    const outcome = await applyTerminalLifecycle(deps(writer, store), {
       repo: REPO,
       issue: 1,
       runId: RUN_ID,
@@ -495,23 +497,23 @@ describe("#703 a run whose DoD is blocked is not finalised", () => {
       dodResult: dod({
         status: "blocked",
         ok: false,
-        blockedReason: "checks-not-finished",
-        pendingChecks: ["e2e", "test"],
         reason: "Review budget exhausted (3 rounds) with 1 unresolved finding(s).",
       }),
       occurredAt: AT,
     });
 
-    const waiting = appended.filter((e) => e.type === "worker.roadblock");
-    expect(waiting).toHaveLength(1);
-    expect(waiting[0].status).toBe("blocked");
-    // The reason names the checks it is waiting for, which is the whole point.
-    expect(waiting[0].agentOutputSummary).toContain("e2e");
-    expect(waiting[0].agentOutputSummary).toContain("test");
-    expect(waiting[0].agentOutputSummary).toContain("checks-not-finished");
+    // The RECORD states the run's outcome: a real judgment is `failed`, so the terminal event lands
+    // and the claim is released.
+    expect(outcome).toMatchObject({ applied: true });
+    expect(appended.filter((e) => e.type === "run.terminal")).toHaveLength(1);
+    // The TICKET keeps #672's vocabulary: df:blocked, so it can be re-triggered after a fix. A run that
+    // produced work is not marked as a failure (#672/ADR 0085) - the record says the run failed, the
+    // label says the ticket is workable.
+    expect(calls).toContain("add:df:blocked");
+    expect(calls).not.toContain("add:df:failed");
   });
 
-  it("still finalises a REFUSED run - that is a real judgement, not a wait", async () => {
+  it("still finalises a REFUSED run - that is a real judgment, not a wait", async () => {
     const { writer, calls } = labelWriter();
     const { store, appended } = history();
 
