@@ -81,7 +81,91 @@ export type AttemptFixes = (
 /** The default ceiling on findings attempted per pass. */
 export const DEFAULT_MAX_FINDINGS = 10;
 
+function describe(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 export function createFixCycle(ports: FixCyclePorts): AttemptFixes {
-  void ports;
-  throw new Error("not implemented");
+  const log = ports.log ?? (() => {});
+  const maxFindings = Math.max(0, ports.maxFindings ?? DEFAULT_MAX_FINDINGS);
+
+  return async (findings) => {
+    // One pass attempts a bounded number of findings. The ceiling is not about cost alone: it keeps
+    // the failure legible. A pass that tried fifty findings and reported nothing would be
+    // indistinguishable from one that tried none.
+    const attempted = findings.slice(0, maxFindings);
+    if (attempted.length < findings.length) {
+      log(
+        "Fix cycle",
+        `attempting ${attempted.length} of ${findings.length} findings`,
+      );
+    }
+    if (attempted.length === 0) return [];
+
+    const opened = await ports.openWorkspace();
+    if (!opened.ok) {
+      log("Fix cycle", `no workspace, so nothing was attempted: ${opened.error}`);
+      return [];
+    }
+
+    let authored: FixAuthorResult;
+    try {
+      authored = await ports.author(opened.workspace, attempted);
+    } catch (error) {
+      log("Fix cycle", `the authoring pass failed: ${describe(error)}`);
+      return [];
+    }
+
+    // A refusal is itself a disposition, so a refused finding must never ALSO be resolved: accepting
+    // a finding and claiming to have fixed it are contradictory answers to the same question.
+    const refusedIds = new Set((authored.refusals ?? []).map((r) => r.findingId));
+    const dispositions: FindingDisposition[] = [];
+
+    if (authored.changedFiles.length > 0) {
+      let pushed: { ok: boolean; error?: string };
+      try {
+        pushed = await ports.push(opened.workspace, attempted);
+      } catch (error) {
+        pushed = { ok: false, error: describe(error) };
+      }
+      if (pushed.ok) {
+        for (const target of attempted) {
+          if (refusedIds.has(target.id)) continue;
+          dispositions.push({ findingId: target.id, status: "resolved" });
+        }
+      } else {
+        // A fix that was not pushed is not a fix. Claiming otherwise would tell the ledger the
+        // finding was addressed while the pull request still carries the code the check rejected.
+        log("Fix cycle", `the fix was not pushed: ${pushed.error ?? "unknown error"}`);
+      }
+    }
+
+    for (const refusal of authored.refusals ?? []) {
+      const target = attempted.find((candidate) => candidate.id === refusal.findingId);
+      if (!target) continue;
+      // The DoD refuses an `error`-severity acceptance outright (`definition-of-done.ts:540`).
+      // Refusing it here makes the refusal early and explicit instead of a block several layers away.
+      if (target.severity === "error") {
+        log(
+          "Fix cycle",
+          `not accepting an error-severity finding: ${refusal.findingId}`,
+        );
+        continue;
+      }
+      const explanation = refusal.explanation.trim();
+      // The DoD blocks on an acceptance with no reason (`definition-of-done.ts:507`), so this must
+      // not manufacture one - an unexplained acceptance is the rubber stamp the loop exists to stop.
+      if (explanation.length === 0) {
+        log("Fix cycle", `dropping an acceptance with no reason: ${refusal.findingId}`);
+        continue;
+      }
+      dispositions.push({
+        findingId: refusal.findingId,
+        status: "accepted",
+        explanation,
+      });
+    }
+
+    return dispositions;
+  };
 }
