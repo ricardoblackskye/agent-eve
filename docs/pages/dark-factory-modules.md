@@ -445,6 +445,24 @@ Dark Factory — the entry point (#163). WHAT IT DOES: takes the trigger's decis
 
 **Exports:** `DispatchIntent`, `EntryDeps`, `EntryResult`, `EntryStatus`, `LabelWriter`, `RunnerDecision`, `RunnerMode`, `buildIntent`, `renderHandoffMessage`, `resolveApiOrigin`, `resolveRunnerMode`, `runDarkFactoryDispatch`, `sanitizeIdentifier`, `toRunId`
 
+## fix-cycle
+
+Dark Factory - the Definition of Done's fix cycle (#718). Supplies
+`DefinitionOfDoneDeps.attemptFixes`, the seam the DoD gates its whole fix/disposition path on: a pass
+re-authors the affected files on the pull request's own branch and pushes them, and returns
+`resolved` for what it addressed. Deliberately port-injected, so the disposition rules are testable
+without a sandbox, a model or a network. A pass claims a resolution only when it authored files
+**and** pushed them; an `error`-severity finding can never be accepted (the DoD refuses that
+disposition itself); an acceptance always carries a reason; and one pass attempts a bounded number
+of findings. It has no budget of its own - it is called once per review round, so the round budget
+that already exists *is* the budget - and it does not certify its own work, because the next round
+re-reads the pull request's checks. See [ADR 0092](../../docs/adr/0092-a-fix-cycle-is-bounded-by-rounds.md)
+and [ADR 0093](../../docs/adr/0093-a-fix-pass-runs-in-its-own-sandbox.md).
+
+**Source:** [`agent/lib/dark-factory/fix-cycle.ts`](../../agent/lib/dark-factory/fix-cycle.ts)
+
+**Exports:** `AttemptFixes`, `DEFAULT_MAX_FINDINGS`, `FixAuthorResult`, `FixCyclePorts`, `FixRefusal`, `FixWorkspace`, `createFixCycle`
+
 ## governed-agent-call
 
 Dark Factory — a governed agent LLM call (#270). Wraps `runGovernedLlmCall` for an AGENT call site (the runner's Architect / Developer calls); on a refusal it records the code ON THE RUN and throws `CostRefusedError`. OPT-IN: with no governor the call runs unchanged.

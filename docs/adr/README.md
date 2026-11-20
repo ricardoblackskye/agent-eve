@@ -145,3 +145,5 @@ changes, write a new one that supersedes it.
 | [0089](0089-a-test-timeout-is-sized-from-measurement.md)                 | A test timeout is sized from measurement                                                            | Accepted           |
 | [0090](0090-an-unfinished-check-is-not-a-failure.md)                     | An unfinished check is not a failure                                                                | Accepted           |
 | [0091](0091-the-agent-output-bound-is-shared.md)                         | The agent-output bound is shared                                                                    | Accepted           |
+| [0092](0092-a-fix-cycle-is-bounded-by-rounds.md)                         | A fix cycle is bounded by the review rounds                                                         | Accepted           |
+| [0093](0093-a-fix-pass-runs-in-its-own-sandbox.md)                       | A fix pass runs in its own sandbox                                                                  | Accepted           |
