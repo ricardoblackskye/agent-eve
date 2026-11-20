@@ -1562,9 +1562,35 @@ async function main(): Promise<void> {
   // STEP 7: Definition of DONE with AC Traceability Matrix
   console.log(`\n[STEP 7] Executing Hardened Definition of DONE (#179)...`);
   await checkpoint();
+  // #718: the ONE fix cycle, built here where everything it needs is resolved. The workspace, the
+  // author and the remote are accessors because the phase's replays and the re-entry resolve them at
+  // different times; each resolves when a pass actually runs, which is after this point in every case.
+  const fixCycle = buildFixCycleAdapter({
+    runId,
+    branchName,
+    remoteUrl: () => sandboxRemoteUrl,
+    workspaceDir: () => sandboxWorkspace,
+    author: () => codeAuthor,
+    createProvider: (sandboxRunId) =>
+      createSandboxProvider(
+        undefined,
+        vaultPath
+          ? {
+              gitPushCredential: {
+                host: gitHost,
+                path: `/${repoOwner}/${repoName}.git*`,
+                token,
+              },
+            }
+          : undefined,
+        sandboxRunId,
+      ),
+    log: line,
+  });
   await runDefinitionOfDonePhase(
     {
       runHistory,
+      attemptFixes: fixCycle,
       labelWriter,
       prWriter,
       postIssueComment: (owner, repo, issue, body) =>
@@ -1884,6 +1910,14 @@ export interface DodPhaseDeps {
   log?: (label: string, value: unknown) => void;
   timeoutMs?: number;
   pollIntervalMs?: number;
+  /**
+   * #718: the fix cycle, so the DoD can dispose of the findings its own checks raise.
+   *
+   * Supplied only where a fix can actually be run. The verify-only re-entry deliberately does NOT
+   * carry one: it exists to settle a verdict by re-reading checks, and the workspace, remote and
+   * author it would need are resolved later in the run than it executes.
+   */
+  attemptFixes?: AttemptFixes;
 }
 
 export interface DodPhaseArgs {
@@ -1974,6 +2008,7 @@ export async function runDefinitionOfDonePhase(
     // #702: the store was never passed, so EVERY DoD event was discarded silently - the PR it opened,
     // its review rounds, the acceptance-criteria matrix and the test results never reached the page.
     runHistory: deps.runHistory,
+    ...(deps.attemptFixes ? { attemptFixes: deps.attemptFixes } : {}),
     prWriter: opener,
     commentWriter: {
       postComment: async (owner, repo, prNum, body) => {

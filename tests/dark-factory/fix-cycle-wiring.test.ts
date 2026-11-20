@@ -60,6 +60,22 @@ function callArgs(text: string, callee: string): string[] {
   }
 }
 
+/** The body of a top-level function declaration, by balanced braces. */
+function functionBody(text: string, name: string): string {
+  const at = text.indexOf(`function ${name}(`);
+  if (at === -1) return "";
+  const open = text.indexOf("{", at);
+  let depth = 0;
+  for (let i = open; i < text.length; i++) {
+    if (text[i] === "{") depth += 1;
+    else if (text[i] === "}") {
+      depth -= 1;
+      if (depth === 0) return text.slice(open, i + 1);
+    }
+  }
+  return text.slice(open);
+}
+
 describe("#718 the runner supplies the DoD fix cycle", () => {
   it("imports createFixCycle from the fix-cycle module", () => {
     expect(source).toMatch(
@@ -73,24 +89,31 @@ describe("#718 the runner supplies the DoD fix cycle", () => {
     expect(callArgs(source, "runDefinitionOfDonePhase")).toHaveLength(2);
   });
 
-  it("passes attemptFixes at EVERY DoD composition", () => {
+  it("supplies attemptFixes to the STEP 7 composition, and to exactly one of them", () => {
+    // Deliberately NOT "every composition". #703's verify-only re-entry runs BEFORE the run resolves
+    // its workspace, remote and author - so a fix cycle there could not be built from the same
+    // dependencies without moving that whole setup earlier, and its job is to settle a verdict by
+    // re-reading checks rather than to start coding again. It is the LATER call (STEP 7) that carries
+    // one, and asserting the count keeps a second, unbuildable site from appearing unnoticed.
     const sites = callArgs(source, "runDefinitionOfDonePhase");
-    expect(sites.length).toBeGreaterThan(0);
-    for (const [index, args] of sites.entries()) {
-      expect(
-        args.includes("attemptFixes"),
-        `runDefinitionOfDonePhase call #${index + 1} does not supply attemptFixes`,
-      ).toBe(true);
-    }
+    expect(sites).toHaveLength(2);
+    const carriers = sites.filter((args) => args.includes("attemptFixes"));
+    expect(carriers, "exactly one composition supplies the fix cycle").toHaveLength(1);
+    expect(
+      sites[1].includes("attemptFixes"),
+      "the STEP 7 composition is the one that supplies it",
+    ).toBe(true);
   });
 
   it("builds the adapter from createFixCycle, wiring all four ports", () => {
     // The ports are the contract the module relies on. A composition that passed an object shaped
-    // like the adapter without these ports would compile and then quietly dispose nothing.
-    const adapter = source.match(/createFixCycle\s*\(\s*\{[\s\S]*?\}\s*\)/);
-    expect(adapter, "the runner must build the fix cycle with createFixCycle").not.toBeNull();
+    // like the adapter without these ports would compile and then quietly dispose nothing - which is
+    // the failure this whole issue is about, one level down.
+    const adapter = functionBody(source, "buildFixCycleAdapter");
+    expect(adapter, "the runner must define buildFixCycleAdapter").not.toBe("");
+    expect(adapter).toContain("createFixCycle");
     for (const port of ["openWorkspace", "author", "push", "closeWorkspace"]) {
-      expect(adapter![0], `the adapter does not wire ${port}`).toContain(port);
+      expect(adapter, `the adapter does not wire ${port}`).toContain(port);
     }
   });
 });
