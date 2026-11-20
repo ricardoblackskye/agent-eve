@@ -144,6 +144,27 @@ function markerEventId(runId: string): string {
   return `terminal-lifecycle:${runId}`;
 }
 
+/** Idempotent on the run: a run is marked as waiting once. */
+function waitingEventId(runId: string): string {
+  return `dod-waiting:${runId}`;
+}
+
+/**
+ * #703: what a waiting run is waiting FOR, in the form the page renders.
+ *
+ * It names the verdict and the checks on purpose: "not done" on its own is what made the record
+ * unreadable - an unsettled check and a genuine failure looked identical (#691, #703).
+ */
+function waitingMessage(result: DefinitionOfDoneResult): string {
+  const pending = result.pendingChecks ?? [];
+  const waitingFor = pending.length
+    ? ` Waiting for the pull request's checks to settle: ${pending.join(", ")}.`
+    : "";
+  const why = result.blockedReason ? ` (${result.blockedReason})` : "";
+  return (`Run is NOT done${why}: ${result.reason}${waitingFor} ` +
+    "It is left in flight so it can be resumed once the checks settle.");
+}
+
 /**
  * The failure record deliberately uses a DISTINCT eventId so that it does not
  * satisfy the idempotency marker: a run whose label writes failed must be able to
@@ -307,6 +328,31 @@ export async function applyTerminalLifecycle(
   //    `blocked` as a terminal event status for exactly that reason. A `refused` verdict is a real
   //    judgement and still finalises as "failed": only a `blocked` verdict defers.
   if (dodResult?.status === "blocked") {
+    // #703 (Leg B): record WHY it is waiting, so the run page can say it instead of showing a bare
+    // status. `agentOutputSummary` is the field the PARKED QUESTION already uses for its human-facing
+    // message (`worker-reporter.ts`), and the AGENT TRACE panel renders any event that carries one -
+    // so this needs no new column and no new UI.
+    //
+    // `worker.roadblock` rather than `worker.question` is deliberate: `worker.question` IS the
+    // plan-park signal the resume path looks for (`notifying-run-history.ts` maps it to "parked"), and
+    // a checks-wait has to stay distinguishable from it or a resume cannot route (Leg C).
+    const waiting = await runHistory.appendEvent({
+      eventId: waitingEventId(runId),
+      runId,
+      type: "worker.roadblock",
+      stage: "worker",
+      status: "blocked",
+      occurredAt,
+      agentOutputSummary: waitingMessage(dodResult),
+    });
+    if (!waiting.ok) {
+      // Not fatal. The load-bearing part - no terminal event, so the claim is kept and the run stays
+      // resumable - has already been decided. The reason is explanatory, so losing it is reported
+      // rather than fatal; swallowing it silently is the mistake this whole area exists to avoid.
+      console.warn(
+        `[WARN] The reason this run is waiting could not be recorded: ${waiting.error ?? "unknown error"}`,
+      );
+    }
     return { applied: false, deferred: true };
   }
 
