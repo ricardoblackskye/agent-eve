@@ -608,6 +608,85 @@ async function main(): Promise<void> {
       `- **Status**: Synthesizing ExecutionPlan and running pre-flight domain validation...`,
   );
 
+  // #280: the execution backend is configuration-selected. Unset DF_SANDBOX_DRIVER = the local
+  // filesystem, i.e. today's behavior; an unknown value throws before any side effect.
+  // #281 (R2b/B2): the sandbox is created once per run and force-disposed by runCodingPhase,
+  // so the runner owns the lifecycle (closing the SDK client does not terminate a sandbox).
+
+  // #281 (R2b/B1): the author is configuration-selected. Unset DF_CODE_AUTHOR = in-process, i.e. the
+  // governed path above, unchanged. The in-process adapter calls `generate`, which runs through the
+  // cost gate, so the seam cannot bypass governance.
+  const codeAuthor = createCodeAuthorProvider(
+    {
+      DF_CODE_AUTHOR: process.env.DF_CODE_AUTHOR,
+      DF_AGENT_CLI: process.env.DF_AGENT_CLI,
+      DF_AGENT_CLI_COMMAND: process.env.DF_AGENT_CLI_COMMAND,
+    },
+    {
+      generate: (prompt) =>
+        runGovernedAgentCall(
+          { governor, runHistory, runId },
+          {
+            category: "developer",
+            model: modelId,
+            inputTokens: Math.ceil(prompt.length / 4),
+            outputTokens: 8_000,
+            run: async () => {
+              const stream = streamText({ model, prompt });
+              let output = "";
+              for await (const chunk of stream.textStream) output += chunk;
+              return output;
+            },
+          },
+        ),
+    },
+  );
+
+  // #354 — the vault path runs git INSIDE the sandbox, where the egress sidecar injects the push
+  // credential. That forces the git flow into the coding phase, because runCodingPhase disposes the
+  // sandbox in a `finally`; the phase therefore needs the provider, not just its tools.
+  const vaultPath =
+    (process.env.DF_SANDBOX_VAULT_ENABLED ?? "").trim() !== "" &&
+    (process.env.DF_SANDBOX_DRIVER ?? "").trim() === "opensandbox";
+
+  // A path INSIDE the container: process.cwd() is a HOST path, so the vault path roots both the loop
+  // and the git flow at the same container directory the driver uses.
+  const sandboxWorkspace =
+    (process.env.DF_SANDBOX_WORKSPACE ?? "").trim() ||
+    DEFAULT_SANDBOX_WORKSPACE;
+
+  const gitHost = (
+    process.env.DF_SANDBOX_EGRESS_GIT_HOST ?? "github.com"
+  ).trim();
+
+  const sandboxRemoteUrl = `https://${gitHost}/${repoOwner}/${repoName}.git`;
+
+  // #718: the ONE fix cycle, built here where everything it needs is resolved. The workspace, the
+  // author and the remote are accessors because the phase's replays and the re-entry resolve them at
+  // different times; each resolves when a pass actually runs, which is after this point in every case.
+  const fixCycle = buildFixCycleAdapter({
+    runId,
+    branchName,
+    remoteUrl: () => sandboxRemoteUrl,
+    workspaceDir: () => sandboxWorkspace,
+    author: () => codeAuthor,
+    createProvider: (sandboxRunId) =>
+      createSandboxProvider(
+        undefined,
+        vaultPath
+          ? {
+              gitPushCredential: {
+                host: gitHost,
+                path: `/${repoOwner}/${repoName}.git*`,
+                token,
+              },
+            }
+          : undefined,
+        sandboxRunId,
+      ),
+    log: line,
+  });
+
   // STEP 3: Architect Agent Planning Phase
   //
   // #365 R4: on a RESUME the plan is NOT regenerated. A fresh plan is a different plan from the one a human
@@ -681,6 +760,7 @@ async function main(): Promise<void> {
             issueWriter.postComment(owner, repo, issue, body),
           makeCheckFetcher: (prNumber) =>
             makePullRequestCheckFetcher({ token, repo: targetRepo, prNumber }),
+          attemptFixes: fixCycle,
           log: line,
         },
         {
@@ -1062,39 +1142,6 @@ async function main(): Promise<void> {
   console.log(
     `\n[STEP 5] Dispatched Multi-File Developer Agent with Workspace Tools...`,
   );
-  // #280: the execution backend is configuration-selected. Unset DF_SANDBOX_DRIVER = the local
-  // filesystem, i.e. today's behavior; an unknown value throws before any side effect.
-  // #281 (R2b/B2): the sandbox is created once per run and force-disposed by runCodingPhase,
-  // so the runner owns the lifecycle (closing the SDK client does not terminate a sandbox).
-
-  // #281 (R2b/B1): the author is configuration-selected. Unset DF_CODE_AUTHOR = in-process, i.e. the
-  // governed path above, unchanged. The in-process adapter calls `generate`, which runs through the
-  // cost gate, so the seam cannot bypass governance.
-  const codeAuthor = createCodeAuthorProvider(
-    {
-      DF_CODE_AUTHOR: process.env.DF_CODE_AUTHOR,
-      DF_AGENT_CLI: process.env.DF_AGENT_CLI,
-      DF_AGENT_CLI_COMMAND: process.env.DF_AGENT_CLI_COMMAND,
-    },
-    {
-      generate: (prompt) =>
-        runGovernedAgentCall(
-          { governor, runHistory, runId },
-          {
-            category: "developer",
-            model: modelId,
-            inputTokens: Math.ceil(prompt.length / 4),
-            outputTokens: 8_000,
-            run: async () => {
-              const stream = streamText({ model, prompt });
-              let output = "";
-              for await (const chunk of stream.textStream) output += chunk;
-              return output;
-            },
-          },
-        ),
-    },
-  );
   const capturedTestResults: {
     testFile: string;
     testCaseName: string;
@@ -1126,21 +1173,6 @@ async function main(): Promise<void> {
     }
   }
 
-  // #354 — the vault path runs git INSIDE the sandbox, where the egress sidecar injects the push
-  // credential. That forces the git flow into the coding phase, because runCodingPhase disposes the
-  // sandbox in a `finally`; the phase therefore needs the provider, not just its tools.
-  const vaultPath =
-    (process.env.DF_SANDBOX_VAULT_ENABLED ?? "").trim() !== "" &&
-    (process.env.DF_SANDBOX_DRIVER ?? "").trim() === "opensandbox";
-  // A path INSIDE the container: process.cwd() is a HOST path, so the vault path roots both the loop
-  // and the git flow at the same container directory the driver uses.
-  const sandboxWorkspace =
-    (process.env.DF_SANDBOX_WORKSPACE ?? "").trim() ||
-    DEFAULT_SANDBOX_WORKSPACE;
-  const gitHost = (
-    process.env.DF_SANDBOX_EGRESS_GIT_HOST ?? "github.com"
-  ).trim();
-  const sandboxRemoteUrl = `https://${gitHost}/${repoOwner}/${repoName}.git`;
 
   // #365 Task 11: put the plan on the ticket BEFORE the coding loop, so the intent is reviewable even if
   // the run fails during coding. Idempotent: a retry updates its own comment instead of adding another.
@@ -1592,31 +1624,6 @@ async function main(): Promise<void> {
   // STEP 7: Definition of DONE with AC Traceability Matrix
   console.log(`\n[STEP 7] Executing Hardened Definition of DONE (#179)...`);
   await checkpoint();
-  // #718: the ONE fix cycle, built here where everything it needs is resolved. The workspace, the
-  // author and the remote are accessors because the phase's replays and the re-entry resolve them at
-  // different times; each resolves when a pass actually runs, which is after this point in every case.
-  const fixCycle = buildFixCycleAdapter({
-    runId,
-    branchName,
-    remoteUrl: () => sandboxRemoteUrl,
-    workspaceDir: () => sandboxWorkspace,
-    author: () => codeAuthor,
-    createProvider: (sandboxRunId) =>
-      createSandboxProvider(
-        undefined,
-        vaultPath
-          ? {
-              gitPushCredential: {
-                host: gitHost,
-                path: `/${repoOwner}/${repoName}.git*`,
-                token,
-              },
-            }
-          : undefined,
-        sandboxRunId,
-      ),
-    log: line,
-  });
   await runDefinitionOfDonePhase(
     {
       runHistory,

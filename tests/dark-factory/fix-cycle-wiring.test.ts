@@ -89,20 +89,21 @@ describe("#718 the runner supplies the DoD fix cycle", () => {
     expect(callArgs(source, "runDefinitionOfDonePhase")).toHaveLength(2);
   });
 
-  it("supplies attemptFixes to the STEP 7 composition, and to exactly one of them", () => {
-    // Deliberately NOT "every composition". #703's verify-only re-entry runs BEFORE the run resolves
-    // its workspace, remote and author - so a fix cycle there could not be built from the same
-    // dependencies without moving that whole setup earlier, and its job is to settle a verdict by
-    // re-reading checks rather than to start coding again. It is the LATER call (STEP 7) that carries
-    // one, and asserting the count keeps a second, that cannot be built site from appearing unnoticed.
+  it("supplies attemptFixes at EVERY DoD composition, the re-entry included", () => {
+    // It was STEP 7 only, and that was the wrong trade: the case that matters most - a red check
+    // discovered AFTER a wait - arrives on the verify-only re-entry, which was the one path with no
+    // fix cycle. The run then recorded why the pull request failed and did nothing about it.
+    //
+    // The re-entry could not reach the adapter's dependencies before. The workspace, remote, author
+    // and sandbox config are now resolved above it, so ONE adapter serves both compositions.
     const sites = callArgs(source, "runDefinitionOfDonePhase");
     expect(sites).toHaveLength(2);
-    const carriers = sites.filter((args) => args.includes("attemptFixes"));
-    expect(carriers, "exactly one composition supplies the fix cycle").toHaveLength(1);
-    expect(
-      sites[1].includes("attemptFixes"),
-      "the STEP 7 composition is the one that supplies it",
-    ).toBe(true);
+    for (const [index, args] of sites.entries()) {
+      expect(
+        args.includes("attemptFixes"),
+        `runDefinitionOfDonePhase call #${index + 1} does not supply attemptFixes`,
+      ).toBe(true);
+    }
   });
 
   it("builds the adapter from createFixCycle, wiring all four ports", () => {
