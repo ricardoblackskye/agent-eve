@@ -133,7 +133,11 @@ describe("#718 the fix cycle's disposition rules", () => {
   });
 
   it("attempts at most maxFindings in one pass", async () => {
-    const author = vi.fn(async () => ({ changedFiles: ["a.ts"] }));
+    const author = vi.fn(
+      async (_workspace: FixWorkspace, _findings: readonly ReviewFinding[]) => ({
+        changedFiles: ["a.ts"],
+      }),
+    );
     const attempts = createFixCycle(ports({ author, maxFindings: 2 }));
 
     const dispositions = await attempts([
@@ -151,7 +155,11 @@ describe("#718 the fix cycle's disposition rules", () => {
 
   it("defaults the ceiling rather than attempting an unbounded list", async () => {
     const many = Array.from({ length: DEFAULT_MAX_FINDINGS + 5 }, (_, i) => finding(`f${i}`));
-    const author = vi.fn(async () => ({ changedFiles: [] }));
+    const author = vi.fn(
+      async (_workspace: FixWorkspace, _findings: readonly ReviewFinding[]) => ({
+        changedFiles: [],
+      }),
+    );
     const attempts = createFixCycle(ports({ author }));
 
     await attempts(many);
