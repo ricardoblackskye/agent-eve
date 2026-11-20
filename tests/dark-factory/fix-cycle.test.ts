@@ -30,6 +30,7 @@ function ports(overrides: Partial<FixCyclePorts> = {}): FixCyclePorts {
     openWorkspace: async () => ({ ok: true, workspace: WORKSPACE }),
     author: async () => ({ changedFiles: ["src/pages/HomePage.jsx"] }),
     push: async () => ({ ok: true }),
+    closeWorkspace: async () => {},
     ...overrides,
   };
 }
@@ -151,6 +152,33 @@ describe("#718 the fix cycle's disposition rules", () => {
     expect(dispositions.map((d) => d.findingId)).toEqual(["f1", "f2"]);
     expect(author).toHaveBeenCalledTimes(1);
     expect(author.mock.calls[0][1]).toHaveLength(2);
+  });
+
+  it("closes the workspace after a successful pass, so the sandbox is not leaked", async () => {
+    const closeWorkspace = vi.fn(async () => {});
+    const attempts = createFixCycle(ports({ closeWorkspace }));
+
+    await attempts([finding("PR-CHECK-FAILED:e2e")]);
+
+    expect(closeWorkspace).toHaveBeenCalledTimes(1);
+    expect(closeWorkspace).toHaveBeenCalledWith(WORKSPACE);
+  });
+
+  it("closes the workspace even when the authoring pass throws, and still does not throw", async () => {
+    // The adapter opens a real sandbox. If an authoring failure skipped the close, every failed pass
+    // would leak one - and the runner would accumulate sandboxes until the driver gave up.
+    const closeWorkspace = vi.fn(async () => {});
+    const attempts = createFixCycle(
+      ports({
+        author: async () => {
+          throw new Error("the model returned nothing");
+        },
+        closeWorkspace,
+      }),
+    );
+
+    await expect(attempts([finding("PR-CHECK-FAILED:e2e")])).resolves.toEqual([]);
+    expect(closeWorkspace).toHaveBeenCalledTimes(1);
   });
 
   it("defaults the ceiling rather than attempting an unbounded list", async () => {
