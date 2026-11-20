@@ -32,6 +32,7 @@ import {
   type DefinitionOfDoneDeps,
   type DefinitionOfDoneTask,
   type ReviewFinding,
+  type PrCheckAnnotation,
   type PrCheckRun,
   type PrOpener,
   checkRunFindings,
@@ -306,7 +307,7 @@ const PR_CHECKS_POLL_INTERVAL_MS = 15_000;
  * to stay distinguishable from "the checks passed" (#659): the mapping turns null into a warning, never
  * into a silent pass.
  */
-function makePullRequestCheckFetcher(deps: {
+export function makePullRequestCheckFetcher(deps: {
   token: string;
   repo: string;
   prNumber: number;
@@ -335,8 +336,37 @@ function makePullRequestCheckFetcher(deps: {
         { headers },
       );
       if (!checksResponse.ok) return null;
-      const body = (await checksResponse.json()) as { check_runs?: PrCheckRun[] };
-      return Array.isArray(body.check_runs) ? body.check_runs : null;
+      const body = (await checksResponse.json()) as {
+        check_runs?: (PrCheckRun & {
+          output?: { annotations_url?: string; annotations_count?: number };
+        })[];
+      };
+      if (!Array.isArray(body.check_runs)) return null;
+
+      // #718: a failing check says WHERE it failed through its annotations, and this endpoint returns
+      // an `annotations_url` rather than the annotations themselves - so this is a second call, made
+      // only for a check that actually annotated. Best-effort on purpose: losing the detail must not
+      // lose the verdict, because a failed check that vanished from the findings would be worse than
+      // one that arrives without a file.
+      return await Promise.all(
+        body.check_runs.map(async (run) => {
+          const { output, ...check } = run;
+          const annotationsUrl = output?.annotations_url;
+          const annotated =
+            typeof output?.annotations_count === "number" && output.annotations_count > 0;
+          if (!annotated || typeof annotationsUrl !== "string" || annotationsUrl === "") {
+            return check;
+          }
+          try {
+            const response = await fetch(annotationsUrl, { headers });
+            if (!response.ok) return check;
+            const annotations = (await response.json()) as PrCheckAnnotation[];
+            return Array.isArray(annotations) ? { ...check, annotations } : check;
+          } catch {
+            return check;
+          }
+        }),
+      );
     } catch {
       return null;
     }

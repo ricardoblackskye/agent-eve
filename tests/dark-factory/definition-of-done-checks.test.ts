@@ -98,6 +98,39 @@ describe("#691 an unfinished check is not a failure", () => {
     expect(result.pendingChecks ?? []).toEqual([]);
   });
 
+  it("names the file a FAILED check annotated, so a fix has something to act on (#718)", () => {
+    // A failed check that annotates says WHERE it failed. Without this the finding is prose and the
+    // fix cycle has no target file - which is why a red e2e produced "authored 0 file(s) for 1
+    // finding(s)" on WebFeedPOC#248: the loop was given nothing it could act on.
+    const findings = checkRunFindings([
+      {
+        name: "e2e",
+        status: "completed",
+        conclusion: "failure",
+        annotations: [
+          {
+            path: "tests/e2e/home.spec.ts",
+            start_line: 42,
+            message: "expect(received).toContain(expected)",
+          },
+        ],
+      },
+    ] as never);
+
+    expect(findings[0].file).toBe("tests/e2e/home.spec.ts");
+    expect(findings[0].line).toBe(42);
+  });
+
+  it("still reports a FAILED check with no annotations, without inventing a file", () => {
+    const findings = checkRunFindings([
+      { name: "e2e", status: "completed", conclusion: "failure" },
+    ] as never);
+
+    expect(findings[0].id).toBe("PR-CHECK-FAILED:e2e");
+    expect(findings[0].file).toBeUndefined();
+    expect(findings[0].line).toBeUndefined();
+  });
+
   it("CONTROL: reports the FAILURE when both a failed and an unfinished check are present", async () => {
     const deps = depsWith(
       vi.fn().mockResolvedValue(
