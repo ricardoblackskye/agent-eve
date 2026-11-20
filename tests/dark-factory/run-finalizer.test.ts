@@ -406,3 +406,78 @@ describe("#698 Leg F — a run that opened a PR must carry it to the terminal re
     expect((terminal as RunEvent).prUrl).toBeUndefined();
   });
 });
+
+describe("#703 a run whose DoD is blocked is not finalised", () => {
+  // #703: the ticket label already followed the DoD verdict (#672) - it is the terminal EVENT that did
+  // not, and that event is also what RELEASES the active-run claim (#373). So a run waiting on its
+  // checks was recorded terminal `failed` while its ticket correctly said df:blocked: the record said
+  // "finished" and the label said "re-triggerable". `blocked` is deliberately not terminal anywhere in
+  // this system (#672: "not done AND resumable"), so a waiting run must be left in exactly that state.
+  const dod = (partial: Record<string, unknown>) =>
+    partial as unknown as NonNullable<
+      Parameters<typeof applyTerminalLifecycle>[1]["dodResult"]
+    >;
+
+  it("labels the ticket df:blocked and leaves the run NON-terminal, so its claim survives", async () => {
+    const { writer, calls } = labelWriter();
+    const { store, appended } = history();
+
+    const outcome = await applyTerminalLifecycle(deps(writer, store), {
+      repo: REPO,
+      issue: 1,
+      runId: RUN_ID,
+      terminalStatus: "failed",
+      dodResult: dod({
+        status: "blocked",
+        ok: false,
+        blockedReason: "checks-not-finished",
+        pendingChecks: ["e2e"],
+      }),
+      occurredAt: AT,
+    });
+
+    // The ticket keeps the vocabulary it already had.
+    expect(calls).toContain("add:df:blocked");
+    expect(calls).toContain("remove:df:running");
+    expect(calls).not.toContain("add:df:failed");
+    // The RUN is left in flight: no terminal event, so the claim is not released.
+    expect(appended.filter((e) => e.type === "run.terminal")).toHaveLength(0);
+    expect(outcome).toMatchObject({ applied: false, deferred: true });
+  });
+
+  it("still finalises a REFUSED run - that is a real judgement, not a wait", async () => {
+    const { writer, calls } = labelWriter();
+    const { store, appended } = history();
+
+    const outcome = await applyTerminalLifecycle(deps(writer, store), {
+      repo: REPO,
+      issue: 1,
+      runId: RUN_ID,
+      terminalStatus: "failed",
+      dodResult: dod({ status: "refused", ok: false }),
+      occurredAt: AT,
+    });
+
+    expect(appended.filter((e) => e.type === "run.terminal")).toHaveLength(1);
+    expect(outcome.applied).toBe(true);
+    expect(calls).not.toContain("add:df:blocked");
+  });
+
+  it("still finalises a DONE run", async () => {
+    const { writer, calls } = labelWriter();
+    const { store, appended } = history();
+
+    const outcome = await applyTerminalLifecycle(deps(writer, store), {
+      repo: REPO,
+      issue: 1,
+      runId: RUN_ID,
+      terminalStatus: "succeeded",
+      dodResult: DOD_DONE,
+      occurredAt: AT,
+    });
+
+    expect(appended.filter((e) => e.type === "run.terminal")).toHaveLength(1);
+    expect(outcome.applied).toBe(true);
+    expect(calls).toContain("add:df:done");
+  });
+});
