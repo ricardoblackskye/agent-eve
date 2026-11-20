@@ -72,6 +72,11 @@ describe("#284 runner wires the terminal-lifecycle finalizer", () => {
 describe("#659 the check wait is bounded once across the review rounds", () => {
   it("derives each round's wait from a single deadline", () => {
     expect(source).toMatch(/checkWaitDeadline/);
-    expect(source).toMatch(/timeoutMs:\s*Math\.max\(\s*0\s*,\s*checkWaitDeadline\s*-\s*Date\.now\(\)\s*\)/);
+    // #703: the clock is now injected (`now()`), so the phase can be tested without the real one. The
+    // invariant this guard exists for is unchanged and still fully pinned: the wait is derived from the
+    // single `checkWaitDeadline` and clamped at 0. Widened for the clock ONLY - not for the shape.
+    expect(source).toMatch(
+      /timeoutMs:\s*Math\.max\(\s*0\s*,\s*checkWaitDeadline\s*-\s*(?:Date\.now|now)\(\)\s*\)/,
+    );
   });
 });

@@ -21,6 +21,7 @@ import {
 } from "./definition-of-done";
 import type { RunEvent } from "./run-history";
 import type { RunHistoryStore } from "./run-history-store";
+import { createHash } from "node:crypto";
 import { OUTCOME_LABELS, TERMINAL_LABELS, TRIGGER_LABELS } from "./trigger";
 
 // One definition of "terminal", owned by the label vocabulary in trigger.ts.
@@ -144,9 +145,43 @@ function markerEventId(runId: string): string {
   return `terminal-lifecycle:${runId}`;
 }
 
-/** Idempotent on the run: a run is marked as waiting once. */
-function waitingEventId(runId: string): string {
-  return `dod-waiting:${runId}`;
+/**
+ * The event-id marker for "this run is waiting on its checks" (#703).
+ *
+ * Exported because a RESUME has to tell the two blocked states apart: a plan-park is a `worker.question`
+ * (the event the resume path already looks for, `notifying-run-history.ts` maps it to "parked"), while a
+ * checks-wait is the `worker.roadblock` this module records. One re-enters planning, the other re-enters
+ * the Definition of Done - so the marker has exactly one definition, here.
+ */
+export const WAITING_EVENT_PREFIX = "dod-waiting:";
+
+/**
+ * Idempotent on (run, message): the SAME wait records once, a CHANGED reason records again.
+ *
+ * Keyed on the message rather than on the run alone because the store refuses a reused event id that
+ * carries different data - so a second verify attempt that is waiting on a different check would have
+ * been unable to record it, and would have kept a stale reason on the page.
+ */
+function waitingEventId(runId: string, message: string): string {
+  const hash = createHash("sha256")
+    .update(`${runId}:${message}`)
+    .digest("hex")
+    .slice(0, 32);
+  return `${WAITING_EVENT_PREFIX}${runId}:${hash}`;
+}
+
+/**
+ * Is this run WAITING ON ITS CHECKS rather than parked for a human? (#703 leg C)
+ *
+ * Keyed on the event-id marker, not on the prose in `agentOutputSummary`: a resume must route on
+ * structure. Matching the message text would silently stop working the first time the wording changed.
+ */
+export function isWaitingOnChecks(events: readonly RunEvent[]): boolean {
+  return events.some(
+    (event) =>
+      event.type === "worker.roadblock" &&
+      event.eventId.startsWith(WAITING_EVENT_PREFIX),
+  );
 }
 
 /**
@@ -336,14 +371,15 @@ export async function applyTerminalLifecycle(
     // `worker.roadblock` rather than `worker.question` is deliberate: `worker.question` IS the
     // plan-park signal the resume path looks for (`notifying-run-history.ts` maps it to "parked"), and
     // a checks-wait has to stay distinguishable from it or a resume cannot route (Leg C).
+    const message = waitingMessage(dodResult);
     const waiting = await runHistory.appendEvent({
-      eventId: waitingEventId(runId),
+      eventId: waitingEventId(runId, message),
       runId,
       type: "worker.roadblock",
       stage: "worker",
       status: "blocked",
       occurredAt,
-      agentOutputSummary: waitingMessage(dodResult),
+      agentOutputSummary: message,
     });
     if (!waiting.ok) {
       // Not fatal. The load-bearing part - no terminal event, so the claim is kept and the run stays
