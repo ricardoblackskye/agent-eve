@@ -85,6 +85,10 @@ import {
 import { createSandboxProvider } from "../agent/lib/dark-factory/sandbox-provider";
 import { reapSandboxesByRun } from "../agent/lib/dark-factory/sandbox-reaper";
 import type { SandboxProvider } from "../agent/lib/dark-factory/sandbox";
+import {
+  createFixCycle,
+  type AttemptFixes,
+} from "../agent/lib/dark-factory/fix-cycle";
 import type { WorkspaceTools } from "../agent/lib/dark-factory/developer-agent";
 import { createCodeAuthorProvider } from "../agent/lib/dark-factory/code-author-provider";
 import {
@@ -2070,6 +2074,48 @@ export function pullRequestBody(options: PullRequestBodyOptions): string {
  * terminate a sandbox, so a missing dispose is a leak and spend). The recording-double test proves the
  * order: create -> phase -> dispose, exactly one create, dispose always fires.
  */
+/**
+ * #718 - the fix cycle's adapter: one sandbox per PASS, for the run that already owns it.
+ *
+ * The Definition of Done raises findings and has to dispose of them; this is the machinery behind
+ * that, kept out of the DoD's own interface. Three things about the shape are load-bearing, and each
+ * is asserted in fix-cycle-adapter.test.ts rather than described here:
+ *
+ * - **The pull request's branch is fetched and checked out BEFORE a fix is authored.** The push that
+ *   follows uses `git checkout -B <branch>`, which RESETS the branch to the current HEAD - so a pass
+ *   that prepared a default-tip checkout and then pushed would rewrite the pull request's branch to
+ *   `main` and destroy the work it was fixing.
+ * - **The sandbox is built for THIS run id**, because `reapSandboxesByRun` keys on the run id: a pass
+ *   under any other id would be invisible to the reaper and leak with no safety net.
+ * - **The workspace is closed on every path**, including the early returns and the throws.
+ *
+ * The workspace and the author are resolved when a pass RUNS, not when the adapter is built: both
+ * belong to the coding phase, which has not run yet at the point the DoD's deps are assembled - and
+ * the verify-only re-entry never runs it at all. Passing them as accessors keeps the adapter
+ * constructible in one place for both compositions without duplicating it, and without a reference to
+ * a `const` above its own declaration.
+ */
+export interface FixCycleAdapterDeps {
+  /** The run the fix belongs to - also the id the sandbox carries, so the reaper can find it. */
+  runId: string;
+  /** The pull request's head branch: what is checked out, fixed, and pushed. */
+  branchName: string;
+  /** The remote the branch is fetched from and pushed to. */
+  remoteUrl: string;
+  /** Resolved at call time; the coding phase's workspace exists only after the phase has run. */
+  workspaceDir: () => string;
+  /** Resolved at call time, for the same reason. */
+  author: () => CodeAuthorProvider;
+  /** Builds the sandbox for a pass. Injected so a recording double can prove the order. */
+  createProvider: (runId: string) => SandboxProvider;
+  log?: (label: string, value: unknown) => void;
+}
+
+export function buildFixCycleAdapter(deps: FixCycleAdapterDeps): AttemptFixes {
+  void deps;
+  throw new Error("not implemented");
+}
+
 export async function runCodingPhase<T>(
   provider: SandboxProvider,
   workspaceDir: string,

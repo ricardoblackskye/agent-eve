@@ -52,20 +52,26 @@ export interface FixAuthorResult {
   refusals?: readonly FixRefusal[];
 }
 
-/** Everything the fix cycle needs, injected so the rules can be tested without any machinery. */
-export interface FixCyclePorts {
+/**
+ * Everything the fix cycle needs, injected so the rules can be tested without any machinery.
+ *
+ * Generic over the handle because the module itself reads only `branch` - the adapter that owns the
+ * sandbox needs to carry the provider and its tools through the same three calls, and widening the
+ * handle here is how the ports stay honest about what they hand back.
+ */
+export interface FixCyclePorts<W extends FixWorkspace = FixWorkspace> {
   /** Checks out the pull request's head branch. */
   openWorkspace: () => Promise<
-    { ok: true; workspace: FixWorkspace } | { ok: false; error: string }
+    { ok: true; workspace: W } | { ok: false; error: string }
   >;
   /** Re-authors the affected files for these findings. */
   author: (
-    workspace: FixWorkspace,
+    workspace: W,
     findings: readonly ReviewFinding[],
   ) => Promise<FixAuthorResult>;
   /** Commits and pushes what the pass authored. */
   push: (
-    workspace: FixWorkspace,
+    workspace: W,
     findings: readonly ReviewFinding[],
   ) => Promise<{ ok: boolean; error?: string }>;
   /**
@@ -73,7 +79,7 @@ export interface FixCyclePorts {
    * that throw: the adapter holds a real sandbox open across author and push, so a pass that skipped
    * this would leak one sandbox per failure until the driver gave up.
    */
-  closeWorkspace?: (workspace: FixWorkspace) => Promise<void>;
+  closeWorkspace?: (workspace: W) => Promise<void>;
   /** A ceiling on how many findings ONE pass will attempt. Defaults to 10. */
   maxFindings?: number;
   log?: (label: string, value: unknown) => void;
@@ -91,7 +97,9 @@ function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-export function createFixCycle(ports: FixCyclePorts): AttemptFixes {
+export function createFixCycle<W extends FixWorkspace = FixWorkspace>(
+  ports: FixCyclePorts<W>,
+): AttemptFixes {
   const log = ports.log ?? (() => {});
   const maxFindings = Math.max(0, ports.maxFindings ?? DEFAULT_MAX_FINDINGS);
 
@@ -126,7 +134,7 @@ export function createFixCycle(ports: FixCyclePorts): AttemptFixes {
   };
 
   async function runPass(
-    workspace: FixWorkspace,
+    workspace: W,
     attempted: readonly ReviewFinding[],
   ): Promise<FindingDisposition[]> {
     let authored: FixAuthorResult;
