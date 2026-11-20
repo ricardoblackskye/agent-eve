@@ -449,6 +449,37 @@ describe("#703 a run whose DoD is blocked is not finalised", () => {
     expect(outcome).toMatchObject({ applied: false, deferred: true });
   });
 
+  it("records WHY the run is waiting, on the field the page already renders (#703 leg B)", async () => {
+    // The parked question already carries its human-facing message on `agentOutputSummary`
+    // (worker-reporter.ts), and the AGENT TRACE panel renders any event that carries one - so a waiting
+    // run can say what it is waiting for with no new column and no new UI.
+    const { writer } = labelWriter();
+    const { store, appended } = history();
+
+    await applyTerminalLifecycle(deps(writer, store), {
+      repo: REPO,
+      issue: 1,
+      runId: RUN_ID,
+      terminalStatus: "failed",
+      dodResult: dod({
+        status: "blocked",
+        ok: false,
+        blockedReason: "checks-not-finished",
+        pendingChecks: ["e2e", "test"],
+        reason: "Review budget exhausted (3 rounds) with 1 unresolved finding(s).",
+      }),
+      occurredAt: AT,
+    });
+
+    const waiting = appended.filter((e) => e.type === "worker.roadblock");
+    expect(waiting).toHaveLength(1);
+    expect(waiting[0].status).toBe("blocked");
+    // The reason names the checks it is waiting for, which is the whole point.
+    expect(waiting[0].agentOutputSummary).toContain("e2e");
+    expect(waiting[0].agentOutputSummary).toContain("test");
+    expect(waiting[0].agentOutputSummary).toContain("checks-not-finished");
+  });
+
   it("still finalises a REFUSED run - that is a real judgement, not a wait", async () => {
     const { writer, calls } = labelWriter();
     const { store, appended } = history();
