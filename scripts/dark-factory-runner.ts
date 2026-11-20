@@ -1554,7 +1554,7 @@ async function main(): Promise<void> {
   }
 
   if (dodResult.pr) {
-    await applyTerminalLifecycle(
+    const finalised = await applyTerminalLifecycle(
       { labelWriter, runHistory },
       {
         repo: targetRepo,
@@ -1565,10 +1565,20 @@ async function main(): Promise<void> {
         // #672: the EVENT status stays terminal-only (run-history rejects "blocked" - a blocked run is
         // resumable, not finished). The nuance belongs on the TICKET, derived from the DoD verdict by the
         // finalizer, which reads dodResult.status directly.
+        // #703: and a BLOCKED verdict now means no terminal event at all (see the finalizer): the label
+        // still follows the verdict, while the run itself stays in flight so that it can be resumed.
         terminalStatus: dodResult.ok ? "succeeded" : "failed",
         dodResult,
       },
     );
+    // #703: say so out loud. A deferred run is not finished - it is waiting - and the record now agrees
+    // with the ticket instead of contradicting it.
+    if (finalised.deferred) {
+      line(
+        "Run left in flight (not finalised)",
+        `DoD verdict ${dodResult.status}: waiting for the pull request's checks`,
+      );
+    }
   }
 
   // #659: posted for BOTH outcomes. A run that refused to finish is exactly the run whose ticket must say

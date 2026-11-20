@@ -286,13 +286,17 @@ describe("#284 terminal lifecycle labels", () => {
       occurredAt: AT,
     });
 
-    expect(outcome.applied).toBe(true);
+    // #703: the LABEL still follows the verdict, but the run is deliberately NOT finalised - a blocked
+    // verdict leaves it in flight so that it can be resumed. The label half of #672 is what this test
+    // pins; the record half has its own #703 test below.
+    expect(outcome).toMatchObject({ applied: false, deferred: true });
     expect(calls).toContain("add:df:blocked");
     expect(calls).not.toContain("add:df:failed");
     expect(calls).not.toContain("add:df:done");
     // The in-flight labels still clear: the attempt is over either way.
     expect(calls).toContain("remove:df:running");
     expect(calls).toContain("remove:needs-answer");
+    expect(appended.filter((e) => e.type === "run.terminal")).toHaveLength(0);
   });
 
   it("a refused DoD applies NO terminal label, and is left for review (#271)", async () => {

@@ -30,9 +30,14 @@ export { TERMINAL_LABELS };
 /**
  * The status a run.terminal EVENT may carry. Terminal-only, on purpose:
  * `run-history.ts` enforces the same set (TERMINAL_STATUSES = aborted | succeeded |
- * failed), because a BLOCKED run is resumable rather than finished. A run whose DoD
- * did not certify still ends here as "failed" - the TICKET carries the nuance via
- * df:blocked, derived from the DoD verdict in the decision below (#672).
+ * failed), because a BLOCKED run is resumable rather than finished.
+ *
+ * #703: so a run the DoD did NOT certify is not finalised at all. It used to be that a
+ * blocked run still ended here as "failed" and only the TICKET carried the nuance via
+ * df:blocked (#672) - but this event is ALSO what releases the claim (#373), so the
+ * record said "finished" while the label said "re-triggerable", and a run waiting on
+ * its checks could not be resumed. `blocked` now stays blocked in the record too;
+ * `refused` is a real judgement and still finalises as "failed".
  */
 export type TerminalStatus = "succeeded" | "failed";
 
@@ -59,6 +64,12 @@ export interface TerminalFinalizeArgs {
 export interface TerminalFinalizeOutcome {
   applied: boolean;
   skipped?: boolean;
+  /**
+   * #703: the labels were applied but the run was deliberately left NON-terminal, because the DoD's
+   * verdict was `blocked`. Its claim is still held and it is still resumable - which is what
+   * `df:blocked` has always meant (#672).
+   */
+  deferred?: boolean;
   error?: string;
 }
 
@@ -286,7 +297,20 @@ export async function applyTerminalLifecycle(
     throw new LabelWriteError(`Terminal lifecycle labelling failed: ${error}`);
   }
 
-  // 5. Record the finalised state so the idempotency check (1) holds on a re-delivery.
+  // 5. #703: a run the DoD could not certify is NOT finalised.
+  //
+  //    The label work above already put the ticket in the right vocabulary (`df:blocked`, #672), and
+  //    the RUN has to stay in the same state. This next write is also what RELEASES the active-run
+  //    claim (#373), so writing it for a run that is merely WAITING on its checks released the claim
+  //    so the run could not be resumed - while the label said it was re-triggerable. `blocked` means
+  //    "not done AND resumable" everywhere else in this system, including the store, which refuses
+  //    `blocked` as a terminal event status for exactly that reason. A `refused` verdict is a real
+  //    judgement and still finalises as "failed": only a `blocked` verdict defers.
+  if (dodResult?.status === "blocked") {
+    return { applied: false, deferred: true };
+  }
+
+  // 6. Record the finalised state so the idempotency check (1) holds on a re-delivery.
   //
   // #373 - this write is ALSO what releases the active-run claim, so its result is checked for the same
   // reason step 3 checks every label write. A refusal here is not cosmetic: the ledger keeps believing
