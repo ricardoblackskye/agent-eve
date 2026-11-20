@@ -63,6 +63,7 @@ import {
   commitAndPushFromSandbox,
   ensureSandboxRepo,
   gitPushWithVault,
+  type SandboxGitRunner,
 } from "../agent/lib/dark-factory/git-push";
 import { DEFAULT_SANDBOX_WORKSPACE } from "../agent/lib/dark-factory/opensandbox-driver";
 import { resolvePrChecksTimeoutMs } from "../agent/lib/dark-factory/pr-checks-timeout";
@@ -2100,8 +2101,12 @@ export interface FixCycleAdapterDeps {
   runId: string;
   /** The pull request's head branch: what is checked out, fixed, and pushed. */
   branchName: string;
-  /** The remote the branch is fetched from and pushed to. */
-  remoteUrl: string;
+  /**
+   * The remote the branch is fetched from and pushed to. An accessor for the same reason as the
+   * workspace: it is derived from the resolved host and repo, which happen later than the DoD deps
+   * are assembled.
+   */
+  remoteUrl: () => string;
   /** Resolved at call time; the coding phase's workspace exists only after the phase has run. */
   workspaceDir: () => string;
   /** Resolved at call time, for the same reason. */
@@ -2111,9 +2116,135 @@ export interface FixCycleAdapterDeps {
   log?: (label: string, value: unknown) => void;
 }
 
+/** The handle a fix pass works in: the sandbox, its tools, and what the pass has authored so far. */
+interface FixWorkspaceHandle {
+  branch: string;
+  provider: SandboxProvider;
+  runGit: SandboxGitRunner;
+  workspaceDir: string;
+  tools: WorkspaceTools;
+  /** Set by the authoring port, read by the push port. */
+  changedFiles: string[];
+}
+
+/**
+ * The findings as a plan, so a fix reuses the authoring path the coding phase already uses.
+ *
+ * `authorFiles` reads its target actions from a plan, so a fix has to arrive as one. That is the
+ * smaller change than a second authoring seam, and it means the fix inherits that path's guards -
+ * including `assessPreservation`, which refuses to write a file that would lose existing code.
+ */
+function planFromFindings(findings: readonly ReviewFinding[]): unknown {
+  const files = [
+    ...new Set(
+      findings
+        .map((finding) => finding.file)
+        .filter((path): path is string => typeof path === "string" && path.trim() !== ""),
+    ),
+  ];
+  return {
+    title: `Address ${findings.length} review finding(s)`,
+    summary: [
+      "Fix the findings below. Change only what each finding requires.",
+      ...findings.map((finding) => `- [${finding.id}] ${finding.message}`),
+    ].join("\n"),
+    targetFiles: files.map((path) => ({ path, action: "modify" })),
+  };
+}
+
 export function buildFixCycleAdapter(deps: FixCycleAdapterDeps): AttemptFixes {
-  void deps;
-  throw new Error("not implemented");
+  const log = deps.log ?? (() => {});
+
+  return createFixCycle<FixWorkspaceHandle>({
+    openWorkspace: async () => {
+      const workspaceDir = deps.workspaceDir();
+      const provider = deps.createProvider(deps.runId);
+      const tools = provider.create(workspaceDir);
+      if (!provider.runGit) {
+        // Without git there is no checkout to fix and no push to make, so this is not a workspace
+        // this pass can use. Reported rather than thrown: the DoD reports a throw as "the fix
+        // attempt failed unexpectedly", which would blame the run.
+        return {
+          ok: false as const,
+          error: "the sandbox driver cannot run git, so a fix cannot be prepared or pushed",
+        };
+      }
+      const runGit = provider.runGit;
+      const prepared = await ensureSandboxRepo({
+        runGit,
+        remoteUrl: deps.remoteUrl(),
+        workspaceDir,
+      });
+      if (!prepared.ok) {
+        return { ok: false as const, error: prepared.error ?? "the checkout could not be prepared" };
+      }
+      // The pull request's branch, BEFORE a fix is authored: the push below uses `checkout -B`, which
+      // resets the branch to the current HEAD. Preparing a default-tip checkout and then pushing
+      // would rewrite the pull request's branch to main and discard the work being fixed.
+      const fetched = await runGit(["-C", workspaceDir, "fetch", "origin", deps.branchName]);
+      if (fetched.exitCode !== 0) {
+        return {
+          ok: false as const,
+          error: `git fetch failed (exit ${fetched.exitCode}): ${fetched.output}`,
+        };
+      }
+      const checkedOut = await runGit(["-C", workspaceDir, "checkout", deps.branchName]);
+      if (checkedOut.exitCode !== 0) {
+        return {
+          ok: false as const,
+          error: `git checkout failed (exit ${checkedOut.exitCode}): ${checkedOut.output}`,
+        };
+      }
+      log("Fix cycle", `prepared '${deps.branchName}' in a sandbox for run ${deps.runId}`);
+      return {
+        ok: true as const,
+        workspace: {
+          branch: deps.branchName,
+          provider,
+          runGit,
+          workspaceDir,
+          tools,
+          changedFiles: [],
+        },
+      };
+    },
+
+    author: async (workspace, findings) => {
+      const authored: AuthorFilesResult = await authorFiles(
+        deps.author(),
+        planFromFindings(findings),
+        workspace.tools,
+      );
+      workspace.changedFiles = [...authored.written];
+      log(
+        "Fix cycle",
+        `authored ${workspace.changedFiles.length} file(s) for ${findings.length} finding(s)`,
+      );
+      return { changedFiles: workspace.changedFiles };
+    },
+
+    push: async (workspace, findings) => {
+      const pushed = await commitAndPushFromSandbox({
+        runGit: workspace.runGit,
+        remoteUrl: deps.remoteUrl(),
+        workspaceDir: workspace.workspaceDir,
+        branchName: deps.branchName,
+        commitMessage: `fix: address ${findings.length} review finding(s)`,
+        filesToAdd: workspace.changedFiles,
+      });
+      if (!pushed.ok) {
+        return { ok: false, error: pushed.error ?? "the push did not complete" };
+      }
+      log("Fix cycle", `pushed ${workspace.changedFiles.length} file(s) to '${deps.branchName}'`);
+      return { ok: true };
+    },
+
+    closeWorkspace: async (workspace) => {
+      // The pass owns the sandbox it opened, and releases it on every path. The module calls this in
+      // a finally, so a pass that returns early or throws still disposes.
+      await workspace.provider.dispose?.();
+    },
+  });
 }
 
 export async function runCodingPhase<T>(

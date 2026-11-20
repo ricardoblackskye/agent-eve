@@ -51,7 +51,18 @@ function harness(overrides: Partial<FixCycleAdapterDeps> = {}) {
       log.push("dispose");
     },
     runGit: async (args: string[]) => {
-      log.push(`git:${args.join(" ")}`);
+      const joined = args.join(" ");
+      log.push(`git:${joined}`);
+      // ensureSandboxRepo takes the documented image's path - it already carries the repo - and that
+      // path REFUSES an empty origin/HEAD, because it resolves the default branch from it rather
+      // than guessing a branch name. A double returning "" makes the prepare step fail, which is how
+      // this fixture was caught: the fetch under test never ran.
+      if (joined.includes("refs/remotes/origin/HEAD")) {
+        return { exitCode: 0, output: "origin/main\n" };
+      }
+      if (joined.includes("rev-parse")) {
+        return { exitCode: 0, output: "abc1234\n" };
+      }
       return { exitCode: 0, output: "" };
     },
   } as unknown as SandboxProvider;
@@ -63,7 +74,7 @@ function harness(overrides: Partial<FixCycleAdapterDeps> = {}) {
   const deps: FixCycleAdapterDeps = {
     runId: RUN_ID,
     branchName: BRANCH,
-    remoteUrl: "https://github.com/owner/repo.git",
+    remoteUrl: () => "https://github.com/owner/repo.git",
     workspaceDir: () => WORKSPACE,
     author: () => author,
     createProvider: (runId) => {
