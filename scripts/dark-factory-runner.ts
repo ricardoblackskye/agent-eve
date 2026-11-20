@@ -42,6 +42,7 @@ import {
 import {
   applyStartLifecycle,
   applyTerminalLifecycle,
+  isWaitingOnChecks,
 } from "../agent/lib/dark-factory/run-finalizer";
 import { GitHubPrWriter } from "../agent/lib/dark-factory/pr-writer";
 import {
@@ -292,7 +293,6 @@ const PR_CHECKS_TIMEOUT_MS = resolvePrChecksTimeoutMs();
 const PR_CHECKS_POLL_INTERVAL_MS = 15_000;
 
 /** The pull request the Definition of Done opened, so the check gate can read it (#659). */
-let openedPr: number | undefined;
 
 /**
  * Read the check runs on a pull request's CURRENT head.
@@ -592,6 +592,82 @@ async function main(): Promise<void> {
         },
       )
     : undefined;
+
+  // #703 (Leg C): a run whose only obstacle WAS its pull request's checks is re-entered to ACQUIRE THE
+  // VERDICT, not to do the work again. Re-planning would produce a different plan from the one a human
+  // approved, and re-coding would redo a change that is already pushed - so this runs the Definition of
+  // Done alone, against the pull request the run already recorded, and adopts the SAME run.
+  if (isResume) {
+    const adopted = await runHistory.getRun(runId);
+    const adoptedEvents = await runHistory.listRunEvents(runId);
+    const adoptedStream = (adoptedEvents.value?.items ?? []).map(({ event }) => event);
+
+    if (
+      adopted.ok &&
+      adopted.value &&
+      adoptedEvents.ok &&
+      isWaitingOnChecks(adoptedStream)
+    ) {
+      console.log(
+        `\n[STEP 3] Resuming a run that was WAITING ON ITS CHECKS: reading them again rather than re-coding...`,
+      );
+
+      // #702: the run is `blocked`, and the ledger refuses any work event from that state - so it must be
+      // marked resumed before the Definition of Done can record anything.
+      const marked = await recordRunResumed(runHistory, { runId });
+      if (!marked.ok) {
+        console.warn(
+          `[WARN] The resumed run could not be marked resumed: ${marked.error ?? "unknown error"}`,
+        );
+      }
+
+      const prUrl = adopted.value.prUrl;
+      const prNumberFromUrl =
+        prUrl === undefined ? Number.NaN : Number(prUrl.split("/").pop());
+      const recordedPr =
+        prUrl === undefined || !Number.isFinite(prNumberFromUrl)
+          ? undefined
+          : {
+              number: prNumberFromUrl,
+              url: prUrl,
+              head: branchName,
+              base: "main",
+              title: `feat: #${issueNum} ${issueData.title}`,
+              body: "",
+            };
+
+      await checkpoint();
+      await runDefinitionOfDonePhase(
+        {
+          runHistory,
+          labelWriter,
+          prWriter,
+          postIssueComment: (owner, repo, issue, body) =>
+            issueWriter.postComment(owner, repo, issue, body),
+          makeCheckFetcher: (prNumber) =>
+            makePullRequestCheckFetcher({ token, repo: targetRepo, prNumber }),
+          log: line,
+        },
+        {
+          runId,
+          repo: targetRepo,
+          issue: issueNum,
+          head: branchName,
+          // No test results on a verify-only re-entry - the loop did not run this time. The pull request
+          // already exists, so title/body are never used to open one.
+          title: `feat: #${issueNum} ${issueData.title}`,
+          body: "",
+          ...(recordedPr === undefined ? {} : { existingPr: recordedPr }),
+        },
+      );
+
+      // #503 AC5: the run ended through its own terminal lifecycle (or was deliberately left in flight).
+      await activeControlStore?.close?.();
+      activeControlStore = null;
+      activeRun = null;
+      return;
+    }
+  }
 
   console.log(
     isResume
@@ -1481,105 +1557,35 @@ async function main(): Promise<void> {
   // STEP 7: Definition of DONE with AC Traceability Matrix
   console.log(`\n[STEP 7] Executing Hardened Definition of DONE (#179)...`);
   await checkpoint();
-  const dodTask: DefinitionOfDoneTask = {
-    runId,
-    repo: targetRepo,
-    issue: issueNum,
-    head: branchName,
-    base: "main",
-    title: `feat: #${issueNum} ${executionPlan.title}`,
-    body: pullRequestBody({
-      issueNum,
-      planPath: planArtifactPath,
+  await runDefinitionOfDonePhase(
+    {
+      runHistory,
+      labelWriter,
+      prWriter,
+      postIssueComment: (owner, repo, issue, body) =>
+        issueWriter.postComment(owner, repo, issue, body),
+      makeCheckFetcher: (prNumber) =>
+        makePullRequestCheckFetcher({ token, repo: targetRepo, prNumber }),
+      log: line,
+    },
+    {
+      runId,
       repo: targetRepo,
-      branch: branchName,
-    }),
-    plan: executionPlan,
-    testResults: capturedTestResults,
-  };
-
-  // #659: ONE budget for the DoD's check wait. `runChecks` runs once per review round, and passing the
-  // full timeout each time made a blocked run against a slow CI wait ten minutes per round for checks
-  // that had already concluded (measured: ~25 minutes of silence). Consume a single deadline instead.
-  const checkWaitDeadline = Date.now() + PR_CHECKS_TIMEOUT_MS;
-  // #676: name the cap. The wait returns as soon as the checks settle, so this is a ceiling on a
-  // stuck check rather than an expected duration - but a run that is waiting should say so, since
-  // the alternative is a silent pause whose length a reader has to guess.
-  line("PR checks wait up to", `${Math.round(PR_CHECKS_TIMEOUT_MS / 60_000)} min`);
-
-  // #659: the Definition of Done opens the PR itself, and calls runChecks afterwards, so the gate needs
-  // the pull request it just opened. Capturing it here keeps the DoD's own interface unchanged.
-  const capturingPrWriter: PrOpener = {
-    createPullRequest: async (owner, repoName, options) => {
-      const result = await prWriter.createPullRequest(owner, repoName, options);
-      if (result.ok && result.pr) openedPr = result.pr.number;
-      return result;
-    },
-  };
-
-  const dodDeps: DefinitionOfDoneDeps = {
-    // #702: the store was never passed, so EVERY DoD event was discarded silently - the PR it opened,
-    // its review rounds, the acceptance-criteria matrix and the test results never reached the page.
-    runHistory,
-    prWriter: capturingPrWriter,
-    commentWriter: {
-      postComment: async (owner, repo, prNum, body) => {
-        const res = await issueWriter.postComment(owner, repo, prNum, body);
-        return { ok: res.ok, error: res.error };
-      },
-    },
-    // #659: the checks the PULL REQUEST is actually running. What this replaces ran
-    // `npx tsc --noEmit` in THIS process's working directory, which on the vault path is a tree without
-    // the run's changes - a check that could never fail on the thing it claimed to check.
-    runChecks: async () =>
-      checkRunFindings(
-        await settlePullRequestChecks({
-          fetchChecks: openedPr
-            ? makePullRequestCheckFetcher({ token, repo: targetRepo, prNumber: openedPr })
-            : async () => null,
-          sleep: (ms: number) => new Promise((resolve) => setTimeout(resolve, ms)),
-          timeoutMs: Math.max(0, checkWaitDeadline - Date.now()),
-          pollIntervalMs: PR_CHECKS_POLL_INTERVAL_MS,
-        }),
-      ),
-  };
-
-  const dodResult = await runDefinitionOfDone(dodDeps, dodTask);
-  line("DoD Status", dodResult.status);
-  line("Is DONE (ok)", dodResult.ok);
-  line("AC Matrix Count", dodResult.acMatrix?.length ?? 0);
-
-  if (dodResult.pr) {
-    line("Live PR URL", dodResult.pr.url);
-  }
-
-  if (dodResult.pr) {
-    await applyTerminalLifecycle(
-      { labelWriter, runHistory },
-      {
+      issue: issueNum,
+      head: branchName,
+      plan: executionPlan,
+      title: `feat: #${issueNum} ${executionPlan.title}`,
+      body: pullRequestBody({
+        issueNum,
+        planPath: planArtifactPath,
         repo: targetRepo,
-        issue: issueNum,
-        runId,
-        // #659: the lifecycle follows the VERDICT. It used to be "succeeded" whenever a PR existed, so the
-        // record and the ticket comment agreed with each other and disagreed with the DoD.
-        // #672: the EVENT status stays terminal-only (run-history rejects "blocked" - a blocked run is
-        // resumable, not finished). The nuance belongs on the TICKET, derived from the DoD verdict by the
-        // finalizer, which reads dodResult.status directly.
-        terminalStatus: dodResult.ok ? "succeeded" : "failed",
-        dodResult,
-      },
-    );
-  }
-
-  // #659: posted for BOTH outcomes. A run that refused to finish is exactly the run whose ticket must say
-  // so - silence there is how a blocked run looked like a success.
-  await issueWriter.postComment(
-    repoOwner,
-    repoName,
-    issueNum,
-    dodOutcomeComment(issueNum, dodResult),
+        branch: branchName,
+      }),
+      ...(capturedTestResults === undefined
+        ? {}
+        : { testResults: capturedTestResults }),
+    },
   );
-
   console.log(
     "\n================================================================================",
   );
@@ -1841,6 +1847,209 @@ export interface PullRequestBodyOptions {
  * absolute: a relative path in a PR body resolves against the pull request page, not the repository, so
  * it would 404.
  */
+/**
+ * #703 (Leg C): the Definition of Done phase as its own seam.
+ *
+ * Extracted so a RE-ENTRY can run it without the planning and coding phases. A run that is waiting on its
+ * pull request's checks needs only the verdict: re-planning would produce a different plan from the one a
+ * human approved, and re-coding would redo a change that is already pushed. The body is a MOVE - the
+ * statements are the ones that ran inline at STEP 7 - with injectable seams so the phase can be tested
+ * without reaching GitHub.
+ */
+export interface DodPhaseDeps {
+  runHistory: Parameters<typeof applyTerminalLifecycle>[0]["runHistory"];
+  labelWriter: Parameters<typeof applyTerminalLifecycle>[0]["labelWriter"];
+  /** Opens the pull request. */
+  prWriter: PrOpener;
+  /** Posts the DoD's outcome comment on the TICKET. */
+  postIssueComment: (
+    owner: string,
+    repo: string,
+    issue: number,
+    body: string,
+  ) => Promise<{ ok: boolean; error?: string }>;
+  /**
+   * Builds the fetcher for the pull request's checks. REQUIRED rather than defaulted, because only the
+   * composition root holds the token - and injectable because that is what lets a test script the checks.
+   */
+  makeCheckFetcher: (prNumber: number) => ReturnType<typeof makePullRequestCheckFetcher>;
+  /** Injectable so a test is not at the mercy of the clock or of a real pause. */
+  now?: () => number;
+  sleep?: (ms: number) => Promise<void>;
+  log?: (label: string, value: unknown) => void;
+  timeoutMs?: number;
+  pollIntervalMs?: number;
+}
+
+export interface DodPhaseArgs {
+  runId: string;
+  repo: string;
+  issue: number;
+  head: string;
+  base?: string;
+  /** The plan the DoD records beside its verdict. Absent on a verify-only re-entry, which has no plan. */
+  plan?: ExecutionPlan;
+  title: string;
+  body: string;
+  testResults?: DefinitionOfDoneTask["testResults"];
+  /**
+   * #703 (Leg C): the pull request this run ALREADY recorded. When present the phase does not open
+   * another one - it re-reads the checks for this pull request, which is what makes a verify-only
+   * re-entry possible. The same trick the capturing writer used in the other direction: the DoD's own
+   * interface stays unchanged.
+   */
+  existingPr?: DefinitionOfDoneResult["pr"];
+}
+
+export interface DodPhaseOutcome {
+  result: DefinitionOfDoneResult;
+  /** #703: the labels were applied but the run was deliberately left in flight. */
+  deferred: boolean;
+  prNumber?: number;
+}
+
+export async function runDefinitionOfDonePhase(
+  deps: DodPhaseDeps,
+  args: DodPhaseArgs,
+): Promise<DodPhaseOutcome> {
+  const now = deps.now ?? (() => Date.now());
+  const sleep =
+    deps.sleep ??
+    ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const log = deps.log ?? (() => {});
+  const timeoutMs = deps.timeoutMs ?? PR_CHECKS_TIMEOUT_MS;
+  const pollIntervalMs = deps.pollIntervalMs ?? PR_CHECKS_POLL_INTERVAL_MS;
+
+  // #659: ONE budget for the DoD's check wait. `runChecks` runs once per review round, and passing the
+  // full timeout each time made a blocked run against a slow CI wait ten minutes per round for checks
+  // that had already concluded (measured: ~25 minutes of silence). Consume a single deadline instead.
+  const checkWaitDeadline = now() + timeoutMs;
+  // #676: name the cap. The wait returns as soon as the checks settle, so this is a ceiling on a
+  // stuck check rather than an expected duration - but a run that is waiting should say so, since
+  // the alternative is a silent pause whose length a reader has to guess.
+  log("PR checks wait up to", `${Math.round(timeoutMs / 60_000)} min`);
+
+  let prNumber = args.existingPr?.number;
+  const existingPr = args.existingPr;
+
+  // #659: the Definition of Done opens the PR itself, and calls runChecks afterwards, so the gate needs
+  // the pull request it just opened. Capturing it here keeps the DoD's own interface unchanged.
+  const opener: PrOpener =
+    existingPr === undefined
+      ? {
+          createPullRequest: async (owner, repoName, options) => {
+            const result = await deps.prWriter.createPullRequest(
+              owner,
+              repoName,
+              options,
+            );
+            if (result.ok && result.pr) prNumber = result.pr.number;
+            return result;
+          },
+        }
+      : {
+          // #703 (Leg C): a verify-only re-entry must not open a SECOND pull request for a change that is
+          // already pushed and already has one.
+          createPullRequest: async () => ({ ok: true, pr: existingPr }),
+        };
+
+  const dodTask: DefinitionOfDoneTask = {
+    runId: args.runId,
+    repo: args.repo,
+    issue: args.issue,
+    head: args.head,
+    base: args.base ?? "main",
+    title: args.title,
+    body: args.body,
+    ...(args.plan === undefined ? {} : { plan: args.plan }),
+    ...(args.testResults === undefined ? {} : { testResults: args.testResults }),
+  };
+
+  const dodDeps: DefinitionOfDoneDeps = {
+    // #702: the store was never passed, so EVERY DoD event was discarded silently - the PR it opened,
+    // its review rounds, the acceptance-criteria matrix and the test results never reached the page.
+    runHistory: deps.runHistory,
+    prWriter: opener,
+    commentWriter: {
+      postComment: async (owner, repo, prNum, body) => {
+        const res = await deps.postIssueComment(owner, repo, prNum, body);
+        return { ok: res.ok, error: res.error };
+      },
+    },
+    // #659: the checks the PULL REQUEST is actually running. What this replaces ran
+    // `npx tsc --noEmit` in THIS process's working directory, which on the vault path is a tree without
+    // the run's changes - a check that could never fail on the thing it claimed to check.
+    runChecks: async () =>
+      checkRunFindings(
+        await settlePullRequestChecks({
+          fetchChecks:
+            prNumber === undefined ? async () => null : await deps.makeCheckFetcher(prNumber),
+          sleep,
+          timeoutMs: Math.max(0, checkWaitDeadline - now()),
+          pollIntervalMs,
+        }),
+      ),
+  };
+
+  const dodResult = await runDefinitionOfDone(dodDeps, dodTask);
+  log("DoD Status", dodResult.status);
+  log("Is DONE (ok)", dodResult.ok);
+  log("AC Matrix Count", dodResult.acMatrix?.length ?? 0);
+
+  if (dodResult.pr) {
+    log("Live PR URL", dodResult.pr.url);
+  }
+
+  let deferred = false;
+  if (dodResult.pr) {
+    const finalised = await applyTerminalLifecycle(
+      { labelWriter: deps.labelWriter, runHistory: deps.runHistory },
+      {
+        repo: args.repo,
+        issue: args.issue,
+        runId: args.runId,
+        // #659: the lifecycle follows the VERDICT. It used to be "succeeded" whenever a PR existed, so the
+        // record and the ticket comment agreed with each other and disagreed with the DoD.
+        // #672: the EVENT status stays terminal-only (run-history rejects "blocked" - a blocked run is
+        // resumable, not finished). The nuance belongs on the TICKET, derived from the DoD verdict by the
+        // finalizer, which reads dodResult.status directly.
+        // #703: and a BLOCKED verdict now means no terminal event at all (see the finalizer): the label
+        // still follows the verdict, while the run itself stays in flight so that it can be resumed.
+        terminalStatus: dodResult.ok ? "succeeded" : "failed",
+        dodResult,
+      },
+    );
+    deferred = finalised.deferred === true;
+    // #703: say so out loud, and name the ACTUAL reason. The first draft hardcoded "waiting for the
+    // pull request's checks", which printed on a run blocked by a FAILED check - the log misreporting
+    // what the record was reporting correctly. Found by reading WebFeedPOC#244's run back.
+    if (deferred) {
+      const pending = dodResult.pendingChecks ?? [];
+      log(
+        "Run left in flight (not finalised)",
+        `DoD verdict ${dodResult.status} (${dodResult.blockedReason ?? "no reason"}): ${
+          pending.length > 0 ? `waiting for ${pending.join(", ")}` : "waiting"
+        }`,
+      );
+    }
+  }
+
+  // #659: posted for BOTH outcomes. A run that refused to finish is exactly the run whose ticket must say
+  // so - silence there is how a blocked run looked like a success.
+  await deps.postIssueComment(
+    args.repo.split("/")[0],
+    args.repo.split("/")[1],
+    args.issue,
+    dodOutcomeComment(args.issue, dodResult),
+  );
+
+  return {
+    result: dodResult,
+    deferred,
+    ...(prNumber === undefined ? {} : { prNumber }),
+  };
+}
+
 export function pullRequestBody(options: PullRequestBodyOptions): string {
   const lines = [
     "Autonomous pull request opened by Eve's Developer Agent.",

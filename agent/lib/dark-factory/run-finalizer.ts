@@ -18,6 +18,7 @@ import {
   isDoneGateSatisfied,
   type DefinitionOfDoneResult,
   type LabelWriter,
+  isChecksWait,
 } from "./definition-of-done";
 import type { RunEvent } from "./run-history";
 import type { RunHistoryStore } from "./run-history-store";
@@ -30,9 +31,14 @@ export { TERMINAL_LABELS };
 /**
  * The status a run.terminal EVENT may carry. Terminal-only, on purpose:
  * `run-history.ts` enforces the same set (TERMINAL_STATUSES = aborted | succeeded |
- * failed), because a BLOCKED run is resumable rather than finished. A run whose DoD
- * did not certify still ends here as "failed" - the TICKET carries the nuance via
- * df:blocked, derived from the DoD verdict in the decision below (#672).
+ * failed), because a BLOCKED run is resumable rather than finished.
+ *
+ * #703: so a run the DoD did NOT certify is not finalised at all. It used to be that a
+ * blocked run still ended here as "failed" and only the TICKET carried the nuance via
+ * df:blocked (#672) - but this event is ALSO what releases the claim (#373), so the
+ * record said "finished" while the label said "re-triggerable", and a run waiting on
+ * its checks could not be resumed. `blocked` now stays blocked in the record too;
+ * `refused` is a real judgment and still finalises as "failed".
  */
 export type TerminalStatus = "succeeded" | "failed";
 
@@ -59,6 +65,12 @@ export interface TerminalFinalizeArgs {
 export interface TerminalFinalizeOutcome {
   applied: boolean;
   skipped?: boolean;
+  /**
+   * #703: the labels were applied but the run was deliberately left NON-terminal, because the DoD's
+   * verdict was `blocked`. Its claim is still held and it is still resumable - which is what
+   * `df:blocked` has always meant (#672).
+   */
+  deferred?: boolean;
   error?: string;
 }
 
@@ -132,6 +144,16 @@ async function isRunTerminal(
 function markerEventId(runId: string): string {
   return `terminal-lifecycle:${runId}`;
 }
+
+/**
+ * #703: the waiting marker and its predicate now live WITH the writer, in `definition-of-done.ts`.
+ *
+ * They moved because the write has to happen there: by the time this finalizer runs the run is already
+ * `blocked`, and the ledger permits only `run.resumed` or `run.terminal` from that state - so the marker
+ * is recorded BEFORE the transition, inside the DoD, and this module only READS it. Re-exported here so
+ * existing importers keep one import site.
+ */
+export { isWaitingOnChecks, WAITING_EVENT_PREFIX } from "./definition-of-done";
 
 /**
  * The failure record deliberately uses a DISTINCT eventId so that it does not
@@ -245,6 +267,12 @@ export async function applyTerminalLifecycle(
   // #672: follow the DoD's own verdict, which already distinguishes the three
   // outcomes. `ok` collapsed them to a boolean, so a run that produced a pull
   // request and merely awaited certification was recorded as a failure.
+  // #703: the label is UNCHANGED. It and the record describe two different things, and conflating them
+  // is what made the first draft collide with #672: the LABEL says how workable the TICKET is (`df:blocked`
+  // = produced work, not certified, RE-TRIGGERABLE - which is exactly what a red check needs, so it stays
+  // #672's), while the RECORD states the run's OUTCOME (`failed`, for a real judgment). What #703
+  // actually fixes is the case where those genuinely contradicted: a WAIT recorded as `failed`. `refused`
+  // stays unlabelled (#271: left for human review).
   const terminalLabel = dodResult
     ? dodResult.status === "done"
       ? TRIGGER_LABELS.done
@@ -286,7 +314,22 @@ export async function applyTerminalLifecycle(
     throw new LabelWriteError(`Terminal lifecycle labelling failed: ${error}`);
   }
 
-  // 5. Record the finalised state so the idempotency check (1) holds on a re-delivery.
+  // 5. #703: a run that is WAITING on its checks is NOT finalised.
+  //
+  //    This next write is also what RELEASES the active-run claim (#373), so writing it for a run that
+  //    is merely waiting released the claim and left the run impossible to resume - while the ticket
+  //    said it was re-triggerable. `blocked` means "not done AND resumable" everywhere else in this
+  //    system, including the store, which refuses `blocked` as a terminal event status for that reason.
+  //
+  //    The gate is the WAIT, not every blocked verdict. A red check and unresolved findings are REAL
+  //    judgments and finalise as `failed` (with `df:failed`), which is what #703's rule requires:
+  //    reserve `failed` for a real judgment, never for "we could not tell". The waiting reason itself
+  //    is recorded by the DoD, before the transition - see `isChecksWait` in definition-of-done.ts.
+  if (dodResult && isChecksWait(dodResult)) {
+    return { applied: false, deferred: true };
+  }
+
+  // 6. Record the finalised state so the idempotency check (1) holds on a re-delivery.
   //
   // #373 - this write is ALSO what releases the active-run claim, so its result is checked for the same
   // reason step 3 checks every label write. A refusal here is not cosmetic: the ledger keeps believing

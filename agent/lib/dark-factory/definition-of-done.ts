@@ -11,6 +11,7 @@
  * 4. The factory MUST NEVER MERGE — opening the PR is the terminal action.
  */
 
+import { createHash } from "node:crypto";
 import type {
   CreatePullRequestOptions,
   CreatePullRequestResult,
@@ -160,6 +161,75 @@ export function checkRunFindings(checks: readonly PrCheckRun[] | null): ReviewFi
 
 /** #691 - the machine-readable reason a run is blocked, when `status: "blocked"` cannot say it. */
 export const CHECKS_NOT_FINISHED = "checks-not-finished";
+
+/**
+ * Is this verdict a WAIT rather than a real judgment? (#703)
+ *
+ * The distinction decides two things: whether the run is left in flight or finalised, and whether the
+ * ticket reads `df:blocked` (not done, re-triggerable) or `df:failed`. `unfinishedChecks` sets the
+ * reason ONLY when an unsettled check is the whole of the obstacle, so a FAILED check is never a wait.
+ */
+export function isChecksWait(
+  result: Pick<DefinitionOfDoneResult, "status" | "blockedReason">,
+): boolean {
+  return result.status === "blocked" && result.blockedReason === CHECKS_NOT_FINISHED;
+}
+
+/**
+ * The event-id marker for "this run is waiting on its checks" (#703).
+ *
+ * Exported because a RESUME has to tell the two blocked states apart: a plan-park is a `worker.question`
+ * (the event the resume path already looks for, notifying-run-history maps it to "parked"), while a
+ * checks-wait is the `worker.roadblock` recorded below. One re-enters planning, the other re-enters the
+ * Definition of Done - so the marker has exactly one definition, here.
+ */
+export const WAITING_EVENT_PREFIX = "dod-waiting:";
+
+/**
+ * Idempotent on (run, message): the SAME wait records once, a CHANGED reason records again.
+ *
+ * Keyed on the message rather than on the run alone because the store refuses a reused event id that
+ * carries different data - a second attempt waiting on a different check would otherwise have been
+ * unable to record it and would have kept a stale reason on the page.
+ */
+export function waitingEventId(runId: string, message: string): string {
+  const hash = createHash("sha256")
+    .update(`${runId}:${message}`)
+    .digest("hex")
+    .slice(0, 32);
+  return `${WAITING_EVENT_PREFIX}${runId}:${hash}`;
+}
+
+/**
+ * What a waiting run is waiting FOR, in the form the page renders.
+ *
+ * It names the verdict and the checks on purpose: "not done" on its own is what made the record
+ * unreadable - an unsettled check and a genuine failure looked identical (#691, #703).
+ */
+export function waitingMessage(result: DefinitionOfDoneResult): string {
+  const pending = result.pendingChecks ?? [];
+  const waitingFor = pending.length
+    ? ` Waiting for the pull request's checks to settle: ${pending.join(", ")}.`
+    : "";
+  const why = result.blockedReason ? `: ${result.blockedReason}` : "";
+  return `Run is NOT done (${result.status}${why}): ${result.reason}${waitingFor}`;
+}
+
+/**
+ * Is this run WAITING ON ITS CHECKS rather than parked for a human? (#703)
+ *
+ * Keyed on the event-id marker, never on the message text: a resume must route on structure. Matching
+ * the prose would silently stop working the first time the wording changed.
+ */
+export function isWaitingOnChecks(
+  events: readonly { type: string; eventId: string }[],
+): boolean {
+  return events.some(
+    (event) =>
+      event.type === "worker.roadblock" &&
+      event.eventId.startsWith(WAITING_EVENT_PREFIX),
+  );
+}
 export type BlockedReason = typeof CHECKS_NOT_FINISHED;
 
 const UNSETTLED_CHECK_PREFIX = "PR-CHECK-UNSETTLED:";
@@ -963,6 +1033,28 @@ export async function runDefinitionOfDone(
         acMatrix,
         traceabilityTable,
       );
+      // #703: a run that is WAITING on its checks records WHY - and it must do so BEFORE the round that
+      // blocks it. The order is load-bearing: from `blocked` the ledger permits only `run.resumed` or
+      // `run.terminal`, so a waiting marker written afterwards is REFUSED. Measured on WebFeedPOC#244: the
+      // marker was refused, the run blocked with no reason recorded, and the page could not say what it
+      // was waiting for. This one carries status `running`, leaving the blocked round below as the
+      // transition that actually blocks the run.
+      if (isChecksWait(blocked)) {
+        const message = waitingMessage(blocked);
+        const waiting = await record({
+          eventId: waitingEventId(task.runId, message),
+          runId: task.runId,
+          type: "worker.roadblock",
+          stage: "worker",
+          status: "running",
+          agentOutputSummary: message,
+        });
+        if (waiting) {
+          console.warn(
+            `[WARN] The reason this run is waiting could not be recorded: ${waiting}`,
+          );
+        }
+      }
       const historyError = await recordReviewRound(round, "blocked", roundCounts);
       return historyError ? blockedByHistory(blocked, historyError) : blocked;
     }

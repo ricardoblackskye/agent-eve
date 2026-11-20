@@ -11,6 +11,7 @@ import { describe, it, expect } from "vitest";
 import {
   applyStartLifecycle,
   applyTerminalLifecycle,
+  isWaitingOnChecks,
   LabelWriteError,
   type TerminalFinalizerDeps,
 } from "../../agent/lib/dark-factory/run-finalizer";
@@ -286,6 +287,9 @@ describe("#284 terminal lifecycle labels", () => {
       occurredAt: AT,
     });
 
+    // #703: the LABEL is deliberately unchanged. It describes how workable the TICKET is (`df:blocked`
+    // = produced work, not certified, RE-TRIGGERABLE), which is #672's contract and what a red check
+    // needs. A WAIT is the case #703 changes - see its own test below.
     expect(outcome.applied).toBe(true);
     expect(calls).toContain("add:df:blocked");
     expect(calls).not.toContain("add:df:failed");
@@ -404,5 +408,144 @@ describe("#698 Leg F — a run that opened a PR must carry it to the terminal re
     const terminal = appended.find((e) => e.type === "run.terminal");
     expect(terminal).toBeDefined();
     expect((terminal as RunEvent).prUrl).toBeUndefined();
+  });
+});
+
+describe("#703 a run whose DoD is blocked is not finalised", () => {
+  // #703: the ticket label already followed the DoD verdict (#672) - it is the terminal EVENT that did
+  // not, and that event is also what RELEASES the active-run claim (#373). So a run waiting on its
+  // checks was recorded terminal `failed` while its ticket correctly said df:blocked: the record said
+  // "finished" and the label said "re-triggerable". `blocked` is deliberately not terminal anywhere in
+  // this system (#672: "not done AND resumable"), so a waiting run must be left in exactly that state.
+  const dod = (partial: Record<string, unknown>) =>
+    partial as unknown as NonNullable<
+      Parameters<typeof applyTerminalLifecycle>[1]["dodResult"]
+    >;
+
+  it("labels the ticket df:blocked and leaves the run NON-terminal, so its claim survives", async () => {
+    const { writer, calls } = labelWriter();
+    const { store, appended } = history();
+
+    const outcome = await applyTerminalLifecycle(deps(writer, store), {
+      repo: REPO,
+      issue: 1,
+      runId: RUN_ID,
+      terminalStatus: "failed",
+      dodResult: dod({
+        status: "blocked",
+        ok: false,
+        blockedReason: "checks-not-finished",
+        pendingChecks: ["e2e"],
+      }),
+      occurredAt: AT,
+    });
+
+    // The ticket keeps the vocabulary it already had.
+    expect(calls).toContain("add:df:blocked");
+    expect(calls).toContain("remove:df:running");
+    expect(calls).not.toContain("add:df:failed");
+    // The RUN is left in flight: no terminal event, so the claim is not released.
+    expect(appended.filter((e) => e.type === "run.terminal")).toHaveLength(0);
+    expect(outcome).toMatchObject({ applied: false, deferred: true });
+  });
+
+  it("tells a checks-wait apart from a plan-park, so a resume can route (#703 leg C)", () => {
+    // A park and a wait both leave the run blocked, but a resume must do different things: a park
+    // re-enters planning, a wait re-enters the Definition of Done. Keyed on structure (the event id),
+    // never on the message text.
+    expect(isWaitingOnChecks([])).toBe(false);
+    // A plan-park is a worker.question - the event the resume path already looks for.
+    expect(
+      isWaitingOnChecks([
+        event({ type: "worker.question", eventId: `${RUN_ID}:plan-approval` }),
+      ]),
+    ).toBe(false);
+    // A checks-wait is the roadblock this module records, recognized by its marker.
+    expect(
+      isWaitingOnChecks([
+        event({ type: "worker.roadblock", eventId: `dod-waiting:${RUN_ID}` }),
+      ]),
+    ).toBe(true);
+    // A roadblock that is NOT ours must not be mistaken for a wait.
+    expect(
+      isWaitingOnChecks([event({ type: "worker.roadblock", eventId: "worker:roadblock" })]),
+    ).toBe(false);
+    // A settled-then-resumed run is no longer waiting.
+    expect(
+      isWaitingOnChecks([
+        event({ type: "worker.roadblock", eventId: `dod-waiting:${RUN_ID}` }),
+        event({ type: "run.resumed", eventId: `approval-resume:${RUN_ID}` }),
+      ]),
+    ).toBe(true);
+  });
+
+  it("finalises a REAL blocked judgment as failed - a red check is not a wait (#703)", async () => {
+    // #703's rule: reserve `failed` for a real judgment. A run blocked on unresolved findings - the
+    // shape a FAILED check produces - is exactly that, so it finalises, unlike a WAIT which is left in
+    // flight. Measured on WebFeedPOC#244: the e2e check was red, the DoD blocked, and the first version
+    // of this change wrongly left it non-terminal. The waiting MARKER is written by the DoD, before the
+    // transition (see dod-waiting-703.test.ts) - from `blocked` the ledger permits only `run.resumed` or
+    // `run.terminal`, so it cannot legally be written here.
+    const { writer, calls } = labelWriter();
+    const { store, appended } = history();
+
+    const outcome = await applyTerminalLifecycle(deps(writer, store), {
+      repo: REPO,
+      issue: 1,
+      runId: RUN_ID,
+      terminalStatus: "failed",
+      dodResult: dod({
+        status: "blocked",
+        ok: false,
+        reason: "Review budget exhausted (3 rounds) with 1 unresolved finding(s).",
+      }),
+      occurredAt: AT,
+    });
+
+    // The RECORD states the run's outcome: a real judgment is `failed`, so the terminal event lands
+    // and the claim is released.
+    expect(outcome).toMatchObject({ applied: true });
+    expect(appended.filter((e) => e.type === "run.terminal")).toHaveLength(1);
+    // The TICKET keeps #672's vocabulary: df:blocked, so it can be re-triggered after a fix. A run that
+    // produced work is not marked as a failure (#672/ADR 0085) - the record says the run failed, the
+    // label says the ticket is workable.
+    expect(calls).toContain("add:df:blocked");
+    expect(calls).not.toContain("add:df:failed");
+  });
+
+  it("still finalises a REFUSED run - that is a real judgment, not a wait", async () => {
+    const { writer, calls } = labelWriter();
+    const { store, appended } = history();
+
+    const outcome = await applyTerminalLifecycle(deps(writer, store), {
+      repo: REPO,
+      issue: 1,
+      runId: RUN_ID,
+      terminalStatus: "failed",
+      dodResult: dod({ status: "refused", ok: false }),
+      occurredAt: AT,
+    });
+
+    expect(appended.filter((e) => e.type === "run.terminal")).toHaveLength(1);
+    expect(outcome.applied).toBe(true);
+    expect(calls).not.toContain("add:df:blocked");
+  });
+
+  it("still finalises a DONE run", async () => {
+    const { writer, calls } = labelWriter();
+    const { store, appended } = history();
+
+    const outcome = await applyTerminalLifecycle(deps(writer, store), {
+      repo: REPO,
+      issue: 1,
+      runId: RUN_ID,
+      terminalStatus: "succeeded",
+      dodResult: DOD_DONE,
+      occurredAt: AT,
+    });
+
+    expect(appended.filter((e) => e.type === "run.terminal")).toHaveLength(1);
+    expect(outcome.applied).toBe(true);
+    expect(calls).toContain("add:df:done");
   });
 });
