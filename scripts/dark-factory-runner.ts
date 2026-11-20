@@ -2020,12 +2020,16 @@ export async function runDefinitionOfDonePhase(
       },
     );
     deferred = finalised.deferred === true;
-    // #703: say so out loud. A deferred run is not finished - it is waiting - and the record now agrees
-    // with the ticket instead of contradicting it.
+    // #703: say so out loud, and name the ACTUAL reason. The first draft hardcoded "waiting for the
+    // pull request's checks", which printed on a run blocked by a FAILED check - the log misreporting
+    // what the record was reporting correctly. Found by reading WebFeedPOC#244's run back.
     if (deferred) {
+      const pending = dodResult.pendingChecks ?? [];
       log(
         "Run left in flight (not finalised)",
-        `DoD verdict ${dodResult.status}: waiting for the pull request's checks`,
+        `DoD verdict ${dodResult.status} (${dodResult.blockedReason ?? "no reason"}): ${
+          pending.length > 0 ? `waiting for ${pending.join(", ")}` : "waiting"
+        }`,
       );
     }
   }

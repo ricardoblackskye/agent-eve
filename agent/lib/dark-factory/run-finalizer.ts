@@ -18,10 +18,10 @@ import {
   isDoneGateSatisfied,
   type DefinitionOfDoneResult,
   type LabelWriter,
+  isChecksWait,
 } from "./definition-of-done";
 import type { RunEvent } from "./run-history";
 import type { RunHistoryStore } from "./run-history-store";
-import { createHash } from "node:crypto";
 import { OUTCOME_LABELS, TERMINAL_LABELS, TRIGGER_LABELS } from "./trigger";
 
 // One definition of "terminal", owned by the label vocabulary in trigger.ts.
@@ -38,7 +38,7 @@ export { TERMINAL_LABELS };
  * df:blocked (#672) - but this event is ALSO what releases the claim (#373), so the
  * record said "finished" while the label said "re-triggerable", and a run waiting on
  * its checks could not be resumed. `blocked` now stays blocked in the record too;
- * `refused` is a real judgement and still finalises as "failed".
+ * `refused` is a real judgment and still finalises as "failed".
  */
 export type TerminalStatus = "succeeded" | "failed";
 
@@ -146,59 +146,14 @@ function markerEventId(runId: string): string {
 }
 
 /**
- * The event-id marker for "this run is waiting on its checks" (#703).
+ * #703: the waiting marker and its predicate now live WITH the writer, in `definition-of-done.ts`.
  *
- * Exported because a RESUME has to tell the two blocked states apart: a plan-park is a `worker.question`
- * (the event the resume path already looks for, `notifying-run-history.ts` maps it to "parked"), while a
- * checks-wait is the `worker.roadblock` this module records. One re-enters planning, the other re-enters
- * the Definition of Done - so the marker has exactly one definition, here.
+ * They moved because the write has to happen there: by the time this finalizer runs the run is already
+ * `blocked`, and the ledger permits only `run.resumed` or `run.terminal` from that state - so the marker
+ * is recorded BEFORE the transition, inside the DoD, and this module only READS it. Re-exported here so
+ * existing importers keep one import site.
  */
-export const WAITING_EVENT_PREFIX = "dod-waiting:";
-
-/**
- * Idempotent on (run, message): the SAME wait records once, a CHANGED reason records again.
- *
- * Keyed on the message rather than on the run alone because the store refuses a reused event id that
- * carries different data - so a second verify attempt that is waiting on a different check would have
- * been unable to record it, and would have kept a stale reason on the page.
- */
-function waitingEventId(runId: string, message: string): string {
-  const hash = createHash("sha256")
-    .update(`${runId}:${message}`)
-    .digest("hex")
-    .slice(0, 32);
-  return `${WAITING_EVENT_PREFIX}${runId}:${hash}`;
-}
-
-/**
- * Is this run WAITING ON ITS CHECKS rather than parked for a human? (#703 leg C)
- *
- * Keyed on the event-id marker, not on the prose in `agentOutputSummary`: a resume must route on
- * structure. Matching the message text would silently stop working the first time the wording changed.
- */
-export function isWaitingOnChecks(events: readonly RunEvent[]): boolean {
-  return events.some(
-    (event) =>
-      event.type === "worker.roadblock" &&
-      event.eventId.startsWith(WAITING_EVENT_PREFIX),
-  );
-}
-
-/**
- * #703: what a waiting run is waiting FOR, in the form the page renders.
- *
- * It names the verdict and the checks on purpose: "not done" on its own is what made the record
- * unreadable - an unsettled check and a genuine failure looked identical (#691, #703).
- */
-function waitingMessage(result: DefinitionOfDoneResult): string {
-  const pending = result.pendingChecks ?? [];
-  const waitingFor = pending.length
-    ? ` Waiting for the pull request's checks to settle: ${pending.join(", ")}.`
-    : "";
-  const why = result.blockedReason ? ` (${result.blockedReason})` : "";
-  return (`Run is NOT done${why}: ${result.reason}${waitingFor} ` +
-    "It is left in flight so it can be resumed once the checks settle.");
-}
+export { isWaitingOnChecks, WAITING_EVENT_PREFIX } from "./definition-of-done";
 
 /**
  * The failure record deliberately uses a DISTINCT eventId so that it does not
@@ -312,6 +267,12 @@ export async function applyTerminalLifecycle(
   // #672: follow the DoD's own verdict, which already distinguishes the three
   // outcomes. `ok` collapsed them to a boolean, so a run that produced a pull
   // request and merely awaited certification was recorded as a failure.
+  // #703: the label is UNCHANGED. It and the record describe two different things, and conflating them
+  // is what made the first draft collide with #672: the LABEL says how workable the TICKET is (`df:blocked`
+  // = produced work, not certified, RE-TRIGGERABLE - which is exactly what a red check needs, so it stays
+  // #672's), while the RECORD states the run's OUTCOME (`failed`, for a real judgment). What #703
+  // actually fixes is the case where those genuinely contradicted: a WAIT recorded as `failed`. `refused`
+  // stays unlabelled (#271: left for human review).
   const terminalLabel = dodResult
     ? dodResult.status === "done"
       ? TRIGGER_LABELS.done
@@ -353,42 +314,18 @@ export async function applyTerminalLifecycle(
     throw new LabelWriteError(`Terminal lifecycle labelling failed: ${error}`);
   }
 
-  // 5. #703: a run the DoD could not certify is NOT finalised.
+  // 5. #703: a run that is WAITING on its checks is NOT finalised.
   //
-  //    The label work above already put the ticket in the right vocabulary (`df:blocked`, #672), and
-  //    the RUN has to stay in the same state. This next write is also what RELEASES the active-run
-  //    claim (#373), so writing it for a run that is merely WAITING on its checks released the claim
-  //    so the run could not be resumed - while the label said it was re-triggerable. `blocked` means
-  //    "not done AND resumable" everywhere else in this system, including the store, which refuses
-  //    `blocked` as a terminal event status for exactly that reason. A `refused` verdict is a real
-  //    judgement and still finalises as "failed": only a `blocked` verdict defers.
-  if (dodResult?.status === "blocked") {
-    // #703 (Leg B): record WHY it is waiting, so the run page can say it instead of showing a bare
-    // status. `agentOutputSummary` is the field the PARKED QUESTION already uses for its human-facing
-    // message (`worker-reporter.ts`), and the AGENT TRACE panel renders any event that carries one -
-    // so this needs no new column and no new UI.
-    //
-    // `worker.roadblock` rather than `worker.question` is deliberate: `worker.question` IS the
-    // plan-park signal the resume path looks for (`notifying-run-history.ts` maps it to "parked"), and
-    // a checks-wait has to stay distinguishable from it or a resume cannot route (Leg C).
-    const message = waitingMessage(dodResult);
-    const waiting = await runHistory.appendEvent({
-      eventId: waitingEventId(runId, message),
-      runId,
-      type: "worker.roadblock",
-      stage: "worker",
-      status: "blocked",
-      occurredAt,
-      agentOutputSummary: message,
-    });
-    if (!waiting.ok) {
-      // Not fatal. The load-bearing part - no terminal event, so the claim is kept and the run stays
-      // resumable - has already been decided. The reason is explanatory, so losing it is reported
-      // rather than fatal; swallowing it silently is the mistake this whole area exists to avoid.
-      console.warn(
-        `[WARN] The reason this run is waiting could not be recorded: ${waiting.error ?? "unknown error"}`,
-      );
-    }
+  //    This next write is also what RELEASES the active-run claim (#373), so writing it for a run that
+  //    is merely waiting released the claim and left the run impossible to resume - while the ticket
+  //    said it was re-triggerable. `blocked` means "not done AND resumable" everywhere else in this
+  //    system, including the store, which refuses `blocked` as a terminal event status for that reason.
+  //
+  //    The gate is the WAIT, not every blocked verdict. A red check and unresolved findings are REAL
+  //    judgments and finalise as `failed` (with `df:failed`), which is what #703's rule requires:
+  //    reserve `failed` for a real judgment, never for "we could not tell". The waiting reason itself
+  //    is recorded by the DoD, before the transition - see `isChecksWait` in definition-of-done.ts.
+  if (dodResult && isChecksWait(dodResult)) {
     return { applied: false, deferred: true };
   }
 
