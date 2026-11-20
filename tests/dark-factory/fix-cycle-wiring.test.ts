@@ -94,7 +94,7 @@ describe("#718 the runner supplies the DoD fix cycle", () => {
     // its workspace, remote and author - so a fix cycle there could not be built from the same
     // dependencies without moving that whole setup earlier, and its job is to settle a verdict by
     // re-reading checks rather than to start coding again. It is the LATER call (STEP 7) that carries
-    // one, and asserting the count keeps a second, unbuildable site from appearing unnoticed.
+    // one, and asserting the count keeps a second, that cannot be built site from appearing unnoticed.
     const sites = callArgs(source, "runDefinitionOfDonePhase");
     expect(sites).toHaveLength(2);
     const carriers = sites.filter((args) => args.includes("attemptFixes"));

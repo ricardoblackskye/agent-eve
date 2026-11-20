@@ -11,7 +11,7 @@ per-file detail; read this to see how the pieces hand off.
 A run begins with a **trigger** — a GitHub webhook (issue opened, PR updated,
 review requested) delivered to the API proxy and routed by
 [`agent/lib/dark-factory/trigger.ts`](../../agent/lib/dark-factory/trigger.ts).
-The trigger is normalised into a canonical event; the factory refuses anything it
+The trigger is normalized into a canonical event; the factory refuses anything it
 cannot map rather than guessing. Acceptance also runs the work through the
 [definition of done](../../agent/lib/dark-factory/definition-of-done.ts) and the
 plan validator before any worker is touched — a run that cannot be accepted is

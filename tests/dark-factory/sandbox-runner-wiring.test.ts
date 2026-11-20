@@ -5,8 +5,8 @@ import { describe, expect, it } from "vitest";
 /**
  * #280 / #281 (R2b/B2) — pin the runner's sandbox wiring.
  *
- * The seam's behaviour is covered by its own unit tests; this guard exists so the wiring cannot be
- * quietly undone later (a reverted import would otherwise only show as a behaviour change at runtime,
+ * The seam's behavior is covered by its own unit tests; this guard exists so the wiring cannot be
+ * quietly undone later (a reverted import would otherwise only show as a behavior change at runtime,
  * where nothing exercises it). It also pins that the runner OWNS the lifecycle: the sandbox is created
  * once and disposed via runCodingPhase, because closing the SDK client does not terminate a sandbox.
  */
@@ -23,12 +23,19 @@ describe("#280/#281 runner sandbox wiring (source guard)", () => {
     );
   });
 
-  it("creates the provider exactly once and owns the lifecycle via runCodingPhase", () => {
+  it("owns the lifecycle of EVERY sandbox it creates, including the fix pass's", () => {
+    // ADR 0032's property is "no run may leave a sandbox running", and this guard used to express it
+    // as "exactly one create". #718 makes that false on purpose: a fix pass opens its own sandbox,
+    // because by the time the DoD runs the coding phase has already force-disposed the first one
+    // (ADR 0093). Tightened to the property rather than the count - a blind bump to 2 would have
+    // removed the guard's teeth, since a THIRD, unowned create site is the thing that leaks.
     const calls = source.match(/createSandboxProvider\(/g) ?? [];
-    expect(calls.length).toBe(1);
-    // The single provider is handed to the lifecycle owner, which creates AND disposes it.
+    expect(calls).toHaveLength(2);
+    // The coding phase's provider is created and disposed by its lifecycle owner...
     expect(source).toMatch(/runCodingPhase\(\s*createSandboxProvider\(/);
     expect(source).toMatch(/provider\.dispose\?\.\(\)/);
+    // ...and the fix pass disposes the one it opens, through the port the module calls on every path.
+    expect(source).toMatch(/closeWorkspace:[\s\S]{0,400}?dispose/);
   });
 });
 

@@ -466,9 +466,9 @@ async function main(): Promise<void> {
     issue: issueNum,
   });
   // #373: a run the ledger refused because ANOTHER run holds this issue must not start. The previous
-  // behaviour carried on with the attempt id as a synthetic run id, so its lifecycle writes targeted a run
+  // behavior carried on with the attempt id as a synthetic run id, so its lifecycle writes targeted a run
   // the ledger had never minted - the stale claim kept the issue and nothing could release it.
-  // #373: a FRESH run refused because another run holds this issue must not start. The old behaviour
+  // #373: a FRESH run refused because another run holds this issue must not start. The old behavior
   // carried on with the attempt id as a synthetic run id, so its writes targeted a run the ledger had
   // never minted and the claim could never be released. A RESUME is different: the blocked holder IS the
   // run being approved, so it is adopted and the writes land on the real run.
@@ -1033,7 +1033,7 @@ async function main(): Promise<void> {
     `\n[STEP 5] Dispatched Multi-File Developer Agent with Workspace Tools...`,
   );
   // #280: the execution backend is configuration-selected. Unset DF_SANDBOX_DRIVER = the local
-  // filesystem, i.e. today's behaviour; an unknown value throws before any side effect.
+  // filesystem, i.e. today's behavior; an unknown value throws before any side effect.
   // #281 (R2b/B2): the sandbox is created once per run and force-disposed by runCodingPhase,
   // so the runner owns the lifecycle (closing the SDK client does not terminate a sandbox).
 
@@ -1703,7 +1703,7 @@ async function readExistingFile(
  * #361 — the author is shown the current content of the files it is modifying, and every write is
  * checked against what is already there before a single byte lands. A refused write throws
  * `PreservationRefusedError`, which the caller's worker turns into a failed iteration whose message
- * IS handed to the next iteration as `feedback` (#373 - that sentence described intent, not behaviour, until the loop's context carried it).
+ * IS handed to the next iteration as `feedback` (#373 - that sentence described intent, not behavior, until the loop's context carried it).
  */
 export async function authorFiles(
   author: CodeAuthorProvider,
@@ -2458,7 +2458,7 @@ export function recordPassingTestResults(
  * Reads the run's recorded usage and its own cost events, sums them, and writes the total to the run
  * summary. BEST-EFFORT BY DESIGN: a cost is an observation about a run, not a control over it, so
  * every failure — including an unconfigured store — is reported and the run is unaffected. Exported so
- * both entry paths can call it, and so its behaviour is reachable from a test.
+ * both entry paths can call it, and so its behavior is reachable from a test.
  */
 /**
  * Record a run the LEDGER never minted (#681), so the history can see that it happened.
