@@ -68,6 +68,12 @@ export interface FixCyclePorts {
     workspace: FixWorkspace,
     findings: readonly ReviewFinding[],
   ) => Promise<{ ok: boolean; error?: string }>;
+  /**
+   * Releases the workspace. Called on EVERY path, including the ones that return early and the ones
+   * that throw: the adapter holds a real sandbox open across author and push, so a pass that skipped
+   * this would leak one sandbox per failure until the driver gave up.
+   */
+  closeWorkspace?: (workspace: FixWorkspace) => Promise<void>;
   /** A ceiling on how many findings ONE pass will attempt. Defaults to 10. */
   maxFindings?: number;
   log?: (label: string, value: unknown) => void;
@@ -108,9 +114,24 @@ export function createFixCycle(ports: FixCyclePorts): AttemptFixes {
       return [];
     }
 
+    try {
+      return await runPass(opened.workspace, attempted);
+    } finally {
+      try {
+        await ports.closeWorkspace?.(opened.workspace);
+      } catch (error) {
+        log("Fix cycle", `the workspace could not be closed: ${describe(error)}`);
+      }
+    }
+  };
+
+  async function runPass(
+    workspace: FixWorkspace,
+    attempted: readonly ReviewFinding[],
+  ): Promise<FindingDisposition[]> {
     let authored: FixAuthorResult;
     try {
-      authored = await ports.author(opened.workspace, attempted);
+      authored = await ports.author(workspace, attempted);
     } catch (error) {
       log("Fix cycle", `the authoring pass failed: ${describe(error)}`);
       return [];
@@ -124,7 +145,7 @@ export function createFixCycle(ports: FixCyclePorts): AttemptFixes {
     if (authored.changedFiles.length > 0) {
       let pushed: { ok: boolean; error?: string };
       try {
-        pushed = await ports.push(opened.workspace, attempted);
+        pushed = await ports.push(workspace, attempted);
       } catch (error) {
         pushed = { ok: false, error: describe(error) };
       }
@@ -167,5 +188,5 @@ export function createFixCycle(ports: FixCyclePorts): AttemptFixes {
     }
 
     return dispositions;
-  };
+  }
 }
