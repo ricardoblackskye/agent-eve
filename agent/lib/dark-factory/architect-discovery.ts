@@ -195,6 +195,45 @@ function declaresComponent(content: string, name: string): boolean {
   );
 }
 
+/**
+ * A repository path written in the story, e.g. `src/pages/BlogPostPage.ts`.
+ *
+ * A story is prose, so the extension may be wrong (`#12` wrote `.ts` for a `.tsx` file) - that is a
+ * typo, not a different file. The stem is what carries the meaning.
+ */
+const NAMED_PATH = /[\w.-]+(?:\/[\w.-]+)+\.[cm]?[jt]sx?/g;
+
+/**
+ * Resolve a repo-relative path the way a nameless import would be resolved (#726).
+ *
+ * The same candidates `resolveImport` tries, rooted at the repository instead of at an importer, because
+ * a path named in prose has no importing file to be relative to.
+ */
+function resolveRepoPath(path: string, files: string[]): string | undefined {
+  const base = path.replace(/\/+$/, "");
+  const stem = base.replace(/\.(?:[cm]?[jt]sx?)$/, "");
+  const candidates = [
+    base,
+    stem,
+    `${stem}.tsx`,
+    `${stem}.ts`,
+    `${stem}.jsx`,
+    `${stem}.js`,
+    `${stem}/index.tsx`,
+    `${stem}/index.ts`,
+  ];
+  return candidates.find((candidate) => files.includes(candidate));
+}
+
+/** The first path the story names that exists in this repository, if it names one. */
+function resolveNamedPath(storyText: string, files: string[]): string | undefined {
+  for (const candidate of storyText.match(NAMED_PATH) ?? []) {
+    const found = resolveRepoPath(candidate, files);
+    if (found) return found;
+  }
+  return undefined;
+}
+
 /** A test is not the route table, and not evidence of what a page is. */
 function isTestFile(path: string): boolean {
   return /\.(?:test|spec)\.[cm]?[jt]sx?$/i.test(path);
@@ -354,8 +393,11 @@ export async function discoverArchitecture(input: DiscoveryInput): Promise<Disco
     }
   }
 
-  // 5. The surface the story names: an explicit route path beats a word for the default surface.
+  // 5. The surface the story names. A path the story names outright beats everything: it needs no
+  // framework knowledge at all, and it is the one rule that works in a repository with no route table
+  // (#726). Then an explicit route path, then a word for the default surface.
   const storyText = `${story.title}\n${story.body}`;
+  const namedPage = resolveNamedPath(storyText, files);
   let route: string | undefined;
   const explicit = [...pageForRoute.keys()]
     .filter((candidate) => candidate !== "/" && storyText.includes(candidate))
@@ -364,7 +406,8 @@ export async function discoverArchitecture(input: DiscoveryInput): Promise<Disco
   else if (DEFAULT_SURFACE_WORDS.test(storyText) && pageForRoute.has("/")) route = "/";
   else if ([...pageForRoute.keys()].length === 1) route = [...pageForRoute.keys()][0];
 
-  const page = route !== undefined ? pageForRoute.get(route) : undefined;
+  const page =
+    namedPage ?? (route !== undefined ? pageForRoute.get(route) : undefined);
 
   // 6. The chain: route -> page -> the components that page composes, in import order.
   const chain: DiscoveredFile[] = [];
