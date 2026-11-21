@@ -138,6 +138,22 @@ function routeTable(content: string): Map<string, string> {
   return out;
 }
 
+/**
+ * Whether a file DECLARES a component by this name, rather than importing it.
+ *
+ * A page can live in the route table's own file: an SPA commonly declares its home page as a function
+ * above the `<Routes>` block that renders it (#726). That page has no import to follow, and treating it
+ * as unresolvable is what parked a real run against a real repository.
+ */
+function declaresComponent(content: string, name: string): boolean {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return (
+    new RegExp(`\\bfunction\\s+${escaped}\\b`).test(content) ||
+    new RegExp(`\\b(?:const|let|var)\\s+${escaped}\\s*[:=]`).test(content) ||
+    new RegExp(`\\bclass\\s+${escaped}\\b`).test(content)
+  );
+}
+
 /** A test is not the route table, and not evidence of what a page is. */
 function isTestFile(path: string): boolean {
   return /\.(?:test|spec)\.[cm]?[jt]sx?$/i.test(path);
@@ -236,7 +252,13 @@ export async function discoverArchitecture(input: DiscoveryInput): Promise<Disco
     const imports = namedImports(routeFileContent, routeFilePath, files);
     for (const [routePath, componentName] of routes) {
       let file = imports.get(componentName);
-      if (!file) continue;
+      if (!file) {
+        // A component DECLARED here is this file's own page (#726): the route renders a function defined
+        // in this very file, so the page's home is the route table's file. An IMPORTED component that did
+        // not resolve is a different case - a path alias, say - and is still skipped rather than guessed.
+        if (declaresComponent(routeFileContent, componentName)) file = routeFilePath;
+        else continue;
+      }
       // When a route renders a SHELL, the page is that shell's INDEX CHILD. Reporting the parent would name the
       // file rendered on every route - the exact wrong answer this whole feature exists to stop - and it would
       // also feed R2 a "page" that R2 is supposed to refuse.
