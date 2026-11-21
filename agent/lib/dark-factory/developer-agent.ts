@@ -217,7 +217,10 @@ export async function runDeclaredE2e(deps: {
   command: string | undefined;
   allowedCommands: readonly string[];
 }): Promise<E2eOutcome> {
-  throw new Error("not implemented");
+  if (!deps.command) return { status: "not-run", output: "" };
+  const res = await deps.runTests(deps.command, { allowedCommands: deps.allowedCommands });
+  if (!res.ran) return { status: "not-run", output: res.output };
+  return { status: res.passed ? "passed" : "failed", output: res.output };
 }
 
 export function formatTestVerdict(passed: boolean, suites: GateSuites): string {
