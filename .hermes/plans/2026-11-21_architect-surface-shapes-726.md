@@ -23,16 +23,31 @@ site' to the bottom of the `src/pages/BlogPostPage.ts` page below all other cont
 outright** - and the Architect still could not justify a target. A story that names an existing path in the
 repository is the cheapest case there is, and it failed too.
 
-**Gate 1 - discovery.** `agent/lib/dark-factory/architect-discovery.ts` states its own doctrine at the top:
+**Gate 1 - discovery (CORRECTED after reading the code).** My first reading blamed Next-shaped
+constants. That was wrong: `routeTable()` (`:129-139`) DOES parse react-router JSX, including
+`<Route path=".." element={<Comp/>}/>`, `createBrowserRouter`, index children and extensionless
+specifiers. The real causes, both visible in the target's own `App.tsx`:
 
-> a role is derived from what a file DOES (its contents and who reaches it), **never from its name**
+1. **A page declared in the route table's own file.** `local-promotion-site/src/App.tsx` is both the
+   route table and the home page:
 
-and then contradicts it. The route-to-page map (`pageForRoute`, used at `:301-304`) is populated from
-Next-shaped constants - `NEXT_PAGE = /(^|\/)app\/(?:.*\/)?page\.(?:jsx?|tsx?)$/i` and `NEXT_LAYOUT`
-(`:47-48`). A Vite SPA has no `app/**/page.tsx`, so the map is empty, `DEFAULT_SURFACE_WORDS` cannot resolve
-`"/"`, and `surface.page` is undefined (`:329-330`). `App.tsx` IS read (discovery priority `:63` matches
-`app`), but is classified `shell` - a role the module defines - and a shell is deliberately not a page.
+   ```text
+   function HomePage() { return (<><Header /><main id="main-content">...</main></>); }
+   export default function App() { return (<Routes><Route path="/" element={<HomePage />} /></Routes>); }
+   ```
 
+   `HomePage` is declared locally, so it is not in the file's IMPORTS - and the route loop resolves a
+   route element through imports alone: `let file = imports.get(componentName); if (!file) continue;`
+   (`:236-237`). The route is skipped, so `pageForRoute` never gains `"/"` and
+   `DEFAULT_SURFACE_WORDS` has no route to resolve to. **FIXED in cycle 1** (`c46874d`): a component
+   declared in the route file IS that route's page.
+2. **Path aliases.** Every import in that file uses the `@/` alias (`@/pages/BlogPostPage`), and
+   `relativeImports` matches RELATIVE specifiers only - so the composition chain, and any page reached
+   through an alias, is invisible. Not yet fixed.
+
+Also measured, and it needs no framework knowledge: issue #12 named the file outright
+(`src/pages/BlogPostPage.ts`) and still resolved nothing, because no code path considers a path the
+story names. Not yet fixed.
 **Gate 2 - validation.** `agent/lib/dark-factory/plan-validator.ts:370-382` requires a UI story's targets to
 start with `app/`, `src/app/` or `components/`:
 
