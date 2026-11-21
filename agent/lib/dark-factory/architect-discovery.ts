@@ -25,6 +25,14 @@ export interface DiscoveredFile {
 }
 
 export interface DiscoveryInput {
+  /**
+   * Path aliases that name a location INSIDE this repository, e.g. `{ "@/": "src/" }` (#726).
+   *
+   * Declared by tsconfig `compilerOptions.paths` or a bundler's `resolve.alias`. Supplied by the caller
+   * rather than parsed here: the module already takes its filesystem access injected, and which config
+   * file holds the answer is not this module's business.
+   */
+  aliases?: Record<string, string>;
   /** The repository's files, as the runner lists them. */
   files: string[];
   /** Injected so discovery can be tested without a filesystem, and be bounded by the caller. */
@@ -82,25 +90,52 @@ function declaresRoutes(content: string): boolean {
   );
 }
 
-/** Relative import specifiers only: a bare package name says nothing about this repository. */
-function relativeImports(content: string): string[] {
+/**
+ * Whether a specifier names a path INSIDE this repository: a relative one, or a declared alias.
+ *
+ * A bare package name still says nothing about this repository - that rule stands. An alias is neither
+ * bare nor relative: `@/pages/X` is a path into this tree, named by the project's own config (#726).
+ */
+function isLocalSpecifier(specifier: string, aliases: Record<string, string> | undefined): boolean {
+  if (specifier.startsWith(".")) return true;
+  return Object.keys(aliases ?? {}).some((prefix) => specifier.startsWith(prefix));
+}
+
+/** Import specifiers that name something in this repository, relative or aliased. */
+function localImports(content: string, aliases: Record<string, string> | undefined): string[] {
   const out: string[] = [];
-  const re = /(?:from|import\s*\()\s*["'](\.[^"']+)["']/g;
-  for (const match of content.matchAll(re)) out.push(match[1]);
+  const re = /(?:from|import\s*\()\s*["']([^"']+)["']/g;
+  for (const match of content.matchAll(re)) {
+    if (isLocalSpecifier(match[1], aliases)) out.push(match[1]);
+  }
   return out;
 }
 
 /** Resolve a specifier against the importer, using the file list to infer the extension. */
-function resolveImport(importer: string, specifier: string, files: string[]): string | undefined {
-  const base = importer.split("/").slice(0, -1);
-  const parts = specifier.split("/");
-  const segments = [...base];
-  for (const part of parts) {
-    if (part === "." || part === "") continue;
-    if (part === "..") segments.pop();
-    else segments.push(part);
+function resolveImport(
+  importer: string,
+  specifier: string,
+  files: string[],
+  aliases?: Record<string, string>,
+): string | undefined {
+  let joined: string;
+  const alias = Object.entries(aliases ?? {}).find(([prefix]) => specifier.startsWith(prefix));
+  if (alias) {
+    // An alias names a repo-relative location, so the importer plays no part in resolving it.
+    joined = `${alias[1]}${specifier.slice(alias[0].length)}`.replace(/\/+$/, "");
+  } else if (specifier.startsWith(".")) {
+    const base = importer.split("/").slice(0, -1);
+    const parts = specifier.split("/");
+    const segments = [...base];
+    for (const part of parts) {
+      if (part === "." || part === "") continue;
+      if (part === "..") segments.pop();
+      else segments.push(part);
+    }
+    joined = segments.join("/");
+  } else {
+    return undefined;
   }
-  const joined = segments.join("/");
   const candidates = [
     joined,
     `${joined}.tsx`,
@@ -116,11 +151,17 @@ function resolveImport(importer: string, specifier: string, files: string[]): st
 }
 
 /** Local component name -> resolved file, from a file's own imports. */
-function namedImports(content: string, importer: string, files: string[]): Map<string, string> {
+function namedImports(
+  content: string,
+  importer: string,
+  files: string[],
+  aliases?: Record<string, string>,
+): Map<string, string> {
   const out = new Map<string, string>();
-  const re = /import\s+([A-Za-z0-9_$]+)\s*(?:,\s*\{[^}]*\})?\s*from\s*["'](\.[^"']+)["']/g;
+  const re = /import\s+([A-Za-z0-9_$]+)\s*(?:,\s*\{[^}]*\})?\s*from\s*["']([^"']+)["']/g;
   for (const match of content.matchAll(re)) {
-    const resolved = resolveImport(importer, match[2], files);
+    if (!isLocalSpecifier(match[2], aliases)) continue;
+    const resolved = resolveImport(importer, match[2], files, aliases);
     if (resolved) out.set(match[1], resolved);
   }
   return out;
@@ -193,7 +234,7 @@ function indexChildComponent(content: string, parentElement: string): string | u
 
 /** Discover the composition chain and file roles for the surface a story names. */
 export async function discoverArchitecture(input: DiscoveryInput): Promise<DiscoveryResult> {
-  const { files, readFile, story, maxInspectReads } = input;
+  const { files, readFile, story, maxInspectReads, aliases } = input;
 
   const ordered = files
     .filter((f) => SOURCE_FILE.test(f))
@@ -249,7 +290,7 @@ export async function discoverArchitecture(input: DiscoveryInput): Promise<Disco
   const pageForRoute = new Map<string, string>();
   if (routeFilePath) {
     const routeFileContent = contents.get(routeFilePath) ?? "";
-    const imports = namedImports(routeFileContent, routeFilePath, files);
+    const imports = namedImports(routeFileContent, routeFilePath, files, aliases);
     for (const [routePath, componentName] of routes) {
       let file = imports.get(componentName);
       if (!file) {
@@ -287,7 +328,7 @@ export async function discoverArchitecture(input: DiscoveryInput): Promise<Disco
   // 4. Importers, so a component reached from more than one page can be called shared - with the pages named.
   const importedBy = new Map<string, string[]>();
   for (const [path, content] of contents) {
-    for (const specifier of relativeImports(content)) {
+    for (const specifier of localImports(content, aliases)) {
       const resolved = resolveImport(path, specifier, files);
       if (!resolved) continue;
       importedBy.set(resolved, [...new Set([...(importedBy.get(resolved) ?? []), path])]);
@@ -333,8 +374,8 @@ export async function discoverArchitecture(input: DiscoveryInput): Promise<Disco
     if (entry) chain.push(entry);
   }
   if (page) {
-    for (const specifier of relativeImports(contents.get(page) ?? "")) {
-      const resolved = resolveImport(page, specifier, files);
+    for (const specifier of localImports(contents.get(page) ?? "", aliases)) {
+      const resolved = resolveImport(page, specifier, files, aliases);
       const entry = resolved ? classified.get(resolved) : undefined;
       if (entry) chain.push(entry);
     }
