@@ -72,6 +72,8 @@ import {
   artefactIdentity,
   checkOutcomeLines,
   checkSetSummary,
+  formatTestVerdict,
+  resolveE2eCommand,
   resolveLintCommands,
   CircuitTrippedError,
   DeveloperAgent,
@@ -1344,6 +1346,19 @@ async function main(): Promise<void> {
           }
         })();
 
+        // #701: the target's own e2e suite, resolved from the same manifest. The loop does not RUN it, and
+        // saying so is the point: a bare `PASS` otherwise reads as "this work is verified" while the e2e has
+        // never executed - which is how a PR opens green-by-the-loop and red in CI.
+        const declaredE2eCommands = await (async (): Promise<string[]> => {
+          try {
+            return resolveE2eCommand(
+              JSON.parse(await workspaceTools.readFile("package.json")),
+            );
+          } catch {
+            return [];
+          }
+        })();
+
         const loopOutcome = await runMultiFileCodingLoop({
           plan: executionPlan,
           tools: workspaceTools,
@@ -1432,7 +1447,10 @@ async function main(): Promise<void> {
             }
 
             console.log(
-              `     Test result: ${testOutcome.passed ? "PASS" : "FAIL"}`,
+              `     Test result: ${formatTestVerdict(testOutcome.passed, {
+                ran: ["unit"],
+                notRun: declaredE2eCommands.length > 0 ? ["e2e"] : [],
+              })}`,
             );
 
             // #651: the failure the model must act on used to be discarded here, so a run could fail

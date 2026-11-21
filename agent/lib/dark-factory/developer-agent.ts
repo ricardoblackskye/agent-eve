@@ -199,7 +199,10 @@ export interface GateSuites {
  * rather than by reading prose at a call site.
  */
 export function formatTestVerdict(passed: boolean, suites: GateSuites): string {
-  throw new Error("not implemented");
+  const ran = suites.ran.length > 0 ? ` (${suites.ran.join(", ")})` : "";
+  const notRun =
+    suites.notRun.length > 0 ? ` - NOT run: ${suites.notRun.join(", ")}` : "";
+  return `${passed ? "PASS" : "FAIL"}${ran}${notRun}`;
 }
 
 export interface UnmeasuredIteration {
