@@ -13,13 +13,28 @@ const runner = readFileSync("scripts/dark-factory-runner.ts", "utf8");
 
 describe("#701 the runner's verdict is wired to the target's own declaration", () => {
   it("composes the verdict with formatTestVerdict, not a bare PASS/FAIL", () => {
-    expect(runner).toContain("formatTestVerdict(testOutcome.passed");
+    // The INTENT is that the verdict is composed by formatTestVerdict. Its argument varies
+    // legitimately - it is `gatePassed` now that a failed e2e folds into the gate - so asserting the
+    // exact argument would break on a correct change. Assert the composition, not the spelling.
+    expect(runner).toContain("formatTestVerdict(");
     // The bare form is precisely what this change replaces.
     expect(runner).not.toContain('${testOutcome.passed ? "PASS" : "FAIL"}');
   });
 
   it("derives the not-run list from the target's declared e2e command", () => {
     expect(runner).toContain("resolveE2eCommand(");
-    expect(runner).toMatch(/notRun:\s*declaredE2eCommands/);
+    // The not-run list must still DERIVE from the target's declaration, whatever shape the expression
+    // takes - assert the intent, not an exact spelling that a legitimate change would break.
+    expect(runner).toMatch(/notRun:[\s\S]{0,140}declaredE2eCommands/);
+  });
+});
+
+describe("#701 the e2e attempt is wired, not just available", () => {
+  it("runs the declared suite and folds the result into the iteration's gate", () => {
+    expect(runner).toContain("runDeclaredE2e({");
+    expect(runner).toContain("gatePassed = testOutcome.passed && e2e.status");
+    // The worker reports the COMBINED gate, not the unit outcome alone.
+    expect(runner).toContain("passed: gatePassed,");
+    expect(runner).not.toContain("passed: testOutcome.passed,");
   });
 });

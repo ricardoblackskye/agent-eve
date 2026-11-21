@@ -74,6 +74,7 @@ import {
   checkSetSummary,
   formatTestVerdict,
   resolveE2eCommand,
+  runDeclaredE2e,
   resolveLintCommands,
   CircuitTrippedError,
   DeveloperAgent,
@@ -1446,22 +1447,38 @@ async function main(): Promise<void> {
               return { passed: false, output: testOutcome.output, unmeasured: true };
             }
 
+            // #701: the target's OWN e2e suite, run here rather than left for CI to discover. The command
+            // set is stated at the call site (#437): the loop does not widen its own blast radius. A suite
+            // that cannot START is unmeasured - not a verdict on authored code - so only an actual FAILURE
+            // changes the gate.
+            const e2e = await runDeclaredE2e({
+              runTests: ctx.tools.runTests.bind(ctx.tools),
+              command: declaredE2eCommands[0],
+              allowedCommands: workspaceCommandsFor(declaredE2eCommands),
+            });
+            const gatePassed = testOutcome.passed && e2e.status !== "failed";
+            const gateOutput =
+              e2e.status === "failed" && e2e.output
+                ? `${testOutcome.output}\n\n[e2e] ${e2e.output}`
+                : testOutcome.output;
+
             console.log(
-              `     Test result: ${formatTestVerdict(testOutcome.passed, {
-                ran: ["unit"],
-                notRun: declaredE2eCommands.length > 0 ? ["e2e"] : [],
+              `     Test result: ${formatTestVerdict(gatePassed, {
+                ran: e2e.status === "not-run" ? ["unit"] : ["unit", "e2e"],
+                notRun:
+                  e2e.status === "not-run" && declaredE2eCommands.length > 0 ? ["e2e"] : [],
               })}`,
             );
 
             // #651: the failure the model must act on used to be discarded here, so a run could fail
             // repeatedly with no visible cause. Print a BOUNDED tail of it (the run's own test output,
             // never user content) so the cause is readable in the log.
-            if (!testOutcome.passed && testOutcome.output) {
-              const tail = testOutcome.output.trim().slice(-1200);
+            if (!gatePassed && gateOutput) {
+              const tail = gateOutput.trim().slice(-1200);
               if (tail) console.log(`     Test failure (tail):\n${tail}`);
             }
 
-            if (testOutcome.passed) {
+            if (gatePassed) {
               // #503 AC4: record a passing result for each mapped AC. The map is typed as required but a
               // deserialized plan may omit it (the architect returned one without it at STEP 3.5), so
               // iterate the fallback, not the field directly.
@@ -1505,8 +1522,8 @@ async function main(): Promise<void> {
             // #651: report the identity of what this iteration authored, so the loop can detect a no-op
             // self-correction (a failing iteration that reproduces the previous failing artefact).
             return {
-              passed: testOutcome.passed,
-              output: testOutcome.output,
+              passed: gatePassed,
+              output: gateOutput,
               artefactHash: authored.artefactHash,
             };
           },
