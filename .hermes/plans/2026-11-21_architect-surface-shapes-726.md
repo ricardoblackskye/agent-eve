@@ -48,16 +48,17 @@ specifiers. The real causes, both visible in the target's own `App.tsx`:
 Also measured, and it needs no framework knowledge: issue #12 named the file outright
 (`src/pages/BlogPostPage.ts`) and still resolved nothing, because no code path considers a path the
 story names. Not yet fixed.
-**Gate 2 - validation.** `agent/lib/dark-factory/plan-validator.ts:370-382` requires a UI story's targets to
-start with `app/`, `src/app/` or `components/`:
+**Gate 2 - validation (CORRECTED, and it did not fire).** My plan claimed this rule refuses a
+`src/App.tsx` target and that fixing gate 1 alone would merely move the park. **The live run disproved
+that**: the plan targeting `src/App.tsx` passed `[STEP 4] Domain Validation Passed!`.
 
-```text
-UI/Chat story must modify or create files under app/ or components/ (e.g. app/page.tsx or app/chat.tsx).
-```
+The reason is `UI_SIGNALS` (`plan-validator.ts:67-75`) - a narrow list: `chat ui`, `web ui`,
+`user navigates`, `page loads`, `browser redirects`, `consent screen`, `access denied`. The prefix rule
+only runs when a story matches one of those, and issue #11's story matches NONE. So the rule never ran.
 
-A Vite SPA's page is `src/pages/*.tsx`, so even once the surface resolves, the plan would be refused. Fixing
-only gate 1 moves the park, it does not remove it.
-
+It remains worth fixing, but as a **latent trap** rather than a blocker: a `src/`-targeted UI story whose
+text does contain `when the page loads` or `web ui` WOULD be refused for targeting the correct file. That
+is the same framework coupling, one narrow trigger away.
 ## Intended fix
 
 **Derive the surface from the router's own declaration - the composition - which is what the module already
