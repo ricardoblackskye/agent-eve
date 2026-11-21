@@ -55,6 +55,20 @@ export function resolveMaxReviewRounds(
 
 export type FindingSource = "pr-reviewer" | "codeql" | "linter" | "test";
 
+/**
+ * One place a check said it failed, as GitHub annotates it.
+ *
+ * `path` is the whole reason this exists: a finding without one cannot be acted on. The review loop's
+ * fix cycle turns findings into a plan, and a plan is a list of files - so a failed check that named
+ * no file left the loop with nothing to do (`authored 0 file(s)`), which is what a red e2e produced
+ * before this (#718).
+ */
+export interface PrCheckAnnotation {
+  path?: string;
+  start_line?: number;
+  message?: string;
+}
+
 /** One check running on the pull request, as GitHub reports it. */
 export interface PrCheckRun {
   name: string;
@@ -64,6 +78,11 @@ export interface PrCheckRun {
   conclusion: string | null;
   html_url?: string;
   details_url?: string;
+  /**
+   * Where the check said it failed. Only fetched for checks that did not pass, because the list
+   * endpoint returns an `annotations_url` rather than the annotations themselves.
+   */
+  annotations?: readonly PrCheckAnnotation[];
 }
 
 /** How the check gate reads and waits. Injected so no test sleeps in real time. */
@@ -148,11 +167,28 @@ export function checkRunFindings(checks: readonly PrCheckRun[] | null): ReviewFi
 
     if (PASSING_CONCLUSIONS.has(check.conclusion ?? "")) continue;
 
+    // A failed check that annotated says WHERE. Carrying that through is what gives the review loop's
+    // fix cycle something to act on; without it the finding is prose and the loop can only re-read it.
+    const annotated = (check.annotations ?? []).find(
+      (annotation) =>
+        typeof annotation.path === "string" && annotation.path.trim() !== "",
+    );
+    const detail = annotated?.message?.trim();
     findings.push({
       id: `PR-CHECK-FAILED:${check.name}`,
       source: "linter",
       severity: "error",
-      message: `The repository's own check '${check.name}' failed (${check.conclusion ?? "no conclusion"})${where}.`,
+      message: `The repository's own check '${check.name}' failed (${check.conclusion ?? "no conclusion"})${where}.${
+        detail ? ` ${detail}` : ""
+      }`,
+      ...(annotated
+        ? {
+            file: annotated.path,
+            ...(typeof annotated.start_line === "number"
+              ? { line: annotated.start_line }
+              : {}),
+          }
+        : {}),
     });
   }
 

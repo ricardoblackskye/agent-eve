@@ -32,6 +32,7 @@ import {
   type DefinitionOfDoneDeps,
   type DefinitionOfDoneTask,
   type ReviewFinding,
+  type PrCheckAnnotation,
   type PrCheckRun,
   type PrOpener,
   checkRunFindings,
@@ -63,6 +64,7 @@ import {
   commitAndPushFromSandbox,
   ensureSandboxRepo,
   gitPushWithVault,
+  type SandboxGitRunner,
 } from "../agent/lib/dark-factory/git-push";
 import { DEFAULT_SANDBOX_WORKSPACE } from "../agent/lib/dark-factory/opensandbox-driver";
 import { resolvePrChecksTimeoutMs } from "../agent/lib/dark-factory/pr-checks-timeout";
@@ -85,6 +87,10 @@ import {
 import { createSandboxProvider } from "../agent/lib/dark-factory/sandbox-provider";
 import { reapSandboxesByRun } from "../agent/lib/dark-factory/sandbox-reaper";
 import type { SandboxProvider } from "../agent/lib/dark-factory/sandbox";
+import {
+  createFixCycle,
+  type AttemptFixes,
+} from "../agent/lib/dark-factory/fix-cycle";
 import type { WorkspaceTools } from "../agent/lib/dark-factory/developer-agent";
 import { createCodeAuthorProvider } from "../agent/lib/dark-factory/code-author-provider";
 import {
@@ -301,7 +307,7 @@ const PR_CHECKS_POLL_INTERVAL_MS = 15_000;
  * to stay distinguishable from "the checks passed" (#659): the mapping turns null into a warning, never
  * into a silent pass.
  */
-function makePullRequestCheckFetcher(deps: {
+export function makePullRequestCheckFetcher(deps: {
   token: string;
   repo: string;
   prNumber: number;
@@ -330,8 +336,37 @@ function makePullRequestCheckFetcher(deps: {
         { headers },
       );
       if (!checksResponse.ok) return null;
-      const body = (await checksResponse.json()) as { check_runs?: PrCheckRun[] };
-      return Array.isArray(body.check_runs) ? body.check_runs : null;
+      const body = (await checksResponse.json()) as {
+        check_runs?: (PrCheckRun & {
+          output?: { annotations_url?: string; annotations_count?: number };
+        })[];
+      };
+      if (!Array.isArray(body.check_runs)) return null;
+
+      // #718: a failing check says WHERE it failed through its annotations, and this endpoint returns
+      // an `annotations_url` rather than the annotations themselves - so this is a second call, made
+      // only for a check that actually annotated. Best-effort on purpose: losing the detail must not
+      // lose the verdict, because a failed check that vanished from the findings would be worse than
+      // one that arrives without a file.
+      return await Promise.all(
+        body.check_runs.map(async (run) => {
+          const { output, ...check } = run;
+          const annotationsUrl = output?.annotations_url;
+          const annotated =
+            typeof output?.annotations_count === "number" && output.annotations_count > 0;
+          if (!annotated || typeof annotationsUrl !== "string" || annotationsUrl === "") {
+            return check;
+          }
+          try {
+            const response = await fetch(annotationsUrl, { headers });
+            if (!response.ok) return check;
+            const annotations = (await response.json()) as PrCheckAnnotation[];
+            return Array.isArray(annotations) ? { ...check, annotations } : check;
+          } catch {
+            return check;
+          }
+        }),
+      );
     } catch {
       return null;
     }
@@ -461,9 +496,9 @@ async function main(): Promise<void> {
     issue: issueNum,
   });
   // #373: a run the ledger refused because ANOTHER run holds this issue must not start. The previous
-  // behaviour carried on with the attempt id as a synthetic run id, so its lifecycle writes targeted a run
+  // behavior carried on with the attempt id as a synthetic run id, so its lifecycle writes targeted a run
   // the ledger had never minted - the stale claim kept the issue and nothing could release it.
-  // #373: a FRESH run refused because another run holds this issue must not start. The old behaviour
+  // #373: a FRESH run refused because another run holds this issue must not start. The old behavior
   // carried on with the attempt id as a synthetic run id, so its writes targeted a run the ledger had
   // never minted and the claim could never be released. A RESUME is different: the blocked holder IS the
   // run being approved, so it is adopted and the writes land on the real run.
@@ -573,6 +608,85 @@ async function main(): Promise<void> {
       `- **Status**: Synthesizing ExecutionPlan and running pre-flight domain validation...`,
   );
 
+  // #280: the execution backend is configuration-selected. Unset DF_SANDBOX_DRIVER = the local
+  // filesystem, i.e. today's behavior; an unknown value throws before any side effect.
+  // #281 (R2b/B2): the sandbox is created once per run and force-disposed by runCodingPhase,
+  // so the runner owns the lifecycle (closing the SDK client does not terminate a sandbox).
+
+  // #281 (R2b/B1): the author is configuration-selected. Unset DF_CODE_AUTHOR = in-process, i.e. the
+  // governed path above, unchanged. The in-process adapter calls `generate`, which runs through the
+  // cost gate, so the seam cannot bypass governance.
+  const codeAuthor = createCodeAuthorProvider(
+    {
+      DF_CODE_AUTHOR: process.env.DF_CODE_AUTHOR,
+      DF_AGENT_CLI: process.env.DF_AGENT_CLI,
+      DF_AGENT_CLI_COMMAND: process.env.DF_AGENT_CLI_COMMAND,
+    },
+    {
+      generate: (prompt) =>
+        runGovernedAgentCall(
+          { governor, runHistory, runId },
+          {
+            category: "developer",
+            model: modelId,
+            inputTokens: Math.ceil(prompt.length / 4),
+            outputTokens: 8_000,
+            run: async () => {
+              const stream = streamText({ model, prompt });
+              let output = "";
+              for await (const chunk of stream.textStream) output += chunk;
+              return output;
+            },
+          },
+        ),
+    },
+  );
+
+  // #354 — the vault path runs git INSIDE the sandbox, where the egress sidecar injects the push
+  // credential. That forces the git flow into the coding phase, because runCodingPhase disposes the
+  // sandbox in a `finally`; the phase therefore needs the provider, not just its tools.
+  const vaultPath =
+    (process.env.DF_SANDBOX_VAULT_ENABLED ?? "").trim() !== "" &&
+    (process.env.DF_SANDBOX_DRIVER ?? "").trim() === "opensandbox";
+
+  // A path INSIDE the container: process.cwd() is a HOST path, so the vault path roots both the loop
+  // and the git flow at the same container directory the driver uses.
+  const sandboxWorkspace =
+    (process.env.DF_SANDBOX_WORKSPACE ?? "").trim() ||
+    DEFAULT_SANDBOX_WORKSPACE;
+
+  const gitHost = (
+    process.env.DF_SANDBOX_EGRESS_GIT_HOST ?? "github.com"
+  ).trim();
+
+  const sandboxRemoteUrl = `https://${gitHost}/${repoOwner}/${repoName}.git`;
+
+  // #718: the ONE fix cycle, built here where everything it needs is resolved. The workspace, the
+  // author and the remote are accessors because the phase's replays and the re-entry resolve them at
+  // different times; each resolves when a pass actually runs, which is after this point in every case.
+  const fixCycle = buildFixCycleAdapter({
+    runId,
+    branchName,
+    remoteUrl: () => sandboxRemoteUrl,
+    workspaceDir: () => sandboxWorkspace,
+    author: () => codeAuthor,
+    createProvider: (sandboxRunId) =>
+      createSandboxProvider(
+        undefined,
+        vaultPath
+          ? {
+              gitPushCredential: {
+                host: gitHost,
+                path: `/${repoOwner}/${repoName}.git*`,
+                token,
+              },
+            }
+          : undefined,
+        sandboxRunId,
+      ),
+    log: line,
+  });
+
   // STEP 3: Architect Agent Planning Phase
   //
   // #365 R4: on a RESUME the plan is NOT regenerated. A fresh plan is a different plan from the one a human
@@ -646,6 +760,7 @@ async function main(): Promise<void> {
             issueWriter.postComment(owner, repo, issue, body),
           makeCheckFetcher: (prNumber) =>
             makePullRequestCheckFetcher({ token, repo: targetRepo, prNumber }),
+          attemptFixes: fixCycle,
           log: line,
         },
         {
@@ -1027,39 +1142,6 @@ async function main(): Promise<void> {
   console.log(
     `\n[STEP 5] Dispatched Multi-File Developer Agent with Workspace Tools...`,
   );
-  // #280: the execution backend is configuration-selected. Unset DF_SANDBOX_DRIVER = the local
-  // filesystem, i.e. today's behaviour; an unknown value throws before any side effect.
-  // #281 (R2b/B2): the sandbox is created once per run and force-disposed by runCodingPhase,
-  // so the runner owns the lifecycle (closing the SDK client does not terminate a sandbox).
-
-  // #281 (R2b/B1): the author is configuration-selected. Unset DF_CODE_AUTHOR = in-process, i.e. the
-  // governed path above, unchanged. The in-process adapter calls `generate`, which runs through the
-  // cost gate, so the seam cannot bypass governance.
-  const codeAuthor = createCodeAuthorProvider(
-    {
-      DF_CODE_AUTHOR: process.env.DF_CODE_AUTHOR,
-      DF_AGENT_CLI: process.env.DF_AGENT_CLI,
-      DF_AGENT_CLI_COMMAND: process.env.DF_AGENT_CLI_COMMAND,
-    },
-    {
-      generate: (prompt) =>
-        runGovernedAgentCall(
-          { governor, runHistory, runId },
-          {
-            category: "developer",
-            model: modelId,
-            inputTokens: Math.ceil(prompt.length / 4),
-            outputTokens: 8_000,
-            run: async () => {
-              const stream = streamText({ model, prompt });
-              let output = "";
-              for await (const chunk of stream.textStream) output += chunk;
-              return output;
-            },
-          },
-        ),
-    },
-  );
   const capturedTestResults: {
     testFile: string;
     testCaseName: string;
@@ -1091,21 +1173,6 @@ async function main(): Promise<void> {
     }
   }
 
-  // #354 — the vault path runs git INSIDE the sandbox, where the egress sidecar injects the push
-  // credential. That forces the git flow into the coding phase, because runCodingPhase disposes the
-  // sandbox in a `finally`; the phase therefore needs the provider, not just its tools.
-  const vaultPath =
-    (process.env.DF_SANDBOX_VAULT_ENABLED ?? "").trim() !== "" &&
-    (process.env.DF_SANDBOX_DRIVER ?? "").trim() === "opensandbox";
-  // A path INSIDE the container: process.cwd() is a HOST path, so the vault path roots both the loop
-  // and the git flow at the same container directory the driver uses.
-  const sandboxWorkspace =
-    (process.env.DF_SANDBOX_WORKSPACE ?? "").trim() ||
-    DEFAULT_SANDBOX_WORKSPACE;
-  const gitHost = (
-    process.env.DF_SANDBOX_EGRESS_GIT_HOST ?? "github.com"
-  ).trim();
-  const sandboxRemoteUrl = `https://${gitHost}/${repoOwner}/${repoName}.git`;
 
   // #365 Task 11: put the plan on the ticket BEFORE the coding loop, so the intent is reviewable even if
   // the run fails during coding. Idempotent: a retry updates its own comment instead of adding another.
@@ -1560,6 +1627,7 @@ async function main(): Promise<void> {
   await runDefinitionOfDonePhase(
     {
       runHistory,
+      attemptFixes: fixCycle,
       labelWriter,
       prWriter,
       postIssueComment: (owner, repo, issue, body) =>
@@ -1672,7 +1740,7 @@ async function readExistingFile(
  * #361 — the author is shown the current content of the files it is modifying, and every write is
  * checked against what is already there before a single byte lands. A refused write throws
  * `PreservationRefusedError`, which the caller's worker turns into a failed iteration whose message
- * IS handed to the next iteration as `feedback` (#373 - that sentence described intent, not behaviour, until the loop's context carried it).
+ * IS handed to the next iteration as `feedback` (#373 - that sentence described intent, not behavior, until the loop's context carried it).
  */
 export async function authorFiles(
   author: CodeAuthorProvider,
@@ -1879,6 +1947,14 @@ export interface DodPhaseDeps {
   log?: (label: string, value: unknown) => void;
   timeoutMs?: number;
   pollIntervalMs?: number;
+  /**
+   * #718: the fix cycle, so the DoD can dispose of the findings its own checks raise.
+   *
+   * Supplied only where a fix can actually be run. The verify-only re-entry deliberately does NOT
+   * carry one: it exists to settle a verdict by re-reading checks, and the workspace, remote and
+   * author it would need are resolved later in the run than it executes.
+   */
+  attemptFixes?: AttemptFixes;
 }
 
 export interface DodPhaseArgs {
@@ -1969,6 +2045,7 @@ export async function runDefinitionOfDonePhase(
     // #702: the store was never passed, so EVERY DoD event was discarded silently - the PR it opened,
     // its review rounds, the acceptance-criteria matrix and the test results never reached the page.
     runHistory: deps.runHistory,
+    ...(deps.attemptFixes ? { attemptFixes: deps.attemptFixes } : {}),
     prWriter: opener,
     commentWriter: {
       postComment: async (owner, repo, prNum, body) => {
@@ -2070,6 +2147,178 @@ export function pullRequestBody(options: PullRequestBodyOptions): string {
  * terminate a sandbox, so a missing dispose is a leak and spend). The recording-double test proves the
  * order: create -> phase -> dispose, exactly one create, dispose always fires.
  */
+/**
+ * #718 - the fix cycle's adapter: one sandbox per PASS, for the run that already owns it.
+ *
+ * The Definition of Done raises findings and has to dispose of them; this is the machinery behind
+ * that, kept out of the DoD's own interface. Three things about the shape are load-bearing, and each
+ * is asserted in fix-cycle-adapter.test.ts rather than described here:
+ *
+ * - **The pull request's branch is fetched and checked out BEFORE a fix is authored.** The push that
+ *   follows uses `git checkout -B <branch>`, which RESETS the branch to the current HEAD - so a pass
+ *   that prepared a default-tip checkout and then pushed would rewrite the pull request's branch to
+ *   `main` and destroy the work it was fixing.
+ * - **The sandbox is built for THIS run id**, because `reapSandboxesByRun` keys on the run id: a pass
+ *   under any other id would be invisible to the reaper and leak with no safety net.
+ * - **The workspace is closed on every path**, including the early returns and the throws.
+ *
+ * The workspace and the author are resolved when a pass RUNS, not when the adapter is built: both
+ * belong to the coding phase, which has not run yet at the point the DoD's deps are assembled - and
+ * the verify-only re-entry never runs it at all. Passing them as accessors keeps the adapter
+ * constructible in one place for both compositions without duplicating it, and without a reference to
+ * a `const` above its own declaration.
+ */
+export interface FixCycleAdapterDeps {
+  /** The run the fix belongs to - also the id the sandbox carries, so the reaper can find it. */
+  runId: string;
+  /** The pull request's head branch: what is checked out, fixed, and pushed. */
+  branchName: string;
+  /**
+   * The remote the branch is fetched from and pushed to. An accessor for the same reason as the
+   * workspace: it is derived from the resolved host and repo, which happen later than the DoD deps
+   * are assembled.
+   */
+  remoteUrl: () => string;
+  /** Resolved at call time; the coding phase's workspace exists only after the phase has run. */
+  workspaceDir: () => string;
+  /** Resolved at call time, for the same reason. */
+  author: () => CodeAuthorProvider;
+  /** Builds the sandbox for a pass. Injected so a recording double can prove the order. */
+  createProvider: (runId: string) => SandboxProvider;
+  log?: (label: string, value: unknown) => void;
+}
+
+/** The handle a fix pass works in: the sandbox, its tools, and what the pass has authored so far. */
+interface FixWorkspaceHandle {
+  branch: string;
+  provider: SandboxProvider;
+  runGit: SandboxGitRunner;
+  workspaceDir: string;
+  tools: WorkspaceTools;
+  /** Set by the authoring port, read by the push port. */
+  changedFiles: string[];
+}
+
+/**
+ * The findings as a plan, so a fix reuses the authoring path the coding phase already uses.
+ *
+ * `authorFiles` reads its target actions from a plan, so a fix has to arrive as one. That is the
+ * smaller change than a second authoring seam, and it means the fix inherits that path's guards -
+ * including `assessPreservation`, which refuses to write a file that would lose existing code.
+ */
+function planFromFindings(findings: readonly ReviewFinding[]): unknown {
+  const files = [
+    ...new Set(
+      findings
+        .map((finding) => finding.file)
+        .filter((path): path is string => typeof path === "string" && path.trim() !== ""),
+    ),
+  ];
+  return {
+    title: `Address ${findings.length} review finding(s)`,
+    summary: [
+      "Fix the findings below. Change only what each finding requires.",
+      ...findings.map((finding) => `- [${finding.id}] ${finding.message}`),
+    ].join("\n"),
+    targetFiles: files.map((path) => ({ path, action: "modify" })),
+  };
+}
+
+export function buildFixCycleAdapter(deps: FixCycleAdapterDeps): AttemptFixes {
+  const log = deps.log ?? (() => {});
+
+  return createFixCycle<FixWorkspaceHandle>({
+    openWorkspace: async () => {
+      const workspaceDir = deps.workspaceDir();
+      const provider = deps.createProvider(deps.runId);
+      const tools = provider.create(workspaceDir);
+      if (!provider.runGit) {
+        // Without git there is no checkout to fix and no push to make, so this is not a workspace
+        // this pass can use. Reported rather than thrown: the DoD reports a throw as "the fix
+        // attempt failed unexpectedly", which would blame the run.
+        return {
+          ok: false as const,
+          error: "the sandbox driver cannot run git, so a fix cannot be prepared or pushed",
+        };
+      }
+      const runGit = provider.runGit;
+      const prepared = await ensureSandboxRepo({
+        runGit,
+        remoteUrl: deps.remoteUrl(),
+        workspaceDir,
+      });
+      if (!prepared.ok) {
+        return { ok: false as const, error: prepared.error ?? "the checkout could not be prepared" };
+      }
+      // The pull request's branch, BEFORE a fix is authored: the push below uses `checkout -B`, which
+      // resets the branch to the current HEAD. Preparing a default-tip checkout and then pushing
+      // would rewrite the pull request's branch to main and discard the work being fixed.
+      const fetched = await runGit(["-C", workspaceDir, "fetch", "origin", deps.branchName]);
+      if (fetched.exitCode !== 0) {
+        return {
+          ok: false as const,
+          error: `git fetch failed (exit ${fetched.exitCode}): ${fetched.output}`,
+        };
+      }
+      const checkedOut = await runGit(["-C", workspaceDir, "checkout", deps.branchName]);
+      if (checkedOut.exitCode !== 0) {
+        return {
+          ok: false as const,
+          error: `git checkout failed (exit ${checkedOut.exitCode}): ${checkedOut.output}`,
+        };
+      }
+      log("Fix cycle", `prepared '${deps.branchName}' in a sandbox for run ${deps.runId}`);
+      return {
+        ok: true as const,
+        workspace: {
+          branch: deps.branchName,
+          provider,
+          runGit,
+          workspaceDir,
+          tools,
+          changedFiles: [],
+        },
+      };
+    },
+
+    author: async (workspace, findings) => {
+      const authored: AuthorFilesResult = await authorFiles(
+        deps.author(),
+        planFromFindings(findings),
+        workspace.tools,
+      );
+      workspace.changedFiles = [...authored.written];
+      log(
+        "Fix cycle",
+        `authored ${workspace.changedFiles.length} file(s) for ${findings.length} finding(s)`,
+      );
+      return { changedFiles: workspace.changedFiles };
+    },
+
+    push: async (workspace, findings) => {
+      const pushed = await commitAndPushFromSandbox({
+        runGit: workspace.runGit,
+        remoteUrl: deps.remoteUrl(),
+        workspaceDir: workspace.workspaceDir,
+        branchName: deps.branchName,
+        commitMessage: `fix: address ${findings.length} review finding(s)`,
+        filesToAdd: workspace.changedFiles,
+      });
+      if (!pushed.ok) {
+        return { ok: false, error: pushed.error ?? "the push did not complete" };
+      }
+      log("Fix cycle", `pushed ${workspace.changedFiles.length} file(s) to '${deps.branchName}'`);
+      return { ok: true };
+    },
+
+    closeWorkspace: async (workspace) => {
+      // The pass owns the sandbox it opened, and releases it on every path. The module calls this in
+      // a finally, so a pass that returns early or throws still disposes.
+      await workspace.provider.dispose?.();
+    },
+  });
+}
+
 export async function runCodingPhase<T>(
   provider: SandboxProvider,
   workspaceDir: string,
@@ -2246,7 +2495,7 @@ export function recordPassingTestResults(
  * Reads the run's recorded usage and its own cost events, sums them, and writes the total to the run
  * summary. BEST-EFFORT BY DESIGN: a cost is an observation about a run, not a control over it, so
  * every failure — including an unconfigured store — is reported and the run is unaffected. Exported so
- * both entry paths can call it, and so its behaviour is reachable from a test.
+ * both entry paths can call it, and so its behavior is reachable from a test.
  */
 /**
  * Record a run the LEDGER never minted (#681), so the history can see that it happened.

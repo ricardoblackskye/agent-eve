@@ -38,6 +38,33 @@ path — success, thrown error, or failed context push — revoking the lease
 alongside it. The default `local` provider reports `isolated: false` and executes
 nothing; it never claims isolation it does not have.
 
+## One sandbox per phase, and who releases it
+
+A run holds **one sandbox at a time**, and the phase that creates it releases it.
+[`runCodingPhase`](../../scripts/dark-factory-runner.ts) creates the workspace
+tools, runs the phase and force-disposes the sandbox in a `finally` — so it goes on
+success, on a thrown error and on an early return, without the phase doing anything.
+The commit and the definition of done both sit **outside** that call, which means
+the DoD never runs inside the coding sandbox.
+
+`reapSandboxesByRun` is a second and weaker release: it runs at the *start* of a
+run, only under the opensandbox driver, and reclaims a sandbox a create-time client
+timeout left behind. It keys on the **run id**, so any sandbox a run opens later
+must carry that same run id — one under any other id is invisible to the reaper and
+becomes a leak with no safety net.
+
+Two consequences worth knowing:
+
+- A run resumed straight into its definition of done — the **verify-only re-entry**,
+  taken when a run was waiting on checks that may since have settled — has **no
+  sandbox at all**. It re-reads the checks and returns before the coding phase is
+  reached: nothing was reaped, and nothing ever existed.
+- A phase that must change code once the DoD has started therefore opens its **own**
+  sandbox, on the pull request's own branch, under the same run id. It is authored
+  and pushed from inside it, and prepared *before* the branch is committed to, since
+  `commitAndPushFromSandbox` resets the branch to the current HEAD. The reasoning is
+  in [a fix pass runs in its own sandbox](../../docs/adr/0093-a-fix-pass-runs-in-its-own-sandbox.md).
+
 ## Honest limits
 
 No live container isolation is exercised without an E2B/Modal key, so the default

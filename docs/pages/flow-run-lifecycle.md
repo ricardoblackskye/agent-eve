@@ -11,7 +11,7 @@ per-file detail; read this to see how the pieces hand off.
 A run begins with a **trigger** — a GitHub webhook (issue opened, PR updated,
 review requested) delivered to the API proxy and routed by
 [`agent/lib/dark-factory/trigger.ts`](../../agent/lib/dark-factory/trigger.ts).
-The trigger is normalised into a canonical event; the factory refuses anything it
+The trigger is normalized into a canonical event; the factory refuses anything it
 cannot map rather than guessing. Acceptance also runs the work through the
 [definition of done](../../agent/lib/dark-factory/definition-of-done.ts) and the
 plan validator before any worker is touched — a run that cannot be accepted is
@@ -67,6 +67,18 @@ budget, and the cross-task
 [circuit breaker](../../agent/lib/dark-factory/circuit-breaker.ts) caps how much a
 single PBI may cost before a human is pulled in. A tripped PBI stays halted, so no
 further minutes are counted. Self-correction is bounded, not infinite.
+
+Inside a run, the
+[definition of done](../../agent/lib/dark-factory/definition-of-done.ts) closes the
+loop on what the pull request's own checks say. It has to dispose of every finding
+those checks raise — fix the code, or accept the finding with a published reason —
+and [`fix-cycle.ts`](../../agent/lib/dark-factory/fix-cycle.ts) is what does it:
+re-authoring the affected files on the pull request's branch and pushing, or
+accepting with a reason the DoD will not let it omit. It carries **no budget of its
+own** — it is called once per review round, so the round budget that already exists
+*is* the budget — and it does not certify its own work, because the next round
+re-reads the checks and a fix that did not work comes straight back
+([ADR 0092](../../docs/adr/0092-a-fix-cycle-is-bounded-by-rounds.md)).
 
 ## 6. Outcome
 

@@ -46,7 +46,7 @@ Dark Factory — Architect Agent (#179). Pre-code planning agent that inspects t
 
 ## architect-prompt
 
-Dark Factory — the Architect's target contract (#381 R2 Task 8). The part of the planning prompt that says what may be targeted, as a pure function, because it is prompt BEHAVIOUR and prompt behaviour is testable. It exists because a line of prompt asked for "UI entrypoints under app/ or components/" whenever a story mentioned "page" — which is how a story about the main page of a Vite app produced targets called `src/components/Header.js` and `src/index.js` for a repository containing neither, while discovery had already proved which file the page is. The contract mandates the resolved page for a page-scoped story, names the shell and shared files as forbidden WITH the reason, requires every path to appear in the file list, and keeps `app/` + `components/` only as a fallback for when discovery resolved no page. Its forbidden list is capped, so it has a bounded cost against the prompt budget.
+Dark Factory — the Architect's target contract (#381 R2 Task 8). The part of the planning prompt that says what may be targeted, as a pure function, because it is prompt BEHAVIOUR and prompt behavior is testable. It exists because a line of prompt asked for "UI entrypoints under app/ or components/" whenever a story mentioned "page" — which is how a story about the main page of a Vite app produced targets called `src/components/Header.js` and `src/index.js` for a repository containing neither, while discovery had already proved which file the page is. The contract mandates the resolved page for a page-scoped story, names the shell and shared files as forbidden WITH the reason, requires every path to appear in the file list, and keeps `app/` + `components/` only as a fallback for when discovery resolved no page. Its forbidden list is capped, so it has a bounded cost against the prompt budget.
 
 **Source:** [`agent/lib/dark-factory/architect-prompt.ts`](../../agent/lib/dark-factory/architect-prompt.ts)
 
@@ -445,6 +445,24 @@ Dark Factory — the entry point (#163). WHAT IT DOES: takes the trigger's decis
 
 **Exports:** `DispatchIntent`, `EntryDeps`, `EntryResult`, `EntryStatus`, `LabelWriter`, `RunnerDecision`, `RunnerMode`, `buildIntent`, `renderHandoffMessage`, `resolveApiOrigin`, `resolveRunnerMode`, `runDarkFactoryDispatch`, `sanitizeIdentifier`, `toRunId`
 
+## fix-cycle
+
+Dark Factory - the Definition of Done's fix cycle (#718). Supplies
+`DefinitionOfDoneDeps.attemptFixes`, the seam the DoD gates its whole fix/disposition path on: a pass
+re-authors the affected files on the pull request's own branch and pushes them, and returns
+`resolved` for what it addressed. Deliberately port-injected, so the disposition rules are testable
+without a sandbox, a model or a network. A pass claims a resolution only when it authored files
+**and** pushed them; an `error`-severity finding can never be accepted (the DoD refuses that
+disposition itself); an acceptance always carries a reason; and one pass attempts a bounded number
+of findings. It has no budget of its own - it is called once per review round, so the round budget
+that already exists *is* the budget - and it does not certify its own work, because the next round
+re-reads the pull request's checks. See [ADR 0092](../../docs/adr/0092-a-fix-cycle-is-bounded-by-rounds.md)
+and [ADR 0093](../../docs/adr/0093-a-fix-pass-runs-in-its-own-sandbox.md).
+
+**Source:** [`agent/lib/dark-factory/fix-cycle.ts`](../../agent/lib/dark-factory/fix-cycle.ts)
+
+**Exports:** `AttemptFixes`, `DEFAULT_MAX_FINDINGS`, `FixAuthorResult`, `FixCyclePorts`, `FixRefusal`, `FixWorkspace`, `createFixCycle`
+
 ## governed-agent-call
 
 Dark Factory — a governed agent LLM call (#270). Wraps `runGovernedLlmCall` for an AGENT call site (the runner's Architect / Developer calls); on a refusal it records the code ON THE RUN and throws `CostRefusedError`. OPT-IN: with no governor the call runs unchanged.
@@ -485,7 +503,7 @@ Dark Factory — wiring hub (R1: #134, #138, #140 · R2: #135, #142). Single pla
 
 ## issue-writer
 
-Dark Factory — the GitHub primitives the orchestrator needs to speak on a ticket: post a comment, edit a comment, add a label, remove a label (#162). Why these live here rather than being called from the story provider: `backlog-provider.ts`'s `GitHubProvider` already does all four inline, but `BacklogProvider` exposes only `publish(payload)`. Refactoring merged, fail-closed story-publish code is not this issue's business, so the reporter gets its own small, token-injected set of primitives — and `backlog-provider` can adopt them later. Two behaviours are copied deliberately from `GitHubProvider` rather than rediscovered: - the token is resolved and used HERE, in the orchestrator's process; it is never passed to a worker task (#142); - removing a label that is already absent (404) is SUCCESS, not a warning, so a retry cannot pile up spurious errors.
+Dark Factory — the GitHub primitives the orchestrator needs to speak on a ticket: post a comment, edit a comment, add a label, remove a label (#162). Why these live here rather than being called from the story provider: `backlog-provider.ts`'s `GitHubProvider` already does all four inline, but `BacklogProvider` exposes only `publish(payload)`. Refactoring merged, fail-closed story-publish code is not this issue's business, so the reporter gets its own small, token-injected set of primitives — and `backlog-provider` can adopt them later. Two behaviors are copied deliberately from `GitHubProvider` rather than rediscovered: - the token is resolved and used HERE, in the orchestrator's process; it is never passed to a worker task (#142); - removing a label that is already absent (404) is SUCCESS, not a warning, so a retry cannot pile up spurious errors.
 
 **Source:** [`agent/lib/dark-factory/issue-writer.ts`](../../agent/lib/dark-factory/issue-writer.ts)
 
@@ -561,7 +579,7 @@ Dark Factory — drive notifications from the ledger (#317). Every write path in
 
 ## operator-cli
 
-Operator CLI for the self-improvement gate (#159). The gate in `self-improve.ts` blocks every `access-widening` proposal until a decision is recorded ("blocked: operator gate missing"), and NOTHING in the application records one: `createOperatorDecisionStore` is re-exported but never called outside its test. This module is therefore the only way the gate can be satisfied, which is why every rule below is fail-closed. Deliberately PURE: it takes an injected decision store and clock and returns `{ lines, exitCode }`. No `process`, no `console`, no filesystem — so the behaviour is provable in tests and identical wherever it is invoked.
+Operator CLI for the self-improvement gate (#159). The gate in `self-improve.ts` blocks every `access-widening` proposal until a decision is recorded ("blocked: operator gate missing"), and NOTHING in the application records one: `createOperatorDecisionStore` is re-exported but never called outside its test. This module is therefore the only way the gate can be satisfied, which is why every rule below is fail-closed. Deliberately PURE: it takes an injected decision store and clock and returns `{ lines, exitCode }`. No `process`, no `console`, no filesystem — so the behavior is provable in tests and identical wherever it is invoked.
 
 **Source:** [`agent/lib/dark-factory/operator-cli.ts`](../../agent/lib/dark-factory/operator-cli.ts)
 
@@ -823,7 +841,7 @@ Dark Factory — self-improvement PERSISTENCE adapters (#146, R4b). `self-improv
 
 ## self-improve
 
-Dark Factory — Measurable Recursive Self-Improvement (#146, R4a). One bounded, FAIL-CLOSED cycle: OBSERVE → read the aggregate metrics from #140 (never a parallel store) PROPOSE → a candidate change to a tunable surface + a written hypothesis APPLY → staged behind a versioned, reversible handle (never in place) MEASURE → re-run a fixed, deterministic benchmark set DECIDE → accept iff the objective improves and no guardrail regresses RECORD → append an immutable ledger entry {what, why, before → after, verdict} Every step is an injected interface, so no model, vendor or tool is named here. Reversibility and fail-closed verification are the whole point: an unverified self-improvement loop will happily improve itself into a regression. R4b adds the recurrence (cadence + trend report + operator CLI). SCAFFOLD: signatures are declared with real types so the test file collects; behaviour is implemented RED → GREEN per the plan's cycle table.
+Dark Factory — Measurable Recursive Self-Improvement (#146, R4a). One bounded, FAIL-CLOSED cycle: OBSERVE → read the aggregate metrics from #140 (never a parallel store) PROPOSE → a candidate change to a tunable surface + a written hypothesis APPLY → staged behind a versioned, reversible handle (never in place) MEASURE → re-run a fixed, deterministic benchmark set DECIDE → accept iff the objective improves and no guardrail regresses RECORD → append an immutable ledger entry {what, why, before → after, verdict} Every step is an injected interface, so no model, vendor or tool is named here. Reversibility and fail-closed verification are the whole point: an unverified self-improvement loop will happily improve itself into a regression. R4b adds the recurrence (cadence + trend report + operator CLI). SCAFFOLD: signatures are declared with real types so the test file collects; behavior is implemented RED → GREEN per the plan's cycle table.
 
 **Source:** [`agent/lib/dark-factory/self-improve.ts`](../../agent/lib/dark-factory/self-improve.ts)
 
@@ -925,7 +943,7 @@ Dark Factory — tenant usage report (#213, epic #212 R1). Operator-only, read-o
 
 ## tenant
 
-Dark Factory — canonical customer tenant model (#213, epic #212 R1). A tenant is a customer whose Dark Factory activity and measured LLM spend we attribute. The id is OPAQUE and STABLE: it is never the slug and never a repository name, so renaming either cannot break attribution. This module is the intake seam for untrusted identifiers. Repository slugs arrive from webhooks, so they are validated and normalised HERE, before they reach any canonical payload, log line, or dry-run provider.
+Dark Factory — canonical customer tenant model (#213, epic #212 R1). A tenant is a customer whose Dark Factory activity and measured LLM spend we attribute. The id is OPAQUE and STABLE: it is never the slug and never a repository name, so renaming either cannot break attribution. This module is the intake seam for untrusted identifiers. Repository slugs arrive from webhooks, so they are validated and normalized HERE, before they reach any canonical payload, log line, or dry-run provider.
 
 **Source:** [`agent/lib/dark-factory/tenant.ts`](../../agent/lib/dark-factory/tenant.ts)
 
