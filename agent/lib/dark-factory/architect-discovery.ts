@@ -25,6 +25,14 @@ export interface DiscoveredFile {
 }
 
 export interface DiscoveryInput {
+  /**
+   * Path aliases that name a location INSIDE this repository, e.g. `{ "@/": "src/" }` (#726).
+   *
+   * Declared by tsconfig `compilerOptions.paths` or a bundler's `resolve.alias`. Supplied by the caller
+   * rather than parsed here: the module already takes its filesystem access injected, and which config
+   * file holds the answer is not this module's business.
+   */
+  aliases?: Record<string, string>;
   /** The repository's files, as the runner lists them. */
   files: string[];
   /** Injected so discovery can be tested without a filesystem, and be bounded by the caller. */
@@ -82,25 +90,52 @@ function declaresRoutes(content: string): boolean {
   );
 }
 
-/** Relative import specifiers only: a bare package name says nothing about this repository. */
-function relativeImports(content: string): string[] {
+/**
+ * Whether a specifier names a path INSIDE this repository: a relative one, or a declared alias.
+ *
+ * A bare package name still says nothing about this repository - that rule stands. An alias is neither
+ * bare nor relative: `@/pages/X` is a path into this tree, named by the project's own config (#726).
+ */
+function isLocalSpecifier(specifier: string, aliases: Record<string, string> | undefined): boolean {
+  if (specifier.startsWith(".")) return true;
+  return Object.keys(aliases ?? {}).some((prefix) => specifier.startsWith(prefix));
+}
+
+/** Import specifiers that name something in this repository, relative or aliased. */
+function localImports(content: string, aliases: Record<string, string> | undefined): string[] {
   const out: string[] = [];
-  const re = /(?:from|import\s*\()\s*["'](\.[^"']+)["']/g;
-  for (const match of content.matchAll(re)) out.push(match[1]);
+  const re = /(?:from|import\s*\()\s*["']([^"']+)["']/g;
+  for (const match of content.matchAll(re)) {
+    if (isLocalSpecifier(match[1], aliases)) out.push(match[1]);
+  }
   return out;
 }
 
 /** Resolve a specifier against the importer, using the file list to infer the extension. */
-function resolveImport(importer: string, specifier: string, files: string[]): string | undefined {
-  const base = importer.split("/").slice(0, -1);
-  const parts = specifier.split("/");
-  const segments = [...base];
-  for (const part of parts) {
-    if (part === "." || part === "") continue;
-    if (part === "..") segments.pop();
-    else segments.push(part);
+function resolveImport(
+  importer: string,
+  specifier: string,
+  files: string[],
+  aliases?: Record<string, string>,
+): string | undefined {
+  let joined: string;
+  const alias = Object.entries(aliases ?? {}).find(([prefix]) => specifier.startsWith(prefix));
+  if (alias) {
+    // An alias names a repo-relative location, so the importer plays no part in resolving it.
+    joined = `${alias[1]}${specifier.slice(alias[0].length)}`.replace(/\/+$/, "");
+  } else if (specifier.startsWith(".")) {
+    const base = importer.split("/").slice(0, -1);
+    const parts = specifier.split("/");
+    const segments = [...base];
+    for (const part of parts) {
+      if (part === "." || part === "") continue;
+      if (part === "..") segments.pop();
+      else segments.push(part);
+    }
+    joined = segments.join("/");
+  } else {
+    return undefined;
   }
-  const joined = segments.join("/");
   const candidates = [
     joined,
     `${joined}.tsx`,
@@ -116,11 +151,17 @@ function resolveImport(importer: string, specifier: string, files: string[]): st
 }
 
 /** Local component name -> resolved file, from a file's own imports. */
-function namedImports(content: string, importer: string, files: string[]): Map<string, string> {
+function namedImports(
+  content: string,
+  importer: string,
+  files: string[],
+  aliases?: Record<string, string>,
+): Map<string, string> {
   const out = new Map<string, string>();
-  const re = /import\s+([A-Za-z0-9_$]+)\s*(?:,\s*\{[^}]*\})?\s*from\s*["'](\.[^"']+)["']/g;
+  const re = /import\s+([A-Za-z0-9_$]+)\s*(?:,\s*\{[^}]*\})?\s*from\s*["']([^"']+)["']/g;
   for (const match of content.matchAll(re)) {
-    const resolved = resolveImport(importer, match[2], files);
+    if (!isLocalSpecifier(match[2], aliases)) continue;
+    const resolved = resolveImport(importer, match[2], files, aliases);
     if (resolved) out.set(match[1], resolved);
   }
   return out;
@@ -136,6 +177,61 @@ function routeTable(content: string): Map<string, string> {
     if (component) out.set(match[1], component);
   }
   return out;
+}
+
+/**
+ * Whether a file DECLARES a component by this name, rather than importing it.
+ *
+ * A page can live in the route table's own file: an SPA commonly declares its home page as a function
+ * above the `<Routes>` block that renders it (#726). That page has no import to follow, and treating it
+ * as unresolvable is what parked a real run against a real repository.
+ */
+function declaresComponent(content: string, name: string): boolean {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return (
+    new RegExp(`\\bfunction\\s+${escaped}\\b`).test(content) ||
+    new RegExp(`\\b(?:const|let|var)\\s+${escaped}\\s*[:=]`).test(content) ||
+    new RegExp(`\\bclass\\s+${escaped}\\b`).test(content)
+  );
+}
+
+/**
+ * A repository path written in the story, e.g. `src/pages/BlogPostPage.ts`.
+ *
+ * A story is prose, so the extension may be wrong (`#12` wrote `.ts` for a `.tsx` file) - that is a
+ * typo, not a different file. The stem is what carries the meaning.
+ */
+const NAMED_PATH = /[\w.-]+(?:\/[\w.-]+)+\.[cm]?[jt]sx?/g;
+
+/**
+ * Resolve a repo-relative path the way a nameless import would be resolved (#726).
+ *
+ * The same candidates `resolveImport` tries, rooted at the repository instead of at an importer, because
+ * a path named in prose has no importing file to be relative to.
+ */
+function resolveRepoPath(path: string, files: string[]): string | undefined {
+  const base = path.replace(/\/+$/, "");
+  const stem = base.replace(/\.(?:[cm]?[jt]sx?)$/, "");
+  const candidates = [
+    base,
+    stem,
+    `${stem}.tsx`,
+    `${stem}.ts`,
+    `${stem}.jsx`,
+    `${stem}.js`,
+    `${stem}/index.tsx`,
+    `${stem}/index.ts`,
+  ];
+  return candidates.find((candidate) => files.includes(candidate));
+}
+
+/** The first path the story names that exists in this repository, if it names one. */
+function resolveNamedPath(storyText: string, files: string[]): string | undefined {
+  for (const candidate of storyText.match(NAMED_PATH) ?? []) {
+    const found = resolveRepoPath(candidate, files);
+    if (found) return found;
+  }
+  return undefined;
 }
 
 /** A test is not the route table, and not evidence of what a page is. */
@@ -177,7 +273,7 @@ function indexChildComponent(content: string, parentElement: string): string | u
 
 /** Discover the composition chain and file roles for the surface a story names. */
 export async function discoverArchitecture(input: DiscoveryInput): Promise<DiscoveryResult> {
-  const { files, readFile, story, maxInspectReads } = input;
+  const { files, readFile, story, maxInspectReads, aliases } = input;
 
   const ordered = files
     .filter((f) => SOURCE_FILE.test(f))
@@ -233,10 +329,16 @@ export async function discoverArchitecture(input: DiscoveryInput): Promise<Disco
   const pageForRoute = new Map<string, string>();
   if (routeFilePath) {
     const routeFileContent = contents.get(routeFilePath) ?? "";
-    const imports = namedImports(routeFileContent, routeFilePath, files);
+    const imports = namedImports(routeFileContent, routeFilePath, files, aliases);
     for (const [routePath, componentName] of routes) {
       let file = imports.get(componentName);
-      if (!file) continue;
+      if (!file) {
+        // A component DECLARED here is this file's own page (#726): the route renders a function defined
+        // in this very file, so the page's home is the route table's file. An IMPORTED component that did
+        // not resolve is a different case - a path alias, say - and is still skipped rather than guessed.
+        if (declaresComponent(routeFileContent, componentName)) file = routeFilePath;
+        else continue;
+      }
       // When a route renders a SHELL, the page is that shell's INDEX CHILD. Reporting the parent would name the
       // file rendered on every route - the exact wrong answer this whole feature exists to stop - and it would
       // also feed R2 a "page" that R2 is supposed to refuse.
@@ -265,7 +367,7 @@ export async function discoverArchitecture(input: DiscoveryInput): Promise<Disco
   // 4. Importers, so a component reached from more than one page can be called shared - with the pages named.
   const importedBy = new Map<string, string[]>();
   for (const [path, content] of contents) {
-    for (const specifier of relativeImports(content)) {
+    for (const specifier of localImports(content, aliases)) {
       const resolved = resolveImport(path, specifier, files);
       if (!resolved) continue;
       importedBy.set(resolved, [...new Set([...(importedBy.get(resolved) ?? []), path])]);
@@ -291,8 +393,11 @@ export async function discoverArchitecture(input: DiscoveryInput): Promise<Disco
     }
   }
 
-  // 5. The surface the story names: an explicit route path beats a word for the default surface.
+  // 5. The surface the story names. A path the story names outright beats everything: it needs no
+  // framework knowledge at all, and it is the one rule that works in a repository with no route table
+  // (#726). Then an explicit route path, then a word for the default surface.
   const storyText = `${story.title}\n${story.body}`;
+  const namedPage = resolveNamedPath(storyText, files);
   let route: string | undefined;
   const explicit = [...pageForRoute.keys()]
     .filter((candidate) => candidate !== "/" && storyText.includes(candidate))
@@ -301,7 +406,8 @@ export async function discoverArchitecture(input: DiscoveryInput): Promise<Disco
   else if (DEFAULT_SURFACE_WORDS.test(storyText) && pageForRoute.has("/")) route = "/";
   else if ([...pageForRoute.keys()].length === 1) route = [...pageForRoute.keys()][0];
 
-  const page = route !== undefined ? pageForRoute.get(route) : undefined;
+  const page =
+    namedPage ?? (route !== undefined ? pageForRoute.get(route) : undefined);
 
   // 6. The chain: route -> page -> the components that page composes, in import order.
   const chain: DiscoveredFile[] = [];
@@ -311,8 +417,8 @@ export async function discoverArchitecture(input: DiscoveryInput): Promise<Disco
     if (entry) chain.push(entry);
   }
   if (page) {
-    for (const specifier of relativeImports(contents.get(page) ?? "")) {
-      const resolved = resolveImport(page, specifier, files);
+    for (const specifier of localImports(contents.get(page) ?? "", aliases)) {
+      const resolved = resolveImport(page, specifier, files, aliases);
       const entry = resolved ? classified.get(resolved) : undefined;
       if (entry) chain.push(entry);
     }
