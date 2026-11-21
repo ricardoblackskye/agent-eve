@@ -180,6 +180,28 @@ export interface LoopResult {
  * failure of the developer's work (#541, #559). The loop classifies it; the caller decides what
  * to record, because the loop is pure and owns no store or reporter.
  */
+/**
+ * The suites a single loop iteration's gate actually covered (#701).
+ *
+ * `ran` is what the iteration executed; `notRun` is what the TARGET declares and this iteration did not
+ * execute. The second list is the whole point: a bare `PASS` reads as "this work is verified" while the
+ * e2e suite was never run, and a reader has no way to tell.
+ */
+export interface GateSuites {
+  ran: string[];
+  notRun: string[];
+}
+
+/**
+ * The loop's verdict for one iteration, naming the suites it ran and the ones it did not (#701).
+ *
+ * Deliberately a pure function: the runner composes the log line, and the wording is pinned by tests
+ * rather than by reading prose at a call site.
+ */
+export function formatTestVerdict(passed: boolean, suites: GateSuites): string {
+  throw new Error("not implemented");
+}
+
 export interface UnmeasuredIteration {
   /** 1-based iteration index, matching `LoopContext.iteration`. */
   iteration: number;
