@@ -221,7 +221,7 @@ describe("#701 resolveE2eCommand", () => {
     expect(resolveE2eCommand(undefined)).toEqual([]);
   });
 
-  it("ignores a non-string script rather than stringifying it", () => {
+  it("ignores a non-string script instead of running it", () => {
     expect(resolveE2eCommand({ scripts: { e2e: 123 } })).toEqual([]);
     expect(resolveE2eCommand({ scripts: { "test:e2e": { command: "playwright" } } })).toEqual([]);
   });

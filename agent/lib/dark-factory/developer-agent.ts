@@ -640,6 +640,26 @@ export function resolveLintCommands(packageJson: unknown): string[] {
     .map((name) => `npm run ${name}`);
 }
 
+/**
+ * The e2e command a target declares, from its own package.json scripts (#701).
+ *
+ * Same stance as `resolveLintCommands` above: an absent or unreadable package.json resolves to NOTHING,
+ * and "this target declares no e2e" must never be reported as "the e2e passed".
+ *
+ * `test:e2e` is checked as well as `e2e` because that is what WebFeedPOC actually declares - a resolver
+ * that only looked for the shorter name would conclude, wrongly, that the target has no e2e suite at all.
+ * The FIRST match wins, so a target declaring both does not pay for two browser suites.
+ */
+export function resolveE2eCommand(packageJson: unknown): string[] {
+  const scripts = (packageJson as { scripts?: unknown } | null)?.scripts;
+  if (typeof scripts !== "object" || scripts === null) return [];
+  const named = scripts as Record<string, unknown>;
+  const declared = ["e2e", "test:e2e"].find(
+    (name) => typeof named[name] === "string",
+  );
+  return declared === undefined ? [] : [`npm run ${declared}`];
+}
+
 export const ALLOWED_WORKSPACE_EXTENSIONS: ReadonlySet<string> = new Set([
   ".ts",
   ".tsx",
