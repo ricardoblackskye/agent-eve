@@ -198,6 +198,28 @@ export interface GateSuites {
  * Deliberately a pure function: the runner composes the log line, and the wording is pinned by tests
  * rather than by reading prose at a call site.
  */
+/** What happened when the loop tried to run the target's declared e2e suite (#701). */
+export interface E2eOutcome {
+  /** `not-run` means the command could not start - it is not a verdict on the developer's work. */
+  status: "passed" | "failed" | "not-run";
+  output: string;
+}
+
+/**
+ * Run the target's declared e2e suite, if it declares one, and classify the result (#701).
+ *
+ * Extracted from the runner's iteration worker so it is testable with an injected command runner - no
+ * sandbox, no browsers. The classification matters more than the run: a suite that could not START is
+ * `not-run`, exactly as `#541` refuses to blame an unmeasured iteration on the developer's code.
+ */
+export async function runDeclaredE2e(deps: {
+  runTests: WorkspaceTools["runTests"];
+  command: string | undefined;
+  allowedCommands: readonly string[];
+}): Promise<E2eOutcome> {
+  throw new Error("not implemented");
+}
+
 export function formatTestVerdict(passed: boolean, suites: GateSuites): string {
   const ran = suites.ran.length > 0 ? ` (${suites.ran.join(", ")})` : "";
   const notRun =
