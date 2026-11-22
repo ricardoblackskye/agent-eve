@@ -262,7 +262,7 @@ export function classifyE2eFailure(output: string): "failed" | "environment" {
 
 export interface E2eOutcome {
   /** `not-run` means the command could not start - it is not a verdict on the developer's work. */
-  status: "passed" | "failed" | "not-run" | "environment";
+  status: "passed" | "failed" | "not-run" | "environment" | "deferred";
   output: string;
 }
 
@@ -298,10 +298,15 @@ export async function runDeclaredE2e(deps: {
  */
 export function decideGate(
   unitPassed: boolean,
-  e2eStatus: E2eOutcome["status"],
+  e2eStatus?: E2eOutcome["status"],
 ): { gatePassed: boolean; environmentFault: boolean } {
   const environmentFault = e2eStatus === "environment";
-  const gatePassed = unitPassed && (e2eStatus === "passed" || e2eStatus === "not-run");
+  const gatePassed =
+    unitPassed &&
+    (e2eStatus === undefined ||
+      e2eStatus === "passed" ||
+      e2eStatus === "not-run" ||
+      e2eStatus === "deferred");
   return { gatePassed, environmentFault };
 }
 
@@ -313,6 +318,10 @@ export function formatTestVerdict(
   const ran = suites.ran.length > 0 ? ` (${suites.ran.join(", ")})` : "";
   const notRun =
     suites.notRun.length > 0 ? ` - NOT run: ${suites.notRun.join(", ")}` : "";
+  // #739: the declared e2e is not a gap - it runs on the pull request, where the DoD reads it.
+  if (e2eStatus === "deferred") {
+    return `${passed ? "PASS" : "FAIL"}${ran} - e2e deferred to the PR's checks${notRun}`;
+  }
   // #731: the run still FAILS and must not open a pull request, but the reason is named: "the suite
   // failed" and "the sandbox could not run the suite" call for different reactions from the loop.
   if (!passed && e2eStatus === "environment" && suites.ran.length > 0) {

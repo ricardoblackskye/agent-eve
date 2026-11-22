@@ -20,7 +20,7 @@ describe("#739 the e2e leaves the sandbox", () => {
   });
 
   it("names the e2e as DEFERRED, not as a missing suite", () => {
-    const verdict = formatTestVerdict(true, { ran: ["unit"] }, "deferred");
+    const verdict = formatTestVerdict(true, { ran: ["unit"], notRun: [] }, "deferred");
     expect(verdict).toContain("deferred");
     expect(verdict).toMatch(/PR/);
     // "NOT run" would make a deliberate deferral indistinguishable from a gap in coverage.
@@ -28,7 +28,7 @@ describe("#739 the e2e leaves the sandbox", () => {
   });
 
   it("still reports a failed unit run as a failure", () => {
-    const verdict = formatTestVerdict(false, { ran: ["unit"] }, "deferred");
+    const verdict = formatTestVerdict(false, { ran: ["unit"], notRun: [] }, "deferred");
     expect(verdict).toContain("FAIL");
   });
 });
