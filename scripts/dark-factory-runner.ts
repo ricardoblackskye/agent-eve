@@ -1524,6 +1524,7 @@ async function main(): Promise<void> {
             // self-correction (a failing iteration that reproduces the previous failing artefact).
             return {
               passed: gatePassed,
+              ...(environmentFault ? { environmentFault: true } : {}),
               // #731: an environment fault is not for the model to fix, so it
               // is given no feedback - the next iteration would author the same artefact.
               output: environmentFault ? "" : gateOutput,

@@ -157,6 +157,12 @@ export interface WorkerResult {
    * compare, and the loop keeps its previous behaviour.
    */
   artefactHash?: string;
+  /**
+   * True when the suite RAN and failed because the sandbox could not run it (#731): a missing browser
+   * or toolchain. Unlike `unmeasured` the result is measured, and unlike an ordinary failure there is
+   * nothing for the model to fix, so the loop stops instead of spending its budget on the image.
+   */
+  environmentFault?: boolean;
 }
 
 /** A single coding iteration step (e.g. write code + run tests in a sandbox). */
@@ -172,7 +178,7 @@ export interface LoopResult {
    * cap). "no-op-self-correction" means a failing iteration reproduced the previous failing artefact, so
    * further iterations were guaranteed to fail the same way.
    */
-  stopReason?: "no-op-self-correction";
+  stopReason?: "no-op-self-correction" | "environment-fault";
 }
 
 /**
@@ -353,6 +359,7 @@ export async function runCodingLoop(
 ): Promise<LoopResult> {
   let iterations = 0;
   let passed = false;
+  let stopReason: LoopResult["stopReason"];
 
   for (let attempt = 1; attempt <= opts.maxIterations; attempt++) {
     iterations = attempt;
@@ -368,6 +375,13 @@ export async function runCodingLoop(
         ...(result.output !== undefined ? { output: result.output } : {}),
       });
     }
+    // #731: an environment fault is not correctable by authoring code, so no further iteration can
+    // succeed. Measured on a real run: without this the loop spent 62 worker-minutes and three full
+    // e2e runs on an image that carried no browsers.
+    if (!passed && result.environmentFault === true) {
+      stopReason = "environment-fault";
+      break;
+    }
     if (passed) break;
   }
 
@@ -376,7 +390,12 @@ export async function runCodingLoop(
   // two numbers can then never drift apart.
   const fixCycles = passed ? iterations - 1 : iterations;
 
-  return { status: passed ? "success" : "failed", iterations, fixCycles };
+  return {
+    status: passed ? "success" : "failed",
+    iterations,
+    fixCycles,
+    ...(stopReason ? { stopReason } : {}),
+  };
 }
 
 /**
