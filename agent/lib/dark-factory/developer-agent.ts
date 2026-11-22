@@ -199,6 +199,61 @@ export interface GateSuites {
  * rather than by reading prose at a call site.
  */
 /** What happened when the loop tried to run the target's declared e2e suite (#701). */
+/**
+ * Patterns that name a MISSING TOOL rather than a broken assertion (#731).
+ *
+ * Deliberately a short, explicit, reviewable list: the whole safety of `classifyE2eFailure` rests on
+ * condition 3, so a reviewer must be able to read every pattern in one place. Nothing framework-specific
+ * appears here - the factory does not know which runner produced the output.
+ */
+export const ENVIRONMENT_FAULT_PATTERNS: readonly RegExp[] = [
+  /Executable doesn't exist/i,
+  /command not found/i,
+  /cannot execute binary file/i,
+  /error while loading shared libraries/i,
+  /No such file or directory/i,
+  /EACCES: permission denied/,
+];
+
+/** The fewest failures that can constitute a shape; one failure is a test, not a pattern. */
+const MIN_ENVIRONMENT_FAULT_FAILURES = 3;
+
+/**
+ * Classify a failing suite's own output as a code fault or an environment fault (#731).
+ *
+ * ALL THREE must hold, and the conjunction is the point:
+ *   1. at least 3 failure entries;
+ *   2. every entry's error text is byte-identical - real breakage varies per test;
+ *   3. that text names a missing tool (see ENVIRONMENT_FAULT_PATTERNS).
+ *
+ * Condition 3 is what stops a broken SHARED IMPORT - which fails everything with identical text and is
+ * genuinely the developer's bug - from being excused as the image's fault.
+ *
+ * Fail-closed by design: a false `failed` costs one loop iteration, while a false `environment` would
+ * let a red suite reach a pull request. Every uncertain case returns `failed`.
+ */
+export function classifyE2eFailure(output: string): "failed" | "environment" {
+  if (output.trim() === "") return "failed";
+
+  const lines = output.split(/\r?\n/);
+  const errors: string[] = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    if (/^\s*Error:\s/.test(lines[i])) {
+      // The error line plus its continuation: a launch failure names the missing binary on the next line.
+      // Only a real continuation counts. A suite that prints one line per failure puts the NEXT entry's
+      // header here ("  7) spec.ts > ..."), which is not part of this failure's text - treating it as such
+      // made every entry look unique and defeated the identical-text condition.
+      const next = (lines[i + 1] ?? "").trim();
+      const continuation = /^\s*\d+\)/.test(next) ? "" : next;
+      errors.push(`${lines[i].trim()}\n${continuation}`);
+    }
+  }
+
+  if (errors.length < MIN_ENVIRONMENT_FAULT_FAILURES) return "failed";
+  if (new Set(errors).size !== 1) return "failed";
+  return ENVIRONMENT_FAULT_PATTERNS.some((pattern) => pattern.test(errors[0])) ? "environment" : "failed";
+}
+
 export interface E2eOutcome {
   /** `not-run` means the command could not start - it is not a verdict on the developer's work. */
   status: "passed" | "failed" | "not-run";
