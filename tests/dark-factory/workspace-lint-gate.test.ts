@@ -20,6 +20,7 @@ import {
   checkSetSummary,
   isAllowedWorkspaceCommand,
   LINT_COMMAND_PREFIXES,
+  resolveE2eCommand,
   resolveLintCommands,
   workspaceCommandsFor,
 } from "../../agent/lib/dark-factory/developer-agent";
@@ -178,5 +179,57 @@ describe("#674 the loop's log names every declared check", () => {
     );
     expect(src).not.toMatch(/if \(!lint\.ran\)\s*continue;/);
     expect(src).toMatch(/checkOutcomeLines\(/);
+  });
+});
+
+/**
+ * #701 - the target's own e2e script, resolved the way its lint commands already are.
+ *
+ * The coding loop verifies with the target's UNIT tests and then reports PASS, which is read as "this
+ * work is verified" while the e2e suite is never run. Resolving the command is the first step: nothing
+ * downstream can say whether an e2e was expected without knowing what it would have been.
+ *
+ * Same stance as `resolveLintCommands`: an absent or unreadable package.json resolves to NOTHING, and
+ * "this target declares no e2e" must never be reported as "the e2e passed".
+ */
+describe("#701 resolveE2eCommand", () => {
+  it("resolves the target's e2e script", () => {
+    expect(resolveE2eCommand({ scripts: { e2e: "playwright test" } })).toEqual([
+      "npm run e2e",
+    ]);
+  });
+
+  it("resolves test:e2e, which is what WebFeedPOC actually declares", () => {
+    // Measured in the sandbox image: WebFeedPOC's package.json has "test:e2e" and no "e2e" at all,
+    // so a resolver that only looked for "e2e" would conclude this target has no e2e suite.
+    expect(
+      resolveE2eCommand({ scripts: { "test:e2e": "playwright test --config playwright.config.cjs" } }),
+    ).toEqual(["npm run test:e2e"]);
+  });
+
+  it("prefers e2e when a target declares both, rather than running two suites", () => {
+    expect(
+      resolveE2eCommand({ scripts: { e2e: "playwright test", "test:e2e": "playwright test" } }),
+    ).toEqual(["npm run e2e"]);
+  });
+
+  it("resolves to nothing when the target declares no e2e, whatever its shape", () => {
+    expect(resolveE2eCommand({ scripts: { dev: "vite", build: "vite build" } })).toEqual([]);
+    expect(resolveE2eCommand({})).toEqual([]);
+    expect(resolveE2eCommand(null)).toEqual([]);
+    expect(resolveE2eCommand("not a package.json")).toEqual([]);
+    expect(resolveE2eCommand(undefined)).toEqual([]);
+  });
+
+  it("ignores a non-string script instead of running it", () => {
+    expect(resolveE2eCommand({ scripts: { e2e: 123 } })).toEqual([]);
+    expect(resolveE2eCommand({ scripts: { "test:e2e": { command: "playwright" } } })).toEqual([]);
+  });
+
+  it("produces a command the workspace allow-list accepts", () => {
+    // The gate is useless if the command it resolves is refused when the loop tries to run it.
+    const [command] = resolveE2eCommand({ scripts: { "test:e2e": "playwright test" } });
+    expect(command).toBeDefined();
+    expect(isAllowedWorkspaceCommand(command, [command])).toBe(true);
   });
 });

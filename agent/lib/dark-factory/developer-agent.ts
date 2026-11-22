@@ -180,6 +180,56 @@ export interface LoopResult {
  * failure of the developer's work (#541, #559). The loop classifies it; the caller decides what
  * to record, because the loop is pure and owns no store or reporter.
  */
+/**
+ * The suites a single loop iteration's gate actually covered (#701).
+ *
+ * `ran` is what the iteration executed; `notRun` is what the TARGET declares and this iteration did not
+ * execute. The second list is the whole point: a bare `PASS` reads as "this work is verified" while the
+ * e2e suite was never run, and a reader has no way to tell.
+ */
+export interface GateSuites {
+  ran: string[];
+  notRun: string[];
+}
+
+/**
+ * The loop's verdict for one iteration, naming the suites it ran and the ones it did not (#701).
+ *
+ * Deliberately a pure function: the runner composes the log line, and the wording is pinned by tests
+ * rather than by reading prose at a call site.
+ */
+/** What happened when the loop tried to run the target's declared e2e suite (#701). */
+export interface E2eOutcome {
+  /** `not-run` means the command could not start - it is not a verdict on the developer's work. */
+  status: "passed" | "failed" | "not-run";
+  output: string;
+}
+
+/**
+ * Run the target's declared e2e suite, if it declares one, and classify the result (#701).
+ *
+ * Extracted from the runner's iteration worker so it is testable with an injected command runner - no
+ * sandbox, no browsers. The classification matters more than the run: a suite that could not START is
+ * `not-run`, exactly as `#541` refuses to blame an unmeasured iteration on the developer's code.
+ */
+export async function runDeclaredE2e(deps: {
+  runTests: WorkspaceTools["runTests"];
+  command: string | undefined;
+  allowedCommands: readonly string[];
+}): Promise<E2eOutcome> {
+  if (!deps.command) return { status: "not-run", output: "" };
+  const res = await deps.runTests(deps.command, { allowedCommands: deps.allowedCommands });
+  if (!res.ran) return { status: "not-run", output: res.output };
+  return { status: res.passed ? "passed" : "failed", output: res.output };
+}
+
+export function formatTestVerdict(passed: boolean, suites: GateSuites): string {
+  const ran = suites.ran.length > 0 ? ` (${suites.ran.join(", ")})` : "";
+  const notRun =
+    suites.notRun.length > 0 ? ` - NOT run: ${suites.notRun.join(", ")}` : "";
+  return `${passed ? "PASS" : "FAIL"}${ran}${notRun}`;
+}
+
 export interface UnmeasuredIteration {
   /** 1-based iteration index, matching `LoopContext.iteration`. */
   iteration: number;
@@ -638,6 +688,26 @@ export function resolveLintCommands(packageJson: unknown): string[] {
   return ["lint", "typecheck"]
     .filter((name) => typeof named[name] === "string")
     .map((name) => `npm run ${name}`);
+}
+
+/**
+ * The e2e command a target declares, from its own package.json scripts (#701).
+ *
+ * Same stance as `resolveLintCommands` above: an absent or unreadable package.json resolves to NOTHING,
+ * and "this target declares no e2e" must never be reported as "the e2e passed".
+ *
+ * `test:e2e` is checked as well as `e2e` because that is what WebFeedPOC actually declares - a resolver
+ * that only looked for the shorter name would conclude, wrongly, that the target has no e2e suite at all.
+ * The FIRST match wins, so a target declaring both does not pay for two browser suites.
+ */
+export function resolveE2eCommand(packageJson: unknown): string[] {
+  const scripts = (packageJson as { scripts?: unknown } | null)?.scripts;
+  if (typeof scripts !== "object" || scripts === null) return [];
+  const named = scripts as Record<string, unknown>;
+  const declared = ["e2e", "test:e2e"].find(
+    (name) => typeof named[name] === "string",
+  );
+  return declared === undefined ? [] : [`npm run ${declared}`];
 }
 
 export const ALLOWED_WORKSPACE_EXTENSIONS: ReadonlySet<string> = new Set([
