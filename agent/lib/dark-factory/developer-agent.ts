@@ -281,6 +281,24 @@ export async function runDeclaredE2e(deps: {
   };
 }
 
+/**
+ * Decide the gate from the unit result and the e2e outcome (#731).
+ *
+ * `environment` must NOT pass: the suite could not run, so the work is unverified and the run must not
+ * open a pull request. It is returned as its own flag because the loop's reaction differs - there is
+ * nothing for the model to fix, so no failure feedback is handed to the next iteration.
+ *
+ * `not-run` DOES pass, preserving #541: a suite that could not start is not a verdict on the code.
+ */
+export function decideGate(
+  unitPassed: boolean,
+  e2eStatus: E2eOutcome["status"],
+): { gatePassed: boolean; environmentFault: boolean } {
+  const environmentFault = e2eStatus === "environment";
+  const gatePassed = unitPassed && (e2eStatus === "passed" || e2eStatus === "not-run");
+  return { gatePassed, environmentFault };
+}
+
 export function formatTestVerdict(
   passed: boolean,
   suites: GateSuites,
