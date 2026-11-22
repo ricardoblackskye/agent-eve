@@ -1,8 +1,9 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import {
   classifyE2eFailure,
   decideGate,
-  runCodingLoop,
+  runMultiFileCodingLoop,
   formatTestVerdict,
   runDeclaredE2e,
 } from "../../agent/lib/dark-factory/developer-agent";
@@ -136,8 +137,10 @@ describe("#731 the gate decision", () => {
 describe("#731 the loop halts on an environment fault", () => {
   it("stops after ONE iteration when the sandbox could not run the suite", async () => {
     let calls = 0;
-    const outcome = await runCodingLoop({
+    const outcome = await runMultiFileCodingLoop({
       maxIterations: 10,
+      plan: {} as never,
+      tools: {} as never,
       worker: async () => {
         calls += 1;
         return { passed: false, environmentFault: true, output: "664 identical launch failures" };
@@ -153,8 +156,10 @@ describe("#731 the loop halts on an environment fault", () => {
 
   it("CONTROL: an ordinary failure still iterates to the cap", async () => {
     let calls = 0;
-    const outcome = await runCodingLoop({
+    const outcome = await runMultiFileCodingLoop({
       maxIterations: 3,
+      plan: {} as never,
+      tools: {} as never,
       worker: async () => {
         calls += 1;
         return { passed: false, output: "expected A to be B" };
@@ -164,5 +169,23 @@ describe("#731 the loop halts on an environment fault", () => {
     expect(calls).toBe(3);
     expect(outcome.status).toBe("failed");
     expect(outcome.stopReason).toBeUndefined();
+  });
+});
+
+describe("#731 the halt is in the loop the RUNNER drives", () => {
+  it("wires the halt into runMultiFileCodingLoop, not merely into some loop", () => {
+    const dev = readFileSync(
+      new URL("../../agent/lib/dark-factory/developer-agent.ts", import.meta.url),
+      "utf8",
+    );
+    const runnerSrc = readFileSync(
+      new URL("../../scripts/dark-factory-runner.ts", import.meta.url),
+      "utf8",
+    );
+
+    // The runner's entry point: if this changes, the halt must move with it.
+    expect(runnerSrc).toContain("runMultiFileCodingLoop({");
+    // The halt keys off THAT loop's worker result (`res`), so it can only be satisfied inside it.
+    expect(dev).toContain("res.environmentFault === true");
   });
 });
