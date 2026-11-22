@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   classifyE2eFailure,
+  decideGate,
   formatTestVerdict,
   runDeclaredE2e,
 } from "../../agent/lib/dark-factory/developer-agent";
@@ -106,5 +107,27 @@ describe("#731 the verdict names the reason", () => {
 
   it("leaves an ordinary code failure's wording unchanged", () => {
     expect(formatTestVerdict(false, { ran: ["unit", "e2e"], notRun: [] })).toBe("FAIL (unit, e2e)");
+  });
+});
+
+describe("#731 the gate decision", () => {
+  it("an environment fault CANNOT pass the gate - it must not open a PR", () => {
+    expect(decideGate(true, "environment")).toEqual({ gatePassed: false, environmentFault: true });
+  });
+
+  it("a genuine failure cannot pass it either, and is not flagged as environmental", () => {
+    expect(decideGate(true, "failed")).toEqual({ gatePassed: false, environmentFault: false });
+  });
+
+  it("a suite that could not start does not block a unit-only pass (#541)", () => {
+    expect(decideGate(true, "not-run")).toEqual({ gatePassed: true, environmentFault: false });
+  });
+
+  it("a passing suite passes", () => {
+    expect(decideGate(true, "passed")).toEqual({ gatePassed: true, environmentFault: false });
+  });
+
+  it("a failing unit suite blocks regardless of the e2e", () => {
+    expect(decideGate(false, "passed").gatePassed).toBe(false);
   });
 });
