@@ -1256,6 +1256,14 @@ export async function runMultiFileCodingLoop(
       stopReason = "no-op-self-correction";
       break;
     }
+    // #731: an environment fault cannot be corrected by authoring code, so no further iteration can
+    // succeed. Measured live: without this the loop spent 62 worker-minutes and three e2e runs on an
+    // image carrying no browsers. That attempt put the halt in runCodingLoop, which the runner never
+    // calls - the wiring guard in the tests now pins the loop that actually runs.
+    if (!res.passed && res.environmentFault === true) {
+      stopReason = "environment-fault";
+      break;
+    }
   }
 
   // Cooperative control check after the final worker call: a Stop (or Pause)
