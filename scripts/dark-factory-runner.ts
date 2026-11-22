@@ -75,7 +75,6 @@ import {
   decideGate,
   formatTestVerdict,
   resolveE2eCommand,
-  runDeclaredE2e,
   resolveLintCommands,
   CircuitTrippedError,
   DeveloperAgent,
@@ -1351,15 +1350,6 @@ async function main(): Promise<void> {
         // #701: the target's own e2e suite, resolved from the same manifest. The loop does not RUN it, and
         // saying so is the point: a bare `PASS` otherwise reads as "this work is verified" while the e2e has
         // never executed - which is how a PR opens green-by-the-loop and red in CI.
-        const declaredE2eCommands = await (async (): Promise<string[]> => {
-          try {
-            return resolveE2eCommand(
-              JSON.parse(await workspaceTools.readFile("package.json")),
-            );
-          } catch {
-            return [];
-          }
-        })();
 
         const loopOutcome = await runMultiFileCodingLoop({
           plan: executionPlan,
@@ -1452,23 +1442,17 @@ async function main(): Promise<void> {
             // set is stated at the call site (#437): the loop does not widen its own blast radius. A suite
             // that cannot START is unmeasured - not a verdict on authored code - so only an actual FAILURE
             // changes the gate.
-            const e2e = await runDeclaredE2e({
-              runTests: ctx.tools.runTests.bind(ctx.tools),
-              command: declaredE2eCommands[0],
-              allowedCommands: workspaceCommandsFor(declaredE2eCommands),
-            });
-            const { gatePassed, environmentFault } = decideGate(testOutcome.passed, e2e.status);
-            const gateOutput =
-              e2e.status === "failed" && e2e.output
-                ? `${testOutcome.output}\n\n[e2e] ${e2e.output}`
-                : testOutcome.output;
+            // #739: the target's declared e2e is NOT run here. It runs on the pull request,
+            // where the DoD reads the target's own checks - so the gate is the unit tier alone.
+            const { gatePassed, environmentFault } = decideGate(testOutcome.passed);
+            const gateOutput = testOutcome.output;
 
             console.log(
               `     Test result: ${formatTestVerdict(gatePassed, {
-                ran: e2e.status === "not-run" ? ["unit"] : ["unit", "e2e"],
+                ran: ["unit"],
                 notRun:
-                  e2e.status === "not-run" && declaredE2eCommands.length > 0 ? ["e2e"] : [],
-              }, e2e.status)}`,
+                  [],
+              }, "deferred")}`,
             );
 
             // #651: the failure the model must act on used to be discarded here, so a run could fail

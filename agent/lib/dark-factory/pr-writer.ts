@@ -128,6 +128,8 @@ export class GitHubPrWriter {
           body: JSON.stringify({
             title: options.title,
             head: options.head,
+            // #739: draft - the target's e2e is still running, so this is not a merge proposal.
+            draft: true,
             base,
             body,
           }),

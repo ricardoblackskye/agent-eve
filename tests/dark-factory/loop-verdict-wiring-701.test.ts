@@ -22,19 +22,23 @@ describe("#701 the runner's verdict is wired to the target's own declaration", (
   });
 
   it("derives the not-run list from the target's declared e2e command", () => {
-    expect(runner).toContain("resolveE2eCommand(");
+    // #739: resolution moved with the run - it now feeds the PR's checks, not the sandbox.
+    expect(runner).not.toContain("resolveE2eCommand(");
     // The not-run list must still DERIVE from the target's declaration, whatever shape the expression
     // takes - assert the intent, not an exact spelling that a legitimate change would break.
-    expect(runner).toMatch(/notRun:[\s\S]{0,140}declaredE2eCommands/);
+    // #739: the declared e2e is no longer a sandbox suite - it runs on the PR.
+    expect(runner).not.toContain("declaredE2eCommands");
   });
 });
 
 describe("#701 the e2e attempt is wired, not just available", () => {
   it("runs the declared suite and folds the result into the iteration's gate", () => {
-    expect(runner).toContain("runDeclaredE2e({");
+    // #739: the sandbox no longer runs the declared e2e - it runs on the pull request,
+    // where the DoD reads the target's own checks.
+    expect(runner).not.toContain("runDeclaredE2e");
     // #731: the composition moved into decideGate, which returns BOTH the gate and the environment flag.
     // Asserted as the intent - both inputs feed the decision - not as the old spelling.
-    expect(runner).toContain("decideGate(testOutcome.passed, e2e.status)");
+    expect(runner).toContain("decideGate(testOutcome.passed)");
     // The worker reports the COMBINED gate, not the unit outcome alone.
     expect(runner).toContain("passed: gatePassed,");
     expect(runner).not.toContain("passed: testOutcome.passed,");
