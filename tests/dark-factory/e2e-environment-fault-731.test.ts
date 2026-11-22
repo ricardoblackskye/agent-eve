@@ -1,5 +1,9 @@
-import { describe, expect, it } from "vitest";
-import { classifyE2eFailure } from "../../agent/lib/dark-factory/developer-agent";
+import { describe, expect, it, vi } from "vitest";
+import {
+  classifyE2eFailure,
+  formatTestVerdict,
+  runDeclaredE2e,
+} from "../../agent/lib/dark-factory/developer-agent";
 
 /**
  * #731 — a suite that failed because the SANDBOX could not run it must not be read as broken code.
@@ -66,5 +70,41 @@ describe("#731 classifying an e2e failure", () => {
 
   it("CONTROL: empty output is not an environment fault", () => {
     expect(classifyE2eFailure("")).toBe("failed");
+  });
+});
+
+describe("#731 the outcome the loop consumes", () => {
+  const ALLOWED = ["npm test", "npm run test:e2e"];
+  const stubbed = (output: string) =>
+    vi.fn().mockResolvedValue({ passed: false, output, ran: true });
+
+  it("maps an image-shaped failure to `environment`, not to `failed`", async () => {
+    const outcome = await runDeclaredE2e({
+      runTests: stubbed(launchBurst),
+      command: "npm run test:e2e",
+      allowedCommands: ALLOWED,
+    });
+    expect(outcome.status).toBe("environment");
+    expect(outcome.output).toContain("browserType.launch");
+  });
+
+  it("still reports `failed` for a genuine code failure", async () => {
+    const outcome = await runDeclaredE2e({
+      runTests: stubbed("  1) a.spec.ts\n    Error: expected 'A' to be 'B'"),
+      command: "npm run test:e2e",
+      allowedCommands: ALLOWED,
+    });
+    expect(outcome.status).toBe("failed");
+  });
+});
+
+describe("#731 the verdict names the reason", () => {
+  it("says the sandbox could not run the suite, and still says FAIL", () => {
+    const verdict = formatTestVerdict(false, { ran: ["unit", "e2e"], notRun: [] }, "environment");
+    expect(verdict).toBe("FAIL (unit, e2e: the sandbox could not run it)");
+  });
+
+  it("leaves an ordinary code failure's wording unchanged", () => {
+    expect(formatTestVerdict(false, { ran: ["unit", "e2e"], notRun: [] })).toBe("FAIL (unit, e2e)");
   });
 });
