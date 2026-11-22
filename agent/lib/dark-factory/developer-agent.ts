@@ -256,7 +256,7 @@ export function classifyE2eFailure(output: string): "failed" | "environment" {
 
 export interface E2eOutcome {
   /** `not-run` means the command could not start - it is not a verdict on the developer's work. */
-  status: "passed" | "failed" | "not-run";
+  status: "passed" | "failed" | "not-run" | "environment";
   output: string;
 }
 
@@ -275,13 +275,25 @@ export async function runDeclaredE2e(deps: {
   if (!deps.command) return { status: "not-run", output: "" };
   const res = await deps.runTests(deps.command, { allowedCommands: deps.allowedCommands });
   if (!res.ran) return { status: "not-run", output: res.output };
-  return { status: res.passed ? "passed" : "failed", output: res.output };
+  return {
+    status: res.passed ? "passed" : classifyE2eFailure(res.output),
+    output: res.output,
+  };
 }
 
-export function formatTestVerdict(passed: boolean, suites: GateSuites): string {
+export function formatTestVerdict(
+  passed: boolean,
+  suites: GateSuites,
+  e2eStatus?: E2eOutcome["status"],
+): string {
   const ran = suites.ran.length > 0 ? ` (${suites.ran.join(", ")})` : "";
   const notRun =
     suites.notRun.length > 0 ? ` - NOT run: ${suites.notRun.join(", ")}` : "";
+  // #731: the run still FAILS and must not open a pull request, but the reason is named: "the suite
+  // failed" and "the sandbox could not run the suite" call for different reactions from the loop.
+  if (!passed && e2eStatus === "environment" && suites.ran.length > 0) {
+    return `FAIL (${suites.ran.join(", ")}: the sandbox could not run it)${notRun}`;
+  }
   return `${passed ? "PASS" : "FAIL"}${ran}${notRun}`;
 }
 
