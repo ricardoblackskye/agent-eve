@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   classifyE2eFailure,
   decideGate,
+  runCodingLoop,
   formatTestVerdict,
   runDeclaredE2e,
 } from "../../agent/lib/dark-factory/developer-agent";
@@ -129,5 +130,39 @@ describe("#731 the gate decision", () => {
 
   it("a failing unit suite blocks regardless of the e2e", () => {
     expect(decideGate(false, "passed").gatePassed).toBe(false);
+  });
+});
+
+describe("#731 the loop halts on an environment fault", () => {
+  it("stops after ONE iteration when the sandbox could not run the suite", async () => {
+    let calls = 0;
+    const outcome = await runCodingLoop({
+      maxIterations: 10,
+      worker: async () => {
+        calls += 1;
+        return { passed: false, environmentFault: true, output: "664 identical launch failures" };
+      },
+    });
+
+    expect(calls).toBe(1);
+    expect(outcome.iterations).toBe(1);
+    expect(outcome.stopReason).toBe("environment-fault");
+    // Still a failure: the run must not proceed, and must not open a pull request.
+    expect(outcome.status).toBe("failed");
+  });
+
+  it("CONTROL: an ordinary failure still iterates to the cap", async () => {
+    let calls = 0;
+    const outcome = await runCodingLoop({
+      maxIterations: 3,
+      worker: async () => {
+        calls += 1;
+        return { passed: false, output: "expected A to be B" };
+      },
+    });
+
+    expect(calls).toBe(3);
+    expect(outcome.status).toBe("failed");
+    expect(outcome.stopReason).toBeUndefined();
   });
 });
