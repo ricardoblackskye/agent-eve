@@ -26,7 +26,7 @@
     "GHES",
     "GHSA",
     "HMAC",
-    "Jos\u00e9",
+    "José",
     "LOCALAPPDATA",
     "Menlo",
     "NFR",
@@ -234,7 +234,7 @@
     "youtube-content",
     "zizmor",
     "alvarez",
-    "\u00fc\u00f1\u00ed\u00e7\u00f6d\u00e9",
+    "üñíçödé",
     "mape",
     "MAPE",
     "mae",
@@ -246,7 +246,8 @@
     "ECONNRESET",
     "prerender",
     "prerendered",
-    "triggerable"
+    "triggerable",
+    "EACCES"
   ],
   "ignorePaths": [
     "node_modules/**",

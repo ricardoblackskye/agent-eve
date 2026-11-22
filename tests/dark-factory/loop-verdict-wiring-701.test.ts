@@ -32,7 +32,9 @@ describe("#701 the runner's verdict is wired to the target's own declaration", (
 describe("#701 the e2e attempt is wired, not just available", () => {
   it("runs the declared suite and folds the result into the iteration's gate", () => {
     expect(runner).toContain("runDeclaredE2e({");
-    expect(runner).toContain("gatePassed = testOutcome.passed && e2e.status");
+    // #731: the composition moved into decideGate, which returns BOTH the gate and the environment flag.
+    // Asserted as the intent - both inputs feed the decision - not as the old spelling.
+    expect(runner).toContain("decideGate(testOutcome.passed, e2e.status)");
     // The worker reports the COMBINED gate, not the unit outcome alone.
     expect(runner).toContain("passed: gatePassed,");
     expect(runner).not.toContain("passed: testOutcome.passed,");

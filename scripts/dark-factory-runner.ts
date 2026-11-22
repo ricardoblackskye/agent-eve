@@ -72,6 +72,7 @@ import {
   artefactIdentity,
   checkOutcomeLines,
   checkSetSummary,
+  decideGate,
   formatTestVerdict,
   resolveE2eCommand,
   runDeclaredE2e,
@@ -1456,7 +1457,7 @@ async function main(): Promise<void> {
               command: declaredE2eCommands[0],
               allowedCommands: workspaceCommandsFor(declaredE2eCommands),
             });
-            const gatePassed = testOutcome.passed && e2e.status !== "failed";
+            const { gatePassed, environmentFault } = decideGate(testOutcome.passed, e2e.status);
             const gateOutput =
               e2e.status === "failed" && e2e.output
                 ? `${testOutcome.output}\n\n[e2e] ${e2e.output}`
@@ -1467,7 +1468,7 @@ async function main(): Promise<void> {
                 ran: e2e.status === "not-run" ? ["unit"] : ["unit", "e2e"],
                 notRun:
                   e2e.status === "not-run" && declaredE2eCommands.length > 0 ? ["e2e"] : [],
-              })}`,
+              }, e2e.status)}`,
             );
 
             // #651: the failure the model must act on used to be discarded here, so a run could fail
@@ -1523,7 +1524,10 @@ async function main(): Promise<void> {
             // self-correction (a failing iteration that reproduces the previous failing artefact).
             return {
               passed: gatePassed,
-              output: gateOutput,
+              ...(environmentFault ? { environmentFault: true } : {}),
+              // #731: an environment fault is not for the model to fix, so it
+              // is given no feedback - the next iteration would author the same artefact.
+              output: environmentFault ? "" : gateOutput,
               artefactHash: authored.artefactHash,
             };
           },

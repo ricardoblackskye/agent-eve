@@ -157,6 +157,12 @@ export interface WorkerResult {
    * compare, and the loop keeps its previous behaviour.
    */
   artefactHash?: string;
+  /**
+   * True when the suite RAN and failed because the sandbox could not run it (#731): a missing browser
+   * or toolchain. Unlike `unmeasured` the result is measured, and unlike an ordinary failure there is
+   * nothing for the model to fix, so the loop stops instead of spending its budget on the image.
+   */
+  environmentFault?: boolean;
 }
 
 /** A single coding iteration step (e.g. write code + run tests in a sandbox). */
@@ -172,7 +178,7 @@ export interface LoopResult {
    * cap). "no-op-self-correction" means a failing iteration reproduced the previous failing artefact, so
    * further iterations were guaranteed to fail the same way.
    */
-  stopReason?: "no-op-self-correction";
+  stopReason?: "no-op-self-correction" | "environment-fault";
 }
 
 /**
@@ -199,9 +205,64 @@ export interface GateSuites {
  * rather than by reading prose at a call site.
  */
 /** What happened when the loop tried to run the target's declared e2e suite (#701). */
+/**
+ * Patterns that name a MISSING TOOL rather than a broken assertion (#731).
+ *
+ * Deliberately a short, explicit, reviewable list: the whole safety of `classifyE2eFailure` rests on
+ * condition 3, so a reviewer must be able to read every pattern in one place. Nothing framework-specific
+ * appears here - the factory does not know which runner produced the output.
+ */
+export const ENVIRONMENT_FAULT_PATTERNS: readonly RegExp[] = [
+  /Executable doesn't exist/i,
+  /command not found/i,
+  /cannot execute binary file/i,
+  /error while loading shared libraries/i,
+  /No such file or directory/i,
+  /EACCES: permission denied/,
+];
+
+/** The fewest failures that can constitute a shape; one failure is a test, not a pattern. */
+const MIN_ENVIRONMENT_FAULT_FAILURES = 3;
+
+/**
+ * Classify a failing suite's own output as a code fault or an environment fault (#731).
+ *
+ * ALL THREE must hold, and the conjunction is the point:
+ *   1. at least 3 failure entries;
+ *   2. every entry's error text is byte-identical - real breakage varies per test;
+ *   3. that text names a missing tool (see ENVIRONMENT_FAULT_PATTERNS).
+ *
+ * Condition 3 is what stops a broken SHARED IMPORT - which fails everything with identical text and is
+ * genuinely the developer's bug - from being excused as the image's fault.
+ *
+ * Fail-closed by design: a false `failed` costs one loop iteration, while a false `environment` would
+ * let a red suite reach a pull request. Every uncertain case returns `failed`.
+ */
+export function classifyE2eFailure(output: string): "failed" | "environment" {
+  if (output.trim() === "") return "failed";
+
+  const lines = output.split(/\r?\n/);
+  const errors: string[] = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    if (/^\s*Error:\s/.test(lines[i])) {
+      // The error line plus its continuation: a launch failure names the missing binary on the next line.
+      // Only a real continuation counts. A suite that prints one line per failure puts the NEXT entry's
+      // header here ("  7) spec.ts > ..."), which is not part of this failure's text - treating it as such
+      // made every entry look unique and defeated the identical-text condition.
+      const next = (lines[i + 1] ?? "").trim();
+      const continuation = /^\s*\d+\)/.test(next) ? "" : next;
+      errors.push(`${lines[i].trim()}\n${continuation}`);
+    }
+  }
+
+  if (errors.length < MIN_ENVIRONMENT_FAULT_FAILURES) return "failed";
+  if (new Set(errors).size !== 1) return "failed";
+  return ENVIRONMENT_FAULT_PATTERNS.some((pattern) => pattern.test(errors[0])) ? "environment" : "failed";
+}
+
 export interface E2eOutcome {
   /** `not-run` means the command could not start - it is not a verdict on the developer's work. */
-  status: "passed" | "failed" | "not-run";
+  status: "passed" | "failed" | "not-run" | "environment";
   output: string;
 }
 
@@ -220,13 +281,43 @@ export async function runDeclaredE2e(deps: {
   if (!deps.command) return { status: "not-run", output: "" };
   const res = await deps.runTests(deps.command, { allowedCommands: deps.allowedCommands });
   if (!res.ran) return { status: "not-run", output: res.output };
-  return { status: res.passed ? "passed" : "failed", output: res.output };
+  return {
+    status: res.passed ? "passed" : classifyE2eFailure(res.output),
+    output: res.output,
+  };
 }
 
-export function formatTestVerdict(passed: boolean, suites: GateSuites): string {
+/**
+ * Decide the gate from the unit result and the e2e outcome (#731).
+ *
+ * `environment` must NOT pass: the suite could not run, so the work is unverified and the run must not
+ * open a pull request. It is returned as its own flag because the loop's reaction differs - there is
+ * nothing for the model to fix, so no failure feedback is handed to the next iteration.
+ *
+ * `not-run` DOES pass, preserving #541: a suite that could not start is not a verdict on the code.
+ */
+export function decideGate(
+  unitPassed: boolean,
+  e2eStatus: E2eOutcome["status"],
+): { gatePassed: boolean; environmentFault: boolean } {
+  const environmentFault = e2eStatus === "environment";
+  const gatePassed = unitPassed && (e2eStatus === "passed" || e2eStatus === "not-run");
+  return { gatePassed, environmentFault };
+}
+
+export function formatTestVerdict(
+  passed: boolean,
+  suites: GateSuites,
+  e2eStatus?: E2eOutcome["status"],
+): string {
   const ran = suites.ran.length > 0 ? ` (${suites.ran.join(", ")})` : "";
   const notRun =
     suites.notRun.length > 0 ? ` - NOT run: ${suites.notRun.join(", ")}` : "";
+  // #731: the run still FAILS and must not open a pull request, but the reason is named: "the suite
+  // failed" and "the sandbox could not run the suite" call for different reactions from the loop.
+  if (!passed && e2eStatus === "environment" && suites.ran.length > 0) {
+    return `FAIL (${suites.ran.join(", ")}: the sandbox could not run it)${notRun}`;
+  }
   return `${passed ? "PASS" : "FAIL"}${ran}${notRun}`;
 }
 
@@ -268,6 +359,7 @@ export async function runCodingLoop(
 ): Promise<LoopResult> {
   let iterations = 0;
   let passed = false;
+  let stopReason: LoopResult["stopReason"];
 
   for (let attempt = 1; attempt <= opts.maxIterations; attempt++) {
     iterations = attempt;
@@ -283,6 +375,13 @@ export async function runCodingLoop(
         ...(result.output !== undefined ? { output: result.output } : {}),
       });
     }
+    // #731: an environment fault is not correctable by authoring code, so no further iteration can
+    // succeed. Measured on a real run: without this the loop spent 62 worker-minutes and three full
+    // e2e runs on an image that carried no browsers.
+    if (!passed && result.environmentFault === true) {
+      stopReason = "environment-fault";
+      break;
+    }
     if (passed) break;
   }
 
@@ -291,7 +390,12 @@ export async function runCodingLoop(
   // two numbers can then never drift apart.
   const fixCycles = passed ? iterations - 1 : iterations;
 
-  return { status: passed ? "success" : "failed", iterations, fixCycles };
+  return {
+    status: passed ? "success" : "failed",
+    iterations,
+    fixCycles,
+    ...(stopReason ? { stopReason } : {}),
+  };
 }
 
 /**
@@ -1150,6 +1254,14 @@ export async function runMultiFileCodingLoop(
     if (passed) break;
     if (noop) {
       stopReason = "no-op-self-correction";
+      break;
+    }
+    // #731: an environment fault cannot be corrected by authoring code, so no further iteration can
+    // succeed. Measured live: without this the loop spent 62 worker-minutes and three e2e runs on an
+    // image carrying no browsers. That attempt put the halt in runCodingLoop, which the runner never
+    // calls - the wiring guard in the tests now pins the loop that actually runs.
+    if (!res.passed && res.environmentFault === true) {
+      stopReason = "environment-fault";
       break;
     }
   }
