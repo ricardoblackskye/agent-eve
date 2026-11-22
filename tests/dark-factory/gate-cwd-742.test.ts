@@ -10,7 +10,9 @@ describe("#742 a declared gate runs from the checkout root", () => {
   it("sets the working directory explicitly rather than inheriting the session's", () => {
     // The bug: the sandbox session's cwd decided where the gate ran, so ESLint resolved its
     // configuration from a subdirectory (/workspace/__mocks__) and found none.
-    expect(driver).toMatch(/cwd:\s*[A-Za-z_$]/);
+    // #742: the fix prefixes the command with an explicit root instead of passing an SDK-specific
+    // `cwd` option, so the invariant does not depend on one backend's shape. Asserted as the intent.
+    expect(driver).toMatch(/cd \$\{WORKSPACE_ROOT\} && /);
   });
 
   it("pins the checkout root as the working directory for every workspace command", () => {
