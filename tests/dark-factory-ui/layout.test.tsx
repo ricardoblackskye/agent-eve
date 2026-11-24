@@ -1,14 +1,16 @@
 // @vitest-environment jsdom
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import DarkFactoryLayout from "../../app/dark-factory/layout";
 
 describe("Dark Factory rail navigation", () => {
-  it("labels the rail links Overview and Runs (not bare letters)", () => {
+  it("labels the rail links Overview and Runs (not bare letters)", async () => {
     render(
-      <DarkFactoryLayout>
+      await DarkFactoryLayout({
+        children: (
         <div>panel body</div>
-      </DarkFactoryLayout>,
+        ),
+      }),
     );
     const overview = screen.getByText("Overview");
     const runs = screen.getByText("Runs");
@@ -21,11 +23,13 @@ describe("Dark Factory rail navigation", () => {
    * only by typing the URL. The link sits directly UNDER Runs, and the ORDER assertion is the point: a link that
    * exists but drifts above Runs is the same miss wearing a different hat.
    */
-  it("links to the repositories page directly under Runs", () => {
+  it("links to the repositories page directly under Runs", async () => {
     const { container } = render(
-      <DarkFactoryLayout>
+      await DarkFactoryLayout({
+        children: (
         <div>panel body</div>
-      </DarkFactoryLayout>,
+        ),
+      }),
     );
     const destinations = [...container.querySelectorAll(".df-rail-link")].map((node) =>
       node.getAttribute("href"),
@@ -40,3 +44,14 @@ describe("Dark Factory rail navigation", () => {
     );
   });
 });
+
+
+// The layout now resolves an operator before it renders, so this suite states who is asking.
+// vitest hoists these above the imports, so the order here does not matter.
+vi.mock("../../app/api/dark-factory/viewer", () => ({
+  resolveViewer: async () => ({
+    ok: true,
+    viewer: { email: "ops@example.test", role: "operator" },
+  }),
+}));
+vi.mock("next/headers", () => ({ headers: async () => new Headers() }));

@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 const { resolveViewer } = vi.hoisted(() => ({ resolveViewer: vi.fn() }));
 vi.mock("../../app/api/dark-factory/viewer", () => ({ resolveViewer }));
+vi.mock("next/headers", () => ({ headers: async () => new Headers() }));
 
 import DarkFactoryLayout from "../../app/dark-factory/layout";
 
