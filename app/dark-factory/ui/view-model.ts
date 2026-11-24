@@ -498,44 +498,6 @@ export const DEFAULT_PAGE_SIZE = 20;
 /** The page sizes the run list offers. */
 export const PAGE_SIZE_OPTIONS: readonly number[] = [20, 50, 100];
 
-/**
- * Builds the page request: the existing filters, plus the size and the offset for one page.
- *
- * The filters are encoded by `toQueryParams` rather than a second time here, so a filter added
- * there reaches the server without another place to keep in step. `set` rather than `append`
- * means the page size always wins over a `limit` left on the filters.
- */
-export function buildPageRequest(
-  filters: RunFilters,
-  paging: { page: number; size: number },
-): URLSearchParams {
-  const params = toQueryParams(filters);
-  params.set("limit", String(paging.size));
-  params.set("offset", String((paging.page - 1) * paging.size));
-  return params;
-}
-
-/** How many pages a total makes at a given size. An empty list still has one page to show. */
-export function pageCount(total: number, size: number): number {
-  return Math.max(1, Math.ceil(total / size));
-}
-
-/**
- * The page in range, and whether either arrow is live.
- *
- * The page is clamped rather than rejected: a list that shrinks under the reader - a filter, or
- * a run finishing - lands on the last page that exists instead of an empty one.
- */
-export function pageBounds(
-  page: number,
-  total: number,
-  size: number,
-): { page: number; canGoBack: boolean; canGoForward: boolean } {
-  const count = pageCount(total, size);
-  const inRange = Math.min(Math.max(page, 1), count);
-  return { page: inRange, canGoBack: inRange > 1, canGoForward: inRange < count };
-}
-
 /** A row is identified by its run id, so paging cannot re-key a row. */
 export function runRowId(row: TableRow): string {
   return row.runId;
