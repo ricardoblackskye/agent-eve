@@ -546,7 +546,5 @@ export function runQueryKey(
   filters: RunFilters,
   paging: { page: number; size: number },
 ): RunQueryKey {
-  void filters;
-  void paging;
-  throw new Error("not implemented");
+  return ["dark-factory", "runs", { page: paging.page, size: paging.size, ...filters }];
 }
