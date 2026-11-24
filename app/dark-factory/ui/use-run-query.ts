@@ -1,4 +1,5 @@
 "use client";
+import type { RunFilters, RunQueryKey } from "./view-model";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -107,4 +108,36 @@ export function useRunQuery<T>(
   }, [runFetch]);
 
   return { data, loading, error, refresh };
+}
+
+/** The run list read path. The page, the size and the filters go on as parameters. */
+export const RUN_LIST_PATH = "/api/dark-factory/runs";
+
+/** One page of the run list, as the key React Query holds and the path it fetches. */
+export interface RunListRequest {
+  key: RunQueryKey;
+  path: string;
+}
+
+/** Builds both from one input, so the key and the path cannot drift apart. */
+export function runListRequest(
+  filters: RunFilters,
+  paging: { page: number; size: number },
+): RunListRequest {
+  void filters;
+  void paging;
+  throw new Error("not implemented");
+}
+
+/** The Query posture: never cached, never retried, and polled on the given interval. */
+export interface RunQueryOptions {
+  staleTime: number;
+  retry: boolean;
+  refetchInterval: number | undefined;
+}
+
+/** States that posture explicitly rather than inheriting one from the library. */
+export function runQueryOptions(intervalMs?: number): RunQueryOptions {
+  void intervalMs;
+  throw new Error("not implemented");
 }
