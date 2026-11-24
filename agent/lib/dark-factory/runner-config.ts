@@ -712,7 +712,7 @@ export interface CheckoutBaseInput {
   branch: string;
   /** Whether that branch already exists on the remote. */
   remoteBranchExists: boolean;
-  /** The repositorys default branch, used when the DF branch does not exist yet. */
+  /** The repository's default branch, used when the DF branch does not exist yet. */
   defaultBase: string;
 }
 
