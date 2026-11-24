@@ -11,6 +11,7 @@ import type {
 import type { PersistedRunEvent } from "../../../agent/lib/dark-factory/run-history-store";
 import {
   formatClockTime,
+  formatDateTime,
   formatCostUsd,
   formatDuration,
   formatRelativeTime,
@@ -48,7 +49,7 @@ export interface TableRow {
   category: RunCategory;
   stage: string;
   updatedLabel: string;
-  updatedAtLabel?: string;
+  updatedAtLabel: string;
   attemptCount: number;
   elapsedLabel: string;
   costLabel: string;
@@ -288,6 +289,7 @@ export function toTableRows(
     category: categorizeStatus(run.status),
     stage: run.stage,
     updatedLabel: formatRelativeTime(run.updatedAt, now),
+    updatedAtLabel: formatDateTime(run.updatedAt),
     attemptCount: run.attemptCount,
     elapsedLabel: formatDuration(run.startedAt, run.completedAt),
     costLabel: formatCostUsd(run.costUsd),
