@@ -551,3 +551,23 @@ export function runQueryKey(
 ): RunQueryKey {
   return ["dark-factory", "runs", { page: paging.page, size: paging.size, ...filters }];
 }
+
+/** One page of the run list, asked for by size and an opaque cursor. */
+export function buildCursorRequest(
+  filters: RunFilters,
+  paging: { size: number; cursor?: string },
+): URLSearchParams {
+  void filters;
+  void paging;
+  throw new Error("not implemented");
+}
+
+/** Whether either arrow is live, from the page in the stack and the cursor returned. */
+export function cursorBounds(
+  page: number,
+  nextCursor: string | null,
+): { canGoBack: boolean; canGoForward: boolean } {
+  void page;
+  void nextCursor;
+  throw new Error("not implemented");
+}
