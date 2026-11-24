@@ -47,3 +47,11 @@ export function formatClockTime(iso: string): string {
   if (!Number.isFinite(ms)) return EM_DASH;
   return new Date(ms).toISOString().slice(11, 19);
 }
+
+/**
+ * The run date and time as one field, in the viewer's own timezone.
+ */
+export function formatDateTime(value: number | string | Date): string {
+  void value;
+  throw new Error("not implemented");
+}
