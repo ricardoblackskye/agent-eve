@@ -389,6 +389,25 @@ export function RecentRunsList({ rows }: { rows: TableRow[] }): ReactNode {
   );
 }
 
+import {
+  getCoreRowModel,
+  useLegacyTable,
+  type LegacyColumnDef,
+} from "@tanstack/react-table/legacy";
+import { runRowId } from "./view-model";
+
+/** The columns, in the order the operator reads them. */
+const RUN_COLUMNS: Array<LegacyColumnDef<TableRow, unknown>> = [
+  { id: "runId", header: "Run" },
+  { id: "issueRepo", header: "Issue \u00b7 Repo" },
+  { id: "status", header: "Status" },
+  { id: "stage", header: "Stage" },
+  { id: "update", header: "Update" },
+  { id: "dateTime", header: "Date and time" },
+  { id: "attempt", header: "Try" },
+  { id: "elapsed", header: "Elapsed" },
+  { id: "cost", header: "Cost" },
+];
 export function RunTable({
   rows,
   loading = false,
@@ -408,6 +427,18 @@ export function RunTable({
    */
   hrefForRun?: (runId: string) => string;
 }): ReactNode {
+  // Paging, filtering and sorting are the server s, so the table is told so: a client row model
+  // would give it its own answer and put the two in conflict. The row id is the run id, so a row
+  // cannot be re-keyed by paging. Built before any early return, because a hook cannot follow one.
+  const table = useLegacyTable({
+    data: rows,
+    columns: RUN_COLUMNS,
+    getRowId: (row: TableRow) => runRowId(row),
+    manualPagination: true,
+    manualFiltering: true,
+    manualSorting: true,
+    getCoreRowModel: getCoreRowModel(),
+  });
   if (loading) return <StatePanel state="loading" message="Loading runs…" />;
   if (error) return <StatePanel state="error" message={error} />;
   if (rows.length === 0) {
@@ -429,31 +460,31 @@ export function RunTable({
         </tr>
       </thead>
       <tbody>
-        {rows.map((row) => (
+        {table.getRowModel().rows.map((row) => (
           <tr
-            className={`df-table-row${selectedRunId === row.runId ? " selected" : ""}`}
-            key={row.runId}
-            onClick={onSelect ? () => onSelect(row.runId) : undefined}
+            className={`df-table-row${selectedRunId === row.original.runId ? " selected" : ""}`}
+            key={row.id}
+            onClick={onSelect ? () => onSelect(row.original.runId) : undefined}
           >
             <td className="df-run-id">
               {hrefForRun ? (
-                <Link className="df-run-id" href={hrefForRun(row.runId)}>
-                  {row.runId}
+                <Link className="df-run-id" href={hrefForRun(row.original.runId)}>
+                  {row.original.runId}
                 </Link>
               ) : (
-                row.runId
+                row.original.runId
               )}
             </td>
-            <td>{`${row.issueLabel} · ${row.repo}`}</td>
+            <td>{`${row.original.issueLabel} · ${row.original.repo}`}</td>
             <td>
-              <StatusPill category={row.category} label={row.status} />
+              <StatusPill category={row.original.category} label={row.original.status} />
             </td>
-            <td>{row.stage}</td>
-            <td>{row.updatedLabel}</td>
-            <td>{row.updatedAtLabel}</td>
-            <td>{row.attemptCount}</td>
-            <td>{row.elapsedLabel}</td>
-            <td>{row.costLabel}</td>
+            <td>{row.original.stage}</td>
+            <td>{row.original.updatedLabel}</td>
+            <td>{row.original.updatedAtLabel}</td>
+            <td>{row.original.attemptCount}</td>
+            <td>{row.original.elapsedLabel}</td>
+            <td>{row.original.costLabel}</td>
           </tr>
         ))}
       </tbody>

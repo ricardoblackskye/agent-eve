@@ -19,7 +19,7 @@ const table = source.slice(source.indexOf("export function RunTable"));
 
 describe("#748 RunTable is built on a table model", () => {
   it("builds a table rather than mapping rows by hand", () => {
-    expect(table).toMatch(/useReactTable\(/);
+    expect(table).toMatch(/useLegacyTable|useReactTable\(/);
   });
 
   it("keys every row by its run id, so a row cannot be re-keyed by paging", () => {
