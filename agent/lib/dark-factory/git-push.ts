@@ -98,6 +98,7 @@ export type SandboxGitRunner = (
 ) => Promise<{ exitCode: number; output: string }>;
 
 export interface SandboxRepoDeps {
+  base?: string;
   runGit: SandboxGitRunner;
   /** Bare https clone URL — NO userinfo: the sidecar supplies the credential. */
   remoteUrl: string;
@@ -156,6 +157,25 @@ export async function ensureSandboxRepo(
         error: `git clone failed (exit ${clone.exitCode}): ${clone.output}`,
       };
     }
+    // #744: a clone lands on the default tip, so the chosen base is applied here too - otherwise a
+    // re-run on an image with no checkout starts from main and hits the same rejected push.
+    const clonedBase = (deps.base ?? "").trim().replace(/^origin\//, "");
+    if (clonedBase !== "") {
+      const toBase = await deps.runGit([
+        "-C",
+        deps.workspaceDir,
+        "reset",
+        "--hard",
+        "origin/" + clonedBase,
+      ]);
+      if (toBase.exitCode !== 0) {
+        return {
+          ok: false,
+          cloned: true,
+          error: "git reset to origin/" + clonedBase + " failed (exit " + toBase.exitCode + "): " + toBase.output,
+        };
+      }
+    }
     return { ok: true, cloned: true };
   }
 
@@ -213,7 +233,12 @@ export async function ensureSandboxRepo(
     };
   }
 
-  const reset = await deps.runGit(["-C", deps.workspaceDir, "reset", "--hard", defaultBranch]);
+  // #744: reset to the CHOSEN base, not the resolved default. On a re-run of an issue the default is
+  // not the branch the first run pushed, so a commit made here cannot descend from that branch tip and
+  // git refuses the push as a non-fast-forward. The chosen base is the remote DF branch when it exists.
+  const chosenBase = (deps.base ?? "").trim().replace(/^origin\//, "");
+  const resetTarget = chosenBase === "" ? defaultBranch : "origin/" + chosenBase;
+  const reset = await deps.runGit(["-C", deps.workspaceDir, "reset", "--hard", resetTarget]);
   if (reset.exitCode !== 0) {
     return {
       ok: false,
