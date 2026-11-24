@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useCallback, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import type {
   RunStatus,
   RunSummary,
@@ -37,8 +37,23 @@ function runDetailHref(runId: string): string {
 
 export default function DarkFactoryRunsPage() {
   const router = useRouter();
-  const [cursors, setCursors] = useState<Array<string | undefined>>([undefined]);
-  const [size, setSize] = useState<number>(DEFAULT_PAGE_SIZE);
+  // The size and the cursor stack live in the URL, so a view is shareable and a link opens the page
+  // it names. Component state is the one place this must NOT live.
+  const searchParams = useSearchParams();
+  const sizeParam = Number.parseInt(searchParams.get("size") ?? "", 10);
+  const size = PAGE_SIZE_OPTIONS.includes(sizeParam) ? sizeParam : DEFAULT_PAGE_SIZE;
+  const cursors = searchParams.getAll("cursor");
+
+  const showPage = useCallback(
+    (nextSize: number, nextCursors: string[]) => {
+      const params = new URLSearchParams();
+      if (nextSize !== DEFAULT_PAGE_SIZE) params.set("size", String(nextSize));
+      for (const token of nextCursors) params.append("cursor", token);
+      const query = params.toString();
+      router.push(query ? `/dark-factory/runs?${query}` : "/dark-factory/runs");
+    },
+    [router],
+  );
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("any");
   const [stage, setStage] = useState("any");
@@ -56,13 +71,13 @@ export default function DarkFactoryRunsPage() {
 
   const runs = useRunListQuery<{ runs: RunSummary[]; nextCursor?: string | null }>(
     filters,
-    { size, cursor: cursors[cursors.length - 1] },
+    { size, cursor: cursors.length ? cursors[cursors.length - 1] : undefined },
     { intervalMs: DEFAULT_POLL_INTERVAL_MS },
   );
 
   // The total is the server s when it reports one; until then the rows it returned are the count.
   // Back and forward come from the reader s own stack and the cursor the server returned.
-  const bounds = cursorBounds(cursors.length, runs.data?.nextCursor ?? null);
+  const bounds = cursorBounds(cursors.length + 1, runs.data?.nextCursor ?? null);
 
   const rows = useMemo(() => toTableRows(runs.data?.runs ?? [], Date.now()), [runs.data]);
 
@@ -91,8 +106,7 @@ export default function DarkFactoryRunsPage() {
             className="df-field"
             value={String(size)}
             onChange={(event) => {
-              setSize(Number(event.target.value));
-              setCursors([undefined]);
+              showPage(Number(event.target.value), []);
             }}
           >
             {PAGE_SIZE_OPTIONS.map((option) => (
@@ -106,7 +120,7 @@ export default function DarkFactoryRunsPage() {
             type="button"
             aria-label="Previous page"
             disabled={!bounds.canGoBack}
-            onClick={() => setCursors((stack) => stack.slice(0, -1))}
+            onClick={() => showPage(size, cursors.slice(0, -1))}
           >
             ‹
           </button>
@@ -115,7 +129,7 @@ export default function DarkFactoryRunsPage() {
             type="button"
             aria-label="Next page"
             disabled={!bounds.canGoForward}
-            onClick={() => setCursors((stack) => [...stack, runs.data?.nextCursor ?? undefined])}
+            onClick={() => showPage(size, [...cursors, runs.data?.nextCursor ?? ""])}
           >
             ›
           </button>

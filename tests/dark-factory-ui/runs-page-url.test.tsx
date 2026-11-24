@@ -8,7 +8,7 @@ const nav = vi.hoisted(() => ({
   search: new URLSearchParams(),
 }));
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: nav.push, replace: nav.replace }),
+  useRouter: () => ({ push: nav.push, replace: nav.push }),
   useSearchParams: () => nav.search,
 }));
 vi.mock("next/headers", () => ({ headers: async () => new Headers() }));
@@ -59,14 +59,14 @@ function stubFetch(runs: unknown[], nextCursor: string | null = null) {
 }
 
 /** The last URL the page asked the router to show. */
-function lastReplace(): string {
-  const calls = nav.replace.mock.calls;
+function lastPush(): string {
+  const calls = nav.push.mock.calls;
   return calls.length ? String(calls[calls.length - 1][0]) : "";
 }
 
 beforeEach(() => {
   nav.search = new URLSearchParams();
-  nav.replace.mockReset();
+  nav.push.mockReset();
   nav.push.mockReset();
   stubFetch([RUN]);
 });
@@ -76,8 +76,8 @@ describe("the run list keeps its place in the URL (#748 task 4)", () => {
   it("puts the page size in the URL when the operator changes it", async () => {
     const { getByLabelText } = renderWithQuery(<DarkFactoryRunsPage />);
     fireEvent.change(getByLabelText("Rows per page"), { target: { value: "50" } });
-    await waitFor(() => expect(nav.replace).toHaveBeenCalled());
-    expect(lastReplace()).toContain("size=50");
+    await waitFor(() => expect(nav.push).toHaveBeenCalled());
+    expect(lastPush()).toContain("size=50");
   });
 
   it("puts the cursor in the URL when the operator pages forward", async () => {
@@ -87,8 +87,8 @@ describe("the run list keeps its place in the URL (#748 task 4)", () => {
       expect((getByLabelText("Next page") as HTMLButtonElement).disabled).toBe(false);
     });
     fireEvent.click(getByLabelText("Next page"));
-    await waitFor(() => expect(nav.replace).toHaveBeenCalled());
-    expect(lastReplace()).toContain("cursor=tok-1");
+    await waitFor(() => expect(nav.push).toHaveBeenCalled());
+    expect(lastPush()).toContain("cursor=tok-1");
   });
 
   it("opens the page the URL names, so a link is shareable", async () => {

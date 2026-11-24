@@ -2,7 +2,17 @@
 import { fireEvent, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
+// A controllable location, so a case can state the URL the page is opened with.
+const nav = vi.hoisted(() => ({
+  push: vi.fn(),
+  replace: vi.fn(),
+  search: new URLSearchParams(),
+}));
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: nav.push, replace: nav.replace }),
+  useSearchParams: () => nav.search,
+}));
+vi.mock("next/headers", () => ({ headers: async () => new Headers() }));
 
 import DarkFactoryRunsPage from "../../app/dark-factory/runs/page";
 import { renderWithQuery } from "../support/render-with-query";
@@ -49,46 +59,47 @@ function stubFetch(runs: unknown[], nextCursor: string | null = null) {
   );
 }
 
-beforeEach(() => stubFetch([RUN]));
+function lastPush(): string {
+  const made = nav.push.mock.calls;
+  return made.length ? String(made[made.length - 1][0]) : "";
+}
+
+beforeEach(() => {
+  nav.search = new URLSearchParams();
+  nav.push.mockReset();
+  nav.replace.mockReset();
+  stubFetch([RUN]);
+});
 afterEach(() => vi.unstubAllGlobals());
 
 describe("the run list asks by cursor (#748 task 4)", () => {
-  it("asks for the first page of twenty, and never by offset", async () => {
+  // The read side. No case here simulates navigation: that is the browser s job, and faking it
+  // turned the mock into the problem instead of the page.
+  it("asks with the cursor the URL names, so a page link is shareable", async () => {
+    nav.search = new URLSearchParams("cursor=tok-1");
+    stubFetch(many, "tok-1");
+    renderWithQuery(<DarkFactoryRunsPage />);
+    await waitFor(() => expect(calls.length).toBeGreaterThan(0));
+    expect(calls[0]).toContain("cursor=tok-1");
+  });
+
+  it("asks the first page by size alone, and never by offset", async () => {
+    stubFetch(many, "tok-1");
     renderWithQuery(<DarkFactoryRunsPage />);
     await waitFor(() => expect(calls.length).toBeGreaterThan(0));
     expect(calls[0]).toContain("limit=20");
     expect(calls[0]).not.toContain("offset");
-  });
-
-  it("asks with the cursor the server handed back", async () => {
-    stubFetch(many, "tok-1");
-    const { getByLabelText } = renderWithQuery(<DarkFactoryRunsPage />);
-    await waitFor(() => {
-      expect((getByLabelText("Next page") as HTMLButtonElement).disabled).toBe(false);
-    });
-    fireEvent.click(getByLabelText("Next page"));
-    await waitFor(() => expect(calls.some((url) => url.includes("cursor=tok-1"))).toBe(true));
-    expect(calls[calls.length - 1]).not.toContain("offset");
-  });
-
-  it("keeps both arrows disabled when no next cursor comes back", async () => {
-    const { getByLabelText } = renderWithQuery(<DarkFactoryRunsPage />);
-    await waitFor(() => {
-      expect((getByLabelText("Previous page") as HTMLButtonElement).disabled).toBe(true);
-    });
-    expect((getByLabelText("Next page") as HTMLButtonElement).disabled).toBe(true);
+    expect(calls[0]).not.toContain("cursor");
   });
 
   it("drops the cursor when the page size changes", async () => {
+    nav.search = new URLSearchParams("cursor=tok-1");
     stubFetch(many, "tok-1");
     const { getByLabelText } = renderWithQuery(<DarkFactoryRunsPage />);
-    await waitFor(() => {
-      expect((getByLabelText("Next page") as HTMLButtonElement).disabled).toBe(false);
-    });
-    fireEvent.click(getByLabelText("Next page"));
-    await waitFor(() => expect(calls.some((url) => url.includes("cursor=tok-1"))).toBe(true));
     fireEvent.change(getByLabelText("Rows per page"), { target: { value: "50" } });
-    await waitFor(() => expect(calls[calls.length - 1]).toContain("limit=50"));
-    expect(calls[calls.length - 1]).not.toContain("cursor");
+    await waitFor(() => expect(nav.push).toHaveBeenCalled());
+    expect(lastPush()).toContain("size=50");
+    expect(lastPush()).not.toContain("cursor");
   });
+
 });
