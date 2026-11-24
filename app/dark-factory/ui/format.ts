@@ -47,3 +47,21 @@ export function formatClockTime(iso: string): string {
   if (!Number.isFinite(ms)) return EM_DASH;
   return new Date(ms).toISOString().slice(11, 19);
 }
+
+/**
+ * The run date and time as one field, in the viewer's own timezone.
+ *
+ * Built from the local getters rather than a locale formatter, so the month
+ * abbreviations read the same in every environment, and the value is the
+ * reader's own clock rather than the server's.
+ */
+export function formatDateTime(value: number | string | Date): string {
+  const at = value instanceof Date ? value : new Date(value);
+  const month = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][
+    at.getMonth()
+  ];
+  const day = String(at.getDate()).padStart(2, "0");
+  const hour = String(at.getHours()).padStart(2, "0");
+  const minute = String(at.getMinutes()).padStart(2, "0");
+  return `${day} ${month} ${at.getFullYear()}, ${hour}:${minute}`;
+}

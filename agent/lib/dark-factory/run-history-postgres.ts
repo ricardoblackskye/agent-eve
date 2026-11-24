@@ -1603,6 +1603,16 @@ export class PostgresRunHistoryStore implements RunHistoryStore {
     const status =
       options.status === undefined ? undefined : validateStatus(options.status);
     const statuses = validateStatuses(options.statuses);
+    const search =
+      options.search === undefined ? undefined : options.search.trim();
+    if (search === "") {
+      throw new InvalidRunRecordError("Run history search must be a non-empty string.");
+    }
+    const stage =
+      options.stage === undefined ? undefined : options.stage.trim();
+    if (stage === "") {
+      throw new InvalidRunRecordError("Run history stage must be a non-empty string.");
+    }
     if (status !== undefined && statuses !== undefined) {
       throw new InvalidRunRecordError(
         "Use either status or statuses, not both.",
@@ -1633,6 +1643,14 @@ export class PostgresRunHistoryStore implements RunHistoryStore {
       }
       if (from !== undefined) clauses.push(`created_at >= ${bind(from)}`);
       if (to !== undefined) clauses.push(`created_at < ${bind(to)}`);
+      if (stage !== undefined) clauses.push(`stage = ${bind(stage)}`);
+      if (search !== undefined) {
+        // This driver can reuse one placeholder, so one bound value serves four columns.
+        const like = bind(`%${search}%`);
+        clauses.push(
+          `(run_id ILIKE ${like} OR repo ILIKE ${like} OR CAST(issue AS text) ILIKE ${like} OR stage ILIKE ${like})`,
+        );
+      }
       if (cursor) {
         const key = bind(cursor.key);
         const equalKey = bind(cursor.key);

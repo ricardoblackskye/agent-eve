@@ -1,6 +1,9 @@
 "use client";
+import { buildCursorRequest, runQueryKey } from "./view-model";
+import type { RunFilters, RunQueryKey } from "./view-model";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 export interface RunQueryState<T> {
   data: T | null;
@@ -107,4 +110,84 @@ export function useRunQuery<T>(
   }, [runFetch]);
 
   return { data, loading, error, refresh };
+}
+
+/** The run list read path. The page, the size and the filters go on as parameters. */
+export const RUN_LIST_PATH = "/api/dark-factory/runs";
+
+/** One page of the run list, as the key React Query holds and the path it fetches. */
+export interface RunListRequest {
+  key: RunQueryKey;
+  path: string;
+}
+
+/** Builds both from one input, so the key and the path cannot drift apart. */
+export function runListRequest(
+  filters: RunFilters,
+  paging: { size: number; cursor?: string },
+): RunListRequest {
+  const params = buildCursorRequest(filters, paging);
+  return { key: runQueryKey(filters, paging), path: `${RUN_LIST_PATH}?${params.toString()}` };
+}
+
+/** The Query posture: never cached, never retried, and polled on the given interval. */
+export interface RunQueryOptions {
+  staleTime: number;
+  retry: boolean;
+  refetchInterval: number | undefined;
+}
+
+/** States that posture explicitly rather than inheriting one from the library. */
+export function runQueryOptions(intervalMs?: number): RunQueryOptions {
+  const interval = intervalMs ?? DEFAULT_POLL_INTERVAL_MS;
+  return { staleTime: 0, retry: false, refetchInterval: interval > 0 ? interval : undefined };
+}
+
+/**
+ * Fetches one Dark Factory read path and throws the message a panel should show. A 401 is its
+ * own message rather than a status, and a store that explains itself is believed.
+ */
+export async function fetchRun<T>(path: string, fetcher?: typeof fetch): Promise<T> {
+  const doFetch = fetcher ?? globalThis.fetch;
+  if (!doFetch) throw new Error("Network error");
+  let response: Response;
+  try {
+    response = await doFetch(path, { headers: { accept: "application/json" } });
+  } catch {
+    throw new Error("Network error");
+  }
+  if (response.status === 401) throw new Error("Authentication required");
+  if (!response.ok) throw new Error(await readErrorMessage(response));
+  return (await response.json()) as T;
+}
+
+/**
+ * One page of the run list. The page and the size live in the query key, so a poll re-reads the
+ * page in view instead of moving the reader, and the posture in `runQueryOptions` means a 401 is
+ * not retried. The general `useRunQuery` is untouched: nothing else is paged yet.
+ */
+export function useRunListQuery<T>(
+  filters: RunFilters,
+  paging: { size: number; cursor?: string },
+  options: UseRunQueryOptions = {},
+): RunQueryState<T> {
+  const { intervalMs = DEFAULT_POLL_INTERVAL_MS, fetcher } = options;
+  const request = useMemo(() => runListRequest(filters, paging), [filters, paging]);
+  const query = useQuery({
+    queryKey: request.key,
+    queryFn: () => fetchRun<T>(request.path, fetcher),
+    // Keeps the page in view while the next one loads, so changing a filter or a size
+    // does not flash an empty table.
+    placeholderData: keepPreviousData,
+    ...runQueryOptions(intervalMs),
+  });
+  const refresh = useCallback(() => {
+    void query.refetch();
+  }, [query]);
+  return {
+    data: query.data ?? null,
+    loading: query.isPending,
+    error: query.error instanceof Error ? query.error.message : query.error ? "Network error" : null,
+    refresh,
+  };
 }

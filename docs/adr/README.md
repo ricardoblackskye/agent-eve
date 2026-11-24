@@ -148,3 +148,5 @@ changes, write a new one that supersedes it.
 | [0092](0092-a-fix-cycle-is-bounded-by-rounds.md)                         | A fix cycle is bounded by the review rounds                                                         | Accepted           |
 | [0093](0093-a-fix-pass-runs-in-its-own-sandbox.md)                       | A fix pass runs in its own sandbox                                                                  | Accepted           |
 | [0094](0094-a-surface-comes-from-composition.md)                         | A surface comes from composition, not from conventions                                              | Accepted           |
+| [0095](0095-a-list-pages-by-cursor.md)                                   | A list pages by cursor, not by offset                                                               | Accepted           |
+| [0096](0096-the-dark-factory-is-operator-only.md)                        | The dark factory is operator-only, and fails closed                                                 | Accepted           |

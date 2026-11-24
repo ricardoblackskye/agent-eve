@@ -11,6 +11,7 @@ import type {
 import type { PersistedRunEvent } from "../../../agent/lib/dark-factory/run-history-store";
 import {
   formatClockTime,
+  formatDateTime,
   formatCostUsd,
   formatDuration,
   formatRelativeTime,
@@ -48,6 +49,7 @@ export interface TableRow {
   category: RunCategory;
   stage: string;
   updatedLabel: string;
+  updatedAtLabel: string;
   attemptCount: number;
   elapsedLabel: string;
   costLabel: string;
@@ -133,6 +135,9 @@ export interface DetailView {
 }
 
 export interface RunFilters {
+  /** Free text the store matches over the run id, the repo, the issue and the stage. */
+  search?: string;
+  stage?: string;
   statuses?: RunStatus[];
   repo?: string;
   issue?: number;
@@ -287,6 +292,7 @@ export function toTableRows(
     category: categorizeStatus(run.status),
     stage: run.stage,
     updatedLabel: formatRelativeTime(run.updatedAt, now),
+    updatedAtLabel: formatDateTime(run.updatedAt),
     attemptCount: run.attemptCount,
     elapsedLabel: formatDuration(run.startedAt, run.completedAt),
     costLabel: formatCostUsd(run.costUsd),
@@ -486,6 +492,48 @@ export function toQueryParams(filters: RunFilters): URLSearchParams {
   if (filters.issue !== undefined) params.set("issue", String(filters.issue));
   if (filters.from) params.set("from", filters.from);
   if (filters.to) params.set("to", filters.to);
+  if (filters.search) params.set("search", filters.search);
+  if (filters.stage) params.set("stage", filters.stage);
   if (filters.limit !== undefined) params.set("limit", String(filters.limit));
   return params;
+}
+/** Page size the run list opens with. */
+export const DEFAULT_PAGE_SIZE = 20;
+
+/** The page sizes the run list offers. */
+export const PAGE_SIZE_OPTIONS: readonly number[] = [20, 50, 100];
+
+/** A row is identified by its run id, so paging cannot re-key a row. */
+export function runRowId(row: TableRow): string {
+  return row.runId;
+}
+
+/** The React Query key for one page of the run list. */
+export type RunQueryKey = readonly ["dark-factory", "runs", Record<string, unknown>];
+
+/** Builds that key from the page, the size and the filters, and from nothing else. */
+export function runQueryKey(
+  filters: RunFilters,
+  paging: { size: number; cursor?: string },
+): RunQueryKey {
+  return ["dark-factory", "runs", { ...filters, size: paging.size, ...(paging.cursor !== undefined ? { cursor: paging.cursor } : {}) }];
+}
+
+/** One page of the run list, asked for by size and an opaque cursor. */
+export function buildCursorRequest(
+  filters: RunFilters,
+  paging: { size: number; cursor?: string },
+): URLSearchParams {
+  const params = toQueryParams(filters);
+  params.set("limit", String(paging.size));
+  if (paging.cursor !== undefined) params.set("cursor", paging.cursor);
+  return params;
+}
+
+/** Whether either arrow is live, from the page in the stack and the cursor returned. */
+export function cursorBounds(
+  page: number,
+  nextCursor: string | null,
+): { canGoBack: boolean; canGoForward: boolean } {
+  return { canGoBack: page > 1, canGoForward: nextCursor !== null };
 }

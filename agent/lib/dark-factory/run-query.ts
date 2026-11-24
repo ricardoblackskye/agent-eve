@@ -102,6 +102,8 @@ export function decodeEventCursor(token: string): EventCursor | null {
 }
 
 export interface RunListParams {
+  search?: string;
+  stage?: string;
   repo?: string;
   issue?: string;
   statuses?: readonly string[];
@@ -125,6 +127,8 @@ export interface RunMetricsParams {
 }
 
 export type RunListRequest = {
+  search?: string;
+  stage?: string;
   repo?: string;
   issue?: number;
   statuses?: RunStatus[];
@@ -150,6 +154,18 @@ export function validateRunListParams(
   params: RunListParams,
 ): ValidationResult<RunListRequest> {
   const request: RunListRequest = { limit: DEFAULT_PAGE_SIZE };
+
+  if (params.search !== undefined) {
+    const search = params.search.trim();
+    if (!search) return { ok: false, error: "search must be a non-empty string" };
+    request.search = search;
+  }
+
+  if (params.stage !== undefined) {
+    const stage = params.stage.trim();
+    if (!stage) return { ok: false, error: "stage must be a non-empty string" };
+    request.stage = stage;
+  }
 
   if (params.repo !== undefined) {
     const repo = params.repo.trim();
@@ -316,6 +332,8 @@ export async function queryRunList(
       cursor,
       sort: request.sort,
       direction: request.direction,
+      search: request.search,
+      stage: request.stage,
     });
     if (!result.ok || !result.value)
       return { ok: false, status: 503, error: "run history is unavailable" };

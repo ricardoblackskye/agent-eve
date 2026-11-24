@@ -8,6 +8,7 @@
     "REALVAULT",
     "hasattr",
     "AUTOINCREMENT",
+    "ILIKE",
     "Authorisation",
     "batchsandbox",
     "batchsandboxes",
