@@ -720,6 +720,19 @@ export type CheckoutBaseResult =
   | { ok: true; base: string; source: "remote-branch" | "default" }
   | { ok: false; error: string };
 
-export function selectCheckoutBase(_input: CheckoutBaseInput): CheckoutBaseResult {
-  throw new Error("selectCheckoutBase is not implemented");
+export function selectCheckoutBase(input: CheckoutBaseInput): CheckoutBaseResult {
+  const branch = input.branch.trim();
+  if (input.remoteBranchExists) {
+    // Continue the issue: the first run already pushed this branch, so its tip is the base.
+    // Without this the new commit is not a descendant and git refuses the push.
+    if (!branch)
+      return { ok: false, error: "the dark factory branch name is empty" };
+    if (branch.includes("#"))
+      return { ok: false, error: "a branch name cannot contain a hash" };
+    return { ok: true, base: branch, source: "remote-branch" };
+  }
+  const fallback = input.defaultBase.trim();
+  if (!fallback)
+    return { ok: false, error: "the default branch name is empty" };
+  return { ok: true, base: fallback, source: "default" };
 }
