@@ -135,6 +135,9 @@ export interface DetailView {
 }
 
 export interface RunFilters {
+  /** Free text the store matches over the run id, the repo, the issue and the stage. */
+  search?: string;
+  stage?: string;
   statuses?: RunStatus[];
   repo?: string;
   issue?: number;
@@ -489,6 +492,8 @@ export function toQueryParams(filters: RunFilters): URLSearchParams {
   if (filters.issue !== undefined) params.set("issue", String(filters.issue));
   if (filters.from) params.set("from", filters.from);
   if (filters.to) params.set("to", filters.to);
+  if (filters.search) params.set("search", filters.search);
+  if (filters.stage) params.set("stage", filters.stage);
   if (filters.limit !== undefined) params.set("limit", String(filters.limit));
   return params;
 }

@@ -8,7 +8,7 @@ import type {
 } from "../../../agent/lib/dark-factory/run-history";
 import { RunTable, StatePanel } from "../ui/components";
 import { DEFAULT_POLL_INTERVAL_MS, useRunListQuery } from "../ui/use-run-query";
-import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, cursorBounds, filterRows, toTableRows } from "../ui/view-model";
+import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, cursorBounds, toTableRows } from "../ui/view-model";
 import type { RunFilters } from "../ui/view-model";
 
 const STATUS_OPTIONS: Array<{ value: string; label: string }> = [
@@ -43,9 +43,15 @@ export default function DarkFactoryRunsPage() {
   const [status, setStatus] = useState("any");
   const [stage, setStage] = useState("any");
 
+  // The store filters, not this page: with paging, a filter applied here would hide matches on
+  // pages the client never fetched.
   const filters = useMemo<RunFilters>(
-    () => ({ statuses: status !== "any" ? [status as RunStatus] : undefined }),
-    [status],
+    () => ({
+      statuses: status !== "any" ? [status as RunStatus] : undefined,
+      search: search.trim() || undefined,
+      stage: stage !== "any" ? stage : undefined,
+    }),
+    [status, search, stage],
   );
 
   const runs = useRunListQuery<{ runs: RunSummary[]; nextCursor?: string | null }>(
@@ -58,14 +64,7 @@ export default function DarkFactoryRunsPage() {
   // Back and forward come from the reader s own stack and the cursor the server returned.
   const bounds = cursorBounds(cursors.length, runs.data?.nextCursor ?? null);
 
-  const rows = useMemo(
-    () =>
-      filterRows(toTableRows(runs.data?.runs ?? [], Date.now()), {
-        search,
-        stage,
-      }),
-    [runs.data, search, stage],
-  );
+  const rows = useMemo(() => toTableRows(runs.data?.runs ?? [], Date.now()), [runs.data]);
 
   if (runs.error === "Authentication required") {
     return (

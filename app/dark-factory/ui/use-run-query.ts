@@ -2,7 +2,7 @@
 import { buildCursorRequest, runQueryKey } from "./view-model";
 import type { RunFilters, RunQueryKey } from "./view-model";
 
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 export interface RunQueryState<T> {
@@ -176,6 +176,9 @@ export function useRunListQuery<T>(
   const query = useQuery({
     queryKey: request.key,
     queryFn: () => fetchRun<T>(request.path, fetcher),
+    // Keeps the page in view while the next one loads, so changing a filter or a size
+    // does not flash an empty table.
+    placeholderData: keepPreviousData,
     ...runQueryOptions(intervalMs),
   });
   const refresh = useCallback(() => {
