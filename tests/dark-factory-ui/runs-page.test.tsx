@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-import { fireEvent, render, waitFor } from "@testing-library/react";
+import { fireEvent, waitFor } from "@testing-library/react";
+import { renderWithQuery } from "../support/render-with-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { push } = vi.hoisted(() => ({ push: vi.fn() }));
@@ -50,7 +51,7 @@ afterEach(() => {
 
 describe("Dark Factory runs page", () => {
   it("navigates to the run detail page when a row is clicked", async () => {
-    const { container } = render(<DarkFactoryRunsPage />);
+    const { container } = renderWithQuery(<DarkFactoryRunsPage />);
     await waitFor(() =>
       expect(container.querySelectorAll(".df-table-row")).toHaveLength(1),
     );
@@ -59,7 +60,7 @@ describe("Dark Factory runs page", () => {
   });
 
   it("links each run id to its detail route", async () => {
-    const { container } = render(<DarkFactoryRunsPage />);
+    const { container } = renderWithQuery(<DarkFactoryRunsPage />);
     await waitFor(() =>
       expect(container.querySelectorAll(".df-table-row")).toHaveLength(1),
     );
@@ -69,7 +70,7 @@ describe("Dark Factory runs page", () => {
   });
 
   it("no longer renders the inline selected-run preview", async () => {
-    const { container } = render(<DarkFactoryRunsPage />);
+    const { container } = renderWithQuery(<DarkFactoryRunsPage />);
     await waitFor(() =>
       expect(container.querySelectorAll(".df-table-row")).toHaveLength(1),
     );
