@@ -47,4 +47,9 @@ describe("run list wiring (#748 tasks 2c and 2d)", () => {
       expect(read(file)).toMatch(/useRunQuery/);
     }
   });
+  it("renders the pages under the provider in the tests as well as the app", () => {
+    // The gap this test closes: a page can be correct while its test renders it bare,
+    // which the layout assertion cannot see. It failed exactly that way.
+    expect(read("tests/dark-factory-ui/runs-page.test.tsx")).toMatch(/renderWithQuery|QueryClientProvider/);
+  });
 });
