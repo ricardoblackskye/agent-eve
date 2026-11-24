@@ -332,6 +332,8 @@ export async function queryRunList(
       cursor,
       sort: request.sort,
       direction: request.direction,
+      search: request.search,
+      stage: request.stage,
     });
     if (!result.ok || !result.value)
       return { ok: false, status: 503, error: "run history is unavailable" };
