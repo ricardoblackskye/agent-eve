@@ -1,6 +1,7 @@
 # A conflicting create returns the existing resource
 
 Date: 2026-11-24
+Status: Accepted
 
 ## Context
 
