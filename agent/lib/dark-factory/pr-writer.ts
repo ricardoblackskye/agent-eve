@@ -137,10 +137,56 @@ export class GitHubPrWriter {
       );
 
       if (!res.ok) {
+        // Surface WHAT GitHub said. A bare status code turned a diagnosable payload problem into a
+        // mystery: the difference between "this already exists" and "your request is malformed" is
+        // in the body, and without it the operator has a number and no cause.
+        const detail = await res.text().catch(() => "");
+        const suffix = detail ? ": " + detail.replace(/\s+/g, " ").slice(0, 300) : "";
+
+        if (res.status === 422) {
+          // #754: creating a resource that already exists is a SUCCESS that returns it. GitHub answers
+          // 422 to a create for an existing head, and treating that as a failure refused the Definition
+          // of Done on a re-run whose only sin was finding its own pull request open.
+          const headQuery = options.head.includes(":")
+            ? options.head
+            : owner + ":" + options.head;
+          const lookup = await this.fetchImpl(
+            `${this.apiBase}/repos/${owner}/${repo}/pulls?head=${headQuery}&state=open`,
+            { method: "GET", headers: this.headers() },
+          );
+          if (lookup.ok) {
+            const found = (await lookup.json()) as Array<{
+              number?: number;
+              html_url?: string;
+              title?: string;
+              body?: string;
+              head?: { ref?: string };
+              base?: { ref?: string };
+            }>;
+            const existing = Array.isArray(found) ? found[0] : undefined;
+            // Forgiven ONLY once the lookup proves the pull request exists: a 422 with nothing behind
+            // it is still a failure, which is what the control case pins.
+            if (existing && typeof existing.number === "number") {
+              return {
+                ok: true,
+                status: res.status,
+                pr: {
+                  number: existing.number,
+                  url: existing.html_url ?? "",
+                  head: existing.head?.ref ?? options.head,
+                  base: existing.base?.ref ?? base,
+                  title: existing.title ?? options.title,
+                  body: existing.body ?? options.body,
+                },
+              };
+            }
+          }
+        }
+
         return {
           ok: false,
           status: res.status,
-          error: `GitHub responded ${res.status}`,
+          error: `GitHub responded ${res.status}${suffix}`,
         };
       }
 
