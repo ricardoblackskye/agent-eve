@@ -1,3 +1,4 @@
+import { selectCheckoutBase } from "./runner-config";
 import { execSync } from "node:child_process";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -99,6 +100,11 @@ export type SandboxGitRunner = (
 
 export interface SandboxRepoDeps {
   base?: string;
+  /**
+   * The Dark Factory branch for this issue, as derived by the branch-name rule. The prepare step
+   * chooses the checkout base from it: a re-run must continue the branch the first run pushed.
+   */
+  branchName?: string;
   runGit: SandboxGitRunner;
   /** Bare https clone URL — NO userinfo: the sidecar supplies the credential. */
   remoteUrl: string;
@@ -236,7 +242,30 @@ export async function ensureSandboxRepo(
   // #744: reset to the CHOSEN base, not the resolved default. On a re-run of an issue the default is
   // not the branch the first run pushed, so a commit made here cannot descend from that branch tip and
   // git refuses the push as a non-fast-forward. The chosen base is the remote DF branch when it exists.
-  const chosenBase = (deps.base ?? "").trim().replace(/^origin\//, "");
+  // #744: choose the checkout base from the issue s branch after the fetch above, so the refs are
+  // present. Nothing here force-pushes: the earlier commit may be the only record of an approved
+  // plan s implementation, so the base moves forward by descendant commits instead.
+  const requestedBranch = (deps.branchName ?? "").trim();
+  const branchExists = requestedBranch !== ""
+    ? (await deps.runGit([
+        "-C",
+        deps.workspaceDir,
+        "rev-parse",
+        "--verify",
+        "--quiet",
+        "refs/remotes/origin/" + requestedBranch,
+      ])).exitCode === 0
+    : false;
+  const chosen = selectCheckoutBase({
+    branch: requestedBranch,
+    remoteBranchExists: branchExists,
+    defaultBase: (deps.base ?? "").trim() || defaultBranch,
+  });
+  if (!chosen.ok) {
+    // A named setup finding, never a code failure: nothing the agent writes can fix this.
+    return { ok: false, cloned: false, error: "sandbox setup: " + chosen.error };
+  }
+  const chosenBase = chosen.base.replace(/^origin\//, "");
   const resetTarget = chosenBase === "" ? defaultBranch : "origin/" + chosenBase;
   const reset = await deps.runGit(["-C", deps.workspaceDir, "reset", "--hard", resetTarget]);
   if (reset.exitCode !== 0) {

@@ -1321,6 +1321,9 @@ async function main(): Promise<void> {
             runGit: sandboxProvider.runGit,
             remoteUrl: sandboxRemoteUrl,
             workspaceDir: sandboxWorkspace,
+            // #744: name the issue branch, so the prepare step can continue it on a re-run instead
+            // of restarting from the default tip and hitting a rejected push.
+            branchName: `feat/dark-factory-${issueNum}`,
           });
           if (!prepared.ok) {
             throw new Error(
