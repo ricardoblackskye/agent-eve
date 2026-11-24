@@ -1,5 +1,5 @@
 "use client";
-import { buildPageRequest, runQueryKey } from "./view-model";
+import { buildCursorRequest, runQueryKey } from "./view-model";
 import type { RunFilters, RunQueryKey } from "./view-model";
 
 import { useQuery } from "@tanstack/react-query";
@@ -124,9 +124,9 @@ export interface RunListRequest {
 /** Builds both from one input, so the key and the path cannot drift apart. */
 export function runListRequest(
   filters: RunFilters,
-  paging: { page: number; size: number },
+  paging: { size: number; cursor?: string },
 ): RunListRequest {
-  const params = buildPageRequest(filters, paging);
+  const params = buildCursorRequest(filters, paging);
   return { key: runQueryKey(filters, paging), path: `${RUN_LIST_PATH}?${params.toString()}` };
 }
 
@@ -168,7 +168,7 @@ export async function fetchRun<T>(path: string, fetcher?: typeof fetch): Promise
  */
 export function useRunListQuery<T>(
   filters: RunFilters,
-  paging: { page: number; size: number },
+  paging: { size: number; cursor?: string },
   options: UseRunQueryOptions = {},
 ): RunQueryState<T> {
   const { intervalMs = DEFAULT_POLL_INTERVAL_MS, fetcher } = options;

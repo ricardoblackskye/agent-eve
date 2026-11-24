@@ -8,7 +8,7 @@ import type {
 } from "../../../agent/lib/dark-factory/run-history";
 import { RunTable, StatePanel } from "../ui/components";
 import { DEFAULT_POLL_INTERVAL_MS, useRunListQuery } from "../ui/use-run-query";
-import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, filterRows, pageBounds, toTableRows } from "../ui/view-model";
+import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, cursorBounds, filterRows, toTableRows } from "../ui/view-model";
 import type { RunFilters } from "../ui/view-model";
 
 const STATUS_OPTIONS: Array<{ value: string; label: string }> = [
@@ -37,7 +37,7 @@ function runDetailHref(runId: string): string {
 
 export default function DarkFactoryRunsPage() {
   const router = useRouter();
-  const [page, setPage] = useState(1);
+  const [cursors, setCursors] = useState<Array<string | undefined>>([undefined]);
   const [size, setSize] = useState<number>(DEFAULT_PAGE_SIZE);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("any");
@@ -48,15 +48,15 @@ export default function DarkFactoryRunsPage() {
     [status],
   );
 
-  const runs = useRunListQuery<{ runs: RunSummary[]; total?: number }>(
+  const runs = useRunListQuery<{ runs: RunSummary[]; nextCursor?: string | null }>(
     filters,
-    { page, size },
+    { size, cursor: cursors[cursors.length - 1] },
     { intervalMs: DEFAULT_POLL_INTERVAL_MS },
   );
 
   // The total is the server s when it reports one; until then the rows it returned are the count.
-  const total = runs.data?.total ?? runs.data?.runs?.length ?? 0;
-  const bounds = pageBounds(page, total, size);
+  // Back and forward come from the reader s own stack and the cursor the server returned.
+  const bounds = cursorBounds(cursors.length, runs.data?.nextCursor ?? null);
 
   const rows = useMemo(
     () =>
@@ -93,7 +93,7 @@ export default function DarkFactoryRunsPage() {
             value={String(size)}
             onChange={(event) => {
               setSize(Number(event.target.value));
-              setPage(1);
+              setCursors([undefined]);
             }}
           >
             {PAGE_SIZE_OPTIONS.map((option) => (
@@ -107,7 +107,7 @@ export default function DarkFactoryRunsPage() {
             type="button"
             aria-label="Previous page"
             disabled={!bounds.canGoBack}
-            onClick={() => setPage(bounds.page - 1)}
+            onClick={() => setCursors((stack) => stack.slice(0, -1))}
           >
             ‹
           </button>
@@ -116,7 +116,7 @@ export default function DarkFactoryRunsPage() {
             type="button"
             aria-label="Next page"
             disabled={!bounds.canGoForward}
-            onClick={() => setPage(bounds.page + 1)}
+            onClick={() => setCursors((stack) => [...stack, runs.data?.nextCursor ?? undefined])}
           >
             ›
           </button>

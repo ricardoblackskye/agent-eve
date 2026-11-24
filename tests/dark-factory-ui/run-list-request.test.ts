@@ -5,24 +5,25 @@ import {
   runQueryOptions,
 } from "../../app/dark-factory/ui/use-run-query";
 
-describe("run list request (#748 task 2b)", () => {
+describe("run list request (#748 task 2b, in cursor terms)", () => {
   it("takes the key and the path from one input, so they cannot drift", () => {
-    for (const paging of [
-      { page: 1, size: 20 },
-      { page: 3, size: 50 },
-    ]) {
-      const { key, path } = runListRequest({}, paging);
-      const named = key[2] as { page: number; size: number };
-      expect(named.page).toBe(paging.page);
-      expect(named.size).toBe(paging.size);
-      expect(path).toContain(`limit=${paging.size}`);
-      expect(path).toContain(`offset=${(paging.page - 1) * paging.size}`);
-      expect(path.startsWith("/api/dark-factory/runs?")).toBe(true);
-    }
+    const { key, path } = runListRequest({}, { size: 20 });
+    const named = key[2] as { size: number; cursor?: string };
+    expect(named.size).toBe(20);
+    expect(path).toContain("limit=20");
+    expect(path.startsWith("/api/dark-factory/runs?")).toBe(true);
+    expect(path).not.toContain("offset");
+  });
+
+  it("puts the same cursor in the key and in the path", () => {
+    const { key, path } = runListRequest({}, { size: 20, cursor: "tok-1" });
+    expect((key[2] as { cursor?: string }).cursor).toBe("tok-1");
+    expect(path).toContain("cursor=tok-1");
+    expect(path).not.toContain("offset");
   });
 
   it("carries the same filters in the key and in the path", () => {
-    const { key, path } = runListRequest({ statuses: ["failed"] }, { page: 1, size: 20 });
+    const { key, path } = runListRequest({ statuses: ["failed"] }, { size: 20 });
     expect((key[2] as { statuses?: string[] }).statuses).toEqual(["failed"]);
     expect(path).toContain("status=failed");
   });
@@ -33,12 +34,9 @@ describe("run list request (#748 task 2b)", () => {
     expect(options.retry).toBe(false);
   });
 
-  it("polls on the documented default interval", () => {
+  it("polls on the documented default interval, and can be switched off", () => {
     expect(runQueryOptions().refetchInterval).toBe(DEFAULT_POLL_INTERVAL_MS);
     expect(runQueryOptions(5_000).refetchInterval).toBe(5_000);
-  });
-
-  it("disables polling when the interval is switched off", () => {
     expect(runQueryOptions(0).refetchInterval).toBeFalsy();
   });
 });

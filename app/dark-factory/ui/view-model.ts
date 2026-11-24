@@ -547,9 +547,9 @@ export type RunQueryKey = readonly ["dark-factory", "runs", Record<string, unkno
 /** Builds that key from the page, the size and the filters, and from nothing else. */
 export function runQueryKey(
   filters: RunFilters,
-  paging: { page: number; size: number },
+  paging: { size: number; cursor?: string },
 ): RunQueryKey {
-  return ["dark-factory", "runs", { page: paging.page, size: paging.size, ...filters }];
+  return ["dark-factory", "runs", { ...filters, size: paging.size, ...(paging.cursor !== undefined ? { cursor: paging.cursor } : {}) }];
 }
 
 /** One page of the run list, asked for by size and an opaque cursor. */
