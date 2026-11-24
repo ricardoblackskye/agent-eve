@@ -172,6 +172,9 @@ export interface Page<T, TCursor> {
 }
 
 export interface RunListOptions {
+  /** Free text over the run id, the repo, the issue and the stage. */
+  search?: string;
+  stage?: string;
   repo?: string;
   issue?: number;
   status?: RunStatus;
@@ -1747,6 +1750,16 @@ export class SqliteRunHistoryStore implements RunHistoryStore {
     const status =
       options.status === undefined ? undefined : validateStatus(options.status);
     const statuses = validateStatuses(options.statuses);
+    const search =
+      options.search === undefined ? undefined : options.search.trim();
+    if (search === "") {
+      throw new InvalidRunRecordError("Run history search must be a non-empty string.");
+    }
+    const stage =
+      options.stage === undefined ? undefined : options.stage.trim();
+    if (stage === "") {
+      throw new InvalidRunRecordError("Run history stage must be a non-empty string.");
+    }
     if (status !== undefined && statuses !== undefined) {
       throw new InvalidRunRecordError(
         "Use either status or statuses, not both.",
@@ -1786,6 +1799,18 @@ export class SqliteRunHistoryStore implements RunHistoryStore {
       if (to !== undefined) {
         clauses.push("created_at < ?");
         values.push(to);
+      }
+      if (stage !== undefined) {
+        clauses.push("stage = ?");
+        values.push(stage);
+      }
+      if (search !== undefined) {
+        // This driver is positional, so the same value is pushed once per column.
+        const like = `%${search}%`;
+        clauses.push(
+          "(run_id LIKE ? OR repo LIKE ? OR CAST(issue AS TEXT) LIKE ? OR stage LIKE ?)",
+        );
+        values.push(like, like, like, like);
       }
       if (cursor) {
         clauses.push(

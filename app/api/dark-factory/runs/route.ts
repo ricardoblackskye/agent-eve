@@ -22,6 +22,8 @@ function listParamsFromSearch(search: URLSearchParams): RunListParams {
     from: search.get("from") ?? undefined,
     to: search.get("to") ?? undefined,
     limit: search.get("limit") ?? undefined,
+    search: search.get("search") ?? undefined,
+    stage: search.get("stage") ?? undefined,
     cursor: search.get("cursor") ?? undefined,
     sort: search.get("sort") ?? undefined,
     direction: search.get("direction") ?? undefined,
