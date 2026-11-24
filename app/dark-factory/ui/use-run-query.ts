@@ -1,4 +1,5 @@
 "use client";
+import { buildPageRequest, runQueryKey } from "./view-model";
 import type { RunFilters, RunQueryKey } from "./view-model";
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -124,9 +125,8 @@ export function runListRequest(
   filters: RunFilters,
   paging: { page: number; size: number },
 ): RunListRequest {
-  void filters;
-  void paging;
-  throw new Error("not implemented");
+  const params = buildPageRequest(filters, paging);
+  return { key: runQueryKey(filters, paging), path: `${RUN_LIST_PATH}?${params.toString()}` };
 }
 
 /** The Query posture: never cached, never retried, and polled on the given interval. */
@@ -138,6 +138,6 @@ export interface RunQueryOptions {
 
 /** States that posture explicitly rather than inheriting one from the library. */
 export function runQueryOptions(intervalMs?: number): RunQueryOptions {
-  void intervalMs;
-  throw new Error("not implemented");
+  const interval = intervalMs ?? DEFAULT_POLL_INTERVAL_MS;
+  return { staleTime: 0, retry: false, refetchInterval: interval > 0 ? interval : undefined };
 }
