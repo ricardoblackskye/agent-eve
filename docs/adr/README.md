@@ -150,3 +150,4 @@ changes, write a new one that supersedes it.
 | [0094](0094-a-surface-comes-from-composition.md)                         | A surface comes from composition, not from conventions                                              | Accepted           |
 | [0095](0095-a-list-pages-by-cursor.md)                                   | A list pages by cursor, not by offset                                                               | Accepted           |
 | [0096](0096-the-dark-factory-is-operator-only.md)                        | The dark factory is operator-only, and fails closed                                                 | Accepted           |
+| [0097](0097-a-conflicting-create-returns-the-existing-resource.md)       | A conflicting create returns the existing resource                                                  | Accepted           |
