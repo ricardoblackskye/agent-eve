@@ -697,3 +697,29 @@ export function resolveTargetRepo(input: {
       `${RUNNER_CONFIG_PATH}.`,
   };
 }
+
+/**
+ * Which ref the sandbox checkout starts from (#744).
+ *
+ * A re-run of an issue whose `feat/dark-factory-<issue>` branch already exists on the remote must
+ * continue THAT branch: synced to main, its commit is not a descendant of the branch tip, git
+ * rejects the push as a non-fast-forward, and the run aborts. The choice is pure so it can be
+ * pinned without a sandbox, and it never force-pushes: the earlier commit may be the only record
+ * of an approved plan s implementation.
+ */
+export interface CheckoutBaseInput {
+  /** The DF branch name for this issue, already derived by the branch-name rule below. */
+  branch: string;
+  /** Whether that branch already exists on the remote. */
+  remoteBranchExists: boolean;
+  /** The repositorys default branch, used when the DF branch does not exist yet. */
+  defaultBase: string;
+}
+
+export type CheckoutBaseResult =
+  | { ok: true; base: string; source: "remote-branch" | "default" }
+  | { ok: false; error: string };
+
+export function selectCheckoutBase(_input: CheckoutBaseInput): CheckoutBaseResult {
+  throw new Error("selectCheckoutBase is not implemented");
+}
