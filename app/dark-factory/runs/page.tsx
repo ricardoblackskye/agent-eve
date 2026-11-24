@@ -8,7 +8,7 @@ import type {
 } from "../../../agent/lib/dark-factory/run-history";
 import { RunTable, StatePanel } from "../ui/components";
 import { DEFAULT_POLL_INTERVAL_MS, useRunListQuery } from "../ui/use-run-query";
-import { filterRows, toTableRows } from "../ui/view-model";
+import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, filterRows, pageBounds, toTableRows } from "../ui/view-model";
 import type { RunFilters } from "../ui/view-model";
 
 const STATUS_OPTIONS: Array<{ value: string; label: string }> = [
@@ -37,6 +37,8 @@ function runDetailHref(runId: string): string {
 
 export default function DarkFactoryRunsPage() {
   const router = useRouter();
+  const [page, setPage] = useState(1);
+  const [size, setSize] = useState<number>(DEFAULT_PAGE_SIZE);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("any");
   const [stage, setStage] = useState("any");
@@ -46,12 +48,15 @@ export default function DarkFactoryRunsPage() {
     [status],
   );
 
-  // The paging controls are task 3; until they land the list keeps its current page of 50.
-  const runs = useRunListQuery<{ runs: RunSummary[] }>(
+  const runs = useRunListQuery<{ runs: RunSummary[]; total?: number }>(
     filters,
-    { page: 1, size: 50 },
+    { page, size },
     { intervalMs: DEFAULT_POLL_INTERVAL_MS },
   );
+
+  // The total is the server s when it reports one; until then the rows it returned are the count.
+  const total = runs.data?.total ?? runs.data?.runs?.length ?? 0;
+  const bounds = pageBounds(page, total, size);
 
   const rows = useMemo(
     () =>
@@ -78,6 +83,42 @@ export default function DarkFactoryRunsPage() {
         <div className="df-actions">
           <button className="df-btn" type="button" onClick={runs.refresh}>
             ↻ Refresh
+          </button>
+          <label className="df-field" htmlFor="df-page-size">
+            Rows per page
+          </label>
+          <select
+            id="df-page-size"
+            className="df-field"
+            value={String(size)}
+            onChange={(event) => {
+              setSize(Number(event.target.value));
+              setPage(1);
+            }}
+          >
+            {PAGE_SIZE_OPTIONS.map((option) => (
+              <option key={option} value={String(option)}>
+                {option}
+              </option>
+            ))}
+          </select>
+          <button
+            className="df-btn"
+            type="button"
+            aria-label="Previous page"
+            disabled={!bounds.canGoBack}
+            onClick={() => setPage(bounds.page - 1)}
+          >
+            ‹
+          </button>
+          <button
+            className="df-btn"
+            type="button"
+            aria-label="Next page"
+            disabled={!bounds.canGoForward}
+            onClick={() => setPage(bounds.page + 1)}
+          >
+            ›
           </button>
         </div>
       </div>
