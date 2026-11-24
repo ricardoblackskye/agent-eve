@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { QueryProvider } from "./ui/query-provider";
 
 export default function DarkFactoryLayout({
   children,
@@ -28,7 +29,9 @@ export default function DarkFactoryLayout({
             <span className="df-live">POLLING 60S</span>
           </div>
         </header>
-        <div className="df-content">{children}</div>
+        <div className="df-content">
+          <QueryProvider>{children}</QueryProvider>
+        </div>
       </div>
     </div>
   );

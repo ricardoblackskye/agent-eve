@@ -7,8 +7,9 @@ import type {
   RunSummary,
 } from "../../../agent/lib/dark-factory/run-history";
 import { RunTable, StatePanel } from "../ui/components";
-import { DEFAULT_POLL_INTERVAL_MS, useRunQuery } from "../ui/use-run-query";
-import { filterRows, toQueryParams, toTableRows } from "../ui/view-model";
+import { DEFAULT_POLL_INTERVAL_MS, useRunListQuery } from "../ui/use-run-query";
+import { filterRows, toTableRows } from "../ui/view-model";
+import type { RunFilters } from "../ui/view-model";
 
 const STATUS_OPTIONS: Array<{ value: string; label: string }> = [
   { value: "any", label: "Any status" },
@@ -40,17 +41,17 @@ export default function DarkFactoryRunsPage() {
   const [status, setStatus] = useState("any");
   const [stage, setStage] = useState("any");
 
-  const path = useMemo(() => {
-    const params = toQueryParams({
-      statuses: status !== "any" ? [status as RunStatus] : undefined,
-      limit: 50,
-    });
-    return `/api/dark-factory/runs?${params.toString()}`;
-  }, [status]);
+  const filters = useMemo<RunFilters>(
+    () => ({ statuses: status !== "any" ? [status as RunStatus] : undefined }),
+    [status],
+  );
 
-  const runs = useRunQuery<{ runs: RunSummary[] }>(path, {
-    intervalMs: DEFAULT_POLL_INTERVAL_MS,
-  });
+  // The paging controls are task 3; until they land the list keeps its current page of 50.
+  const runs = useRunListQuery<{ runs: RunSummary[] }>(
+    filters,
+    { page: 1, size: 50 },
+    { intervalMs: DEFAULT_POLL_INTERVAL_MS },
+  );
 
   const rows = useMemo(
     () =>
