@@ -9,7 +9,7 @@ describe("run list filters (#748 task 3)", () => {
     const result = validateRunListParams({ search: "  webfeedpoc  " });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.request.search).toBe("webfeedpoc");
+    expect(result.value.search).toBe("webfeedpoc");
   });
 
   it("refuses a blank search rather than filtering on nothing", () => {
@@ -20,7 +20,7 @@ describe("run list filters (#748 task 3)", () => {
     const result = validateRunListParams({ stage: " terminal " });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.request.stage).toBe("terminal");
+    expect(result.value.stage).toBe("terminal");
   });
 
   it("refuses a blank stage", () => {
@@ -36,9 +36,9 @@ describe("run list filters (#748 task 3)", () => {
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.request.search).toBe("webfeedpoc");
-    expect(result.request.stage).toBe("terminal");
-    expect(result.request.statuses).toEqual(["succeeded"]);
-    expect(result.request.limit).toBe(20);
+    expect(result.value.search).toBe("webfeedpoc");
+    expect(result.value.stage).toBe("terminal");
+    expect(result.value.statuses).toEqual(["succeeded"]);
+    expect(result.value.limit).toBe(20);
   });
 });
