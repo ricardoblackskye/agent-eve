@@ -422,6 +422,7 @@ export function RunTable({
           <th>Status</th>
           <th>Stage</th>
           <th>Update</th>
+          <th>Date and time</th>
           <th>Try</th>
           <th>Elapsed</th>
           <th>Cost</th>
@@ -449,6 +450,7 @@ export function RunTable({
             </td>
             <td>{row.stage}</td>
             <td>{row.updatedLabel}</td>
+            <td>{row.updatedAtLabel}</td>
             <td>{row.attemptCount}</td>
             <td>{row.elapsedLabel}</td>
             <td>{row.costLabel}</td>
