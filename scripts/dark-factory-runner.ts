@@ -2272,6 +2272,10 @@ export function buildFixCycleAdapter(deps: FixCycleAdapterDeps): AttemptFixes {
         runGit,
         remoteUrl: deps.remoteUrl(),
         workspaceDir,
+        // #744: the fix cycle is itself a re-run path, so it names the issue branch too. Without
+        // this it prepares a default-tip checkout, and the push below is rejected as a
+        // non-fast-forward - the symptom this issue exists to remove.
+        branchName: deps.branchName,
       });
       if (!prepared.ok) {
         return { ok: false as const, error: prepared.error ?? "the checkout could not be prepared" };
