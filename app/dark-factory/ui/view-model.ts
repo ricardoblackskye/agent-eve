@@ -537,3 +537,16 @@ export function pageBounds(
 export function runRowId(row: TableRow): string {
   return row.runId;
 }
+
+/** The React Query key for one page of the run list. */
+export type RunQueryKey = readonly ["dark-factory", "runs", Record<string, unknown>];
+
+/** Builds that key from the page, the size and the filters, and from nothing else. */
+export function runQueryKey(
+  filters: RunFilters,
+  paging: { page: number; size: number },
+): RunQueryKey {
+  void filters;
+  void paging;
+  throw new Error("not implemented");
+}
