@@ -48,6 +48,7 @@ export interface TableRow {
   category: RunCategory;
   stage: string;
   updatedLabel: string;
+  updatedAtLabel?: string;
   attemptCount: number;
   elapsedLabel: string;
   costLabel: string;
