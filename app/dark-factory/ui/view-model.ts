@@ -489,3 +489,44 @@ export function toQueryParams(filters: RunFilters): URLSearchParams {
   if (filters.limit !== undefined) params.set("limit", String(filters.limit));
   return params;
 }
+
+/** Page size the run list opens with. */
+export const DEFAULT_PAGE_SIZE = 0;
+
+/** The page sizes the run list offers. */
+export const PAGE_SIZE_OPTIONS: readonly number[] = [];
+
+/** Builds the page request: the filters, plus the size and the offset for one page. */
+export function buildPageRequest(
+  filters: RunFilters,
+  paging: { page: number; size: number },
+): URLSearchParams {
+  void filters;
+  void paging;
+  throw new Error("not implemented");
+}
+
+/** How many pages a total makes at a given size. */
+export function pageCount(total: number, size: number): number {
+  void total;
+  void size;
+  throw new Error("not implemented");
+}
+
+/** The page in range, and whether either arrow is live. */
+export function pageBounds(
+  page: number,
+  total: number,
+  size: number,
+): { page: number; canGoBack: boolean; canGoForward: boolean } {
+  void page;
+  void total;
+  void size;
+  throw new Error("not implemented");
+}
+
+/** A row is identified by its run id, so paging cannot re-key a row. */
+export function runRowId(row: TableRow): string {
+  void row;
+  throw new Error("not implemented");
+}
