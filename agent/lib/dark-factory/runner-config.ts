@@ -697,3 +697,42 @@ export function resolveTargetRepo(input: {
       `${RUNNER_CONFIG_PATH}.`,
   };
 }
+
+/**
+ * Which ref the sandbox checkout starts from (#744).
+ *
+ * A re-run of an issue whose `feat/dark-factory-<issue>` branch already exists on the remote must
+ * continue THAT branch: synced to main, its commit is not a descendant of the branch tip, git
+ * rejects the push as a non-fast-forward, and the run aborts. The choice is pure so it can be
+ * pinned without a sandbox, and it never force-pushes: the earlier commit may be the only record
+ * of an approved plan s implementation.
+ */
+export interface CheckoutBaseInput {
+  /** The DF branch name for this issue, already derived by the branch-name rule below. */
+  branch: string;
+  /** Whether that branch already exists on the remote. */
+  remoteBranchExists: boolean;
+  /** The repository's default branch, used when the DF branch does not exist yet. */
+  defaultBase: string;
+}
+
+export type CheckoutBaseResult =
+  | { ok: true; base: string; source: "remote-branch" | "default" }
+  | { ok: false; error: string };
+
+export function selectCheckoutBase(input: CheckoutBaseInput): CheckoutBaseResult {
+  const branch = input.branch.trim();
+  if (input.remoteBranchExists) {
+    // Continue the issue: the first run already pushed this branch, so its tip is the base.
+    // Without this the new commit is not a descendant and git refuses the push.
+    if (!branch)
+      return { ok: false, error: "the dark factory branch name is empty" };
+    if (branch.includes("#"))
+      return { ok: false, error: "a branch name cannot contain a hash" };
+    return { ok: true, base: branch, source: "remote-branch" };
+  }
+  const fallback = input.defaultBase.trim();
+  if (!fallback)
+    return { ok: false, error: "the default branch name is empty" };
+  return { ok: true, base: fallback, source: "default" };
+}
