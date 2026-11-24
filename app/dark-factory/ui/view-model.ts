@@ -557,9 +557,10 @@ export function buildCursorRequest(
   filters: RunFilters,
   paging: { size: number; cursor?: string },
 ): URLSearchParams {
-  void filters;
-  void paging;
-  throw new Error("not implemented");
+  const params = toQueryParams(filters);
+  params.set("limit", String(paging.size));
+  if (paging.cursor !== undefined) params.set("cursor", paging.cursor);
+  return params;
 }
 
 /** Whether either arrow is live, from the page in the stack and the cursor returned. */
@@ -567,7 +568,5 @@ export function cursorBounds(
   page: number,
   nextCursor: string | null,
 ): { canGoBack: boolean; canGoForward: boolean } {
-  void page;
-  void nextCursor;
-  throw new Error("not implemented");
+  return { canGoBack: page > 1, canGoForward: nextCursor !== null };
 }
