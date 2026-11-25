@@ -190,6 +190,13 @@ function terminalEvent(
 export interface StartLifecycleArgs {
   repo: string;
   issue: number;
+  /**
+   * #759: the labels the ticket already carries, when the caller knows them. A DELIVERED
+   * ticket is refused rather than re-dispatched. Callers that omit this keep the previous
+   * behaviour, and the durable guarantee does not depend on them: `done` is no longer in
+   * OUTCOME_LABELS, so no caller can clear it.
+   */
+  existingLabels?: string[];
 }
 
 export interface StartLifecycleOutcome {
@@ -218,6 +225,23 @@ export async function applyStartLifecycle(
 ): Promise<StartLifecycleOutcome> {
   const cleared: string[] = [];
   const failures: string[] = [];
+
+  // #759: a DELIVERED ticket must not be dispatched again. Adding `df:running` beside `df:done`
+  // advertises the contradictory pair this module exists to prevent, and clearing `df:done` would
+  // un-deliver finished work. This mirrors RETRIGGER_REFUSED_LABELS, which guards only the LABEL
+  // path - the CLI path is the one that produced the original report.
+  const delivered = (args.existingLabels ?? []).filter(
+    (label) => label === TRIGGER_LABELS.done || label === TRIGGER_LABELS.signoff,
+  );
+  if (delivered.length > 0) {
+    return {
+      applied: false,
+      cleared,
+      refused:
+        `the ticket is already delivered (${delivered.join(", ")}) - dispatching again would ` +
+        "un-deliver it; sign it off, or retire the delivered state first",
+    };
+  }
 
   for (const label of OUTCOME_LABELS) {
     const removed = await deps.labelWriter.remove(args.repo, args.issue, label);
