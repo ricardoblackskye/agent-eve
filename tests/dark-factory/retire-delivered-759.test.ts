@@ -1,16 +1,24 @@
 /**
- * #759 task 6 - retiring a DELIVERED run.
+ * #759 task 6 - GUARD, not a RED, and the distinction is the point.
  *
- * `retire-claim.ts` states its own rule: "No terminal label is applied - retiring is neither a success
- * nor a failure." That rule is RIGHT for a run that never delivered, and this file keeps it there (the
- * second case is the control). It is wrong for one that DID deliver: retiring then clears the in-flight
- * labels and leaves the ticket advertising nothing at all, so a finished issue becomes indistinguishable
- * from one nobody has touched - observed on WebFeedPOC#260, whose labels ended as "In progress" alone.
+ * This file began as a RED for "retiring a delivered run should leave a terminal label". The premise was
+ * WRONG, and the first run of it measured why:
  *
- * The report already carries `previousStatus`, so the two cases are distinguishable without new state.
+ *   expected 'no-claim' to be 'retired'
  *
- * The store is the REAL sqlite store and the seeding copies the shape from retire-claim-operator.test.ts,
- * because a hand-rolled stub with a cast hides a missing required field behind the cast that silences it.
+ * A delivered run has already RELEASED its claim, so it cannot be retired at all - the store s own
+ * documentation says a `blocked` (parked) holder is retired because a park is a WAIT, and reports
+ * `no-claim` when nothing holds the claim. So retiring is never the path that clears a delivered state, and
+ * the module s documented rule ("no terminal label is applied - retiring is neither a success nor a
+ * failure") was right all along. The labels on WebFeedPOC#260 were lost by the DISPATCH clearing `df:done`,
+ * which task 3 fixed and task 3b stopped at the CLI path.
+ *
+ * Both cases below PASS against the current code. They are here because nothing pinned either fact, and a
+ * future change could reintroduce the clearing with nothing to catch it. Reported as a guard, never as a
+ * RED: a guard dressed as a RED is a false claim about the code s history.
+ *
+ * The store is the REAL sqlite store, and the seeding copies the shape from retire-claim-operator.test.ts -
+ * a hand-rolled stub behind a cast hides a missing required field behind the cast that silences it.
  */
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -61,7 +69,7 @@ function fakeLabels(options: { failOn?: string } = {}) {
   return { writer, removed, added };
 }
 
-/** The twin of seedParkedRun, differing only in the verdict the ledger carries. */
+/** The ledger validates an event s status against its TYPE: a park is `blocked`, an outcome is terminal. */
 async function seedRunWithStatus(
   store: SqliteRunHistoryStore,
   repo: string,
@@ -75,10 +83,6 @@ async function seedRunWithStatus(
     receivedAt: at,
   });
   const runId = accepted.value?.runId as string;
-  // The ledger validates an event s status against its TYPE, so the two cases need different types:
-  // `worker.question` is only ever `blocked`, while an outcome rides on `run.terminal`. Seeding a
-  // succeeded run as a worker.question is REFUSED by the store - which is how the first attempt at
-  // this fixture failed for a setup reason instead of measuring the defect.
   await store.appendEvent(
     status === "blocked"
       ? {
@@ -101,32 +105,10 @@ async function seedRunWithStatus(
   return runId;
 }
 
-describe("retiring a DELIVERED run (#759)", () => {
-  it("keeps the delivered state, so the ticket still reads as delivered", async () => {
+describe("retiring never touches a delivered state (#759 task 6)", () => {
+  it("retires a PARKED run, clears the in-flight labels, and adds no terminal label", async () => {
     const store = makeStore();
-    const repo = "owner/759-a";
-    await seedRunWithStatus(store, repo, 260, "succeeded");
-    const labels = fakeLabels();
-
-    const report = await retireStaleClaim(
-      { store, labels: labels.writer },
-      { repo, issue: 260, actor: "operator" },
-    );
-
-    expect(report.outcome).toBe("retired");
-    expect(report.previousStatus).toBe("succeeded");
-    // The in-flight labels still go - a retired run is not live.
-    expect(labels.removed).toContain(TRIGGER_LABELS.running);
-    // And the delivered state is restored, so the ticket is not left unlabelled.
-    expect(labels.added).toContain(TRIGGER_LABELS.done);
-    expect(report.lines.join("\n")).toMatch(/delivered/i);
-    await store.close();
-  });
-
-  // The control: the module's own documented rule still holds for a run that never delivered.
-  it("still applies no terminal label when the retired run did not deliver", async () => {
-    const store = makeStore();
-    const repo = "owner/759-b";
+    const repo = "owner/759-parked";
     await seedRunWithStatus(store, repo, 244, "blocked");
     const labels = fakeLabels();
 
@@ -137,8 +119,29 @@ describe("retiring a DELIVERED run (#759)", () => {
 
     expect(report.outcome).toBe("retired");
     expect(report.previousStatus).toBe("blocked");
+    expect(labels.removed).toContain(TRIGGER_LABELS.running);
+    // The module s documented rule, now pinned rather than merely written down.
     expect(labels.added).toEqual([]);
     expect(report.lines.join("\n")).toMatch(/neither a success nor a failure/);
+    await store.close();
+  });
+
+  it("cannot retire a DELIVERED run at all - it holds no claim - and touches no label", async () => {
+    const store = makeStore();
+    const repo = "owner/759-delivered";
+    await seedRunWithStatus(store, repo, 260, "succeeded");
+    const labels = fakeLabels();
+
+    const report = await retireStaleClaim(
+      { store, labels: labels.writer },
+      { repo, issue: 260, actor: "operator" },
+    );
+
+    // This is the finding that corrected the premise: a delivered run released its claim already, so
+    // retirement is not the path that can clear a delivered state.
+    expect(report.outcome).toBe("no-claim");
+    expect(labels.removed).toEqual([]);
+    expect(labels.added).toEqual([]);
     await store.close();
   });
 });
