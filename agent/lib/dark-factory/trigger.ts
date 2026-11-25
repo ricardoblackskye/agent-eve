@@ -368,6 +368,13 @@ export interface HumanStateInput {
   pullRequestOpen: boolean;
 }
 
-export function selectHumanStateLabel(_input: HumanStateInput): HumanState | null {
-  throw new Error("selectHumanStateLabel is not implemented");
+export function selectHumanStateLabel(input: HumanStateInput): HumanState | null {
+  // A parked plan wins: the factory cannot start without an answer, so that is the request in flight.
+  if (input.planParked) return "needs-answer";
+
+  // Delivered work, with something to sign off. Without a pull request there is nothing to sign, and the
+  // Definition of Done s own verdict already says the work is finished - so no human label is warranted.
+  if (input.dodPassed && input.pullRequestOpen) return "awaiting-signoff";
+
+  return null;
 }
