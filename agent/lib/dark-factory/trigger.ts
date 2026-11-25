@@ -345,3 +345,29 @@ export function decideDarkFactoryTrigger(
     where,
   );
 }
+
+/**
+ * #759: which label instructs a HUMAN, if any.
+ *
+ * Two states ask a person for something and they are NOT the same request: a parked plan wants
+ * permission to start, and a delivered result wants sign-off. Collapsing them into `needs-answer` made
+ * a finished issue read as unfinished.
+ *
+ * `awaiting-signoff` is deliberately NOT in the `df:*` family: that family is lifecycle state, while this
+ * is an instruction to a human - the same reason `needs-answer` sits outside it. It rides BESIDE
+ * `df:done`, and neither is cleared by a fresh dispatch.
+ */
+export type HumanState = "awaiting-signoff" | "needs-answer";
+
+export interface HumanStateInput {
+  /** A plan is parked, so the factory needs permission to start coding. */
+  planParked: boolean;
+  /** The Definition of Done passed. */
+  dodPassed: boolean;
+  /** A pull request exists for the run branch. */
+  pullRequestOpen: boolean;
+}
+
+export function selectHumanStateLabel(_input: HumanStateInput): HumanState | null {
+  throw new Error("selectHumanStateLabel is not implemented");
+}
