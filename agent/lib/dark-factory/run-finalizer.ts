@@ -23,6 +23,7 @@ import {
 import type { RunEvent } from "./run-history";
 import type { RunHistoryStore } from "./run-history-store";
 import { OUTCOME_LABELS, TERMINAL_LABELS, TRIGGER_LABELS } from "./trigger";
+import { selectHumanStateLabel } from "./trigger";
 
 // One definition of "terminal", owned by the label vocabulary in trigger.ts.
 // Re-exported so existing importers keep one import site.
@@ -318,6 +319,22 @@ export async function applyTerminalLifecycle(
     writes.push({
       description: `add ${terminalLabel}`,
       result: await labelWriter.add(repo, issue, terminalLabel),
+    });
+  }
+
+  // #759: a DELIVERED issue also carries the request to a human. `df:done` says the work is finished;
+  // this says it is waiting to be accepted, and it rides BESIDE the lifecycle label rather than replacing
+  // it - the same shape as `df:blocked` sitting with an instruction label. Applied here, next to the
+  // verdict, because this is where the verdict becomes a label.
+  const humanLabel = selectHumanStateLabel({
+    planParked: false,
+    dodPassed: terminalLabel === TRIGGER_LABELS.done,
+    pullRequestOpen: Boolean(args.dodResult?.pr),
+  });
+  if (humanLabel) {
+    writes.push({
+      description: `add ${humanLabel}`,
+      result: await labelWriter.add(repo, issue, humanLabel),
     });
   }
   for (const label of CLEARED_LABELS) {

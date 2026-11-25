@@ -45,6 +45,7 @@ import {
   applyTerminalLifecycle,
   isWaitingOnChecks,
 } from "../agent/lib/dark-factory/run-finalizer";
+import { renderSignOffComment } from "../agent/lib/dark-factory/dod-presentation";
 import { GitHubPrWriter } from "../agent/lib/dark-factory/pr-writer";
 import {
   GitHubIssueWriter,
@@ -1901,6 +1902,15 @@ export function dodOutcomeComment(
       `- **PR**: ${dodResult.pr.url}\n` +
       `- **Traceability Matrix**:\n\n${dodResult.traceabilityTable ?? "Verified"}\n` +
       `- **Lifecycle**: \`df:done\``
+ +
+      // #759: the lifecycle line said the work was finished and stopped there, leaving a reader to
+      // guess whether anything was expected of them. The sign-off request says what is being asked and
+      // names the two words that answer it.
+      "\n\n" +
+      renderSignOffComment({
+        prNumber: dodResult.pr.number,
+        prUrl: dodResult.pr.url,
+      })
     );
   }
 
