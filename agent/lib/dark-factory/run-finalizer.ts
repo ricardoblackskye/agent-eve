@@ -197,6 +197,8 @@ export interface StartLifecycleOutcome {
   applied: boolean;
   /** The terminal labels actually removed. */
   cleared: string[];
+  /** #759: set when the dispatch was refused because the ticket is already delivered. */
+  refused?: string;
   error?: string;
 }
 
