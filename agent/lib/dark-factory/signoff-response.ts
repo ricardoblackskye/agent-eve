@@ -34,6 +34,40 @@ export const SIGNOFF_APPROVED_PHRASES: readonly string[] = ["approved", "approve
 
 export const SIGNOFF_REJECTED_PHRASES: readonly string[] = ["rejected", "reject"];
 
-export function classifySignOffResponse(_commentBody: string): SignOffDecision {
-  throw new Error("classifySignOffResponse is not implemented");
+export function classifySignOffResponse(commentBody: string): SignOffDecision {
+  const normalized = normalizeHumanReply(commentBody);
+
+  if (normalized === "") {
+    return {
+      kind: "none",
+      reason: "the reply was empty, so no sign-off decision is reached (fail-closed)",
+    };
+  }
+
+  // Whole-message equality, for the reason the plan vocabulary gives: containment would sign the work
+  // off on a sentence that is actually asking for a change.
+  const approved = SIGNOFF_APPROVED_PHRASES.find((phrase) => phrase === normalized);
+  if (approved !== undefined) {
+    return {
+      kind: "approved",
+      reason: `the reply is an explicit sign-off: ${approved}`,
+      matched: approved,
+    };
+  }
+
+  const rejected = SIGNOFF_REJECTED_PHRASES.find((phrase) => phrase === normalized);
+  if (rejected !== undefined) {
+    return {
+      kind: "rejected",
+      reason: `the reply rejects the delivered work: ${rejected}`,
+      matched: rejected,
+    };
+  }
+
+  return {
+    kind: "none",
+    reason:
+      "the reply is neither an explicit sign-off nor an explicit rejection, so no decision is reached " +
+      "(sign-off is opt-in)",
+  };
 }
