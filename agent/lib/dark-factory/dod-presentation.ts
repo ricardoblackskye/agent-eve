@@ -75,10 +75,42 @@ export interface SignOffChecks {
  * describe a plan being built or a pipeline being dispatched: a finished issue told that a new process is
  * starting is the report this answers.
  */
-export function renderSignOffComment(_args: {
+/** What the checks are doing, in one line, naming the failing check when there is one. */
+function renderCheckStatus(checks?: SignOffChecks): string {
+  if (!checks) {
+    return "The pull request checks have not reported yet.";
+  }
+
+  const parts: string[] = [];
+  if (checks.passing > 0) parts.push(`${checks.passing} passing`);
+  if (checks.pending > 0) parts.push(`${checks.pending} pending`);
+  if (checks.failing > 0) parts.push(`${checks.failing} failing`);
+  const summary = parts.length > 0 ? parts.join(", ") : "none reported";
+
+  if (checks.failing > 0) {
+    const names = (checks.failingNames ?? []).map((name) => `\`${name}\``).join(", ");
+    return names.length > 0
+      ? `The pull request checks: ${summary} - the failing check is ${names}.`
+      : `The pull request checks: ${summary}.`;
+  }
+
+  return `The pull request checks: ${summary}.`;
+}
+
+export function renderSignOffComment(args: {
   prNumber: number;
   prUrl: string;
   checks?: SignOffChecks;
 }): string {
-  throw new Error("renderSignOffComment is not implemented");
+  return [
+    "### Ready for sign-off",
+    "",
+    "The work is complete and its pull request is open: " +
+      `[#${args.prNumber}](${args.prUrl}).`,
+    "",
+    renderCheckStatus(args.checks),
+    "",
+    "Reply **Approved** to sign this off, or **Rejected** to close the pull request and return the" +
+      " issue for re-planning.",
+  ].join("\n");
 }
