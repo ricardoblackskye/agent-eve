@@ -75,14 +75,29 @@ async function seedRunWithStatus(
     receivedAt: at,
   });
   const runId = accepted.value?.runId as string;
-  await store.appendEvent({
-    eventId: `q-${runId}`,
-    runId,
-    type: "worker.question",
-    stage: "worker",
-    occurredAt: at,
-    status,
-  });
+  // The ledger validates an event s status against its TYPE, so the two cases need different types:
+  // `worker.question` is only ever `blocked`, while an outcome rides on `run.terminal`. Seeding a
+  // succeeded run as a worker.question is REFUSED by the store - which is how the first attempt at
+  // this fixture failed for a setup reason instead of measuring the defect.
+  await store.appendEvent(
+    status === "blocked"
+      ? {
+          eventId: `q-${runId}`,
+          runId,
+          type: "worker.question",
+          stage: "worker",
+          occurredAt: at,
+          status,
+        }
+      : {
+          eventId: `t-${runId}`,
+          runId,
+          type: "run.terminal",
+          stage: "terminal",
+          occurredAt: at,
+          status,
+        },
+  );
   return runId;
 }
 
