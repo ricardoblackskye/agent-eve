@@ -59,6 +59,9 @@ export const TRIGGER_LABELS = {
   blocked: "df:blocked",
   failed: "df:failed",
   question: "needs-answer",
+  // #759: the OTHER instruction to a human. Deliberately not in the `df:*` family either - it rides
+  // beside `df:done`, and like `done` it must survive a fresh dispatch.
+  signoff: "awaiting-signoff",
 } as const;
 
 /**
