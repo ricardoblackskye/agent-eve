@@ -55,8 +55,10 @@ describe("#373 a new attempt starts from a clean ticket", () => {
     });
 
     expect(outcome.applied).toBe(true);
-    // Both terminal outcomes must go: a stale df:done is as misleading as a stale df:failed.
-    expect(calls).toContain("remove:df:done");
+    // #759 reverses HALF of this. A stale df:failed must still go, because df:failed describes a
+    // finished ATTEMPT whose ticket a human may retry. But df:done is terminal: the work is
+    // delivered, so clearing it would un-deliver it. The df:failed line below is the control.
+    expect(calls).not.toContain("remove:df:done");
     expect(calls).toContain("remove:df:failed");
     expect(calls).toContain("add:df:running");
     // The in-flight label is not cleared at the start — it is the one being applied.
@@ -65,7 +67,7 @@ describe("#373 a new attempt starts from a clean ticket", () => {
   });
 
   it("reports a label failure instead of throwing, so an informational label cannot stop a run", async () => {
-    const { writer } = labelWriter((op, label) => op === "remove" && label === "df:done");
+    const { writer } = labelWriter((op, label) => op === "remove" && label === "df:failed");
 
     const outcome = await applyStartLifecycle({ labelWriter: writer }, {
       repo: REPO,
@@ -73,9 +75,9 @@ describe("#373 a new attempt starts from a clean ticket", () => {
     });
 
     expect(outcome.applied).toBe(false);
-    expect(outcome.error).toMatch(/df:done/);
+    expect(outcome.error).toMatch(/df:failed/);
     // The in-flight label was still attempted: one failure must not cancel the rest.
-    expect(outcome.cleared).not.toContain("df:done");
+    expect(outcome.cleared).not.toContain("df:failed");
   });
 
   it("names the labels from the shared definitions rather than repeating them as literals", async () => {

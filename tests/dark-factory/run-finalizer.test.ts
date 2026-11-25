@@ -352,7 +352,10 @@ describe("#284 terminal lifecycle labels", () => {
     );
 
     expect(calls).toContain("remove:df:blocked");
-    expect(calls).toContain("remove:df:done");
+    // #759: `df:done` is terminal, so a fresh attempt does NOT clear it - the verdict is still true.
+    // The contradictory-pair concern above still holds for df:blocked, which is why that half of
+    // this test is untouched; the pairing guard for a delivered ticket lives in the dispatch path.
+    expect(calls).not.toContain("remove:df:done");
     expect(calls).toContain("remove:df:failed");
     expect(calls).toContain("add:df:running");
     expect(outcome.cleared).toContain("df:blocked");

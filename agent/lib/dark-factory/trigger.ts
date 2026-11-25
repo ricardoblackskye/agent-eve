@@ -87,8 +87,10 @@ export const TERMINAL_LABELS: readonly string[] = [
  * So: TERMINAL_LABELS decides whether a re-trigger is REFUSED; OUTCOME_LABELS decides
  * what a fresh start CLEARS. Do not collapse them.
  */
+// #759: `done` is deliberately NOT in this set. It is "what a fresh start CLEARS", and a delivered
+// state is terminal - the verdict is still true, so clearing it un-delivers finished work.
+// RETRIGGER_REFUSED_LABELS guards only the LABEL path, which is where the CLI path escaped it.
 export const OUTCOME_LABELS: readonly string[] = [
-  TRIGGER_LABELS.done,
   TRIGGER_LABELS.blocked,
   TRIGGER_LABELS.failed,
 ];
