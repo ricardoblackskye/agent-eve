@@ -1681,6 +1681,16 @@ async function main(): Promise<void> {
       issue: issueNum,
       head: branchName,
       plan: executionPlan,
+      // #716: the counters the loop ALREADY knows. Without them the Definition of Done has nothing to
+      // spread into its writes, so the summary falls back to a fabricated `0` - which is how a run whose
+      // own log reads "Coding Iteration 2/10" is recorded as having iterated zero times, and a reader
+      // cannot tell UNMEASURED from GENUINELY ZERO.
+      // The REPRESENTATION of an unmeasured counter (optional/NULL, rendered as `-`) is #768. This is
+      // the SUPPLY, which is the half that makes the recorded number true from here on.
+      runMetrics: {
+        iterationCount: loopResult.iterations,
+        fixCycleCount: loopResult.fixCycles,
+      },
       title: `feat: #${issueNum} ${executionPlan.title}`,
       body: pullRequestBody({
         issueNum,
@@ -2017,6 +2027,13 @@ export interface DodPhaseArgs {
   body: string;
   testResults?: DefinitionOfDoneTask["testResults"];
   /**
+   * #716: the counters this run OBSERVED, forwarded verbatim. Absent means unmeasured - and the runner now
+   * supplies them, so the number a summary records is the loop's own count rather than a fallback.
+   * NOTE: the write paths still coerce an absent value to `0`; making "unmeasured" representable end-to-end
+   * is #768, deliberately NOT done here.
+   */
+  runMetrics?: DefinitionOfDoneTask["runMetrics"];
+  /**
    * #703 (Leg C): the pull request this run ALREADY recorded. When present the phase does not open
    * another one - it re-reads the checks for this pull request, which is what makes a verify-only
    * re-entry possible. The same trick the capturing writer used in the other direction: the DoD's own
@@ -2087,6 +2104,9 @@ export async function runDefinitionOfDonePhase(
     body: args.body,
     ...(args.plan === undefined ? {} : { plan: args.plan }),
     ...(args.testResults === undefined ? {} : { testResults: args.testResults }),
+    // #716: the same terms as every other optional arg - supplied when the run observed them, absent
+    // otherwise, so the DoD spreads a real measurement into its writes.
+    ...(args.runMetrics === undefined ? {} : { runMetrics: args.runMetrics }),
   };
 
   const dodDeps: DefinitionOfDoneDeps = {
