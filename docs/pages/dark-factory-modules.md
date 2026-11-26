@@ -629,6 +629,22 @@ Dark Factory — Plan Response (#378). Decides whether a human's reply to a park
 
 **Exports:** `DEFAULT_MAX_PLAN_REVISIONS`, `MAX_PLAN_REVISIONS_ENV`, `PLAN_APPROVAL_PHRASES`, `PlanResponseDecision`, `PlanResponseKind`, `classifyPlanResponse`, `resolveMaxPlanRevisions`
 
+## signoff-response
+
+Dark Factory - Sign-Off Response (#759). Reads a human's reply to a DELIVERED run, which is a different
+question from a parked plan's: `plan-response` decides whether coding may START, and this decides whether
+finished work is accepted or sent back - collapsing the two is what made a completed issue read as unfinished.
+Approval is OPT-IN and fail-closed on the same terms: the test is WHOLE-MESSAGE equality against a deliberately
+tight allow-list, so "Approved, but also update the header" carries an approval AND a request and is therefore
+NOT a sign-off, because closing the pull request on the strength of it is the worst outcome this module could
+produce. Its list is tighter than `plan-response`'s, which carries plan idioms ("lgtm", "ship it", "go ahead")
+that mean permission to START rather than acceptance of finished work. The third outcome, `none`, is the honest
+answer for anything unclassifiable.
+
+**Source:** [`agent/lib/dark-factory/signoff-response.ts`](../../agent/lib/dark-factory/signoff-response.ts)
+
+**Exports:** `SIGNOFF_APPROVED_PHRASES`, `SIGNOFF_REJECTED_PHRASES`, `SignOffDecision`, `SignOffKind`, `classifySignOffResponse`
+
 ## plan-revision-recorder
 
 Dark Factory — Plan Revision Rounds (#378). The durable count of how many times a parked plan has been sent back, which the runner refuses against once the cap is reached. A reply that is not an explicit approval is plan feedback: it costs one architect call and re-parks the run, so without a bound an unrelated comment could send the architect round the loop indefinitely. A round is recorded as a `run.resumed` event, because that is what the reply IS — the ledger permits a BLOCKED run only `run.resumed` or `run.terminal`, which is the rule that stops a parked run accumulating work while it waits. The event id is derived from the run and the reply identity, so a re-delivered comment records once while a genuinely new reply is a new round. An unreadable ledger is REPORTED rather than answered as zero, because a zero fallback would silently disable the cap; a store that REJECTS is reported the same way as one that returns a failure, since a rejection would otherwise escape the caller. Paging is capped at the store's own maximum of 100 rows per read.

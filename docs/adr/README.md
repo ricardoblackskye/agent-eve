@@ -151,3 +151,4 @@ changes, write a new one that supersedes it.
 | [0095](0095-a-list-pages-by-cursor.md)                                   | A list pages by cursor, not by offset                                                               | Accepted           |
 | [0096](0096-the-dark-factory-is-operator-only.md)                        | The dark factory is operator-only, and fails closed                                                 | Accepted           |
 | [0097](0097-a-conflicting-create-returns-the-existing-resource.md)       | A conflicting create returns the existing resource                                                  | Accepted           |
+| [0098](0098-a-delivered-issue-is-terminal.md)                            | A delivered issue is terminal, and asks for sign-off                                                | Accepted           |

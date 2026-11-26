@@ -55,7 +55,7 @@ export const MAX_PLAN_REVISIONS_ENV = "DF_MAX_PLAN_REVISIONS";
  * all noise: a human typing `**Approved**` has approved. Normalizing first also means the allow-list
  * does not need a variant per formatting style.
  */
-function normalizePlanResponse(raw: string): string {
+export function normalizeHumanReply(raw: string): string {
   return (raw ?? "")
     .replace(/`/g, "")
     .replace(/[*_~]/g, "")
@@ -78,7 +78,7 @@ function normalizePlanResponse(raw: string): string {
  * carrying anything else is feedback.
  */
 export function classifyPlanResponse(commentBody: string): PlanResponseDecision {
-  const normalized = normalizePlanResponse(commentBody);
+  const normalized = normalizeHumanReply(commentBody);
 
   if (normalized === "") {
     return {

@@ -59,6 +59,9 @@ export const TRIGGER_LABELS = {
   blocked: "df:blocked",
   failed: "df:failed",
   question: "needs-answer",
+  // #759: the OTHER instruction to a human. Deliberately not in the `df:*` family either - it rides
+  // beside `df:done`, and like `done` it must survive a fresh dispatch.
+  signoff: "awaiting-signoff",
 } as const;
 
 /**
@@ -84,8 +87,10 @@ export const TERMINAL_LABELS: readonly string[] = [
  * So: TERMINAL_LABELS decides whether a re-trigger is REFUSED; OUTCOME_LABELS decides
  * what a fresh start CLEARS. Do not collapse them.
  */
+// #759: `done` is deliberately NOT in this set. It is "what a fresh start CLEARS", and a delivered
+// state is terminal - the verdict is still true, so clearing it un-delivers finished work.
+// RETRIGGER_REFUSED_LABELS guards only the LABEL path, which is where the CLI path escaped it.
 export const OUTCOME_LABELS: readonly string[] = [
-  TRIGGER_LABELS.done,
   TRIGGER_LABELS.blocked,
   TRIGGER_LABELS.failed,
 ];
@@ -344,4 +349,37 @@ export function decideDarkFactoryTrigger(
     `the trigger label was removed on ${clamp(repo)}#${issue}; aborting the run`,
     where,
   );
+}
+
+/**
+ * #759: which label instructs a HUMAN, if any.
+ *
+ * Two states ask a person for something and they are NOT the same request: a parked plan wants
+ * permission to start, and a delivered result wants sign-off. Collapsing them into `needs-answer` made
+ * a finished issue read as unfinished.
+ *
+ * `awaiting-signoff` is deliberately NOT in the `df:*` family: that family is lifecycle state, while this
+ * is an instruction to a human - the same reason `needs-answer` sits outside it. It rides BESIDE
+ * `df:done`, and neither is cleared by a fresh dispatch.
+ */
+export type HumanState = "awaiting-signoff" | "needs-answer";
+
+export interface HumanStateInput {
+  /** A plan is parked, so the factory needs permission to start coding. */
+  planParked: boolean;
+  /** The Definition of Done passed. */
+  dodPassed: boolean;
+  /** A pull request exists for the run branch. */
+  pullRequestOpen: boolean;
+}
+
+export function selectHumanStateLabel(input: HumanStateInput): HumanState | null {
+  // A parked plan wins: the factory cannot start without an answer, so that is the request in flight.
+  if (input.planParked) return "needs-answer";
+
+  // Delivered work, with something to sign off. Without a pull request there is nothing to sign, and the
+  // Definition of Done s own verdict already says the work is finished - so no human label is warranted.
+  if (input.dodPassed && input.pullRequestOpen) return "awaiting-signoff";
+
+  return null;
 }

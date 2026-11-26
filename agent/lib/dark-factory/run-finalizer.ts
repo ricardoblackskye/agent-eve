@@ -23,6 +23,7 @@ import {
 import type { RunEvent } from "./run-history";
 import type { RunHistoryStore } from "./run-history-store";
 import { OUTCOME_LABELS, TERMINAL_LABELS, TRIGGER_LABELS } from "./trigger";
+import { selectHumanStateLabel } from "./trigger";
 
 // One definition of "terminal", owned by the label vocabulary in trigger.ts.
 // Re-exported so existing importers keep one import site.
@@ -190,6 +191,13 @@ function terminalEvent(
 export interface StartLifecycleArgs {
   repo: string;
   issue: number;
+  /**
+   * #759: the labels the ticket already carries, when the caller knows them. A DELIVERED
+   * ticket is refused rather than re-dispatched. Callers that omit this keep the previous
+   * behaviour, and the durable guarantee does not depend on them: `done` is no longer in
+   * OUTCOME_LABELS, so no caller can clear it.
+   */
+  existingLabels?: string[];
 }
 
 export interface StartLifecycleOutcome {
@@ -197,6 +205,8 @@ export interface StartLifecycleOutcome {
   applied: boolean;
   /** The terminal labels actually removed. */
   cleared: string[];
+  /** #759: set when the dispatch was refused because the ticket is already delivered. */
+  refused?: string;
   error?: string;
 }
 
@@ -216,6 +226,23 @@ export async function applyStartLifecycle(
 ): Promise<StartLifecycleOutcome> {
   const cleared: string[] = [];
   const failures: string[] = [];
+
+  // #759: a DELIVERED ticket must not be dispatched again. Adding `df:running` beside `df:done`
+  // advertises the contradictory pair this module exists to prevent, and clearing `df:done` would
+  // un-deliver finished work. This mirrors RETRIGGER_REFUSED_LABELS, which guards only the LABEL
+  // path - the CLI path is the one that produced the original report.
+  const delivered = (args.existingLabels ?? []).filter(
+    (label) => label === TRIGGER_LABELS.done || label === TRIGGER_LABELS.signoff,
+  );
+  if (delivered.length > 0) {
+    return {
+      applied: false,
+      cleared,
+      refused:
+        `the ticket is already delivered (${delivered.join(", ")}) - dispatching again would ` +
+        "un-deliver it; sign it off, or retire the delivered state first",
+    };
+  }
 
   for (const label of OUTCOME_LABELS) {
     const removed = await deps.labelWriter.remove(args.repo, args.issue, label);
@@ -292,6 +319,22 @@ export async function applyTerminalLifecycle(
     writes.push({
       description: `add ${terminalLabel}`,
       result: await labelWriter.add(repo, issue, terminalLabel),
+    });
+  }
+
+  // #759: a DELIVERED issue also carries the request to a human. `df:done` says the work is finished;
+  // this says it is waiting to be accepted, and it rides BESIDE the lifecycle label rather than replacing
+  // it - the same shape as `df:blocked` sitting with an instruction label. Applied here, next to the
+  // verdict, because this is where the verdict becomes a label.
+  const humanLabel = selectHumanStateLabel({
+    planParked: false,
+    dodPassed: terminalLabel === TRIGGER_LABELS.done,
+    pullRequestOpen: Boolean(args.dodResult?.pr),
+  });
+  if (humanLabel) {
+    writes.push({
+      description: `add ${humanLabel}`,
+      result: await labelWriter.add(repo, issue, humanLabel),
     });
   }
   for (const label of CLEARED_LABELS) {

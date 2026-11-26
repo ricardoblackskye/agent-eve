@@ -45,6 +45,7 @@ import {
   applyTerminalLifecycle,
   isWaitingOnChecks,
 } from "../agent/lib/dark-factory/run-finalizer";
+import { renderSignOffComment } from "../agent/lib/dark-factory/dod-presentation";
 import { GitHubPrWriter } from "../agent/lib/dark-factory/pr-writer";
 import {
   GitHubIssueWriter,
@@ -581,7 +582,13 @@ async function main(): Promise<void> {
     );
     throw new Error("Dark Factory Runner stopped after the preceding error.");
   }
-  const issueData = (await issueRes.json()) as { title: string; body: string };
+  // #759: the issue payload already carries the labels; declaring them is what makes the delivered
+  // state reachable at the call site without adding a reader.
+  const issueData = (await issueRes.json()) as {
+    title: string;
+    body: string;
+    labels?: { name: string }[];
+  };
   line("Story Title", issueData.title);
   console.log(`  Story Length: ${issueData.body.length} characters`);
 
@@ -593,8 +600,14 @@ async function main(): Promise<void> {
   // adding `df:running` beside it made the ticket advertise two contradictory outcomes at once.
   const startLifecycle = await applyStartLifecycle(
     { labelWriter },
-    { repo: targetRepo, issue: issueNum },
+    { repo: targetRepo, issue: issueNum, existingLabels: (issueData.labels ?? []).map((l) => l.name) },
   );
+  if (startLifecycle.refused) {
+    // A refusal, not a fault: the run stops before the dispatch comment, so a delivered ticket is
+    // never told a new process is starting - which is the report this change answers.
+    console.warn(`[REFUSED] ${startLifecycle.refused}`);
+    throw new Error(`Dark Factory Runner refused to dispatch: ${startLifecycle.refused}`);
+  }
   if (!startLifecycle.applied) {
     console.warn(
       `[WARN] The ticket lifecycle could not be set up cleanly: ${startLifecycle.error ?? "unknown error"}`,
@@ -1889,6 +1902,15 @@ export function dodOutcomeComment(
       `- **PR**: ${dodResult.pr.url}\n` +
       `- **Traceability Matrix**:\n\n${dodResult.traceabilityTable ?? "Verified"}\n` +
       `- **Lifecycle**: \`df:done\``
+ +
+      // #759: the lifecycle line said the work was finished and stopped there, leaving a reader to
+      // guess whether anything was expected of them. The sign-off request says what is being asked and
+      // names the two words that answer it.
+      "\n\n" +
+      renderSignOffComment({
+        prNumber: dodResult.pr.number,
+        prUrl: dodResult.pr.url,
+      })
     );
   }
 
