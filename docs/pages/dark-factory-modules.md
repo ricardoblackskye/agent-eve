@@ -1299,3 +1299,19 @@ Run it with `npm run df:amm-scan -- --repo <owner/repo> --workspace <dir>`.
 
 **Exports:** `runAmmScan`, `RunAmmScanInput`, `AmmScanResult`
 
+
+
+## test-case-evidence
+
+Answers which test cases a run actually executed, and how each went. The Definition of Done certifies an acceptance
+criterion against a named test case, so it needs evidence that the case ran; before this module the runner recorded a
+passing result for every criterion the plan mapped, which is how a `done` verdict could certify criteria whose tests
+were never written (#764).
+
+A seam rather than a parser: each source is described by the shape it recognizes, so a differently-shaped runner is
+added alongside rather than the caller rewritten. The load-bearing property is the negative one - unreadable output
+yields no cases, which a caller must treat as no evidence rather than a pass.
+
+**Source:** `agent/lib/dark-factory/test-case-evidence.ts`
+
+**Exports:** `ExecutedTestCase`, `MARKER_LINE_SOURCE`, `TestCaseEvidenceSource`, `parseExecutedTestCases`, `testCaseEvidenceSources`
