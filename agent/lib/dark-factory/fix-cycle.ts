@@ -145,6 +145,26 @@ export function createFixCycle<W extends FixWorkspace = FixWorkspace>(
       return [];
     }
 
+    // #756: an empty pass is an ATTEMPT THAT PRODUCED NOTHING, not a finished pass. Observed live as
+    // "authored 0 file(s) for 1 finding(s)" on three consecutive passes, against a ticket showing only a
+    // bare `df:blocked` - which reads identically to no attempt having been made at all. Retry ONCE,
+    // bounded like every other ceiling in this module, and if it is still empty say so on the record so an
+    // operator can tell an attempt-that-produced-nothing from no attempt.
+    if (authored.changedFiles.length === 0 && (authored.refusals ?? []).length === 0) {
+      try {
+        authored = await ports.author(workspace, attempted);
+      } catch (error) {
+        log("Fix cycle", `the authoring pass failed: ${describe(error)}`);
+        return [];
+      }
+      if (authored.changedFiles.length === 0 && (authored.refusals ?? []).length === 0) {
+        log(
+          "Fix cycle",
+          `the fix pass authored nothing for ${attempted.length} finding(s): no change was produced, and no reason was given`,
+        );
+      }
+    }
+
     // A refusal is itself a disposition, so a refused finding must never ALSO be resolved: accepting
     // a finding and claiming to have fixed it are contradictory answers to the same question.
     const refusedIds = new Set((authored.refusals ?? []).map((r) => r.findingId));
