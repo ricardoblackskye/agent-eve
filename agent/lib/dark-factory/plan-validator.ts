@@ -298,9 +298,23 @@ export function validateExecutionPlan(
     for (const file of plan.targetFiles) {
       const targetPath = file?.path;
       if (typeof targetPath !== "string" || targetPath === "") continue;
-      // A `create` target is DEFINED as a file that does not exist yet, so its absence is not an error.
-      // Only `modify` and `replace` target an existing file and therefore require presence (#454).
-      if (file.action === "create") continue;
+      // #770: the action is checked against the repository in BOTH directions.
+      //
+      // A `create` target is defined as a file that does not exist yet, so its PRESENCE is the error - and that
+      // is the case measured three times in one afternoon: a plan claiming `create` for an existing 340-line spec,
+      // which the previous `if (file.action === "create") continue;` could never see because it skipped the check
+      // and compared the plan to itself. A `modify`/`replace` target is the inverse (#454): its ABSENCE is the
+      // error. Both directions are required; refusing only one is how the defect survived.
+      if (file.action === "create") {
+        if (context.files.includes(targetPath)) {
+          errors.push(
+            `Target file '${targetPath}' already exists in the repository, so it cannot be created: restate its ` +
+              `action as 'modify'.`,
+          );
+          codes.push("target-exists");
+        }
+        continue;
+      }
       if (!context.files.includes(targetPath)) {
         errors.push(
           `Target file '${targetPath}' does not exist in the repository: it is not in the file list, so it ` +

@@ -1083,7 +1083,11 @@ async function main(): Promise<void> {
       throw new Error("Dark Factory Runner stopped after the preceding error.");
     }
 
-    const amendedValidation = validateExecutionPlan(amended.plan, issueData.body);
+    // #770: the file list, so rule 1b can actually compare the plan to the repository. Without it the guard
+    // `if (Array.isArray(context?.files))` is false and the existence rule silently never runs.
+    const amendedValidation = validateExecutionPlan(amended.plan, issueData.body, {
+      files: await planReader.listFiles("."),
+    });
     if (!amendedValidation.valid) {
       console.error(
         `[ERROR] The amended plan failed domain validation:`,
@@ -1140,7 +1144,11 @@ async function main(): Promise<void> {
   console.log(
     `\n[STEP 4] Validating ExecutionPlan against domain constraints...`,
   );
-  const validation = validateExecutionPlan(executionPlan, issueData.body);
+  // #770: same list, same reason as the amended path above - BOTH call sites matter, and wiring only one is the
+  // recurring shape in this file.
+  const validation = validateExecutionPlan(executionPlan, issueData.body, {
+    files: await planReader.listFiles("."),
+  });
   if (!validation.valid) {
     console.error(
       `[ERROR] Plan domain validation rejected:`,
