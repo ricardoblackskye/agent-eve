@@ -173,6 +173,7 @@ import {
 import type { RunSummary } from "../agent/lib/dark-factory/run-history";
 import type { RunHistoryStore } from "../agent/lib/dark-factory/run-history-store";
 import { recordRunDiffWithOutcome, type GitRunner } from "../agent/lib/dark-factory/diff-capture";
+import { parseExecutedTestCases } from "../agent/lib/dark-factory/test-case-evidence";
 
 // The .env bootstrap lives in runner-env.ts so it can be tested without running the pipeline.
 // It carries NO model default: agent/model-config.ts is the single source of truth (#400).
@@ -1492,7 +1493,7 @@ async function main(): Promise<void> {
               // #503 AC4: record a passing result for each mapped AC. The map is typed as required but a
               // deserialized plan may omit it (the architect returned one without it at STEP 3.5), so
               // iterate the fallback, not the field directly.
-              recordPassingTestResults(ctx.plan, capturedTestResults);
+              recordExecutedTestResults(gateOutput, capturedTestResults);
 
               // #659: green tests are not "done" if the target's own checks fail. The PR is what a human
               // has to get merged, so the run has to satisfy the checks the repository itself runs. A lint
@@ -2858,4 +2859,30 @@ function gitRunnerForCapture(
     const { exitCode, output } = await runGit(args);
     return { stdout: output, exitCode };
   };
+}
+
+/**
+ * #764 - record the cases the run ACTUALLY executed, parsed from the gate's own output.
+ *
+ * Replaces the behavior at this step: `recordPassingTestResults` recorded a passing result for every criterion the
+ * plan mapped, which is how a `done` verdict could certify criteria whose tests were never written. The evidence now
+ * comes from the run's own output through the seam in `test-case-evidence`, so a criterion whose named case is absent
+ * is simply not certified - and the Definition of Done already refuses when a criterion is uncertified.
+ *
+ * Unreadable output records NOTHING rather than a guess, and a case the output never attributed to a file is skipped
+ * rather than attributed to one: no evidence is not a pass, and an unattributed case cannot honestly certify a
+ * criterion mapped to a specific file.
+ */
+export function recordExecutedTestResults(
+  output: string | undefined,
+  capturedTestResults: { testFile: string; testCaseName: string; passed: boolean }[],
+): void {
+  for (const executed of parseExecutedTestCases(output ?? "")) {
+    if (executed.file === undefined) continue;
+    capturedTestResults.push({
+      testFile: executed.file,
+      testCaseName: executed.name,
+      passed: executed.passed,
+    });
+  }
 }
