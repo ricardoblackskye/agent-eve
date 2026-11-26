@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { recordRunDiffWithOutcome } from "../../agent/lib/dark-factory/diff-capture";
 import type { RunSummary } from "../../agent/lib/dark-factory/run-history";
@@ -102,5 +104,31 @@ describe("#704 - capturing the run diff reports its outcome", () => {
 
     expect(outcome).toBe("no-summary");
     expect(writes).toHaveLength(0);
+  });
+});
+
+
+/**
+ * #704 - the capture must run BEFORE the commit, or it captures nothing.
+ *
+ * `captureWorkspaceDiff` diffs against HEAD, and the commit happens in the same block of the coding phase. Placed
+ * after it, the capture would find a clean tree, return null and record no diff - the page would still say "No diff
+ * captured" while the wiring looked correct.
+ *
+ * Anchored on the CALL sites, not on the identifiers: `indexOf` on a bare name would match the import line at the top
+ * of the file and pass wherever the call sat, which is a guard that cannot fail.
+ */
+describe("#704 - the run diff is captured before the commit that would hide it", () => {
+  const SOURCE = readFileSync(resolve(process.cwd(), "scripts/dark-factory-runner.ts"), "utf8");
+
+  it("finds both call sites, so this guard cannot pass by finding neither", () => {
+    expect(SOURCE.indexOf("await recordRunDiffWithOutcome(")).toBeGreaterThan(-1);
+    expect(SOURCE.indexOf("await commitAndPushFromSandbox(")).toBeGreaterThan(-1);
+  });
+
+  it("captures BEFORE committing", () => {
+    expect(SOURCE.indexOf("await recordRunDiffWithOutcome(")).toBeLessThan(
+      SOURCE.indexOf("await commitAndPushFromSandbox("),
+    );
   });
 });

@@ -172,6 +172,7 @@ import {
 } from "../agent/lib/dark-factory/plan-history";
 import type { RunSummary } from "../agent/lib/dark-factory/run-history";
 import type { RunHistoryStore } from "../agent/lib/dark-factory/run-history-store";
+import { recordRunDiffWithOutcome, type GitRunner } from "../agent/lib/dark-factory/diff-capture";
 
 // The .env bootstrap lives in runner-env.ts so it can be tested without running the pipeline.
 // It carries NO model default: agent/model-config.ts is the single source of truth (#400).
@@ -1554,6 +1555,17 @@ async function main(): Promise<void> {
         }
         // AFTER the loop, and BEFORE runCodingPhase disposes the sandbox.
         if (sandboxProvider.runGit && loopOutcome.status === "success") {
+          // #704: capture the run's diff BEFORE the commit below. The capture diffs against HEAD, so after the commit
+          // there is nothing left to see - a capture placed after it would record no diff while looking wired, which
+          // is the "a check that cannot fire" shape this whole workstream exists to remove.
+          const diffOutcome = await recordRunDiffWithOutcome(runHistory, runId, sandboxWorkspace, {
+            runGit: gitRunnerForCapture(sandboxProvider.runGit),
+          });
+          if (diffOutcome === "failed") {
+            console.error("[STEP 5] Capturing the run diff failed; the run continues without one.");
+          } else {
+            console.log(`[STEP 5] Run diff ${diffOutcome}.`);
+          }
           const pushed = await commitAndPushFromSandbox({
             runGit: sandboxProvider.runGit,
             remoteUrl: sandboxRemoteUrl,
@@ -2825,4 +2837,25 @@ if (isDirectRun) {
       process.exitCode = 1;
     }
   });
+}
+
+
+/**
+ * #704 - adapt the sandbox's git seam to the capture's contract.
+ *
+ * The two are the same operation under different names: `SandboxProvider.runGit` returns `{ exitCode, output }`
+ * (sandbox.ts:21) and `diff-capture`'s `GitRunner` returns `{ stdout, exitCode }`. `tsc` caught this as a type error
+ * where a source-grep wiring guard had reported the call as present and correctly ordered - which is why that guard
+ * is only ever defensible alongside the compiler and the suite.
+ *
+ * Adapting rather than casting keeps each side's contract its own: the capture never learns about sandboxes, and the
+ * sandbox never learns about diffs.
+ */
+function gitRunnerForCapture(
+  runGit: (args: string[]) => Promise<{ exitCode: number; output: string }>,
+): GitRunner {
+  return async (args: string[]) => {
+    const { exitCode, output } = await runGit(args);
+    return { stdout: output, exitCode };
+  };
 }
