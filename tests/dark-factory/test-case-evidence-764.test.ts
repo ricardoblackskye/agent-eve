@@ -84,4 +84,48 @@ describe("#764 - what test cases did a run actually execute?", () => {
     expect(MARKER_LINE_SOURCE.recognises("  ✓ one case\n")).toBe(true);
     expect(MARKER_LINE_SOURCE.recognises("no cases here")).toBe(false);
   });
+
+  /**
+   * The three cases below come from REAL suite output, not from an imagined format. Measured over 74,938 characters
+   * of a full run: 512 lines carried a case marker and 436 of them were file headers. Read as cases those are 436
+   * phantom entries - the defect this seam exists to remove, arriving through its own parser - and every remaining
+   * case name carried a trailing duration, so no name would ever have matched a plan's.
+   */
+  it("CONTROL: a file HEADER is not a case - it states which file the following cases ran in", () => {
+    const output = [
+      " ✓ tests/dark-factory/vault-proof-redaction.test.ts (8 tests) 2298ms",
+      "   ✓ redacts an inline secret assignment",
+      "   × leaves the variable name readable",
+    ].join("\n");
+
+    const cases = parseExecutedTestCases(output);
+
+    expect(cases.map((c) => c.name)).toEqual([
+      "redacts an inline secret assignment",
+      "leaves the variable name readable",
+    ]);
+    expect(cases.map((c) => c.passed)).toEqual([true, false]);
+    // The header is also the ONLY statement of which file the cases ran in, which the DoD's match requires.
+    expect(cases.every((c) => c.file === "tests/dark-factory/vault-proof-redaction.test.ts")).toBe(true);
+  });
+
+  it("strips the trailing duration the reporter appends, so a name can match a plan's", () => {
+    // Real shape: "aggregates status counts, terminal trend, and measured sums  434ms". With the duration attached
+    // no criterion would ever match its named case, and this fix would have blocked every run.
+    const cases = parseExecutedTestCases(
+      " ✓ aggregates status counts, terminal trend, and measured sums  434ms\n",
+    );
+
+    expect(cases).toEqual([
+      { name: "aggregates status counts, terminal trend, and measured sums", passed: true },
+    ]);
+  });
+
+  it("leaves a case UNATTRIBUTED when the output never named its file, rather than guessing one", () => {
+    // A guess here would attribute a case to a file it never ran in, which is how one file's green run certifies
+    // another file's criterion.
+    const cases = parseExecutedTestCases(" ✓ renders the credit in italics\n");
+
+    expect(cases[0].file).toBeUndefined();
+  });
 });
