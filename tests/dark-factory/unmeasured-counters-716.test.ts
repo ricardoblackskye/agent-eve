@@ -1,43 +1,51 @@
 /**
- * #716 - a counter that was never measured must not be recorded as zero.
+ * #716 - the run's own counters must reach the summary.
  *
- * Every run's summary reports `iterationCount` and `fixCycleCount` as `0`, including runs whose own log shows
- * `Coding Iteration 2/10` and two files written across iterations. The write paths coerce the omission to zero,
- * so a reader cannot tell UNMEASURED from GENUINELY ZERO - and the contract already states the rule, at
- * `agent/lib/dark-factory/definition-of-done.ts:331`:
+ * Re-pointed by decision (issue comment, option C): #716 takes the SUPPLY - the runner hands the Definition of
+ * Done the counters the coding loop already knows - and the REPRESENTATION of "unmeasured" is deferred to #768.
  *
- *     Only provide metrics observed by the caller; omitted values stay unmeasured.
+ * Two earlier framings were wrong, and both are worth recording rather than quietly replacing:
  *
- * The CONTROL matters as much as the case: a summary that was given a real count must still record it, so the
- * check cannot pass by discarding its input.
+ *  - the first version asserted an unmeasured counter comes back `undefined`. That is #768's behaviour, and under
+ *    option C it can NEVER pass on this branch - leaving it would create the pressure to make a test pass by
+ *    implementing the change we had just deferred. That is the dishonest GREEN, avoided here;
+ *  - a source-grep guard on its own is VACUOUS - it has passed in this repository while the wiring was absent.
+ *    So the assertion below is BOUNDED to its call site, and paired with a case proving the slice is not empty.
+ *
+ * Verified before writing this, rather than assumed: `runMetrics` appears NOWHERE in
+ * `scripts/dark-factory-runner.ts`, and the STEP 7 call passes `{ runId, repo, issue, head, plan, title, body,
+ * testResults }` with no metrics - the omission that leaves every summary reporting a fabricated `0`.
  */
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { buildAttemptSummary } from "../../agent/lib/dark-factory/run-attempt-summary";
+const SOURCE = readFileSync(resolve(process.cwd(), "scripts/dark-factory-runner.ts"), "utf8");
 
-const BASE = {
-  runId: "run-716",
-  repo: "owner/repo",
-  issue: 716,
-  status: "succeeded" as const,
-  createdAt: "2026-11-26T00:00:00.000Z",
-};
+/**
+ * The STEP 7 Definition-of-Done call, sliced between two markers that each occur once. Bounding matters: an
+ * unbounded `toContain` over a 2,800-line file kept passing whether or not the wiring existed.
+ */
+function step7Block(source: string): string {
+  const start = source.indexOf("[STEP 7] Executing Hardened Definition of DONE");
+  const end = source.indexOf("DARK FACTORY RUNNER: EXECUTION COMPLETED SUCCESSFULLY", start);
+  return start === -1 || end === -1 ? "" : source.slice(start, end);
+}
 
-describe("#716 an unmeasured counter is not a zero", () => {
-  it("records no count when none was observed, rather than inventing zero", () => {
-    const summary = buildAttemptSummary({ ...BASE });
+describe("#716 the runner supplies the counters the summary records", () => {
+  it("the slice is the call site, proven by a token only this call passes (so the guard is not vacuous)", () => {
+    const block = step7Block(SOURCE);
 
-    // `0` is a MEASUREMENT - it claims the loop iterated zero times. Nothing measured this run, so the honest
-    // value is absent. Asserting `not.toBe(0)` first makes the failure read as the defect it is.
-    expect(summary.iterationCount).not.toBe(0);
-    expect(summary.iterationCount).toBeUndefined();
-    expect(summary.fixCycleCount).not.toBe(0);
-    expect(summary.fixCycleCount).toBeUndefined();
+    expect(block.length).toBeGreaterThan(0);
+    // `testResults` is passed only here, so finding it proves the slice really is the STEP 7 call.
+    expect(block).toContain("testResults");
   });
 
-  it("still records a count it was actually given", () => {
-    const summary = buildAttemptSummary({ ...BASE, iterationCount: 3 });
+  it("passes runMetrics to the Definition of Done, so the summary records a measurement", () => {
+    const block = step7Block(SOURCE);
 
-    expect(summary.iterationCount).toBe(3);
+    // Without this the DoD has nothing to spread and the write paths fall back to a fabricated zero - which is how
+    // a run whose log reads "Coding Iteration 2/10" is recorded as having iterated zero times.
+    expect(block).toContain("runMetrics");
   });
 });
