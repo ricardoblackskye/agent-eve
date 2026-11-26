@@ -99,3 +99,53 @@ export async function recordRunDiff(
   const summary: RunSummary = { ...existing.value, gitDiff: diff };
   await store.recordRunSummary(summary);
 }
+
+/**
+ * What happened when a run's diff was captured (#704).
+ *
+ * The caller logs which one, because a NULL `git_diff` in the ledger currently means "nothing changed", "the capture
+ * failed" and "it was never attempted" all at once - the fail-open shape filed as #772.
+ */
+export type DiffCaptureOutcome =
+  | "recorded"
+  | "no-changes"
+  | "unavailable"
+  | "no-summary"
+  | "failed";
+
+/**
+ * Captures and records the run's diff, and reports WHICH of those things happened.
+ *
+ * `recordRunDiff` above does the work and stays `void`; this wraps it rather than reimplementing the capture. It
+ * exists because capturing a diff is TELEMETRY and never a gate: a failure is returned, never thrown, so a diagnostic
+ * that could not be written cannot end a run that otherwise succeeded. It must not be silent either - the caller gets
+ * the outcome and says so.
+ *
+ * `opts.runGit` is required in practice: on a path with no git seam there is nothing to capture through, and that is
+ * reported as `unavailable` rather than being mistaken for a run that changed nothing.
+ */
+export async function recordRunDiffWithOutcome(
+  store: RunHistoryStore,
+  runId: string,
+  workspaceDir: string,
+  opts: CaptureWorkspaceDiffOptions = {},
+): Promise<DiffCaptureOutcome> {
+  if (typeof opts.runGit !== "function") return "unavailable";
+
+  try {
+    // Checked before capturing so "there is no summary to attach a diff to" is distinguishable afterwards from
+    // "the capture produced nothing".
+    const before = await store.getRun(runId);
+    if (!before.ok || !before.value) return "no-summary";
+
+    await recordRunDiff(store, runId, workspaceDir, opts);
+
+    // Read back rather than assume: `recordRunDiff` no-ops on an empty diff, so the stored summary is the only
+    // evidence that anything was recorded.
+    const after = await store.getRun(runId);
+    return after.ok && after.value?.gitDiff ? "recorded" : "no-changes";
+  } catch {
+    // A failed read or write is reported, not thrown: the run's outcome must not hinge on a diagnostic.
+    return "failed";
+  }
+}
