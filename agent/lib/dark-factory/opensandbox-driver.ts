@@ -1,5 +1,16 @@
 import { extname } from "node:path";
 
+/**
+ * #742: every declared command runs from the checkout root, explicitly.
+ *
+ * The sandbox session's working directory is MUTABLE - a `cd` in an earlier command (or a directory an
+ * agent visited while exploring) decides where later ones land. ESLint 8 resolves a flat config from
+ * the cwd and does not search ancestors, so an inherited directory silently moved the lint gate's
+ * config search into `/workspace/__mocks__` and it found nothing. A gate whose location is inherited
+ * is not a gate.
+ */
+const WORKSPACE_ROOT = "/workspace";
+
 import {
   ConnectionConfig,
   Sandbox,
@@ -304,7 +315,8 @@ export async function createLiveSandbox(
     ...(sandboxVault ? { credentialVault: sandboxVault } : {}),
     commands: {
       run: async (command: string) => {
-        const execution = await sandbox.commands.run(command);
+        // #742: prefixed rather than passed as an SDK option, so the invariant survives a backend change.
+        const execution = await sandbox.commands.run(`cd ${WORKSPACE_ROOT} && ${command}`);
         const logs = (
           execution as unknown as {
             logs?: { stdout?: unknown; stderr?: unknown };
