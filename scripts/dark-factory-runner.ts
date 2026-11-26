@@ -1557,7 +1557,7 @@ async function main(): Promise<void> {
         if (sandboxProvider.runGit && loopOutcome.status === "success") {
           // #704: capture the run's diff BEFORE the commit below. The capture diffs against HEAD, so after the commit
           // there is nothing left to see - a capture placed after it would record no diff while looking wired, which
-          // is the "a check that cannot fire" shape this whole workstream exists to remove.
+          // is the "a check that cannot fire" shape this factory keeps finding.
           const diffOutcome = await recordRunDiffWithOutcome(runHistory, runId, sandboxWorkspace, {
             runGit: gitRunnerForCapture(sandboxProvider.runGit),
           });
