@@ -237,4 +237,15 @@ describe("#676 the check-wait bound", () => {
     // floor here records the decision instead of leaving a magic constant.
     expect(DEFAULT_PR_CHECKS_TIMEOUT_MS).toBeGreaterThanOrEqual(15 * 60_000);
   });
+
+  it("defaults to forty-five minutes, sized for the measured slowest descriptor (#722)", () => {
+    // #722: the 20-minute default was sized on the premise that e2e and MegaLinter are each "around
+    // ten minutes" on WebFeedPOC. The repository got slower and the number did not move: e2e measured
+    // 22 min 8 s on run c2f3ff82 (WebFeedPOC#266, all six checks green) and ~30 minutes across four
+    // earlier runs, so a wholly healthy pull request was denied `done` by the CEILING. Pinned as an
+    // explicit literal because the fallback cases above compare against the constant itself and would
+    // pass at any value.
+    expect(DEFAULT_PR_CHECKS_TIMEOUT_MS).toBe(45 * 60_000);
+    expect(resolvePrChecksTimeoutMs({})).toBe(45 * 60_000);
+  });
 });
