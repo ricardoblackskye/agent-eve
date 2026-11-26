@@ -234,7 +234,8 @@ describe("#676 the check-wait bound", () => {
     // #659 gates the whole project, so every check is blocking and ONE deadline must cover the pull
     // request's queue plus its slowest descriptor. Observed: e2e and MegaLinter are each around ten
     // minutes on WebFeedPOC, and #224 was STILL unsettled with ten minutes configured. Asserting the
-    // floor here records the decision instead of leaving a magic constant.
+    // floor here records the decision instead of leaving a magic constant - the exact value is pinned
+    // in the #722 case below, which superseded this floor's reasoning when the repository outgrew it.
     expect(DEFAULT_PR_CHECKS_TIMEOUT_MS).toBeGreaterThanOrEqual(15 * 60_000);
   });
 
