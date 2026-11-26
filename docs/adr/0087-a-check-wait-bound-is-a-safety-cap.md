@@ -30,9 +30,13 @@ settle in two; the timeout is only ever reached by a stuck descriptor.
 
 The premise that motivated per-repository configuration does not hold, so:
 
-- the default is raised to **twenty minutes**, covering the pull request's queue plus the slowest
-  descriptor the whole-project gate must observe (`e2e` and `MegaLinter` are each around ten
-  minutes on WebFeedPOC, and ten configured was still unsettled);
+- the default is raised to **forty-five minutes**. It was raised to twenty here, and raised again in
+  [#722](https://github.com/ricardoblackskye/agent-eve/issues/722) when that figure was measured
+  against. The excuse for twenty was itself a measurement - `e2e` and `MegaLinter` are each around ten
+  minutes on WebFeedPOC - and the repository outgrew it: `e2e` measured **22 min 8 s** on run
+  `c2f3ff82` (WebFeedPOC#266, every other check long since green) and **~30 minutes** across four
+  earlier runs, so a wholly healthy pull request was denied `done` by the ceiling alone. This number is
+  a measurement too, and must be RE-MEASURED whenever a target's checks change shape;
 - the bound stays overridable per environment, and is now **validated**: `Number("5m")` is `NaN`, and
   `now - started >= NaN` is false forever, so a typo used to turn this bounded wait into an
   unbounded one;
@@ -43,8 +47,13 @@ The premise that motivated per-repository configuration does not hold, so:
 
 - A run whose checks settle quickly is unaffected - the number is only reached by a check that never
   settles.
-- A stuck check now costs up to twenty minutes before the run reports blocked, rather than five. The
-  run logs the bound before it waits, so the ceiling is visible; a per-poll heartbeat is deliberately
+- A stuck check now costs up to forty-five minutes before the run reports blocked, rather than five.
+  The run logs the bound before it waits, so the ceiling is visible; a per-poll heartbeat is deliberately
   not part of this change.
+- **This raise cannot help the deployed path.** ADR 0090 records that the loop runs inline inside a
+  request there, so no ceiling is available to lengthen - the improvement lands on local and dispatched
+  runs. The wait is also free in the currency that matters: `settlePullRequestChecks` is a sleep and a
+  check-run read, so a longer ceiling consumes no model tokens, and by letting a slow check settle it
+  avoids the fix-cycle authoring rounds a premature `blocked` provokes (#756).
 - A malformed override falls back to the default instead of waiting forever.
 - A repository needing longer than twenty minutes still has the environment override.
