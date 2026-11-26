@@ -17,10 +17,16 @@ import type { RunHistoryStore } from "../../agent/lib/dark-factory/run-history-s
 
 function fakeStore(summary: RunSummary | undefined) {
   const writes: RunSummary[] = [];
+  // The double models READ-AFTER-WRITE. The wrapper records through `recordRunDiff` and then reads the summary back
+  // to learn whether anything was recorded, so a store that always returns its opening value can never exercise the
+  // `recorded` outcome - the first version of this fake did exactly that, and two cases failed for the double's
+  // reason rather than the code's. A mock that does not model the behaviour under test tests nothing.
+  let current = summary;
   const store = {
-    getRun: vi.fn().mockResolvedValue({ ok: true, value: summary }),
+    getRun: vi.fn().mockImplementation(async () => ({ ok: true, value: current })),
     recordRunSummary: vi.fn().mockImplementation(async (s: RunSummary) => {
       writes.push(s);
+      current = s;
       return { ok: true };
     }),
   } as unknown as RunHistoryStore;
