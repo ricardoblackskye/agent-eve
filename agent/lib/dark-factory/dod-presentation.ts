@@ -78,7 +78,11 @@ export interface SignOffChecks {
 /** What the checks are doing, in one line, naming the failing check when there is one. */
 function renderCheckStatus(checks?: SignOffChecks): string {
   if (!checks) {
-    return "The pull request checks have not reported yet.";
+    // #764: the ABSENCE of an input is not evidence that the checks are silent. A real run's sign-off comment said
+    // "The pull request checks have not reported yet." while its verdict was `done` and all six checks had already
+    // completed green - the operator surface misstating the state it exists to report. Saying nothing is permitted;
+    // asserting an unobserved state is not, which is the same false certification as the issue, one layer down.
+    return "";
   }
 
   const parts: string[] = [];
