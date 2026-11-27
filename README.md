@@ -1158,4 +1158,9 @@ and shows a banner instead of blanking the page.
 
 ## License
 
-MIT# Last rebuilt: 2026-08-24T17:35:32Z
+All rights reserved - copyright BlackSkye.
+
+This code is proprietary. Publication of this repository grants no license to use, copy, modify, distribute or create
+derivative works from it, and none is implied by its availability. Any use beyond what
+[GitHub's Terms of Service](https://docs.github.com/en/site-policy/github-terms/github-terms-of-service) permit requires
+prior written permission.

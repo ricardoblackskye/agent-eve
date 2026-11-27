@@ -1,6 +1,8 @@
 {
   "name": "agent-eve",
   "version": "0.0.0",
+  "license": "UNLICENSED",
+  "private": true,
   "type": "module",
   "imports": {
     "#*": "./agent/*",
