@@ -846,6 +846,13 @@ Resolves the sandbox provider from `DF_SANDBOX_DRIVER`. Unset or blank means the
 an unknown value refuses at startup before any side effect.
 
 **Source:** [`agent/lib/dark-factory/sandbox-provider.ts`](../../agent/lib/dark-factory/sandbox-provider.ts)
+
+## sandbox-view
+
+Reads a local sandbox's workspace for the read-only view, filtering credential-bearing paths. Read-only by
+construction - the reader type accepts only listDirectory and readFile, so there is no write path to reach - and
+it opens no listener of its own.
+
 **Source:** [`agent/lib/dark-factory/sandbox-view.ts`](../../agent/lib/dark-factory/sandbox-view.ts)
 
 ## self-improve-state
