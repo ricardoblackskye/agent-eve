@@ -59,7 +59,11 @@ function agentReplying(outputs: string[], maxPlanRetries = 2) {
   const calls: Array<{ prompt: string; attempt?: number }> = [];
   let index = 0;
   const deps: ArchitectDeps = {
-    listFiles: vi.fn().mockResolvedValue(Object.keys(REPO)),
+  // #785: this fixture's plan maps its acceptance criteria to the suite below, so the repository it hands the
+  // architect has to CONTAIN it - a mapping resolves against the target set or against the repository, and a plan
+  // whose criteria point at a file it neither writes nor finds is now refused. Listed here rather than the mapping
+  // rewritten, because "an existing suite covers these criteria" is what the fixture describes.
+    listFiles: vi.fn().mockResolvedValue([...Object.keys(REPO), "tests/homepage.test.tsx"]),
     readFile: async (p: string) => REPO[p] ?? "",
     maxPlanRetries,
     generateText: vi.fn().mockImplementation(

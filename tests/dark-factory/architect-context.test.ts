@@ -78,7 +78,11 @@ const PLAN: ExecutionPlan = {
 function agentOver(over: Partial<ArchitectDeps> = {}) {
   const prompts: string[] = [];
   const deps: ArchitectDeps = {
-    listFiles: vi.fn().mockResolvedValue(Object.keys(REPO)),
+  // #785: this fixture's plan maps its acceptance criteria to the suite below, so the repository it hands the
+  // architect has to CONTAIN it - a mapping resolves against the target set or against the repository, and a plan
+  // whose criteria point at a file it neither writes nor finds is now refused. Listed here rather than the mapping
+  // rewritten, because "an existing suite covers these criteria" is what the fixture describes.
+    listFiles: vi.fn().mockResolvedValue([...Object.keys(REPO), "src/pages/HomePage.test.jsx"]),
     readFile: async (p: string) => REPO[p] ?? "",
     generateText: vi.fn().mockImplementation(async (prompt: string) => {
       prompts.push(prompt);
@@ -190,7 +194,7 @@ describe("Architect reads the repository (#381 R1)", () => {
       "public/logo.png": "\u0089PNG\r\n\u0000\u0001\u0002 corrupt binary",
     };
     const { agent, prompts } = agentOver({
-      listFiles: vi.fn().mockResolvedValue(Object.keys(repo)),
+      listFiles: vi.fn().mockResolvedValue([...Object.keys(repo), "src/pages/HomePage.test.jsx"]),
       readFile: async (p: string) => repo[p] ?? "",
     });
     const result = await agent.planStory(STORY);
@@ -213,13 +217,13 @@ describe("Architect reads the repository (#381 R1)", () => {
     };
     const baseline = agentOver({
       readFile: undefined,
-      listFiles: vi.fn().mockResolvedValue(Object.keys(repo)),
+      listFiles: vi.fn().mockResolvedValue([...Object.keys(repo), "src/pages/HomePage.test.jsx"]),
     });
     await baseline.agent.planStory(STORY);
     const base = baseline.prompts[0].length;
 
     const { agent, prompts } = agentOver({
-      listFiles: vi.fn().mockResolvedValue(Object.keys(repo)),
+      listFiles: vi.fn().mockResolvedValue([...Object.keys(repo), "src/pages/HomePage.test.jsx"]),
       readFile: async (p: string) => repo[p] ?? "",
       maxPromptChars: base + 1_400,
     });
@@ -243,7 +247,7 @@ describe("Architect reads the repository (#381 R1)", () => {
       ].join("\n"),
     };
     const { agent, prompts } = agentOver({
-      listFiles: vi.fn().mockResolvedValue(Object.keys(repo)),
+      listFiles: vi.fn().mockResolvedValue([...Object.keys(repo), "src/pages/HomePage.test.jsx"]),
       readFile: async (p: string) => repo[p] ?? "",
     });
     await agent.planStory(STORY);
