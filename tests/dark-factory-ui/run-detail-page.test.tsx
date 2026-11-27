@@ -472,4 +472,47 @@ describe("Dark Factory run detail page", () => {
     expect(container.textContent).toContain("1 verified");
     expect(container.textContent).toContain("1 unverified");
   });
+
+  it("renders the sandbox view panel beside the run when, and only when, the server offers one", async () => {
+    // Wiring guard for #790 R1: the page's own poll answers for the run, so the panel's read is stubbed here. The two
+    // halves are asserted together, because a page that renders the panel unconditionally would pass a single-sided
+    // check while pointing a deployed console at a 127.0.0.1 that is not there.
+    const sandboxView = vi.fn((url: string) =>
+      Promise.resolve(
+        jsonResponse(
+          url.includes("sandbox-view")
+            ? {
+                available: true,
+                sandboxId: "sb-local",
+                workspace: "/workspace",
+                entries: [{ path: "src/App.tsx", type: "file", name: "App.tsx" }],
+              }
+            : { summary: SUMMARY, events: EVENTS },
+        ),
+      ),
+    );
+    vi.stubGlobal("fetch", sandboxView);
+
+    const offered = render(<DarkFactoryRunDetailPage />);
+    await waitFor(() => expect(offered.container.textContent).toContain("SANDBOX VIEW"));
+    expect(offered.container.textContent).toContain("src/App.tsx");
+    expect(offered.container.textContent).toContain("sb-local");
+    offered.unmount();
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: unknown) =>
+        Promise.resolve(
+          jsonResponse(
+            String(input).includes("sandbox-view")
+              ? { available: false, reason: "not-local", message: "Not this machine." }
+              : { summary: SUMMARY, events: EVENTS },
+          ),
+        ),
+      ),
+    );
+    const withheld = render(<DarkFactoryRunDetailPage />);
+    await waitFor(() => expect(withheld.container.textContent).toContain("RUN CONTROL"));
+    expect(withheld.container.textContent).not.toContain("SANDBOX VIEW");
+  });
 });

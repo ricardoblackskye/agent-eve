@@ -109,7 +109,9 @@ describe("#790 R1 sandbox view panel", () => {
     };
     fireEvent.click(screen.getByRole("button", { name: /refresh/i }));
 
-    await screen.findByText(/ended/i);
+    await screen.findByText(/the view has ended/i);
+    // The listing is gone with it: the panel is not showing a stale tree beside a notice.
+    expect(screen.queryByText("src/App.tsx")).toBeNull();
   });
 
   it("CONTROL: the same panel with a live view is not empty, so the not-local case is not vacuous", async () => {

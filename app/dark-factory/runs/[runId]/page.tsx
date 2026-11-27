@@ -22,6 +22,7 @@ import { DEFAULT_POLL_INTERVAL_MS, useRunQuery } from "../../ui/use-run-query";
 import { useFactoryControl } from "../../ui/use-factory-control";
 import { ControlPanel } from "../../ui/control-panel";
 import { toDetailView } from "../../ui/view-model";
+import { SandboxViewPanel } from "../../ui/sandbox-panel";
 
 export default function DarkFactoryRunDetailPage() {
   const params = useParams<{ runId: string }>();
@@ -88,6 +89,8 @@ export default function DarkFactoryRunDetailPage() {
           />
         </div>
       </section>
+      {/* The server decides whether a view exists; on a deployed console this renders nothing at all. */}
+      <SandboxViewPanel runId={runId} />
       <RunDetailPanel summary={run.data.summary} view={view} />
       <OutcomeArtifacts prUrl={view.prUrl} />
       {/* The panel needs the RAW event, where the recorder's summary lives; the view's
