@@ -378,3 +378,19 @@ export function renderPlanFile(
   const body = withFenceLanguages(neutralizeInlineHtml(lines.join("\n"))).replace(/\n+$/, "");
   return `${body}\n`;
 }
+
+/**
+ * #780 (R3): the substitution declaration, as ONE line at the top of the plan.
+ *
+ * The requirement says "as one line", so this returns one line and the caller must not wrap it into prose: a
+ * declaration that becomes a paragraph is the thing it was meant to fix.
+ */
+export function renderSubstitutionLine(declaration: {
+  chosen: string;
+  named: string;
+  reason: string;
+}): string {
+  let clean = declaration.reason.trim();
+  while (clean.endsWith(".")) clean = clean.slice(0, -1);
+  return `Substituted: ${declaration.chosen} for ${declaration.named}, because ${clean}.`;
+}

@@ -54,6 +54,64 @@ export interface ExecutionPlan {
   dependencies?: string[];
 }
 
+/**
+ * #780 (R3): a substitution must be DECLARED, not silent.
+ *
+ * The requirement: a plan that chooses a path other than the surface the story names must state which won and why,
+ * at the top of the plan as one line. A silent substitution is refused, and where the story names a surface the plan
+ * cannot write, the plan refuses with its reason rather than quietly changing something else.
+ *
+ * The reason for the choice already existed - in the architect's log and in the approach prose - but the plan itself
+ * never stated the action it was taking, which is how a misclassified create survived three live runs of the same
+ * story while every gate stayed green. Making the approver infer the decision is the defect.
+ */
+export interface SubstitutionDeclaration {
+  /** The path the plan chose to write. */
+  chosen: string;
+  /** The surface the story named, which the plan did not choose. */
+  named: string;
+  /** Why the plan chose otherwise, in the plan's own words. */
+  reason: string;
+}
+
+/**
+ * A backslash, built from its character code rather than written as a literal.
+ *
+ * Not cleverness for its own sake: a backslash inside a generated source file is the documented trap in this
+ * workspace (a heredoc eats it), and it silently produced a no-op replace on the first attempt at this rule. A
+ * character code cannot be mangled in transit.
+ */
+const BACKSLASH = String.fromCharCode(92);
+
+/** Paths are compared after normalizing separators and a leading dot-slash, so a legitimate plan is not refused. */
+function normalizeTargetPath(path: string): string {
+  const slashed = path.trim().split(BACKSLASH).join("/");
+  return slashed.startsWith("./") ? slashed.slice(2) : slashed;
+}
+
+/**
+ * True when the plan targets something other than the surface its story names, and does not declare the substitution.
+ *
+ * Direction of safety, and the reason this is not a blanket refusal:
+ * - Only a KNOWN named surface can be substituted away from. When discovery could not resolve one, no declaration is
+ *   demanded - refusing plans for a reason the plan cannot act on is how a guard gets worked around.
+ * - A declaration satisfies the check. This rule bans SILENT substitutions, not substitutions: naming a different
+ *   surface is often correct, and the plan is expected to say so.
+ *
+ * The caller refuses on true. It must never widen what the plan may target to accommodate the choice - that is R2's
+ * pathsOutsideApprovedSet, one layer later.
+ */
+export function undeclaredSubstitution(input: {
+  targetPaths: readonly string[];
+  namedSurface?: string | null;
+  declaration?: SubstitutionDeclaration | null;
+}): boolean {
+  const named = input.namedSurface ? normalizeTargetPath(input.namedSurface) : "";
+  if (named.length === 0) return false;
+  if (input.declaration) return false;
+  return !input.targetPaths.some((path) => normalizeTargetPath(path) === named);
+}
+
 export interface PlanValidationResult {
   valid: boolean;
   errors: string[];
