@@ -51,6 +51,14 @@ export interface ExecutionPlan {
   tasks?: PlanTask[];
   targetFiles: PlanTargetFile[];
   acceptanceCriteriaMap: AcceptanceCriteriaTestMapping[];
+  /**
+   * #780 (R3): the substitution the plan is making, when it chooses a path other than the surface the story names.
+   *
+   * Optional on purpose, like `approach`: plans in flight and existing fixtures predate it, and the architect prompt
+   * is what asks the model for it. The validator requires it whenever the plan targets something other than a KNOWN
+   * named surface, so its absence is not a loophole - it is the refusal.
+   */
+  substitution?: SubstitutionDeclaration;
   dependencies?: string[];
 }
 
@@ -477,6 +485,28 @@ export function validateExecutionPlan(
       codes.push("target-role");
       errors.push(
         `Target '${file.path}' is ${what}${proof}, but the story is scoped to one page.${instead}`,
+      );
+    }
+  }
+
+  // 3c. Substitution DECLARATION check (#780 R3). A plan that targets something other than the surface its story
+  // names must say so, at the top of the plan as one line; a silent substitution is refused. Deliberately narrow:
+  // undeclaredSubstitution reports nothing when the named surface is UNKNOWN, because refusing plans for a reason
+  // the plan cannot act on is how a guard gets worked around rather than respected.
+  if (context?.surface?.page && isPageScopedStory(storyText)) {
+    const named = context.surface.page;
+    if (
+      undeclaredSubstitution({
+        targetPaths: plan.targetFiles.map((file) => file.path),
+        namedSurface: named,
+        declaration: plan.substitution,
+      })
+    ) {
+      codes.push("undeclared-substitution");
+      errors.push(
+        `Target set does not include '${named}', the surface this story names, and the plan declares no substitution. ` +
+          `Either add ${named} to targetFiles, or declare the choice as one line at the top of the plan: ` +
+          `Substituted: <chosen path> for ${named}, because <reason>.`,
       );
     }
   }
