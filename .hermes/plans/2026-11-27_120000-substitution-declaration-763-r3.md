@@ -4,6 +4,30 @@
 **Branch:** `feat/763-r3-substitution-declaration` (from `origin/main` @ `d81a0d7`, 0 behind)
 **Status:** plan only. No code until GATE 1.
 
+## Why we are doing this
+
+The Dark Factory's plan decides which files a run will change, working from a story written in plain words. When it
+picks a different file from the one the story names, nothing says so. The choice appears in the plan's table and the
+reason sits in the architect's log, but the plan never states the action it is taking - so the person approving it is
+left to infer whether the choice was deliberate.
+
+That is not theoretical. On the same unchanged story, three live runs planned to create a test file that already
+existed; the runs then reported the work as done, with all acceptance criteria passing, while no test had been
+written. Every automated gate was green. The plan was the only place the problem could have shown up, and the plan did
+not mention it.
+
+**What changes:** a plan that chooses a path other than the one the story names must say so, in one line at the top,
+and a plan that makes that substitution without declaring it is refused before it ever reaches you. Where the story
+names something the plan cannot write, the plan refuses and gives its reason rather than quietly changing something
+else instead.
+
+**What this does not change:** the plan may still choose a different file, so this is not a ban on substitutions - it
+is a ban on silent ones. The refusal machinery it needs may already exist (the AC4 gate and `refused-target` both
+refuse with reasons today), so Task 4 verifies and pins what happens rather than adding a second refusal beside one
+that works. This release does not make the choice deterministic - whether that is needed is what R4 measures. And it
+does not change how a plan decides which file to target: R1 already governs that, and R3 governs only what must be
+said about the decision.
+
 ## The requirement, and what R1 and R2 already did for it
 
 Discovery already surfaces candidate artifacts. The plan must list them and state **which won and why**, at the **top
