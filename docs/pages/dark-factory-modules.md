@@ -1315,3 +1315,16 @@ yields no cases, which a caller must treat as no evidence rather than a pass.
 **Source:** `agent/lib/dark-factory/test-case-evidence.ts`
 
 **Exports:** `ExecutedTestCase`, `MARKER_LINE_SOURCE`, `TestCaseEvidenceSource`, `parseExecutedTestCases`, `testCaseEvidenceSources`
+
+
+## approved-target-set
+
+Answers whether what a run WROTE is inside what was APPROVED. The approved plan's `targetFiles` is a contract, and one
+live escape proved it was not enforced: a fix cycle wrote a CI workflow outside its approved set and nothing objected
+(#763 R2). A plan that approved nothing authorizes nothing, so the check fails closed. Paths are compared after
+normalizing separators and a leading `./`; case is deliberately not normalized, which is stated in the module rather
+than left silent.
+
+**Source:** `agent/lib/dark-factory/approved-target-set.ts`
+
+**Exports:** `pathsOutsideApprovedSet`
