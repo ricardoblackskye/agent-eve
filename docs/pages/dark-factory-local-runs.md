@@ -124,15 +124,15 @@ export DF_SANDBOX_IMAGE="df-sandbox-webfeedpoc:4"
 
 ### The sandbox lifecycle commands (#553)
 
-| Command | What it does | Exit |
-|---------|--------------|------|
-| `npm run df:sandbox-vendor` | Populate the gitignored image cache from `artifacts.lock.json`, verifying each digest. Refuses if the registry serves different bits. | `0` cached, `1` refused |
-| `npm run df:sandbox-up` | Provision **and** prove: `helm dependency build`, deploy, wait for rollout, port-forward, run the vault proof, tear the forward down. | `0` proven, otherwise the table below |
-| `npm run df:sandbox-up-shell` | The raw `bootstrap.sh`, kept as an escape hatch for debugging the executor. | `0`/`1` |
-| `npm run df:sandbox-down` | Surgical teardown: uninstall the release, delete both namespaces, stop the forward. **Leaves minikube running** so a re-run is warm. | `0` torn down |
-| `npm run df:sandbox-down -- --delete-cluster` | The full reset: the above, then `minikube delete`. | `0` |
-| `npm run df:sandbox-smoke` | The vault substitution proof alone, against an endpoint that is already up. | `0` proven |
-| `npm run df:sandbox-forward` | Manual port-forward, for when you want to poke the API by hand. | — |
+| Command                                       | What it does                                                                                                                          | Exit                                  |
+|-----------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------|
+| `npm run df:sandbox-vendor`                   | Populate the gitignored image cache from `artifacts.lock.json`, verifying each digest. Refuses if the registry serves different bits. | `0` cached, `1` refused               |
+| `npm run df:sandbox-up`                       | Provision **and** prove: `helm dependency build`, deploy, wait for rollout, port-forward, run the vault proof, tear the forward down. | `0` proven, otherwise the table below |
+| `npm run df:sandbox-up-shell`                 | The raw `bootstrap.sh`, kept as an escape hatch for debugging the executor.                                                           | `0`/`1`                               |
+| `npm run df:sandbox-down`                     | Surgical teardown: uninstall the release, delete both namespaces, stop the forward. **Leaves minikube running** so a re-run is warm.  | `0` torn down                         |
+| `npm run df:sandbox-down -- --delete-cluster` | The full reset: the above, then `minikube delete`.                                                                                    | `0`                                   |
+| `npm run df:sandbox-smoke`                    | The vault substitution proof alone, against an endpoint that is already up.                                                           | `0` proven                            |
+| `npm run df:sandbox-forward`                  | Manual port-forward, for when you want to poke the API by hand.                                                                       | —                                     |
 
 `df:sandbox-up` **is the proof**. It does not print "now run the proof in another terminal" — it runs
 `vault-proof.py` itself and exits non-zero unless a placeholder became the real secret upstream. A shell
@@ -147,15 +147,15 @@ identical. The table is stable and lives in
 number instead of parsing English. The terminal `done` event carries the same code, so a GUI consumer
 reads it without inspecting the process exit.
 
-| Problem code | Exit | Meaning |
-|--------------|------|---------|
-| `internal` | `1` | Unclassified internal failure. Also the crash path when `main()` throws. |
-| `prerequisites-missing` | `10` | A prerequisite is missing or unusable (docker, kubectl, helm, python, minikube for a local cluster). The message names the binary and the fix. |
+| Problem code             | Exit | Meaning                                                                                                                                                                                          |
+|--------------------------|------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `internal`               | `1`  | Unclassified internal failure. Also the crash path when `main()` throws.                                                                                                                         |
+| `prerequisites-missing`  | `10` | A prerequisite is missing or unusable (docker, kubectl, helm, python, minikube for a local cluster). The message names the binary and the fix.                                                   |
 | `prerequisites-mismatch` | `15` | A prerequisite is present but its version or digest does not match the manifest (`scripts/sandbox-vendor/artifacts.lock.json`). The message shows the expected vs actual version. Owned by #603. |
-| `artifact-unresolvable` | `11` | An artifact is unresolvable: the lock is absent or malformed, the cache is empty, or a locked image is not in the local store. |
-| `cluster-unreachable` | `12` | The cluster is unreachable: `minikube start` failed or the kube context does not answer. |
-| `proof-failed` | `13` | The proof failed: the endpoint could not be reached, or the vault proof did not substitute the placeholder. |
-| `teardown-failed` | `14` | Teardown failed: the port-forward or the release cleanup did not complete. |
+| `artifact-unresolvable`  | `11` | An artifact is unresolvable: the lock is absent or malformed, the cache is empty, or a locked image is not in the local store.                                                                   |
+| `cluster-unreachable`    | `12` | The cluster is unreachable: `minikube start` failed or the kube context does not answer.                                                                                                         |
+| `proof-failed`           | `13` | The proof failed: the endpoint could not be reached, or the vault proof did not substitute the placeholder.                                                                                      |
+| `teardown-failed`        | `14` | Teardown failed: the port-forward or the release cleanup did not complete.                                                                                                                       |
 
 Two codes sit outside this table. `0` means provisioned and proven. `2` means a usage error: an
 unknown flag or a refused secret. Both are raised outside the provisioning core — `0` on success and
@@ -172,13 +172,13 @@ so a consumer can read events line-wise without stripping text and an operator s
 errors. The schema is defined in
 [`sandbox-events.ts`](../../agent/lib/dark-factory/sandbox-events.ts).
 
-| Field | Type | Notes |
-|-------|------|-------|
-| `ts` | string | ISO-8601 UTC. Lets a consumer render ordering without guessing. |
-| `step` | string | One of `check`, `vendor`, `cluster`, `deploy`, `forward`, `proof`, `teardown`, `done`. |
-| `phase` | string | One of `start`, `success`, `failure`, `skip`. |
-| `message` | string | Short and human-readable. Structured detail goes in optional extra keys. |
-| `exitCode` | number | Present on the terminal `done` event only. |
+| Field      | Type   | Notes                                                                                  |
+|------------|--------|----------------------------------------------------------------------------------------|
+| `ts`       | string | ISO-8601 UTC. Lets a consumer render ordering without guessing.                        |
+| `step`     | string | One of `check`, `vendor`, `cluster`, `deploy`, `forward`, `proof`, `teardown`, `done`. |
+| `phase`    | string | One of `start`, `success`, `failure`, `skip`.                                          |
+| `message`  | string | Short and human-readable. Structured detail goes in optional extra keys.               |
+| `exitCode` | number | Present on the terminal `done` event only.                                             |
 
 The terminal event is always `step: "done"` and carries the exit code, so a consumer stops on one
 line instead of inferring completion from silence. A `phase: "skip"` event means the stage was
@@ -227,6 +227,29 @@ are installed somewhere PATH does not reach — this repository's own Windows se
 directory, so the override is the normal case rather than an edge case.
 
 `FORWARD_PORT` changes the local port (default `18082`); `DF_SANDBOX_ENDPOINT` must name the same port.
+### Watching the workspace while a run is in flight (#790 R1)
+
+A local run now has a read-only window. Open the run's detail page in the console
+(`http://localhost:3000/dark-factory/runs/<runId>`) and a **SANDBOX VIEW** panel appears while the run's sandbox is
+alive: it lists the workspace, shows one file's contents, and re-reads on demand. It can read, and it can do nothing
+else.
+
+The panel is offered by the **server**, not by the page. The view is served by the console you already have open, and
+it reads the sandbox through the same `DF_SANDBOX_ENDPOINT` the run used:
+
+| what you see         | what it means                                                                                       |
+|:---------------------|:----------------------------------------------------------------------------------------------------|
+| no panel at all      | the endpoint is not a loopback address, so there is no local sandbox to read - the deployed console |
+| the workspace        | the run's sandbox is running, and this is what the agent is editing right now                       |
+| "the view has ended" | the sandbox is gone: the run finished, or it was released                                           |
+
+Two things it will not do. It will not show you `.env`, `.git-credentials`, key material or `.git/` - the view filters
+those by path, before the sandbox is asked for anything, so a refused file is never read. And it will not touch the
+run: reading the workspace neither pauses, resumes nor ends it, and the view has no write path to reach for.
+
+The endpoint it reads has to be the one the run used. If `FORWARD_PORT` (default `18082`) and `DF_SANDBOX_ENDPOINT`
+name different ports, the console reports the sandbox as unreachable rather than showing you an empty workspace -
+which is the honest answer, and the one that tells you the port-forward is what to check.
 
 ### Tearing down (#553 AC5)
 
@@ -266,11 +289,11 @@ first-command latency, captures time until the sandbox is actually usable. Measu
 cluster (minikube, `opensandbox-server` on port-forward 18082) with image `df-sandbox-agent-eve:358`
 (3.12 GB, pre-built and pre-loaded):
 
-| Run | create-to-ready | first-command | Notes |
-| --- | --- | --- | --- |
-| 1 | 3.02s | 0.33s | health check skipped |
-| 2 | 2.63s | 0.28s | health check skipped |
-| 3 | 2.41s | 0.28s | health check enabled (default) |
+| Run | create-to-ready | first-command | Notes                          |
+|-----|-----------------|---------------|--------------------------------|
+| 1   | 3.02s           | 0.33s         | health check skipped           |
+| 2   | 2.63s           | 0.28s         | health check skipped           |
+| 3   | 2.41s           | 0.28s         | health check enabled (default) |
 
 **Median ≈ 2.63s, range 2.41–3.02s.** Enabling the health check added no measurable time.
 
