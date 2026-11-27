@@ -81,7 +81,7 @@ describe("#790 R1 AC3 - only a local endpoint yields a view", () => {
     }
   });
 
-  it("does not treat a remote, a wildcard or an unroutable address as local", () => {
+  it("does not treat a remote, a wildcard or a private address as local", () => {
     for (const endpoint of [
       "sandbox.example.com:443",
       "https://sandbox.example.com",
