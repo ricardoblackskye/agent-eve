@@ -25,6 +25,13 @@ export type { PlanTask };
  * than making one release depend on another.
  */
 export interface PlanFileInput {
+  /**
+   * #780 (R3): the substitution this plan declares, when it writes something other than the surface its story names.
+   *
+   * Typed structurally rather than imported, matching how renderSubstitutionLine is typed: a type-only import across
+   * these modules buys nothing here and risks a cycle for no benefit.
+   */
+  substitution?: { chosen: string; named: string; reason: string };
   storyId: number;
   title: string;
   summary: string;
@@ -289,6 +296,14 @@ export function renderPlanFile(
     lines.push(`Issue: [#${plan.storyId}](${options.issueUrl})`);
   }
   lines.push("");
+
+  // #780 (R3): the substitution DECLARATION, and it comes BEFORE the technical detail. The requirement says the plan
+  // must state which target won and why "at the top of the plan as one line", so this is not a nicety of layout: a
+  // declaration buried in the approach prose is the thing it was meant to fix, and an approver left to infer the
+  // choice is the defect this release exists to remove.
+  if (plan.substitution) {
+    lines.push(renderSubstitutionLine(plan.substitution), "");
+  }
 
   lines.push("## Goal", "", text(plan.summary), "");
 
