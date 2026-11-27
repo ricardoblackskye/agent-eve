@@ -174,6 +174,7 @@ import type { RunSummary } from "../agent/lib/dark-factory/run-history";
 import type { RunHistoryStore } from "../agent/lib/dark-factory/run-history-store";
 import { recordRunDiffWithOutcome, type GitRunner } from "../agent/lib/dark-factory/diff-capture";
 import { parseExecutedTestCases } from "../agent/lib/dark-factory/test-case-evidence";
+import { pathsOutsideApprovedSet } from "../agent/lib/dark-factory/approved-target-set";
 
 // The .env bootstrap lives in runner-env.ts so it can be tested without running the pipeline.
 // It carries NO model default: agent/model-config.ts is the single source of truth (#400).
@@ -1401,6 +1402,22 @@ async function main(): Promise<void> {
               );
             // #361 (R2): the commit after the loop stages `lastAuthored`, not just the plan's targets.
             lastAuthored = authored;
+            // #763 R2: the approved plan's targetFiles is a CONTRACT, and this is the moment the runner learns what
+            // the run actually wrote. Enforced HERE rather than at commit time because the requirement is about what
+            // the run writes - a written-but-uncommitted file would slip past a later check, and the escape in
+            // practice was a fix cycle writing a CI workflow.
+            //
+            // Throwing fails this ITERATION rather than the run: the coder gets the paths back and can correct
+            // itself, and a run only commits on a passing iteration, so a rejected write is never staged. The
+            // alternative - widening the approved set to accommodate the write - would make the approval meaningless
+            // in exactly the case it exists for.
+            const outsideApprovedSet = pathsOutsideApprovedSet(authored.written, ctx.plan ?? {});
+            if (outsideApprovedSet.length > 0) {
+              throw new Error(
+                `The run wrote ${outsideApprovedSet.length} path(s) outside the approved plan's target set: ` +
+                  `${outsideApprovedSet.join(", ")}. That set is a contract; refusing rather than widening it.`,
+              );
+            }
             } catch (err: any) {
               return {
                 passed: false,
