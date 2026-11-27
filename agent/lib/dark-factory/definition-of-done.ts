@@ -309,6 +309,11 @@ export interface ReviewFinding {
   file?: string;
   line?: number;
   severity?: "error" | "warning" | "note";
+  /**
+   * #743: the cause and owner, once the finding has been classified. Carried on the finding rather than beside it
+   * so the renderer that already reports findings is the one that reports why.
+   */
+  classification?: { cause: string; owner: string; evidence: string };
 }
 
 export interface FindingDisposition {
@@ -404,6 +409,12 @@ export interface DefinitionOfDoneResult {
    */
   blockedReason?: BlockedReason;
   pendingChecks?: string[];
+  /**
+   * #743: what this failure IS, and who can act - generalizing #691's blockedReason from one case to every finding.
+   * Set from the run's own failure text, because the status alone cannot distinguish an environment fault from
+   * broken code and a human reading `blocked` cannot either.
+   */
+  classification?: { cause: string; owner: string; evidence: string };
 }
 
 export interface AcTestResult {

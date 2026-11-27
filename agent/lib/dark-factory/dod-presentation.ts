@@ -50,6 +50,14 @@ export function renderAcceptedFindingComment(
     `- **Finding ID**: \`${finding.id}\``,
     `- **Source**: \`${finding.source}\`${location}`,
     `- **Finding**: ${finding.message}`,
+    ...(finding.classification
+      ? [
+          `- **Cause**: ${finding.classification.cause} - owner ${finding.classification.owner}`,
+          ...(finding.classification.evidence
+            ? [`- **Evidence**: ${finding.classification.evidence}`]
+            : []),
+        ]
+      : []),
     `- **Disposition**: Accepted by Developer Agent`,
     `- **Rationale**:`,
     `  > ${explanation.trim()}`,

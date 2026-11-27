@@ -1177,7 +1177,6 @@ Dark Factory — retiring a stale claim (#404 R2). The operator's "let go" for a
 
 **Decisions:** [ADR 0051](../../docs/adr/0051-df-retiring-a-stale-claim-is-abandonment.md)
 
-
 ## AMM readiness
 
 Scores a repository against the whitepaper's Autonomy Maturity Model: the eight technical pillars, the level of
@@ -1299,8 +1298,6 @@ Run it with `npm run df:amm-scan -- --repo <owner/repo> --workspace <dir>`.
 
 **Exports:** `runAmmScan`, `RunAmmScanInput`, `AmmScanResult`
 
-
-
 ## test-case-evidence
 
 Answers which test cases a run actually executed, and how each went. The Definition of Done certifies an acceptance
@@ -1316,7 +1313,6 @@ yields no cases, which a caller must treat as no evidence rather than a pass.
 
 **Exports:** `ExecutedTestCase`, `MARKER_LINE_SOURCE`, `TestCaseEvidenceSource`, `parseExecutedTestCases`, `testCaseEvidenceSources`
 
-
 ## approved-target-set
 
 Answers whether what a run WROTE is inside what was APPROVED. The approved plan's `targetFiles` is a contract, and one
@@ -1328,3 +1324,14 @@ than left silent.
 **Source:** `agent/lib/dark-factory/approved-target-set.ts`
 
 **Exports:** `pathsOutsideApprovedSet`
+
+## finding-classification
+
+Gives every finding a root cause and an owner, so a blocked run says why it is allowed to block rather than only that
+it did (#743). Fail-closed: an unrecognized finding is `unknown`, never `code`, because a `code` default sends a human
+to fix something that is not broken.
+
+**Source:** `agent/lib/dark-factory/finding-classification.ts`
+
+**Exports:** `classifyFinding`, `FindingCause`, `FindingOwner`, `FindingClassification`
+
