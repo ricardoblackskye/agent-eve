@@ -40,6 +40,7 @@ import {
   type DefinitionOfDoneResult,
 
   CHECKS_NOT_FINISHED,} from "../agent/lib/dark-factory/definition-of-done";
+import { classifyFinding } from "../agent/lib/dark-factory/finding-classification";
 import {
   applyStartLifecycle,
   applyTerminalLifecycle,
@@ -2190,6 +2191,14 @@ export async function runDefinitionOfDonePhase(
   log("DoD Status", dodResult.status);
   log("Is DONE (ok)", dodResult.ok);
   log("AC Matrix Count", dodResult.acMatrix?.length ?? 0);
+
+  // #743: say WHY it is allowed to block, not only that it did. The reason string already carries the failure text -
+  // the lint result and its reason, or the suite's own output - so the classification is derived from the same words a
+  // human reads. A finding nobody can classify reports `unknown` and is never defaulted to `code`.
+  const finding = classifyFinding(dodResult.reason ?? "");
+  log("Finding cause", finding.cause);
+  log("Finding owner", finding.owner);
+  if (finding.evidence) log("Finding evidence", finding.evidence);
 
   if (dodResult.pr) {
     log("Live PR URL", dodResult.pr.url);
