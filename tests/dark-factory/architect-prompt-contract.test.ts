@@ -70,7 +70,11 @@ function plan(path: string): ExecutionPlan {
 function agent(repo: Record<string, string>, responses: string[]) {
   const prompts: string[] = [];
   const deps: ArchitectDeps = {
-    listFiles: vi.fn().mockResolvedValue(Object.keys(repo)),
+    // #785: the plan below maps its acceptance criteria to tests/homepage.test.tsx, so the repository handed to the
+    // architect must CONTAIN it - a mapping resolves against the target set or against the repository, and a plan
+    // whose criteria point at a file it neither writes nor finds is now refused. The suite is listed rather than the
+    // mapping rewritten, because "an existing suite covers these criteria" is what the fixture describes.
+    listFiles: vi.fn().mockResolvedValue([...Object.keys(repo), "tests/homepage.test.tsx"]),
     readFile: async (p: string) => repo[p] ?? "",
     generateText: vi.fn().mockImplementation(async (prompt: string) => {
       prompts.push(prompt);

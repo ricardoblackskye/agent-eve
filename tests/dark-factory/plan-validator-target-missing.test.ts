@@ -15,7 +15,12 @@ import {
  * Backward compatibility is part of the contract: with no file list supplied the validator behaves
  * exactly as it did, which is the property every existing caller depends on.
  */
-const FILES = ["src/App.jsx", "src/main.jsx", "src/pages/HomePage.jsx"];
+// #785 made a mapping's testFile resolve against the repository as well as the target set. Both plan helpers below
+// map their acceptance criteria to "tests/homepage.test.tsx", so this repository has to contain it - otherwise the
+// fixtures are modelling a plan whose criteria point at a file it neither writes nor finds, which is now refused.
+// The suite is LISTED rather than the mappings changed, because "an existing suite covers these criteria" is the
+// behaviour these fixtures describe.
+const FILES = ["src/App.jsx", "src/main.jsx", "src/pages/HomePage.jsx", "tests/homepage.test.tsx"];
 
 /**
  * The file list measured on the repository where the defect actually happened, so the #770 case below reproduces

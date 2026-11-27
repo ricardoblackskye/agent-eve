@@ -120,6 +120,32 @@ export function undeclaredSubstitution(input: {
   return !input.targetPaths.some((path) => normalizeTargetPath(path) === named);
 }
 
+/**
+ * #785: an acceptance criterion mapped to a test file the plan will neither write nor find.
+ *
+ * A mapping may point at a file the plan will WRITE (in `targetFiles`) or at one that already EXISTS. It may not
+ * point at a file that is neither: that mapping can never be satisfied by anything the run does, and the AC matrix
+ * would certify a criterion against a file the run was never able to touch - #764's defect one layer earlier, in the
+ * artifact approval rests on.
+ *
+ * Deliberately NOT the stricter "must be in targetFiles": reusing an existing suite to cover a criterion is correct
+ * behaviour, and a rule that refuses correct plans is the one that gets worked around.
+ *
+ * `knownFiles` of undefined/null means NO FILE LIST WAS SUPPLIED, which is not the same as an empty repository, so
+ * nothing is reported. An empty array IS a statement, and does report. The two look alike and mean opposite things.
+ */
+export function acTestFileUnresolvable(input: {
+  testFile: string;
+  targetPaths: readonly string[];
+  knownFiles?: readonly string[] | null;
+}): boolean {
+  const wanted = normalizeTargetPath(input.testFile);
+  if (wanted.length === 0) return false;
+  if (input.targetPaths.some((path) => normalizeTargetPath(path) === wanted)) return false;
+  if (input.knownFiles === undefined || input.knownFiles === null) return false;
+  return !input.knownFiles.some((path) => normalizeTargetPath(path) === wanted);
+}
+
 export interface PlanValidationResult {
   valid: boolean;
   errors: string[];
@@ -548,6 +574,24 @@ export function validateExecutionPlan(
   // 5. Test mapping completeness check
   if (Array.isArray(plan.acceptanceCriteriaMap)) {
     for (const mapping of plan.acceptanceCriteriaMap) {
+      // #785: resolved by the plan's targetFiles, or by the repository. Anything else is a mapping the run cannot
+      // honour, refused here rather than left for the DoD to discover when the criterion has nothing behind it.
+      if (
+        typeof mapping.testFile === "string" &&
+        acTestFileUnresolvable({
+          testFile: mapping.testFile,
+          targetPaths: (plan.targetFiles ?? []).map((file) => file.path),
+          knownFiles: context?.files ?? null,
+        })
+      ) {
+        codes.push("ac-test-file-outside-targets");
+        errors.push(
+          `AC mapping '${mapping.acId || "unknown"}' names '${mapping.testFile}', which is neither in the plan's ` +
+            `targetFiles nor present in the repository. Add it to targetFiles, or map the criterion to a file the ` +
+            `run will write or that already exists.`,
+        );
+      }
+
       if (!mapping.testFile?.trim() || !mapping.testCaseName?.trim()) {
         errors.push(
           `AC mapping '${mapping.acId || "unknown"}' is incomplete: missing testFile or testCaseName.`,
