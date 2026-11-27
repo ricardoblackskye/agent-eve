@@ -328,3 +328,42 @@ export async function openSandboxView(
     };
   }
 }
+// ---------------------------------------------------------------------------
+// Serving the workspace through the view (#790 R1, task 5)
+// ---------------------------------------------------------------------------
+
+/**
+ * The most content the view serves for one file.
+ *
+ * A view that streams a 40MB build artifact is not a view, and it is not what the operator is asking for either. The
+ * cap is stated rather than discovered: the response carries `truncated` so nobody reads a partial file as a whole one.
+ */
+export const MAX_VIEW_CHARS = 200_000;
+
+export type ReadViewableFileResult =
+  | { ok: true; path: string; content: string; truncated: boolean }
+  | { ok: false; reason: "refused" | "unreadable"; message: string };
+
+/** One answer from the sandbox-view endpoint, as the console reads it. */
+export type SandboxViewResponse =
+  | { available: false; reason: SandboxViewReason; message: string }
+  | {
+      available: true;
+      sandboxId: string;
+      workspace: string;
+      entries: WorkspaceEntry[];
+      file?: { path: string; content: string; truncated: boolean };
+    };
+
+/**
+ * Read one file through the view.
+ *
+ * The path is filtered BEFORE the sandbox is asked for it: a refused path must never be read and then discarded,
+ * because the read is the exposure.
+ */
+export async function readViewableFile(options: {
+  handle: WorkspaceReader;
+  path: string;
+}): Promise<ReadViewableFileResult> {
+  throw new Error("not implemented");
+}
