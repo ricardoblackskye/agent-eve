@@ -365,5 +365,31 @@ export async function readViewableFile(options: {
   handle: WorkspaceReader;
   path: string;
 }): Promise<ReadViewableFileResult> {
-  throw new Error("not implemented");
+  if (!isViewablePath(options.path)) {
+    return {
+      ok: false,
+      reason: "refused",
+      message: `This path is not served through the sandbox view: ${options.path}`,
+    };
+  }
+
+  let raw: unknown;
+  try {
+    raw = await options.handle.files.readFile(options.path);
+  } catch (error) {
+    return {
+      ok: false,
+      reason: "unreadable",
+      message: `The sandbox could not read ${options.path}: ${messageOf(error)}`,
+    };
+  }
+
+  const text = typeof raw === "string" ? raw : String(raw);
+  const truncated = text.length > MAX_VIEW_CHARS;
+  return {
+    ok: true,
+    path: options.path,
+    content: truncated ? text.slice(0, MAX_VIEW_CHARS) : text,
+    truncated,
+  };
 }
