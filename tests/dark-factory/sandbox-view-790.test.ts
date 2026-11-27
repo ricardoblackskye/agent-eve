@@ -1,80 +1,126 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildViewUrl,
-  resolveViewBindAddress,
+  isViewablePath,
+  listViewableEntries,
+  type WorkspaceReader,
 } from "../../agent/lib/dark-factory/sandbox-view";
 
 /**
- * #790 R1 (#791) - the two properties that must hold before any exposure exists.
+ * #790 R1 (#791) - route B: observe the workspace through the sandbox's own file API.
  *
- * AC3: exposure defaults to localhost. Asserted on the RESOLVED address, not the config string, because the failure
- * this guards is a "localhost" setting that resolves to a wildcard bind. A string assertion would pass while the
- * socket listened on every interface.
+ * Route B was chosen over exposing a port and running code-server in the sandbox, because that would have handed the
+ * operator a shell - contradicting AC2, which requires the view to grant no write access. Reading through
+ * `files.readFile` / `listDirectory` is read-only by construction: there is no write path to reach.
  *
- * AC4: no credential value may appear in the URL, output or ledger - and a tokenized URL is forbidden outright. R1
- * secures the view by binding it to loopback, not by putting a secret in a link, so the URL builder must have nowhere
- * to put one. These tests are written before the feature so the leak cannot be introduced while building it.
+ * These tests replace an earlier set written for the port-exposure design. That design is gone (no bind, no exposure
+ * URL), so its tests are gone with it rather than left passing over dead code.
+ *
+ * The two properties that must hold before anything is served:
+ *
+ *   AC2 - read-only by construction. Asserted by driving the reader with a handle whose WRITE and EXEC methods throw,
+ *         so an implementation that reaches for one fails loudly instead of quietly.
+ *   AC4 - no credential in the served payload. The vault is write-only (#354, egress substitution) so vault values
+ *         never touch the filesystem, but `.env`, `.git-credentials` and key files are exactly what a workspace cloned
+ *         from a real repo can contain. The filter is the guard; an assumption that secrets are absent is not.
  */
 
-describe("#790 R1 - AC3: exposure is loopback, asserted on the resolved address", () => {
-  it("defaults to loopback when nothing is configured", () => {
-    // No configuration at all is the shipping default, so this is the case that actually runs.
-    expect(resolveViewBindAddress({})).toBe("127.0.0.1");
+/** A handle that fails on anything but reading, so a write or exec path cannot pass unnoticed. */
+function readOnlyHandle(
+  entries: { path: string; type?: string; name?: string }[],
+  contents: Record<string, string>,
+): WorkspaceReader {
+  const thrower = (what: string) => () => {
+    throw new Error(`the sandbox view must never call ${what}`);
+  };
+  return {
+    files: {
+      listDirectory: async () => entries,
+      readFile: async (path: string) => {
+        if (!(path in contents)) throw new Error(`not found: ${path}`);
+        return contents[path];
+      },
+      writeFiles: thrower("files.writeFiles"),
+    },
+    commands: { run: thrower("commands.run") },
+  } as unknown as WorkspaceReader;
+}
+
+describe("#790 R1 route B - AC4: the view must not serve a credential", () => {
+  it("refuses .env and every variant of it", () => {
+    // A sandbox clones a real repo, and .env.local is the file this project actually uses.
+    for (const p of [".env", ".env.local", ".env.production", "config/.env.test"]) {
+      expect(isViewablePath(p), p).toBe(false);
+    }
   });
 
-  it("resolves an explicit loopback hostname to a loopback address", () => {
-    // "localhost" is the string a config is most likely to carry, and it is not itself an address.
-    expect(resolveViewBindAddress({ configured: "localhost" })).toBe("127.0.0.1");
+  it("refuses the git credential store", () => {
+    expect(isViewablePath(".git-credentials")).toBe(false);
+    expect(isViewablePath("nested/.git-credentials")).toBe(false);
   });
 
-  it("accepts IPv6 loopback as loopback", () => {
-    expect(resolveViewBindAddress({ configured: "::1" })).toBe("::1");
+  it("refuses git's own internals", () => {
+    // Not a secret, but a write-shaped surface (hooks, config) a read-only view has no business exposing.
+    expect(isViewablePath(".git/config")).toBe(false);
+    expect(isViewablePath(".git/hooks/pre-commit")).toBe(false);
   });
 
-  it("REFUSES a wildcard bind rather than warning about it", () => {
-    // 0.0.0.0 is the exact failure: it looks like a bind-address setting and exposes the workspace to the network.
-    // Fail closed - a warning would leave the exposure live.
-    expect(() => resolveViewBindAddress({ configured: "0.0.0.0" })).toThrow(/loopback/i);
+  it("refuses key, certificate and identity files", () => {
+    for (const p of ["server.pem", "private.key", "id_rsa", ".ssh/id_ed25519", "cert.crt"]) {
+      expect(isViewablePath(p), p).toBe(false);
+    }
   });
 
-  it("REFUSES a routable address, and names it in the refusal", () => {
-    // A refusal that does not say which address was rejected is one nobody can act on.
-    expect(() => resolveViewBindAddress({ configured: "192.168.1.50" })).toThrow(/192\.168\.1\.50/);
+  it("refuses a path that escapes the workspace", () => {
+    // The reader is handed paths from a listing, but a traversal is the one input that could leave the workspace
+    // entirely, so it is refused on the way in rather than trusted from the listing.
+    for (const p of ["../outside", "a/../../etc/passwd", "..\\windows\\system32"]) {
+      expect(isViewablePath(p), p).toBe(false);
+    }
   });
 
-  it("CONTROL: a loopback bind is not refused", () => {
-    // Guards the guard: if the refusal above were implemented as "always throw", the tests above would pass and the
-    // feature would be inert.
-    expect(() => resolveViewBindAddress({ configured: "127.0.0.1" })).not.toThrow();
+  it("CONTROL: an ordinary source file is allowed, so the filter is not a blanket refusal", () => {
+    // Without this, a filter implemented as `return false` would pass every test above and serve nothing.
+    for (const p of ["src/App.tsx", "README.md", "package.json", "docs/page.md"]) {
+      expect(isViewablePath(p), p).toBe(true);
+    }
   });
 });
 
-describe("#790 R1 - AC4: the URL cannot carry a credential", () => {
-  it("builds a URL with no query string and no fragment", () => {
-    const url = buildViewUrl({ host: "127.0.0.1", port: 18082 });
-    expect(url).toBe("http://127.0.0.1:18082/");
-    expect(url).not.toContain("?");
-    expect(url).not.toContain("#");
+describe("#790 R1 route B - AC2: read-only by construction", () => {
+  it("lists the workspace without ever calling a write or exec method", async () => {
+    // The handle throws on writeFiles and run. If the reader touched either, this fails - which is the assertion AC2
+    // rests on, rather than a claim about intent.
+    const handle = readOnlyHandle(
+      [
+        { path: "src", type: "directory", name: "src" },
+        { path: "src/App.tsx", type: "file", name: "App.tsx" },
+      ],
+      { "src/App.tsx": "export default function App() { return null; }" },
+    );
+
+    const view = await listViewableEntries({ handle, path: "/workspace" });
+    expect(view.length).toBe(2);
   });
 
-  it("REFUSES to build a URL when handed a credential-looking parameter at all", () => {
-    // The forbidden shape is "tokenized URLs", so the builder must not have a parameter that could become one.
-    // Passing one is a programming error, not a configuration choice.
-    expect(() =>
-      buildViewUrl({ host: "127.0.0.1", port: 18082, token: "canary-value" } as never),
-    ).toThrow(/token/i);
+  it("omits a denylisted entry from the listing rather than throwing on the whole view", async () => {
+    // One secret in the tree must not blind the operator to the rest of the workspace.
+    const handle = readOnlyHandle(
+      [
+        { path: ".env.local", type: "file", name: ".env.local" },
+        { path: "src/App.tsx", type: "file", name: "App.tsx" },
+      ],
+      { ".env.local": "SECRET=canary", "src/App.tsx": "ok" },
+    );
+
+    const view = await listViewableEntries({ handle, path: "/workspace" });
+    const paths = view.map((e) => e.path);
+    expect(paths).toContain("src/App.tsx");
+    expect(paths).not.toContain(".env.local");
+    expect(JSON.stringify(view)).not.toContain("canary");
   });
 
-  it("a canary credential value appears nowhere in the built URL", () => {
-    // The canary is deliberately distinctive so a leak is unmistakable rather than arguable.
-    const canary = "CANARY-LEAK-DETECTOR-VALUE";
-    const url = buildViewUrl({ host: "127.0.0.1", port: 18082 });
-    expect(url).not.toContain(canary);
-    expect(url).not.toContain("CANARY");
-  });
-
-  it("CONTROL: the URL is not empty, so the assertions above cannot pass vacuously", () => {
-    // Every negative assertion above would pass on an empty string. This is the assertion that stops that.
-    expect(buildViewUrl({ host: "127.0.0.1", port: 18082 }).length).toBeGreaterThan(10);
+  it("CONTROL: the listing is not empty, so the assertions above cannot pass vacuously", async () => {
+    const handle = readOnlyHandle([{ path: "src/App.tsx", type: "file", name: "App.tsx" }], { "src/App.tsx": "ok" });
+    expect((await listViewableEntries({ handle, path: "/workspace" })).length).toBeGreaterThan(0);
   });
 });
