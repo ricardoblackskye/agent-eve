@@ -204,8 +204,62 @@ export interface OpenSandboxViewOptions {
  * Unset or blank counts as local because the driver's own default is `127.0.0.1:8080`; `0.0.0.0` does NOT, because it
  * is a listen-all address rather than a place to connect to.
  */
+function hostOf(endpoint: string): string {
+  // The port is stripped only when the colons are a port: `[::1]:18082` and `::1` are hosts, not host:port pairs.
+  const value = endpoint
+    .trim()
+    .replace(/^[a-z][a-z0-9+.-]*:\/\//i, "")
+    .split("/")[0] ?? "";
+  const trimmed = value.trim();
+  if (trimmed.startsWith("[")) {
+    const end = trimmed.indexOf("]");
+    return end === -1 ? trimmed.slice(1) : trimmed.slice(1, end);
+  }
+  return trimmed.split(":").length - 1 === 1 ? trimmed.split(":")[0] ?? "" : trimmed;
+}
+
 export function isLocalSandboxEndpoint(endpoint: string | undefined): boolean {
-  throw new Error("not implemented");
+  const raw = (endpoint ?? "").trim();
+  if (raw === "") return true;
+  return LOOPBACK_HOSTS.has(hostOf(raw).toLowerCase());
+}
+
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** The manager the route gets when nobody injected one. Loaded lazily: the SDK is only needed to observe a sandbox. */
+async function defaultSandboxManager(
+  env: Record<string, string | undefined>,
+): Promise<SandboxManagerLike> {
+  const [{ SandboxManager }, { sandboxConnectionConfig }] = await Promise.all([
+    import("@alibaba-group/opensandbox"),
+    import("./opensandbox-driver"),
+  ]);
+  return SandboxManager.create({
+    connectionConfig: sandboxConnectionConfig(env),
+  }) as unknown as SandboxManagerLike;
+}
+
+/**
+ * Connect to the sandbox the run is using.
+ *
+ * `ownsTransport` transfers the connection config this call built to the SDK, so `close()` really releases it - the
+ * view opens a client per request and must not leave one behind. It is NOT a claim on the sandbox.
+ */
+async function defaultSandboxConnect(
+  sandboxId: string,
+  env: Record<string, string | undefined>,
+): Promise<SandboxViewClient> {
+  const [{ Sandbox }, { sandboxConnectionConfig }] = await Promise.all([
+    import("@alibaba-group/opensandbox"),
+    import("./opensandbox-driver"),
+  ]);
+  return (await Sandbox.connect({
+    sandboxId,
+    connectionConfig: sandboxConnectionConfig(env),
+    ownsTransport: true,
+  })) as unknown as SandboxViewClient;
 }
 
 /**
@@ -214,5 +268,63 @@ export function isLocalSandboxEndpoint(endpoint: string | undefined): boolean {
 export async function openSandboxView(
   options: OpenSandboxViewOptions,
 ): Promise<SandboxViewOpenResult> {
-  throw new Error("not implemented");
+  const env = options.env ?? process.env;
+  const endpoint = env.DF_SANDBOX_ENDPOINT;
+  const where = (endpoint ?? "").trim() === "" ? "the driver default (127.0.0.1:8080)" : String(endpoint);
+
+  if (!isLocalSandboxEndpoint(endpoint)) {
+    return {
+      ok: false,
+      reason: "not-local",
+      message: `This run's sandbox is reached at ${where}, which is not this machine. A local sandbox view is offered for local runs only.`,
+    };
+  }
+
+  const configured = (env.DF_SANDBOX_WORKSPACE ?? "").trim();
+  const workspace = configured === "" ? DEFAULT_VIEW_WORKSPACE : configured;
+
+  let sandboxId: string | undefined;
+  try {
+    const manager = options.manager ?? (await defaultSandboxManager(env));
+    const listed = await manager.listSandboxInfos({
+      metadata: { run: options.runId },
+      states: ["Running"],
+    });
+    sandboxId = listed.items[0]?.id;
+  } catch (error) {
+    return {
+      ok: false,
+      reason: "unreachable",
+      message: `The sandbox server at ${where} did not answer: ${messageOf(error)}`,
+    };
+  }
+
+  if (!sandboxId) {
+    return {
+      ok: false,
+      reason: "no-live-sandbox",
+      message: "No local sandbox is running for this run any more: the view has ended.",
+    };
+  }
+
+  try {
+    const client = await (options.connect ?? defaultSandboxConnect)(sandboxId, env);
+    return {
+      ok: true,
+      session: {
+        sandboxId,
+        workspace,
+        reader: client,
+        release: async () => {
+          await client.close?.();
+        },
+      },
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      reason: "unreachable",
+      message: `The sandbox ${sandboxId} did not answer: ${messageOf(error)}`,
+    };
+  }
 }
