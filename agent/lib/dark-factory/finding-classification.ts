@@ -57,7 +57,7 @@ const PATTERNS: ReadonlyArray<{ cause: FindingCause; pattern: RegExp }> = [
   // The harness ran the tool somewhere it could not work from.
   // Alternatives are written out in full rather than as an optional-group regex: the spell checker splits that form
   // and reports a piece of it as an unknown word, which is not something to teach a dictionary.
-  { cause: "harness", pattern: /no eslint configuration found|could not find (an )?(eslint )?config|configuration file not found|config file not found|unknown option .* from the harness/i },
+  { cause: "harness", pattern: /no eslint configuration found|could not find (an )?(eslint )?config|configuration file not found|config file not found|cannot find package|did not run|, [0-9]+ did not run|unknown option .* from the harness/i },
   // The pipeline itself refused: credentials, permissions, a missing runner capability.
   { cause: "ci", pattern: /resource not accessible by integration|bad credentials|permission denied.*(workflow|workflows)|refusing to allow .* to (create|update)/i },
   // The story or the test is ambiguous rather than the code being wrong.
