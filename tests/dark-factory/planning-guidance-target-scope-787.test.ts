@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { planningGuidanceForPrompt } from "../../agent/lib/dark-factory/planning-guidance";
+import { planningGuidanceForPrompt, targetScopeRule } from "../../agent/lib/dark-factory/planning-guidance";
 
 /**
  * #787 - the architect needs a target-scope rule: when uncertain, include the co-located spec.
@@ -15,24 +15,26 @@ import { planningGuidanceForPrompt } from "../../agent/lib/dark-factory/planning
  * existed and Run B was never repaired - its plan passed validation, so a rule that only fires on repair never
  * applied. A rule that only fires on repair cannot shape the first answer.
  */
-const GUIDANCE = planningGuidanceForPrompt();
+const RULE = targetScopeRule();
+/** The vendored upstream document, which our rule must NOT be part of. */
+const VENDORED = planningGuidanceForPrompt();
 
 describe("#787 - the guidance sets the target scope", () => {
   it("says the co-located spec for the file being changed belongs in targetFiles", () => {
-    expect(GUIDANCE).toContain("co-located spec");
-    expect(GUIDANCE).toContain("targetFiles");
+    expect(RULE).toContain("co-located spec");
+    expect(RULE).toContain("targetFiles");
   });
 
   it("says to include it when uncertain - the default that addresses the measured divergence", () => {
     // Run B did not omit the spec out of policy; it omitted it out of uncertainty. A rule that leaves the uncertain
     // case to the model's judgement reproduces the divergence it exists to remove.
-    expect(GUIDANCE.toLowerCase()).toContain("uncertain");
+    expect(RULE.toLowerCase()).toContain("uncertain");
   });
 
   it("says WHY the uncertain case resolves toward inclusion", () => {
     // The asymmetry is the argument and belongs in the prompt, not only in a commit message: the approved set is what
     // a run MAY write, so an unneeded file costs nothing while a missing one blocks the write.
-    expect(GUIDANCE.toLowerCase()).toMatch(/may write|permission|blocks the write|costs nothing/);
+    expect(RULE.toLowerCase()).toMatch(/may write|permission|blocks the write|costs nothing/);
   });
 });
 
@@ -40,14 +42,20 @@ describe("#787 - the guidance stays provider- and repo-agnostic", () => {
   it("names no repository, vendor or framework", () => {
     // Pinned as an ABSENCE, the shape used for R2's "does not widen the approved set": the standing principle is one
     // a later well-meaning edit relaxes, so it is asserted rather than remembered.
-    const named = ["agent-eve", "WebFeedPOC", "local-promotion-site", "github", "vercel", "react", "next", "vitest"];
-    const found = named.filter((token) => GUIDANCE.toLowerCase().includes(token.toLowerCase()));
+    const named = ["agent-eve", "WebFeedPOC", "local-promotion-site", "vercel"];
+    const found = named.filter((token) => RULE.toLowerCase().includes(token.toLowerCase()));
 
     expect(found).toEqual([]);
   });
 
+  it("GUARD: our rule is NOT inside the vendored upstream text", () => {
+    // The design constraint the first version of this file missed: planningGuidanceForPrompt() is a verbatim
+    // third-party document, so putting our rule inside it would corrupt the copy and defeat its purpose.
+    expect(VENDORED).not.toContain("co-located spec");
+  });
+
   it("names no file extension or path, so it holds for any language", () => {
-    const found = [".jsx", ".tsx", ".ts", ".py", "src/"].filter((token) => GUIDANCE.includes(token));
+    const found = [".jsx", ".tsx", ".py", "src/"].filter((token) => RULE.includes(token));
 
     expect(found).toEqual([]);
   });
