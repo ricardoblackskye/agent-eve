@@ -138,7 +138,7 @@ import {
   ArchitectAgent,
   resolveArchitectTimeoutMs,
 } from "../agent/lib/dark-factory/architect-agent";
-import {
+import { isPageScopedStory, isShellScopedStory,
   validateExecutionPlan,
   type ExecutionPlan,
 } from "../agent/lib/dark-factory/plan-validator";
@@ -1223,6 +1223,12 @@ async function main(): Promise<void> {
     issue: issueNum,
     markdown: renderPlanFile(executionPlan, {
       issueUrl: `https://github.com/${targetRepo}/issues/${issueNum}`,
+      // #784: the reading the target choice rests on, derived from the SAME text the architect planned from
+      // (issueData.body), so the plan states the reading the rules acted on rather than a second opinion.
+      scope: {
+        shellScoped: isShellScopedStory(issueData.body),
+        pageScoped: isPageScopedStory(issueData.body),
+      },
     }),
     // #373: the plan ITSELF, not only its rendering. Without it the comment carries no machine-readable
     // block, so the run that resumes against this comment cannot read the plan back and stops.
@@ -1567,6 +1573,12 @@ async function main(): Promise<void> {
             planArtifactPath,
             renderPlanFile(executionPlan, {
               issueUrl: `https://github.com/${targetRepo}/issues/${issueNum}`,
+      // #784: the reading the target choice rests on, derived from the SAME text the architect planned from
+      // (issueData.body), so the plan states the reading the rules acted on rather than a second opinion.
+      scope: {
+        shellScoped: isShellScopedStory(issueData.body),
+        pageScoped: isPageScopedStory(issueData.body),
+      },
             }),
           );
           console.log(`\n[PLAN] Wrote ${planArtifactPath} for review.`);

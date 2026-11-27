@@ -39,7 +39,13 @@ describe("#373 the plan survives the ticket round-trip", () => {
 
     // The argument, not merely the call: a call site without `plan` posts a comment no resume can read,
     // which is the defect, and it type-checked only because the field was optional.
-    const call = source.slice(callAt, callAt + 600);
+    // The window is the CALL's extent, not a fixed character count. It was 600 characters, and a legitimate change
+    // to the markdown argument (#784 added the scope reading inside the render options) pushed `plan:` past it - so
+    // this guard failed while the argument it guards was still being passed. A proximity heuristic that a correct
+    // change can overflow measures the change rather than the property.
+    const callEnd = source.indexOf(String.fromCharCode(10) + "  });", callAt);
+    expect(callEnd).toBeGreaterThan(callAt);
+    const call = source.slice(callAt, callEnd);
     expect(call).toMatch(/\bplan:/);
   });
 

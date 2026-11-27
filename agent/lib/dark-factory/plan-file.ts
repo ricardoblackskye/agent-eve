@@ -272,7 +272,7 @@ function renderTable(header: string[], rows: string[][]): string[] {
 /** Render a plan as a reviewable markdown file. */
 export function renderPlanFile(
   plan: PlanFileInput,
-  options: { issueUrl?: string } = {},
+  options: { issueUrl?: string; scope?: { shellScoped: boolean; pageScoped: boolean } } = {},
 ): string {
   const lines: string[] = [];
 
@@ -303,6 +303,14 @@ export function renderPlanFile(
   // choice is the defect this release exists to remove.
   if (plan.substitution) {
     lines.push(renderSubstitutionLine(plan.substitution), "");
+  }
+
+  // #784: the READING the target choice rests on, beside the declaration and for the same reason. The declaration
+  // says what was chosen; the reading says what it was chosen against. Together they let an approver tell a
+  // deliberate reading from an accident, which is the whole point - R4's runs targeted the shell for a story that
+  // says "home page" and were CORRECT, but the plan never said why.
+  if (options.scope) {
+    lines.push(renderScopeReading(options.scope), "");
   }
 
   lines.push("## Goal", "", text(plan.summary), "");
@@ -408,4 +416,24 @@ export function renderSubstitutionLine(declaration: {
   let clean = declaration.reason.trim();
   while (clean.endsWith(".")) clean = clean.slice(0, -1);
   return `Substituted: ${declaration.chosen} for ${declaration.named}, because ${clean}.`;
+}
+
+/**
+ * #784: the scope reading, as one line at the top of the plan.
+ *
+ * Rendered from the same two classifiers the validator acts on (isShellScopedStory / isPageScopedStory), so the plan
+ * cannot state a reading the rules disagreed with.
+ *
+ * The third case is deliberate: a story matching NO scope signal is real, and saying so is better than implying a
+ * reading was made when none was. Without it, an absent line would be ambiguous between not rendered, not computed,
+ * and no reading at all.
+ */
+export function renderScopeReading(scope: { shellScoped: boolean; pageScoped: boolean }): string {
+  if (scope.shellScoped) {
+    return "Scope: this story reads as shell-scoped work, so a target in the application shell is intended rather than accidental.";
+  }
+  if (scope.pageScoped) {
+    return "Scope: this story reads as page-scoped work, so it is a change to one surface rather than to the application shell.";
+  }
+  return "Scope: this story matches no scope signal, so the target choice rests on the plan's reading of the repository rather than on a scope rule.";
 }
