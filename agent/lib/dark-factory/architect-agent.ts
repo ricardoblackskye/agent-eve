@@ -17,7 +17,7 @@ import {
   type PlanValidationResult,
   type PlanParser,
 } from "./plan-validator";
-import { planningGuidanceForPrompt } from "./planning-guidance";
+import { planningGuidanceForPrompt, targetScopeRule } from "./planning-guidance";
 import { ValidationError } from "./tester-agent";
 import { discoverArchitecture } from "./architect-discovery";
 import { buildTargetContract } from "./architect-prompt";
@@ -753,6 +753,7 @@ export class ArchitectAgent {
         : []),
       `### HOW TO WRITE THE PLAN:`,
       planningGuidanceForPrompt(),
+      targetScopeRule(),
       ``,
       `### EXECUTION PLAN REQUIREMENTS:`,
       `You must output a JSON object with:`,
@@ -840,7 +841,7 @@ export class ArchitectAgent {
       previousOutput,
       ``,
       `Please revise the ExecutionPlan to fix ALL validation errors.`,
-      `Ensure appropriate targetFiles are included and all Acceptance Criteria are mapped to test files.`,
+      targetScopeRule(),
       `Return ONLY the corrected JSON object.`,
     ].join("\n");
   }

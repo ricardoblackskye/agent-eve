@@ -74,3 +74,27 @@ const ATTRIBUTION_HEADER = /^\s*(?:<!--[\s\S]*?-->\s*)+/;
 export function planningGuidanceForPrompt(): string {
   return WRITING_PLANS_GUIDANCE.replace(ATTRIBUTION_HEADER, "").trim();
 }
+
+/**
+ * #787: the target-scope rule, as a SECOND export beside the vendored document.
+ *
+ * Deliberately not appended to `planningGuidanceForPrompt()`: that returns an upstream third-party document passed
+ * through verbatim, and adding our text to it would corrupt the copy.
+ *
+ * R4 (#781) measured the identical story planned twice against one commit producing different target sets - one
+ * including the co-located spec, one omitting it while its prose promised to add it. Both passed validation. Run B did
+ * not omit it out of policy, it omitted it out of uncertainty, which is the case this rule closes.
+ *
+ * The asymmetry is the argument, so it is stated for the model and not only in a commit message: the approved set is
+ * what a run MAY write, not what it must write. An unneeded file in the set costs nothing; a missing one blocks the
+ * write of a test the change needs.
+ */
+export function targetScopeRule(): string {
+  return [
+    "TARGET SCOPE:",
+    "- When a story changes rendered behavior, the co-located spec for the file being changed belongs in targetFiles.",
+    "- If it is uncertain whether the change needs new test cases, INCLUDE the co-located spec anyway.",
+    "- The approved targetFiles set is what a run MAY write, not what it must write: an unneeded file in the set",
+    "  costs nothing, while a missing one blocks the write of a test the change needs.",
+  ].join(String.fromCharCode(10));
+}
