@@ -39,5 +39,9 @@ Forbidden: src/App.jsx (shell)
 {"targets":["src/App.jsx"],"steps":[]}
 
 Please revise the ExecutionPlan to fix ALL validation errors.
-Ensure appropriate targetFiles are included and all Acceptance Criteria are mapped to test files.
+TARGET SCOPE:
+- When a story changes rendered behavior, the co-located spec for the file being changed belongs in targetFiles.
+- If it is uncertain whether the change needs new test cases, INCLUDE the co-located spec anyway.
+- The approved targetFiles set is what a run MAY write, not what it must write: an unneeded file in the set
+  costs nothing, while a missing one blocks the write of a test the change needs.
 Return ONLY the corrected JSON object.

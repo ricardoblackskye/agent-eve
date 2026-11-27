@@ -236,6 +236,11 @@ them to review the plan and choose an execution method before implementation.
 
 **If Native chosen:**
 - **REQUIRED SUB-SKILL:** Use superpowers:executing-plans
+TARGET SCOPE:
+- When a story changes rendered behavior, the co-located spec for the file being changed belongs in targetFiles.
+- If it is uncertain whether the change needs new test cases, INCLUDE the co-located spec anyway.
+- The approved targetFiles set is what a run MAY write, not what it must write: an unneeded file in the set
+  costs nothing, while a missing one blocks the write of a test the change needs.
 
 ### EXECUTION PLAN REQUIREMENTS:
 You must output a JSON object with:
