@@ -25,6 +25,13 @@ export type { PlanTask };
  * than making one release depend on another.
  */
 export interface PlanFileInput {
+  /**
+   * #780 (R3): the substitution this plan declares, when it writes something other than the surface its story names.
+   *
+   * Typed structurally rather than imported, matching how renderSubstitutionLine is typed: a type-only import across
+   * these modules buys nothing here and risks a cycle for no benefit.
+   */
+  substitution?: { chosen: string; named: string; reason: string };
   storyId: number;
   title: string;
   summary: string;
@@ -290,6 +297,14 @@ export function renderPlanFile(
   }
   lines.push("");
 
+  // #780 (R3): the substitution DECLARATION, and it comes BEFORE the technical detail. The requirement says the plan
+  // must state which target won and why "at the top of the plan as one line", so this is not a nicety of layout: a
+  // declaration buried in the approach prose is the thing it was meant to fix, and an approver left to infer the
+  // choice is the defect this release exists to remove.
+  if (plan.substitution) {
+    lines.push(renderSubstitutionLine(plan.substitution), "");
+  }
+
   lines.push("## Goal", "", text(plan.summary), "");
 
   const approach = text(plan.approach);
@@ -377,4 +392,20 @@ export function renderPlanFile(
   // pass runs first so the fence pass sees exactly the text the renderer produced.
   const body = withFenceLanguages(neutralizeInlineHtml(lines.join("\n"))).replace(/\n+$/, "");
   return `${body}\n`;
+}
+
+/**
+ * #780 (R3): the substitution declaration, as ONE line at the top of the plan.
+ *
+ * The requirement says "as one line", so this returns one line and the caller must not wrap it into prose: a
+ * declaration that becomes a paragraph is the thing it was meant to fix.
+ */
+export function renderSubstitutionLine(declaration: {
+  chosen: string;
+  named: string;
+  reason: string;
+}): string {
+  let clean = declaration.reason.trim();
+  while (clean.endsWith(".")) clean = clean.slice(0, -1);
+  return `Substituted: ${declaration.chosen} for ${declaration.named}, because ${clean}.`;
 }
