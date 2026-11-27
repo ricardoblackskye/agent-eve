@@ -1,13 +1,13 @@
-# Lock the licence posture down: remove the MIT grant, then guard against drift
+# Lock the license posture down: remove the MIT grant, then guard against drift
 
 **Issues:** #797 (the change) · #798 (the guard) · visibility decision recorded on #796 (stays public)
-**Branches:** `chore/licence-notice` (R1) then `chore/licence-guard` (R2)
+**Branches:** `chore/license-notice` (R1) then `chore/license-guard` (R2)
 
 ## Why we are doing this
 
 The README ends with a `## License` section whose entire content is `MIT# Last rebuilt: 2026-08-24T17:35:32Z`. That reads
 as an MIT grant, in a public repository, and it has been there since the README was first written. Meanwhile there is no
-`LICENSE` file and no `license` field in `package.json`, so GitHub's own detection reports no licence at all. Readers
+`LICENSE` file and no `license` field in `package.json`, so GitHub's own detection reports no license at all. Readers
 have been granted MIT; the tooling never noticed.
 
 The decision is to keep the repository public and state all rights reserved. That combination is why this is urgent
@@ -21,23 +21,23 @@ grants nothing, revokes nothing retroactively, and does not change repository vi
 
 ## What we know, from reading rather than assuming
 
-| fact | evidence |
-|:---|:---|
-| the MIT line is live | `README.md:1159-1161` — `## License`, blank, `MIT# Last rebuilt: 2026-08-24T17:35:32Z` |
-| no licence file exists | no `LICENSE` / `COPYING` / `NOTICE` in the tree |
-| `package.json` is silent | no `license`, no `private`, no `author` field |
-| GitHub agrees there is no licence | API `license=NONE` for agent-eve, local-promotion-site, WebFeedPOC; `/license` returns 404 |
-| MIT has been public a long time | `git log -S"## License"` → `5a5653d` (the original README commit) |
-| the corruption is a single line | `0f09f0f` (Next.js web UI, #7) changed `README.md` +1 −1 |
-| **no writer exists** | tree-wide `grep` for `Last rebuilt` returns only the README line itself |
-| the only other licence text | `vendor/opensandbox-charts/**` — Apache-2.0, Copyright The OpenSandbox Authors |
+| fact                              | evidence                                                                                   |
+|:----------------------------------|:-------------------------------------------------------------------------------------------|
+| the MIT line is live              | `README.md:1159-1161` — `## License`, blank, `MIT# Last rebuilt: 2026-08-24T17:35:32Z`     |
+| no license file exists            | no `LICENSE` / `COPYING` / `NOTICE` in the tree                                            |
+| `package.json` is silent          | no `license`, no `private`, no `author` field                                              |
+| GitHub agrees there is no license | API `license=NONE` for agent-eve, local-promotion-site, WebFeedPOC; `/license` returns 404 |
+| MIT has been public a long time   | `git log -S"## License"` → `5a5653d` (the original README commit)                          |
+| the corruption is a single line   | `0f09f0f` (Next.js web UI, #7) changed `README.md` +1 −1                                   |
+| **no writer exists**              | tree-wide `grep` for `Last rebuilt` returns only the README line itself                    |
+| the only other license text       | `vendor/opensandbox-charts/**` — Apache-2.0, Copyright The OpenSandbox Authors             |
 
 **The "no writer" row is the one that changed this plan.** An earlier revision asserted a build step writes that line and
-would silently revert the fix. It does not appear to exist. So the plan asserts the licence text directly, and replaces
+would silently revert the fix. It does not appear to exist. So the plan asserts the license text directly, and replaces
 the mechanism claim with an empirical check: does the correction survive a rebuild.
 
 **The vendor row is a hazard, not a detail.** `vendor/**` carries third-party Apache-2.0 notices. Any work touching
-licence text is the most likely thing in this repository to delete someone else's licence by accident, and removing those
+license text is the most likely thing in this repository to delete someone else's license by accident, and removing those
 notices would breach their terms rather than protect ours.
 
 ## Release split
@@ -45,10 +45,10 @@ notices would breach their terms rather than protect ours.
 Two branches, because the fix and the lock should be reviewable separately: a reviewer who disagrees with the guard
 should still be able to take the notice correction.
 
-| release | branch | issue | ships |
-|:---|:---|:---|:---|
-| **R1** | `chore/licence-notice` | #797 | the README notice, the `package.json` fields, the rebuild proof |
-| **R2** | `chore/licence-guard` | #798 | the guard, its scoping exclusion, gate wiring |
+| release | branch                 | issue | ships                                                           |
+|:--------|:-----------------------|:------|:----------------------------------------------------------------|
+| **R1**  | `chore/license-notice` | #797  | the README notice, the `package.json` fields, the rebuild proof |
+| **R2**  | `chore/license-guard`  | #798  | the guard, its scoping exclusion, gate wiring                   |
 
 R2 depends on R1: the guard asserts the state R1 creates. R2 does not need to wait for R1 to merge if it is written
 against the R1 branch, but it must not be reviewed as if the state already existed.
@@ -59,9 +59,9 @@ against the R1 branch, but it must not be reviewed as if the state already exist
 
 Replace the whole `## License` section (lines 1159-1161) with a statement that says what strangers may and may not do.
 
-- Head the section `## Licence` or keep `## License` — **pick one and use it in the guard too**, since a mismatched
+- Head the section `## License` (keep the heading the file already uses) — **pick one and use it in the guard too**, since a mismatched
   heading is exactly the kind of drift this work exists to stop.
-- Body: the code is proprietary, all rights reserved, publication grants no licence, with the line
+- Body: the code is proprietary, all rights reserved, publication grants no license, with the line
   `All rights reserved - copyright BlackSkye` in the user's wording.
 - **Remove the `MIT# Last rebuilt: ...` line entirely**, including the stray `#` and the timestamp — it is the
   corruption being fixed, not documentation.
@@ -75,12 +75,12 @@ Add `"license": "UNLICENSED"` and `"private": true`.
 `"private": true` here is a **different private** — it blocks an accidental `npm publish` and has nothing to do with
 repository visibility. Both fields are pinned by the guard, so both belong in the same commit as the notice.
 
-*Completion:* both fields present; `UNLICENSED` makes GitHub's detection continue to report no open licence, which is the
+*Completion:* both fields present; `UNLICENSED` makes GitHub's detection continue to report no open license, which is the
 intended state.
 
 ### Task 3 — prove it survives a rebuild
 
-Deploy or rebuild, then re-read `README.md`'s licence section.
+Deploy or rebuild, then re-read `README.md`'s license section.
 
 - If something outside the repository rewrites it, this catches it — and that becomes a real finding.
 - If nothing does, that is the evidence the withdrawn mechanism claim never had.
@@ -101,12 +101,12 @@ likely to catch a real regression in this work.
 
 A doc-code-sync check asserting:
 
-1. The README's licence section states all rights reserved — **positively about what it is**, not merely absent of "MIT".
+1. The README's license section states all rights reserved — **positively about what it is**, not merely absent of "MIT".
 2. `package.json`: `license === "UNLICENSED"` and `private === true`.
-3. **No first-party tracked file grants an open licence** — scan for grant language (`licensed under`, `MIT License`, an
+3. **No first-party tracked file grants an open license** — scan for grant language (`licensed under`, `MIT License`, an
    SPDX identifier in a manifest).
 4. **Every `vendor/**` file still carries its upstream notice** — the negative assertion.
-5. The licence heading matches the heading Task 1 chose.
+5. The license heading matches the heading Task 1 chose.
 
 ### Task 6 — the scoping exclusion
 
@@ -116,10 +116,10 @@ unexplained exclusion is how a guard becomes decorative.
 
 ### Task 7 — prove it fails
 
-The acceptance, and not optional: break the README licence line, watch the guard go red, restore it, watch it pass.
+The acceptance, and not optional: break the README license line, watch the guard go red, restore it, watch it pass.
 Then remove a notice from one `vendor/**` file in a scratch branch and watch the negative half fire.
 
-*A check you have not seen fail is a check you do not know works* — and this guard exists precisely because a licence
+*A check you have not seen fail is a check you do not know works* — and this guard exists precisely because a license
 statement sat unchecked for the entire life of the repository.
 
 ### Task 8 — wire it into the gate
@@ -134,7 +134,7 @@ Run it with the other doc-code-sync checks on every PR, not only when someone re
 - **Runtime behaviour.** Documentation and metadata. No application code is touched, which is why both issues are `chore`
   and carry no `dark-factory` label.
 - **Third-party obligations.** `vendor/**` notices stay exactly as they are.
-- **The licence choice itself.** Whether all-rights-reserved is right versus a source-available licence (e.g. BUSL-1.1)
+- **The license choice itself.** Whether all-rights-reserved is right versus a source-available license (e.g. BUSL-1.1)
   is a product decision needing legal input, not a docs change.
 
 ## Gates
@@ -147,10 +147,10 @@ cspell clean · markdownlint 0 non-MD013 · pinned markdown-table-formatter last
 
 ## Risks
 
-| risk | mitigation |
-|:---|:---|
-| the fix reverts behind a rebuild | Task 3 checks empirically instead of assuming a mechanism |
-| a `vendor/**` notice is deleted | Task 4 before, Task 5's negative assertion after |
-| the guard is decorative (passes, checks nothing) | Task 7 requires seeing it fail on both halves |
-| the guard fails on the plan file's legitimate mention of MIT | Task 6's documented exclusion |
-| someone reads this as protecting IP that is already granted | the "What this does not change" section, and #797's own comment |
+| risk                                                         | mitigation                                                      |
+|:-------------------------------------------------------------|:----------------------------------------------------------------|
+| the fix reverts behind a rebuild                             | Task 3 checks empirically instead of assuming a mechanism       |
+| a `vendor/**` notice is deleted                              | Task 4 before, Task 5's negative assertion after                |
+| the guard is decorative (passes, checks nothing)             | Task 7 requires seeing it fail on both halves                   |
+| the guard fails on the plan file's legitimate mention of MIT | Task 6's documented exclusion                                   |
+| someone reads this as protecting IP that is already granted  | the "What this does not change" section, and #797's own comment |
