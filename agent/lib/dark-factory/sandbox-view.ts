@@ -124,3 +124,95 @@ export async function listViewableEntries(options: ListViewableOptions): Promise
 
   return entries.filter((entry) => isViewablePath(entry.path));
 }
+// ---------------------------------------------------------------------------
+// Reaching a live LOCAL sandbox (#790 R1, tasks 4 and 6)
+// ---------------------------------------------------------------------------
+//
+// Route B needs one thing route A did not: evidence that the sandbox it reads is on THIS machine. The view is served by
+// the operator's own console, so "local" is not a UI decision - it is the endpoint the run's sandbox was reached at
+// (`DF_SANDBOX_ENDPOINT`, documented as `host[:port]`, loopback by default). A remote or cluster endpoint yields NO
+// view, and never a hint that one exists. That is AC3's risk in its honest route-B form: the exposure that cannot be
+// created is the one that cannot default to 0.0.0.0.
+
+/** The workspace inside the sandbox, matching the driver's own default. */
+export const DEFAULT_VIEW_WORKSPACE = "/workspace";
+
+/** Hosts that mean "this machine". Anything else is remote, and R1 does not serve remote sandboxes. */
+export const LOOPBACK_HOSTS = new Set([
+  "127.0.0.1",
+  "localhost",
+  "::1",
+  "0:0:0:0:0:0:0:1",
+]);
+
+/**
+ * The manager slice the view accepts: LISTING ONLY.
+ *
+ * The real `SandboxManager` can also `killSandbox`, `pauseSandbox` and `renewSandbox`. None of them belong within reach
+ * of a read-only view of somebody's running run, so none of them are in this type - an implementation that reached for
+ * one would not compile, and the run's own lifecycle stays the run's business.
+ */
+export interface SandboxManagerLike {
+  listSandboxInfos(filter?: {
+    metadata?: Record<string, string>;
+    states?: string[];
+  }): Promise<{ items: Array<{ id: string }> }>;
+}
+
+/** A connected sandbox client, narrowed to what the view may do with one: read, and release the transport. */
+export interface SandboxViewClient extends WorkspaceReader {
+  close?(): Promise<void>;
+}
+
+export interface SandboxViewSession {
+  sandboxId: string;
+  /** Absolute path inside the sandbox that the view lists and reads. */
+  workspace: string;
+  reader: WorkspaceReader;
+  /**
+   * Release the client transport this view opened.
+   *
+   * NOT a teardown of the sandbox: the run owns it, and an observer leaving must cost the run nothing.
+   */
+  release(): Promise<void>;
+}
+
+/** Why a view is not on offer. Each is a different sentence to the operator, so they are not flattened into one. */
+export type SandboxViewReason =
+  | "not-local"
+  | "no-live-sandbox"
+  | "unreachable"
+  | "unreadable";
+
+export type SandboxViewOpenResult =
+  | { ok: true; session: SandboxViewSession }
+  | { ok: false; reason: SandboxViewReason; message: string };
+
+export interface OpenSandboxViewOptions {
+  runId: string;
+  env?: Record<string, string | undefined>;
+  manager?: SandboxManagerLike;
+  connect?: (
+    sandboxId: string,
+    env: Record<string, string | undefined>,
+  ) => Promise<SandboxViewClient>;
+}
+
+/**
+ * Is this endpoint one this machine can read a sandbox through?
+ *
+ * Unset or blank counts as local because the driver's own default is `127.0.0.1:8080`; `0.0.0.0` does NOT, because it
+ * is a listen-all address rather than a place to connect to.
+ */
+export function isLocalSandboxEndpoint(endpoint: string | undefined): boolean {
+  throw new Error("not implemented");
+}
+
+/**
+ * Open a read-only view of the run's live sandbox, or say why there is none.
+ */
+export async function openSandboxView(
+  options: OpenSandboxViewOptions,
+): Promise<SandboxViewOpenResult> {
+  throw new Error("not implemented");
+}
